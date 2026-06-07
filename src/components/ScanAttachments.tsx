@@ -9,7 +9,7 @@ import {
 
 export function ScanAttachmentsEditor({
   title = "Скани",
-  description = "Зображення або PDF, до 2 ГБ кожен.",
+  description = "Зображення, PDF, DOC, DOCX, ODT або TXT, до 2 ГБ кожен.",
   scans,
   onChange,
 }: {
@@ -61,7 +61,7 @@ export function ScanAttachmentsEditor({
           {uploading ? "Завантаження…" : "+ Додати скани"}
           <input
             type="file"
-            accept="image/*,application/pdf"
+            accept="image/*,application/pdf,.doc,.docx,.odt,.txt"
             multiple
             disabled={uploading}
             onChange={(event) => {
@@ -112,7 +112,7 @@ function ScanRow({
   };
   return (
     <div className="scan-row">
-      <span className="scan-file-icon">{scan.mimeType === "application/pdf" ? "PDF" : "IMG"}</span>
+      <span className="scan-file-icon">{attachmentIcon(scan)}</span>
       <div className="scan-file-info">
         <strong>{scan.name}</strong>
         <small>
@@ -139,4 +139,11 @@ function formatFileSize(size: number): string {
   if (size < 1024) return `${size} Б`;
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} КБ`;
   return `${(size / (1024 * 1024)).toFixed(1)} МБ`;
+}
+
+function attachmentIcon(scan: ScanAttachment): string {
+  if (scan.mimeType === "application/pdf" || scan.name.toLocaleLowerCase().endsWith(".pdf")) return "PDF";
+  if (scan.mimeType.startsWith("image/")) return "IMG";
+  if (scan.name.toLocaleLowerCase().endsWith(".txt")) return "TXT";
+  return "DOC";
 }

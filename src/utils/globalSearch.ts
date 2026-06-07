@@ -1,6 +1,7 @@
 import type {
   AppDatabase,
   AppEntity,
+  ArchiveRequest,
   CollectionKey,
   DocumentRecord,
   Finding,
@@ -30,6 +31,7 @@ const moduleLabels: Record<CollectionKey, string> = {
   tasks: "Завдання",
   findings: "Знахідки",
   hypotheses: "Гіпотези",
+  archiveRequests: "Запити в архів",
   persons: "Особи",
 };
 
@@ -51,6 +53,7 @@ export function searchDatabase(db: AppDatabase, query: string): GlobalSearchResu
   addCollection("tasks", db.tasks);
   addCollection("findings", db.findings);
   addCollection("hypotheses", db.hypotheses);
+  addCollection("archiveRequests", db.archiveRequests);
   addCollection("persons", db.persons);
 
   return results
@@ -96,6 +99,10 @@ function entityTitle(module: CollectionKey, entity: AppEntity): string {
     }
     case "hypotheses":
       return (entity as Hypothesis).title || "Гіпотеза без назви";
+    case "archiveRequests": {
+      const request = entity as ArchiveRequest;
+      return request.subject || `Запит до ${request.archive || "архіву"}`;
+    }
     case "persons": {
       const person = entity as Person;
       return person.fullName || [person.surname, person.givenName, person.patronymic].filter(Boolean).join(" ") || "Особа без імені";
@@ -133,6 +140,10 @@ function entityDescription(
     case "hypotheses": {
       const item = entity as Hypothesis;
       return [item.relatedPeople, item.probability, item.status].filter(Boolean).join(" · ");
+    }
+    case "archiveRequests": {
+      const item = entity as ArchiveRequest;
+      return [item.archive, item.requestDate, item.status, research?.title].filter(Boolean).join(" · ");
     }
     case "persons": {
       const item = entity as Person;

@@ -47,6 +47,7 @@ p { color: var(--muted); line-height: 1.7; }
 .brand strong { font-family: "Source Serif 4", serif; font-size: 17px; }
 .brand small { color: #aabdb7; margin-top: 2px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .sidebar nav { display: grid; gap: 4px; }
+.sidebar nav { overflow-y: auto; }
 .sidebar nav button {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px;
   color: #bfd0ca; background: transparent; border: 0; border-radius: 10px; text-align: left;

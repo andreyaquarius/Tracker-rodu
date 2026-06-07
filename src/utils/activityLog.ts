@@ -1,5 +1,6 @@
 import type {
   ActivityLogEntry,
+  ArchiveRequest,
   AppEntity,
   CollectionKey,
   DocumentRecord,
@@ -93,6 +94,19 @@ export function createActivityEntries(
       add(
         "year_status_changed",
         `Статус ${year.year} року змінено на «${year.status}»`,
+      );
+    }
+  }
+
+  if (collection === "archiveRequests") {
+    const request = next as ArchiveRequest;
+    const oldRequest = previous as ArchiveRequest | undefined;
+    if (!oldRequest) {
+      add("archive_request_created", `Додано запит до архіву «${request.archive}»`);
+    } else if (oldRequest.status !== request.status) {
+      add(
+        "archive_request_status_changed",
+        `Статус запиту до «${request.archive}» змінено на «${request.status}»`,
       );
     }
   }

@@ -2,6 +2,7 @@ export type PageKey =
   | "dashboard"
   | "researches"
   | "documents"
+  | "archiveRequests"
   | "yearMatrix"
   | "tasks"
   | "findings"
@@ -14,6 +15,7 @@ const items: Array<{ key: PageKey; label: string; icon: string }> = [
   { key: "dashboard", label: "Панель огляду", icon: "⌂" },
   { key: "researches", label: "Дослідження", icon: "Д" },
   { key: "documents", label: "Документи", icon: "Ф" },
+  { key: "archiveRequests", label: "Запити в архів", icon: "А" },
   { key: "yearMatrix", label: "Матриця років", icon: "Р" },
   { key: "tasks", label: "Завдання", icon: "З" },
   { key: "findings", label: "Знахідки", icon: "✓" },

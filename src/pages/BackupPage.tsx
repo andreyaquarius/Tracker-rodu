@@ -304,6 +304,7 @@ export function BackupPage({ db, user, sync, onReplace, onSync, notify }: Props)
               <PreviewItem label="Завдання" value={pendingImport.preview.tasks} />
               <PreviewItem label="Знахідки" value={pendingImport.preview.findings} />
               <PreviewItem label="Гіпотези" value={pendingImport.preview.hypotheses} />
+              <PreviewItem label="Запити в архів" value={pendingImport.preview.archiveRequests} />
             </div>
             <div className="details-actions">
               <button className="button button-ghost" onClick={closeImportPreview}>Скасувати</button>

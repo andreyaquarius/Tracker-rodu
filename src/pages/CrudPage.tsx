@@ -106,7 +106,10 @@ export function CrudPage({
 
   const confirmDelete = async (entity: AppEntity) => {
     if (window.confirm(`Видалити ${config.singular}? Цю дію не можна скасувати.`)) {
-      const scans = (entity as unknown as { scans?: ScanAttachment[] }).scans ?? [];
+      const record = entity as unknown as Record<string, unknown>;
+      const scans = Object.entries(record)
+        .filter(([key, value]) => key.toLocaleLowerCase("uk").includes("scan") && Array.isArray(value))
+        .flatMap(([, value]) => value as ScanAttachment[]);
       await Promise.allSettled(scans.map(deleteScanFile));
       onDelete(entity.id);
     }
@@ -450,7 +453,7 @@ function getEntityTitle(config: EntityConfig, record: Record<string, unknown>): 
     const participantName = primaryParticipantName(record.participants as FindingParticipant[]);
     if (participantName) return participantName;
   }
-  const preferredKeys = ["title", "people", "year", "personName"];
+  const preferredKeys = ["title", "subject", "people", "year", "personName"];
   const value = preferredKeys.map((key) => record[key]).find((item) => typeof item === "string" && item.trim());
   return typeof value === "string" ? value : `Перегляд: ${config.singular}`;
 }
@@ -624,7 +627,7 @@ function FormField({
   }
   if (field.type === "scans") {
     const scans = Array.isArray(value) ? value as ScanAttachment[] : [];
-    return <ScanAttachmentsEditor scans={scans} onChange={onChange} />;
+    return <ScanAttachmentsEditor title={field.label} scans={scans} onChange={onChange} />;
   }
   if (field.type === "persons") {
     const selected = Array.isArray(value) ? value as string[] : [];

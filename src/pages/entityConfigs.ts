@@ -44,6 +44,35 @@ const researchField: FieldConfig = {
   type: "research",
 };
 
+const archiveOptions = [
+  "ЦДІАК України (Київ)",
+  "ЦДІАЛ України (Львів)",
+  "ЦДАВО України",
+  "ЦДАГО України",
+  "Державний архів Вінницької області",
+  "Державний архів Волинської області",
+  "Державний архів Дніпропетровської області",
+  "Державний архів Житомирської області",
+  "Державний архів Закарпатської області",
+  "Державний архів Запорізької області",
+  "Державний архів Івано-Франківської області",
+  "Державний архів Київської області",
+  "Державний архів Кіровоградської області",
+  "Державний архів Львівської області",
+  "Державний архів Миколаївської області",
+  "Державний архів Одеської області",
+  "Державний архів Полтавської області",
+  "Державний архів Рівненської області",
+  "Державний архів Сумської області",
+  "Державний архів Тернопільської області",
+  "Державний архів Харківської області",
+  "Державний архів Хмельницької області",
+  "Державний архів Черкаської області",
+  "Державний архів Чернівецької області",
+  "Державний архів Чернігівської області",
+  "Інший архів або установа",
+];
+
 export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, EntityConfig> = {
   researches: {
     collection: "researches",
@@ -112,6 +141,42 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
         return String(page);
       } },
       { key: "reviewStatus", label: "Статус" },
+    ],
+  },
+  archiveRequests: {
+    collection: "archiveRequests",
+    title: "Запити в архів",
+    singular: "запит",
+    description: "Облік звернень до архівів, надісланих запитів і отриманих відповідей.",
+    emptyText: "Запитів до архівів поки немає.",
+    searchPlaceholder: "Пошук за архівом, темою запиту, особою або коментарем…",
+    statusKey: "status",
+    statusOptions: ["чернетка", "надіслано", "очікується відповідь", "отримано відповідь", "виконано", "відмовлено"],
+    fields: [
+      researchField,
+      { key: "personIds", label: "Пов’язані особи", type: "persons", wide: true },
+      { key: "archive", label: "Архів", type: "select", options: archiveOptions, required: true },
+      { key: "archiveDetails", label: "Уточнення архіву або установи", wide: true },
+      { key: "requestDate", label: "Дата запиту", type: "date", required: true },
+      { key: "responseDate", label: "Дата відповіді", type: "date" },
+      {
+        key: "status",
+        label: "Статус",
+        type: "select",
+        options: ["чернетка", "надіслано", "очікується відповідь", "отримано відповідь", "виконано", "відмовлено"],
+      },
+      { key: "subject", label: "Про що запит", type: "textarea", required: true, wide: true },
+      { key: "requestScans", label: "Файл або скан запиту", type: "scans", wide: true },
+      { key: "responseScans", label: "Файл або скан відповіді архіву", type: "scans", wide: true },
+      { key: "notes", label: "Коментарі та нотатки", type: "textarea", wide: true },
+    ],
+    columns: [
+      { key: "requestDate", label: "Дата запиту" },
+      { key: "researchId", label: "Дослідження" },
+      { key: "archive", label: "Архів" },
+      { key: "subject", label: "Про що запит" },
+      { key: "responseDate", label: "Дата відповіді" },
+      { key: "status", label: "Статус" },
     ],
   },
   tasks: {

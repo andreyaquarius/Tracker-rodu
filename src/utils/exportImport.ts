@@ -35,6 +35,7 @@ export interface ImportPreview {
   tasks: number;
   findings: number;
   hypotheses: number;
+  archiveRequests: number;
 }
 
 export function createImportPreview(db: AppDatabase): ImportPreview {
@@ -46,6 +47,7 @@ export function createImportPreview(db: AppDatabase): ImportPreview {
     tasks: db.tasks.length,
     findings: db.findings.length,
     hypotheses: db.hypotheses.length,
+    archiveRequests: db.archiveRequests.length,
   };
 }
 

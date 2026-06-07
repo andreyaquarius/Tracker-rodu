@@ -121,6 +121,10 @@ export default function App() {
         ...hypothesis,
         personIds: hypothesis.personIds.filter((personId) => personId !== id),
       })),
+      archiveRequests: current.archiveRequests.map((request) => ({
+        ...request,
+        personIds: request.personIds.filter((personId) => personId !== id),
+      })),
     }));
   };
   const saveRelation = (relation: PersonRelation) => {
@@ -150,6 +154,7 @@ export default function App() {
         );
       case "researches":
       case "documents":
+      case "archiveRequests":
       case "tasks":
       case "findings":
       case "hypotheses":
@@ -183,6 +188,7 @@ export default function App() {
             findings={app.db.findings}
             tasks={app.db.tasks}
             hypotheses={app.db.hypotheses}
+            archiveRequests={app.db.archiveRequests}
             initialSearch={moduleSearch}
             initialOpenPersonId={openEntityId}
             onSavePerson={savePerson}

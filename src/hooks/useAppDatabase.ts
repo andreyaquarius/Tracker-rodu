@@ -334,6 +334,7 @@ function isDatabaseEmpty(db: AppDatabase): boolean {
     db.tasks.length === 0 &&
     db.findings.length === 0 &&
     db.hypotheses.length === 0 &&
+    db.archiveRequests.length === 0 &&
     db.persons.length === 0 &&
     db.personRelations.length === 0
   );

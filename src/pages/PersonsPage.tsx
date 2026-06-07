@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type {
+  ArchiveRequest,
   Finding,
   Hypothesis,
   Person,
@@ -17,7 +18,14 @@ import { nowIso } from "../utils/dateHelpers";
 import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile } from "../services/scanStorage";
 
-type PersonTab = "overview" | "findings" | "tasks" | "hypotheses" | "relations" | "notes";
+type PersonTab =
+  | "overview"
+  | "findings"
+  | "tasks"
+  | "hypotheses"
+  | "archiveRequests"
+  | "relations"
+  | "notes";
 
 export function PersonsPage({
   persons,
@@ -26,6 +34,7 @@ export function PersonsPage({
   findings,
   tasks,
   hypotheses,
+  archiveRequests,
   initialSearch = "",
   initialOpenPersonId = "",
   onSavePerson,
@@ -41,6 +50,7 @@ export function PersonsPage({
   findings: Finding[];
   tasks: TaskRecord[];
   hypotheses: Hypothesis[];
+  archiveRequests: ArchiveRequest[];
   initialSearch?: string;
   initialOpenPersonId?: string;
   onSavePerson: (person: Person) => void;
@@ -229,6 +239,7 @@ export function PersonsPage({
           findings={findings}
           tasks={tasks}
           hypotheses={hypotheses}
+          archiveRequests={archiveRequests}
           onClose={() => setViewing(null)}
           onEdit={() => {
             setEditing(viewing);
@@ -252,6 +263,7 @@ function PersonCardModal({
   findings,
   tasks,
   hypotheses,
+  archiveRequests,
   onClose,
   onEdit,
   onSaveRelation,
@@ -266,6 +278,7 @@ function PersonCardModal({
   findings: Finding[];
   tasks: TaskRecord[];
   hypotheses: Hypothesis[];
+  archiveRequests: ArchiveRequest[];
   onClose: () => void;
   onEdit: () => void;
   onSaveRelation: (relation: PersonRelation) => void;
@@ -278,6 +291,7 @@ function PersonCardModal({
   const linkedFindings = findings.filter((item) => item.personIds?.includes(person.id));
   const linkedTasks = tasks.filter((item) => item.personIds?.includes(person.id));
   const linkedHypotheses = hypotheses.filter((item) => item.personIds?.includes(person.id));
+  const linkedArchiveRequests = archiveRequests.filter((item) => item.personIds?.includes(person.id));
   const linkedRelations = relations.filter(
     (item) => item.personId === person.id || item.relatedPersonId === person.id,
   );
@@ -286,6 +300,7 @@ function PersonCardModal({
     ["findings", "Знахідки", linkedFindings.length],
     ["tasks", "Завдання", linkedTasks.length],
     ["hypotheses", "Гіпотези", linkedHypotheses.length],
+    ["archiveRequests", "Запити в архів", linkedArchiveRequests.length],
     ["relations", "Зв’язки", linkedRelations.length],
     ["notes", "Нотатки"],
   ];
@@ -324,6 +339,14 @@ function PersonCardModal({
               type="hypothesis"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("hypotheses", hypothesisDraftFor(person))}
+            />
+          ) : null}
+          {tab === "archiveRequests" ? (
+            <LinkedRecordsSection
+              records={linkedArchiveRequests}
+              type="archiveRequest"
+              onOpen={onOpenRelated}
+              onAdd={() => onCreateRelated("archiveRequests", archiveRequestDraftFor(person))}
             />
           ) : null}
           {tab === "notes" ? (
@@ -462,8 +485,8 @@ function LinkedRecordsSection({
   onOpen,
   onAdd,
 }: {
-  records: Array<Finding | TaskRecord | Hypothesis>;
-  type: "finding" | "task" | "hypothesis";
+  records: Array<Finding | TaskRecord | Hypothesis | ArchiveRequest>;
+  type: "finding" | "task" | "hypothesis" | "archiveRequest";
   onOpen: (page: PageKey, entityId: string) => void;
   onAdd: () => void;
 }) {
@@ -471,6 +494,7 @@ function LinkedRecordsSection({
     finding: ["Знахідки особи", "Додати знахідку"],
     task: ["Завдання особи", "Додати завдання"],
     hypothesis: ["Гіпотези про особу", "Додати гіпотезу"],
+    archiveRequest: ["Запити в архів про особу", "Додати запит"],
   } as const;
   const [title, buttonLabel] = labels[type];
   return (
@@ -494,8 +518,8 @@ function LinkedRecords({
   type,
   onOpen,
 }: {
-  records: Array<Finding | TaskRecord | Hypothesis>;
-  type: "finding" | "task" | "hypothesis";
+  records: Array<Finding | TaskRecord | Hypothesis | ArchiveRequest>;
+  type: "finding" | "task" | "hypothesis" | "archiveRequest";
   onOpen: (page: PageKey, entityId: string) => void;
 }) {
   if (!records.length) return <div className="empty-inline">Пов’язаних записів поки немає.</div>;
@@ -504,11 +528,15 @@ function LinkedRecords({
       {records.map((record) => {
         const title = type === "finding"
           ? ((record as Finding).summary || (record as Finding).personsText || (record as Finding).findingType)
+          : type === "archiveRequest"
+            ? ((record as ArchiveRequest).subject || (record as ArchiveRequest).archive)
           : (record as TaskRecord | Hypothesis).title;
         const details = type === "finding"
           ? [(record as Finding).findingType, (record as Finding).eventDate, (record as Finding).place]
           : type === "task"
             ? [(record as TaskRecord).status, (record as TaskRecord).place]
+            : type === "archiveRequest"
+              ? [(record as ArchiveRequest).archive, (record as ArchiveRequest).requestDate, (record as ArchiveRequest).status]
             : [(record as Hypothesis).status, (record as Hypothesis).probability];
         return (
           <button
@@ -516,7 +544,13 @@ function LinkedRecords({
             className="person-linked-record"
             key={record.id}
             onClick={() => onOpen(
-              type === "finding" ? "findings" : type === "task" ? "tasks" : "hypotheses",
+              type === "finding"
+                ? "findings"
+                : type === "task"
+                  ? "tasks"
+                  : type === "archiveRequest"
+                    ? "archiveRequests"
+                    : "hypotheses",
               record.id,
             )}
           >
@@ -675,5 +709,13 @@ function hypothesisDraftFor(person: Person): Record<string, unknown> {
     researchId: person.researchId,
     personIds: [person.id],
     relatedPeople: personDisplayName(person),
+  };
+}
+
+function archiveRequestDraftFor(person: Person): Record<string, unknown> {
+  return {
+    researchId: person.researchId,
+    personIds: [person.id],
+    subject: `Запит щодо ${personDisplayName(person)}`,
   };
 }

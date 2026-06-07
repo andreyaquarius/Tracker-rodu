@@ -16,8 +16,8 @@ interface LocalScan {
 }
 
 export async function saveScan(file: File): Promise<ScanAttachment> {
-  if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
-    throw new Error(`Файл «${file.name}» не є зображенням або PDF.`);
+  if (!isSupportedAttachment(file)) {
+    throw new Error(`Формат файла «${file.name}» не підтримується.`);
   }
   if (file.size > MAX_FILE_SIZE) {
     throw new Error(`Файл «${file.name}» перевищує дозволені 2 ГБ.`);
@@ -47,6 +47,22 @@ export async function saveScan(file: File): Promise<ScanAttachment> {
     createdAt: nowIso(),
     storage: "local",
   };
+}
+
+function isSupportedAttachment(file: File): boolean {
+  const supportedTypes = new Set([
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.oasis.opendocument.text",
+    "text/plain",
+  ]);
+  const extension = file.name.split(".").pop()?.toLocaleLowerCase() ?? "";
+  return (
+    file.type.startsWith("image/") ||
+    supportedTypes.has(file.type) ||
+    ["pdf", "doc", "docx", "odt", "txt"].includes(extension)
+  );
 }
 
 export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {

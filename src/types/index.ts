@@ -117,6 +117,8 @@ export type ActivityActionType =
   | "finding_created"
   | "hypothesis_created"
   | "year_status_changed"
+  | "archive_request_created"
+  | "archive_request_status_changed"
   | "person_created"
   | "person_updated";
 
@@ -143,6 +145,20 @@ export interface Hypothesis extends BaseEntity {
   status: string;
   probability: string;
   notes: string;
+}
+
+export interface ArchiveRequest extends BaseEntity {
+  researchId: EntityId;
+  personIds: EntityId[];
+  archive: string;
+  archiveDetails: string;
+  requestDate: string;
+  responseDate: string;
+  subject: string;
+  status: string;
+  notes: string;
+  requestScans: ScanAttachment[];
+  responseScans: ScanAttachment[];
 }
 
 export type PersonGender = "чоловік" | "жінка" | "невідомо";
@@ -228,7 +244,7 @@ export interface DriveBackupFile {
 }
 
 export interface AppDatabase {
-  version: 2;
+  version: 3;
   appName: "Трекер Роду";
   tagline: "Не губи сліди свого роду";
   updatedAt: string;
@@ -238,6 +254,7 @@ export interface AppDatabase {
   tasks: TaskRecord[];
   findings: Finding[];
   hypotheses: Hypothesis[];
+  archiveRequests: ArchiveRequest[];
   persons: Person[];
   personRelations: PersonRelation[];
   activityLog: ActivityLogEntry[];
@@ -251,6 +268,7 @@ export type CollectionKey =
   | "tasks"
   | "findings"
   | "hypotheses"
+  | "archiveRequests"
   | "persons";
 
 export type AppEntity =
@@ -260,6 +278,7 @@ export type AppEntity =
   | TaskRecord
   | Finding
   | Hypothesis
+  | ArchiveRequest
   | Person;
 
 export interface GoogleUser {

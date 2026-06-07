@@ -5,7 +5,7 @@ import { participantSummary } from "./findingParticipants";
 
 export function createEmptyDatabase(): AppDatabase {
   return {
-    version: 2,
+    version: 3,
     appName: "Трекер Роду",
     tagline: "Не губи сліди свого роду",
     updatedAt: nowIso(),
@@ -15,6 +15,7 @@ export function createEmptyDatabase(): AppDatabase {
     tasks: [],
     findings: [],
     hypotheses: [],
+    archiveRequests: [],
     persons: [],
     personRelations: [],
     activityLog: [],
@@ -34,7 +35,10 @@ export function normalizeDatabase(value: unknown): AppDatabase {
   const supportedAppName =
     candidate.appName === "Трекер Роду" ||
     (candidate.appName as string | undefined) === "Родовий Навігатор";
-  if (!supportedAppName || (candidate.version !== 1 && candidate.version !== 2)) {
+  if (
+    !supportedAppName ||
+    (candidate.version !== 1 && candidate.version !== 2 && candidate.version !== 3)
+  ) {
     throw new Error("Непідтримуваний формат або версія бази.");
   }
   const empty = createEmptyDatabase();
@@ -67,6 +71,16 @@ export function normalizeDatabase(value: unknown): AppDatabase {
     ...item,
     personIds: normalizeIds(item.personIds),
   }));
+  const archiveRequests = (
+    Array.isArray(candidate.archiveRequests) ? candidate.archiveRequests : []
+  ).map((item) => ({
+    ...item,
+    personIds: normalizeIds(item.personIds),
+    archiveDetails: typeof item.archiveDetails === "string" ? item.archiveDetails : "",
+    responseDate: typeof item.responseDate === "string" ? item.responseDate : "",
+    requestScans: Array.isArray(item.requestScans) ? item.requestScans : [],
+    responseScans: Array.isArray(item.responseScans) ? item.responseScans : [],
+  }));
   const persons = (Array.isArray(candidate.persons) ? candidate.persons : []).map((item) => ({
     ...item,
     birthScans: Array.isArray(item.birthScans) ? item.birthScans : [],
@@ -77,7 +91,7 @@ export function normalizeDatabase(value: unknown): AppDatabase {
   return {
     ...empty,
     ...candidate,
-    version: 2,
+    version: 3,
     appName: "Трекер Роду",
     tagline: "Не губи сліди свого роду",
     researches: Array.isArray(candidate.researches) ? candidate.researches : [],
@@ -86,6 +100,7 @@ export function normalizeDatabase(value: unknown): AppDatabase {
     tasks,
     findings,
     hypotheses,
+    archiveRequests,
     persons,
     personRelations: Array.isArray(candidate.personRelations) ? candidate.personRelations : [],
     activityLog: Array.isArray(candidate.activityLog) ? candidate.activityLog : [],
