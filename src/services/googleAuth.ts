@@ -11,7 +11,7 @@ declare global {
             include_granted_scopes?: boolean;
             callback: (response: TokenResponse) => void;
             error_callback?: (error: GoogleOAuthError) => void;
-          }): { requestAccessToken(config?: { prompt?: string; scope?: string }): void };
+          }): TokenClient;
           hasGrantedAllScopes(
             response: TokenResponse,
             firstScope: string,
@@ -37,6 +37,12 @@ interface GoogleOAuthError {
   message?: string;
 }
 
+interface TokenClient {
+  callback: (response: TokenResponse) => void;
+  error_callback?: (error: GoogleOAuthError) => void;
+  requestAccessToken(config?: { prompt?: string; scope?: string }): void;
+}
+
 interface StoredGoogleSession {
   accessToken: string;
   tokenExpiresAt: number;
@@ -59,6 +65,8 @@ const BASE_SCOPES = [
 const restoredSession = readStoredSession();
 let accessToken = restoredSession?.accessToken ?? "";
 let tokenExpiresAt = restoredSession?.tokenExpiresAt ?? 0;
+let tokenClient: TokenClient | null = null;
+let tokenClientScope = "";
 
 function readStoredSession(): StoredGoogleSession | null {
   try {
@@ -124,55 +132,67 @@ function requestToken(scope: string, prompt = ""): Promise<string> {
   return prepareGoogleSignIn().then(
     () =>
       new Promise<string>((resolve, reject) => {
-        let popupClosedTimer: number | null = null;
         let completed = false;
         const finish = (action: () => void) => {
           if (completed) return;
           completed = true;
-          if (popupClosedTimer !== null) window.clearTimeout(popupClosedTimer);
           action();
         };
-        const client = window.google!.accounts.oauth2.initTokenClient({
-          client_id: clientId,
-          scope,
-          include_granted_scopes: false,
-          callback: (response) => {
-            if (!response.access_token) {
-              finish(() => reject(new Error(response.error_description || "Google не надав токен доступу.")));
-              return;
-            }
-            if (!window.google!.accounts.oauth2.hasGrantedAllScopes(response, APP_DATA_SCOPE)) {
-              finish(() => reject(
-                new Error(
-                  "Google не надав доступ до папки даних застосунку. Додайте scope drive.appdata у Google Auth Platform → Data Access і підключіть Google Drive повторно.",
-                ),
-              ));
-              return;
-            }
-            accessToken = response.access_token;
-            tokenExpiresAt = Date.now() + Math.max(0, (response.expires_in ?? 3600) - 60) * 1000;
-            writeStoredSession({ accessToken, tokenExpiresAt });
-            finish(() => resolve(accessToken));
-          },
-          error_callback: (error) => {
-            if (error.type === "popup_failed_to_open") {
-              finish(() => reject(
-                new Error(
-                  "Браузер заблокував вікно входу Google. Дозвольте спливні вікна для цього сайту та повторіть вхід.",
-                ),
-              ));
-              return;
-            }
-            if (error.type === "popup_closed") {
-              popupClosedTimer = window.setTimeout(() => {
-                finish(() => reject(new Error("Вікно входу Google було закрито до завершення авторизації.")));
-              }, 1200);
-              return;
-            }
-            finish(() => reject(new Error(error.message || "Не вдалося відкрити вікно входу Google.")));
-          },
-        });
-        client.requestAccessToken({ prompt });
+        if (!tokenClient || tokenClientScope !== scope) {
+          tokenClient = window.google!.accounts.oauth2.initTokenClient({
+            client_id: clientId.trim(),
+            scope,
+            include_granted_scopes: true,
+            callback: () => undefined,
+          });
+          tokenClientScope = scope;
+        }
+        tokenClient.callback = (response) => {
+          if (response.error || !response.access_token) {
+            const details = response.error_description
+              ? `${response.error}: ${response.error_description}`
+              : response.error || "Google не надав токен доступу.";
+            finish(() => reject(new Error(details)));
+            return;
+          }
+          if (!window.google!.accounts.oauth2.hasGrantedAllScopes(response, APP_DATA_SCOPE)) {
+            finish(() => reject(
+              new Error(
+                "Google не надав доступ до папки даних застосунку. Додайте scope drive.appdata у Google Auth Platform → Data Access і підключіть Google Drive повторно.",
+              ),
+            ));
+            return;
+          }
+          accessToken = response.access_token;
+          tokenExpiresAt = Date.now() + Math.max(0, (response.expires_in ?? 3600) - 60) * 1000;
+          writeStoredSession({ accessToken, tokenExpiresAt });
+          finish(() => resolve(accessToken));
+        };
+        tokenClient.error_callback = (error) => {
+          if (error.type === "popup_failed_to_open") {
+            finish(() => reject(
+              new Error(
+                "Браузер заблокував вікно входу Google. Дозвольте спливні вікна для цього сайту та повторіть вхід.",
+              ),
+            ));
+            return;
+          }
+          if (error.type === "popup_closed") {
+            // Chromium can emit this while the OAuth response is still being delivered.
+            window.setTimeout(() => {
+              if (!completed) {
+                finish(() => reject(
+                  new Error(
+                    "Google закрив вікно без відповіді. Відкрийте Google Auth Platform → Audience і перевірте, що ваш акаунт доданий до Test users.",
+                  ),
+                ));
+              }
+            }, 5000);
+            return;
+          }
+          finish(() => reject(new Error(error.message || `Помилка входу Google: ${error.type || "unknown"}.`)));
+        };
+        tokenClient.requestAccessToken({ prompt });
       }),
   );
 }
