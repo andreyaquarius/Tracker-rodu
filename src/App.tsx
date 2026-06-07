@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppEntity, CollectionKey, Person, PersonRelation } from "./types";
 import { useAppDatabase } from "./hooks/useAppDatabase";
 import { Layout } from "./components/Layout";
@@ -11,6 +11,7 @@ import { BackupPage } from "./pages/BackupPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PersonsPage } from "./pages/PersonsPage";
+import { prepareGoogleSignIn } from "./services/googleAuth";
 
 const ONBOARDING_KEY = "tracker-rodu-onboarded";
 const LEGACY_ONBOARDING_KEY = "rodovyi-navigator-onboarded";
@@ -38,6 +39,10 @@ export default function App() {
   });
   const [loginError, setLoginError] = useState("");
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
+
+  useEffect(() => {
+    void prepareGoogleSignIn().catch(() => undefined);
+  }, []);
 
   const notify = (message: string, error = false) => {
     setToast({ message, error });

@@ -10,7 +10,7 @@ declare global {
             scope: string;
             include_granted_scopes?: boolean;
             callback: (response: TokenResponse) => void;
-            error_callback?: (error: unknown) => void;
+            error_callback?: (error: GoogleOAuthError) => void;
           }): { requestAccessToken(config?: { prompt?: string; scope?: string }): void };
           hasGrantedAllScopes(
             response: TokenResponse,
@@ -30,6 +30,11 @@ interface TokenResponse {
   scope?: string;
   error?: string;
   error_description?: string;
+}
+
+interface GoogleOAuthError {
+  type?: "popup_failed_to_open" | "popup_closed" | "unknown";
+  message?: string;
 }
 
 interface StoredGoogleSession {
@@ -92,7 +97,7 @@ function writeStoredSession(updates: Partial<StoredGoogleSession>): void {
   sessionStorage.setItem(GOOGLE_SESSION_KEY, JSON.stringify(session));
 }
 
-async function loadGoogleScript(): Promise<void> {
+export async function prepareGoogleSignIn(): Promise<void> {
   if (window.google) return;
   const existing = document.querySelector<HTMLScriptElement>(`script[src="${GIS_URL}"]`);
   if (existing) {
@@ -116,7 +121,7 @@ async function loadGoogleScript(): Promise<void> {
 function requestToken(scope: string, prompt = ""): Promise<string> {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   if (!clientId) throw new Error("У файлі .env не вказано VITE_GOOGLE_CLIENT_ID.");
-  return loadGoogleScript().then(
+  return prepareGoogleSignIn().then(
     () =>
       new Promise<string>((resolve, reject) => {
         const client = window.google!.accounts.oauth2.initTokenClient({
@@ -141,7 +146,21 @@ function requestToken(scope: string, prompt = ""): Promise<string> {
             writeStoredSession({ accessToken, tokenExpiresAt });
             resolve(accessToken);
           },
-          error_callback: () => reject(new Error("Вікно входу Google було закрито або заблоковано.")),
+          error_callback: (error) => {
+            if (error.type === "popup_failed_to_open") {
+              reject(
+                new Error(
+                  "Браузер заблокував вікно входу Google. Дозвольте спливні вікна для цього сайту та повторіть вхід.",
+                ),
+              );
+              return;
+            }
+            if (error.type === "popup_closed") {
+              reject(new Error("Вікно входу Google було закрито до завершення авторизації."));
+              return;
+            }
+            reject(new Error(error.message || "Не вдалося відкрити вікно входу Google."));
+          },
         });
         client.requestAccessToken({ prompt });
       }),
