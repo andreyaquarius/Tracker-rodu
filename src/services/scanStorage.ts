@@ -1,4 +1,4 @@
-import type { ScanAttachment } from "../types";
+import type { AppDatabase, ScanAttachment } from "../types";
 import { getAccessToken } from "./googleAuth";
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
@@ -25,28 +25,91 @@ export async function saveScan(file: File): Promise<ScanAttachment> {
 
   const id = createId();
   const token = getAccessToken();
-  if (token) {
-    const driveFileId = await uploadToDrive(token, file, id);
-    return {
-      id,
-      name: file.name,
-      mimeType: file.type || "application/octet-stream",
-      size: file.size,
-      createdAt: nowIso(),
-      storage: "drive",
-      driveFileId,
-    };
+  if (!token) {
+    throw new Error(
+      "Підключіть Google Drive перед додаванням файлів. Вкладення зберігаються лише у приватному сховищі застосунку на Google Drive.",
+    );
   }
 
-  await saveLocalBlob(id, file);
+  const driveFileId = await uploadToDrive(token, file, id);
   return {
     id,
     name: file.name,
     mimeType: file.type || "application/octet-stream",
     size: file.size,
     createdAt: nowIso(),
-    storage: "local",
+    storage: "drive",
+    driveFileId,
   };
+}
+
+export interface AttachmentMigrationResult {
+  db: AppDatabase;
+  migrated: ScanAttachment[];
+  unavailable: string[];
+}
+
+export async function migrateLocalAttachmentsToDrive(
+  db: AppDatabase,
+): Promise<AttachmentMigrationResult> {
+  const token = getAccessToken();
+  if (!token) throw new Error("Підключіть Google Drive для перенесення вкладень.");
+  const migrated: ScanAttachment[] = [];
+  const unavailable: string[] = [];
+  const migrateList = async (scans: ScanAttachment[] = []) =>
+    Promise.all(scans.map(async (scan) => {
+      if (scan.storage === "drive") return scan;
+      const blob = await readLocalBlob(scan.id);
+      if (!blob) {
+        unavailable.push(scan.name);
+        return scan;
+      }
+      const file = new File([blob], scan.name, {
+        type: scan.mimeType || blob.type || "application/octet-stream",
+      });
+      const driveFileId = await uploadToDrive(token, file, scan.id);
+      const next = { ...scan, storage: "drive" as const, driveFileId };
+      migrated.push(scan);
+      return next;
+    }));
+
+  const documents = await Promise.all(db.documents.map(async (item) => ({
+    ...item,
+    scans: await migrateList(item.scans),
+  })));
+  const findings = await Promise.all(db.findings.map(async (item) => ({
+    ...item,
+    scans: await migrateList(item.scans),
+  })));
+  const persons = await Promise.all(db.persons.map(async (item) => ({
+    ...item,
+    birthScans: await migrateList(item.birthScans),
+    marriageScans: await migrateList(item.marriageScans),
+    deathScans: await migrateList(item.deathScans),
+    mentionScans: await migrateList(item.mentionScans),
+  })));
+  const archiveRequests = await Promise.all(db.archiveRequests.map(async (item) => ({
+    ...item,
+    requestScans: await migrateList(item.requestScans),
+    responseScans: await migrateList(item.responseScans),
+  })));
+
+  return {
+    db: {
+      ...db,
+      documents,
+      findings,
+      persons,
+      archiveRequests,
+      updatedAt: migrated.length ? nowIso() : db.updatedAt,
+    },
+    migrated,
+    unavailable: [...new Set(unavailable)],
+  };
+}
+
+export async function deleteMigratedLocalFiles(scans: ScanAttachment[]): Promise<void> {
+  await Promise.allSettled(scans.map((scan) => deleteLocalBlob(scan.id)));
 }
 
 function isSupportedAttachment(file: File): boolean {

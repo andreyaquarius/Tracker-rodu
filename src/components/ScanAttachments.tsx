@@ -9,7 +9,7 @@ import {
 
 export function ScanAttachmentsEditor({
   title = "Скани",
-  description = "Зображення, PDF, DOC, DOCX, ODT або TXT, до 2 ГБ кожен.",
+  description = "Зображення, PDF, DOC, DOCX, ODT або TXT, до 2 ГБ кожен. Файли зберігаються у приватному сховищі застосунку на Google Drive.",
   scans,
   onChange,
 }: {

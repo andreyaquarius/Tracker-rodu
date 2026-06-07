@@ -26,6 +26,10 @@ import {
 } from "../services/googleDrive";
 import { scheduleAutoSave } from "../services/syncService";
 import { createActivityEntries } from "../utils/activityLog";
+import {
+  deleteMigratedLocalFiles,
+  migrateLocalAttachmentsToDrive,
+} from "../services/scanStorage";
 
 export function useAppDatabase() {
   const initialGoogleSession = useRef(getGoogleSession());
@@ -49,6 +53,7 @@ export function useAppDatabase() {
   const syncing = useRef(false);
   const driveFileNameEnsured = useRef(false);
   const dailyBackupRunning = useRef(false);
+  const attachmentWarningShown = useRef(false);
 
   const setDatabase = useCallback((next: AppDatabase | ((current: AppDatabase) => AppDatabase)) => {
     setDbState((current) => {
@@ -119,12 +124,31 @@ export function useAppDatabase() {
         dbRef.current = remote;
         saveLocalCopy(remote);
         setDbState(remote);
+        const migration = await migrateLocalAttachmentsToDrive(remote);
+        if (migration.migrated.length) {
+          dbRef.current = migration.db;
+          saveLocalCopy(migration.db);
+          setDbState(migration.db);
+          await updateDatabaseFile(token, fileId, migration.db);
+          await deleteMigratedLocalFiles(migration.migrated);
+        }
+        reportUnavailableAttachments(migration.unavailable);
         const lastSyncedAt = nowIso();
         saveGoogleSessionDetails({ driveFileId: fileId, lastSyncedAt });
         setSync({ status: "synced", lastSyncedAt });
         return;
       }
+      const migration = await migrateLocalAttachmentsToDrive(dbRef.current);
+      if (migration.migrated.length) {
+        dbRef.current = migration.db;
+        saveLocalCopy(migration.db);
+        setDbState(migration.db);
+      }
+      reportUnavailableAttachments(migration.unavailable);
       await updateDatabaseFile(token, fileId, dbRef.current);
+      if (migration.migrated.length) {
+        await deleteMigratedLocalFiles(migration.migrated);
+      }
       const lastSyncedAt = nowIso();
       saveGoogleSessionDetails({ driveFileId: fileId, lastSyncedAt });
       setSync({ status: "synced", lastSyncedAt });
@@ -175,7 +199,13 @@ export function useAppDatabase() {
         findDatabaseFileInAppDataFolder(token),
       ]);
       if (!driveFile) {
+        const migration = await migrateLocalAttachmentsToDrive(dbRef.current);
+        if (migration.migrated.length) replaceLocalDatabase(migration.db);
+        reportUnavailableAttachments(migration.unavailable);
         const created = await createDatabaseFileInAppDataFolder(token, dbRef.current);
+        if (migration.migrated.length) {
+          await deleteMigratedLocalFiles(migration.migrated);
+        }
         driveFileId.current = created.id;
         const lastSyncedAt = nowIso();
         saveGoogleSessionDetails({
@@ -240,6 +270,13 @@ export function useAppDatabase() {
           }
         }
       }
+      const migration = await migrateLocalAttachmentsToDrive(dbRef.current);
+      if (migration.migrated.length) {
+        replaceLocalDatabase(migration.db);
+        await updateDatabaseFile(token, driveFile.id, dbRef.current);
+        await deleteMigratedLocalFiles(migration.migrated);
+      }
+      reportUnavailableAttachments(migration.unavailable);
       const lastSyncedAt = nowIso();
       saveGoogleSessionDetails({
         user: profile,
@@ -323,6 +360,17 @@ export function useAppDatabase() {
     dbRef.current = next;
     saveLocalCopy(next);
     setDbState(next);
+  }
+
+  function reportUnavailableAttachments(names: string[]): void {
+    if (!names.length || attachmentWarningShown.current) return;
+    attachmentWarningShown.current = true;
+    const preview = names.slice(0, 3).join(", ");
+    const rest = names.length > 3 ? ` та ще ${names.length - 3}` : "";
+    window.alert(
+      `Не вдалося перенести ${names.length} локальних вкладень: ${preview}${rest}. ` +
+      "Їх немає у сховищі цього сайту. Відкрийте застосунок на пристрої та за адресою, де файли додавалися, або прикріпіть їх повторно.",
+    );
   }
 }
 
