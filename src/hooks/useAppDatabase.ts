@@ -114,6 +114,16 @@ export function useAppDatabase() {
         await ensureDatabaseFileName(token, fileId);
         driveFileNameEnsured.current = true;
       }
+      const remote = await downloadDatabaseFile(token, fileId);
+      if (isDatabaseEmpty(dbRef.current) && !isDatabaseEmpty(remote)) {
+        dbRef.current = remote;
+        saveLocalCopy(remote);
+        setDbState(remote);
+        const lastSyncedAt = nowIso();
+        saveGoogleSessionDetails({ driveFileId: fileId, lastSyncedAt });
+        setSync({ status: "synced", lastSyncedAt });
+        return;
+      }
       await updateDatabaseFile(token, fileId, dbRef.current);
       const lastSyncedAt = nowIso();
       saveGoogleSessionDetails({ driveFileId: fileId, lastSyncedAt });
@@ -164,7 +174,6 @@ export function useAppDatabase() {
         fetchGoogleUser(token),
         findDatabaseFileInAppDataFolder(token),
       ]);
-      setUser(profile);
       if (!driveFile) {
         const created = await createDatabaseFileInAppDataFolder(token, dbRef.current);
         driveFileId.current = created.id;
@@ -174,6 +183,7 @@ export function useAppDatabase() {
           driveFileId: created.id,
           lastSyncedAt,
         });
+        setUser(profile);
         setSync({ status: "synced", lastSyncedAt });
         void createDailyBackupIfNeeded().catch(() => undefined);
         return;
@@ -182,20 +192,53 @@ export function useAppDatabase() {
       const remote = await downloadDatabaseFile(token, driveFile.id);
       const localTime = new Date(dbRef.current.updatedAt).getTime();
       const remoteTime = new Date(remote.updatedAt).getTime();
-      if (remoteTime > localTime) {
+      const localEmpty = isDatabaseEmpty(dbRef.current);
+      const remoteEmpty = isDatabaseEmpty(remote);
+      if (localEmpty && !remoteEmpty) {
+        replaceLocalDatabase(remote);
+      } else if (!localEmpty && remoteEmpty) {
+        const uploadLocal = window.confirm(
+          "На цьому пристрої є дані, а база на Google Drive порожня. Завантажити локальні дані на Google Drive?",
+        );
+        if (uploadLocal) {
+          await updateDatabaseFile(token, driveFile.id, dbRef.current);
+        } else {
+          throw new Error("Синхронізацію скасовано, щоб не втратити локальні дані.");
+        }
+      } else if (remoteTime > localTime) {
         const useRemote = window.confirm(
           "Копія на Google Drive новіша за локальну. Завантажити версію з Google Drive?",
         );
         if (useRemote) {
-          dbRef.current = remote;
-          saveLocalCopy(remote);
-          setDbState(remote);
+          replaceLocalDatabase(remote);
+        } else {
+          const uploadLocal = window.confirm(
+            "Залишити локальну версію та замінити нею базу на Google Drive?",
+          );
+          if (uploadLocal) {
+            await createAppDataBackup(token, remote, "manual");
+            await updateDatabaseFile(token, driveFile.id, dbRef.current);
+          } else {
+            throw new Error("Синхронізацію скасовано. Обидві версії залишено без змін.");
+          }
         }
       } else if (localTime > remoteTime) {
         const uploadLocal = window.confirm(
           "Локальна копія новіша за Google Drive. Синхронізувати її з Google Drive?",
         );
-        if (uploadLocal) await updateDatabaseFile(token, driveFile.id, dbRef.current);
+        if (uploadLocal) {
+          await createAppDataBackup(token, remote, "manual");
+          await updateDatabaseFile(token, driveFile.id, dbRef.current);
+        } else {
+          const useRemote = window.confirm(
+            "Тоді завантажити версію з Google Drive замість локальної?",
+          );
+          if (useRemote) {
+            replaceLocalDatabase(remote);
+          } else {
+            throw new Error("Синхронізацію скасовано. Обидві версії залишено без змін.");
+          }
+        }
       }
       const lastSyncedAt = nowIso();
       saveGoogleSessionDetails({
@@ -203,6 +246,7 @@ export function useAppDatabase() {
         driveFileId: driveFile.id,
         lastSyncedAt,
       });
+      setUser(profile);
       setSync({ status: "synced", lastSyncedAt });
       void createDailyBackupIfNeeded().catch(() => undefined);
     } catch (error) {
@@ -274,4 +318,23 @@ export function useAppDatabase() {
     setDatabase,
     replaceDatabase,
   };
+
+  function replaceLocalDatabase(next: AppDatabase): void {
+    dbRef.current = next;
+    saveLocalCopy(next);
+    setDbState(next);
+  }
+}
+
+function isDatabaseEmpty(db: AppDatabase): boolean {
+  return (
+    db.researches.length === 0 &&
+    db.documents.length === 0 &&
+    db.yearMatrix.length === 0 &&
+    db.tasks.length === 0 &&
+    db.findings.length === 0 &&
+    db.hypotheses.length === 0 &&
+    db.persons.length === 0 &&
+    db.personRelations.length === 0
+  );
 }
