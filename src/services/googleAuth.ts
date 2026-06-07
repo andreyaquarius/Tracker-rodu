@@ -124,42 +124,52 @@ function requestToken(scope: string, prompt = ""): Promise<string> {
   return prepareGoogleSignIn().then(
     () =>
       new Promise<string>((resolve, reject) => {
+        let popupClosedTimer: number | null = null;
+        let completed = false;
+        const finish = (action: () => void) => {
+          if (completed) return;
+          completed = true;
+          if (popupClosedTimer !== null) window.clearTimeout(popupClosedTimer);
+          action();
+        };
         const client = window.google!.accounts.oauth2.initTokenClient({
           client_id: clientId,
           scope,
           include_granted_scopes: false,
           callback: (response) => {
             if (!response.access_token) {
-              reject(new Error(response.error_description || "Google не надав токен доступу."));
+              finish(() => reject(new Error(response.error_description || "Google не надав токен доступу.")));
               return;
             }
             if (!window.google!.accounts.oauth2.hasGrantedAllScopes(response, APP_DATA_SCOPE)) {
-              reject(
+              finish(() => reject(
                 new Error(
                   "Google не надав доступ до папки даних застосунку. Додайте scope drive.appdata у Google Auth Platform → Data Access і підключіть Google Drive повторно.",
                 ),
-              );
+              ));
               return;
             }
             accessToken = response.access_token;
             tokenExpiresAt = Date.now() + Math.max(0, (response.expires_in ?? 3600) - 60) * 1000;
             writeStoredSession({ accessToken, tokenExpiresAt });
-            resolve(accessToken);
+            finish(() => resolve(accessToken));
           },
           error_callback: (error) => {
             if (error.type === "popup_failed_to_open") {
-              reject(
+              finish(() => reject(
                 new Error(
                   "Браузер заблокував вікно входу Google. Дозвольте спливні вікна для цього сайту та повторіть вхід.",
                 ),
-              );
+              ));
               return;
             }
             if (error.type === "popup_closed") {
-              reject(new Error("Вікно входу Google було закрито до завершення авторизації."));
+              popupClosedTimer = window.setTimeout(() => {
+                finish(() => reject(new Error("Вікно входу Google було закрито до завершення авторизації.")));
+              }, 1200);
               return;
             }
-            reject(new Error(error.message || "Не вдалося відкрити вікно входу Google."));
+            finish(() => reject(new Error(error.message || "Не вдалося відкрити вікно входу Google.")));
           },
         });
         client.requestAccessToken({ prompt });
