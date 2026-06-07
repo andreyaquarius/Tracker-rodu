@@ -38,9 +38,13 @@ interface GoogleOAuthError {
 }
 
 interface TokenClient {
-  callback: (response: TokenResponse) => void;
-  error_callback?: (error: GoogleOAuthError) => void;
   requestAccessToken(config?: { prompt?: string; scope?: string }): void;
+}
+
+interface PendingTokenRequest {
+  resolve: (token: string) => void;
+  reject: (error: Error) => void;
+  popupClosedTimer: number | null;
 }
 
 interface StoredGoogleSession {
@@ -66,7 +70,7 @@ const restoredSession = readStoredSession();
 let accessToken = restoredSession?.accessToken ?? "";
 let tokenExpiresAt = restoredSession?.tokenExpiresAt ?? 0;
 let tokenClient: TokenClient | null = null;
-let tokenClientScope = "";
+let pendingTokenRequest: PendingTokenRequest | null = null;
 
 function readStoredSession(): StoredGoogleSession | null {
   try {
@@ -106,13 +110,17 @@ function writeStoredSession(updates: Partial<StoredGoogleSession>): void {
 }
 
 export async function prepareGoogleSignIn(): Promise<void> {
-  if (window.google) return;
+  if (window.google) {
+    initializeTokenClient();
+    return;
+  }
   const existing = document.querySelector<HTMLScriptElement>(`script[src="${GIS_URL}"]`);
   if (existing) {
     await new Promise<void>((resolve, reject) => {
       existing.addEventListener("load", () => resolve(), { once: true });
       existing.addEventListener("error", () => reject(new Error("Не вдалося завантажити Google Identity Services.")), { once: true });
     });
+    initializeTokenClient();
     return;
   }
   await new Promise<void>((resolve, reject) => {
@@ -124,77 +132,87 @@ export async function prepareGoogleSignIn(): Promise<void> {
     script.onerror = () => reject(new Error("Не вдалося завантажити Google Identity Services."));
     document.head.appendChild(script);
   });
+  initializeTokenClient();
 }
 
-function requestToken(scope: string, prompt = ""): Promise<string> {
+function initializeTokenClient(): void {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   if (!clientId) throw new Error("У файлі .env не вказано VITE_GOOGLE_CLIENT_ID.");
-  return prepareGoogleSignIn().then(
-    () =>
-      new Promise<string>((resolve, reject) => {
-        let completed = false;
-        const finish = (action: () => void) => {
-          if (completed) return;
-          completed = true;
-          action();
-        };
-        if (!tokenClient || tokenClientScope !== scope) {
-          tokenClient = window.google!.accounts.oauth2.initTokenClient({
-            client_id: clientId.trim(),
-            scope,
-            include_granted_scopes: true,
-            callback: () => undefined,
-          });
-          tokenClientScope = scope;
-        }
-        tokenClient.callback = (response) => {
-          if (response.error || !response.access_token) {
-            const details = response.error_description
-              ? `${response.error}: ${response.error_description}`
-              : response.error || "Google не надав токен доступу.";
-            finish(() => reject(new Error(details)));
-            return;
-          }
-          if (!window.google!.accounts.oauth2.hasGrantedAllScopes(response, APP_DATA_SCOPE)) {
-            finish(() => reject(
-              new Error(
-                "Google не надав доступ до папки даних застосунку. Додайте scope drive.appdata у Google Auth Platform → Data Access і підключіть Google Drive повторно.",
-              ),
-            ));
-            return;
-          }
-          accessToken = response.access_token;
-          tokenExpiresAt = Date.now() + Math.max(0, (response.expires_in ?? 3600) - 60) * 1000;
-          writeStoredSession({ accessToken, tokenExpiresAt });
-          finish(() => resolve(accessToken));
-        };
-        tokenClient.error_callback = (error) => {
-          if (error.type === "popup_failed_to_open") {
-            finish(() => reject(
-              new Error(
-                "Браузер заблокував вікно входу Google. Дозвольте спливні вікна для цього сайту та повторіть вхід.",
-              ),
-            ));
-            return;
-          }
-          if (error.type === "popup_closed") {
-            // Chromium can emit this while the OAuth response is still being delivered.
-            window.setTimeout(() => {
-              if (!completed) {
-                finish(() => reject(
-                  new Error(
-                    "Google закрив вікно без відповіді. Відкрийте Google Auth Platform → Audience і перевірте, що ваш акаунт доданий до Test users.",
-                  ),
-                ));
-              }
-            }, 5000);
-            return;
-          }
-          finish(() => reject(new Error(error.message || `Помилка входу Google: ${error.type || "unknown"}.`)));
-        };
-        tokenClient.requestAccessToken({ prompt });
-      }),
+  if (tokenClient) return;
+  tokenClient = window.google!.accounts.oauth2.initTokenClient({
+    client_id: clientId.trim(),
+    scope: BASE_SCOPES,
+    include_granted_scopes: true,
+    callback: handleTokenResponse,
+    error_callback: handleTokenError,
+  });
+}
+
+function handleTokenResponse(response: TokenResponse): void {
+  const pending = takePendingTokenRequest();
+  if (!pending) return;
+  if (response.error || !response.access_token) {
+    const details = response.error_description
+      ? `${response.error}: ${response.error_description}`
+      : response.error || "Google не надав токен доступу.";
+    pending.reject(new Error(details));
+    return;
+  }
+  if (!window.google!.accounts.oauth2.hasGrantedAllScopes(response, APP_DATA_SCOPE)) {
+    pending.reject(
+      new Error(
+        "Google не надав доступ до папки даних застосунку. Додайте scope drive.appdata у Google Auth Platform → Data Access і підключіть Google Drive повторно.",
+      ),
+    );
+    return;
+  }
+  accessToken = response.access_token;
+  tokenExpiresAt = Date.now() + Math.max(0, (response.expires_in ?? 3600) - 60) * 1000;
+  writeStoredSession({ accessToken, tokenExpiresAt });
+  pending.resolve(accessToken);
+}
+
+function handleTokenError(error: GoogleOAuthError): void {
+  const pending = pendingTokenRequest;
+  if (!pending) return;
+  if (error.type === "popup_closed") {
+    pending.popupClosedTimer = window.setTimeout(() => {
+      const current = takePendingTokenRequest();
+      current?.reject(
+        new Error(
+          "Google закрив вікно без OAuth-відповіді. Перевірте Google Auth Platform → Audience → Test users.",
+        ),
+      );
+    }, 3000);
+    return;
+  }
+  takePendingTokenRequest();
+  pending.reject(
+    error.type === "popup_failed_to_open"
+      ? new Error("Браузер заблокував вікно входу Google. Дозвольте спливні вікна для цього сайту.")
+      : new Error(error.message || `Помилка входу Google: ${error.type || "unknown"}.`),
   );
+}
+
+function takePendingTokenRequest(): PendingTokenRequest | null {
+  const pending = pendingTokenRequest;
+  pendingTokenRequest = null;
+  if (pending?.popupClosedTimer !== null && pending?.popupClosedTimer !== undefined) {
+    window.clearTimeout(pending.popupClosedTimer);
+  }
+  return pending;
+}
+
+async function requestToken(scope: string, prompt = ""): Promise<string> {
+  if (!tokenClient) await prepareGoogleSignIn();
+  if (!tokenClient) throw new Error("Не вдалося підготувати Google Identity Services.");
+  if (pendingTokenRequest) {
+    throw new Error("Вхід Google уже виконується. Завершіть відкрите вікно авторизації.");
+  }
+  return new Promise<string>((resolve, reject) => {
+    pendingTokenRequest = { resolve, reject, popupClosedTimer: null };
+    tokenClient!.requestAccessToken({ prompt, scope });
+  });
 }
 
 export function signInWithGoogle(): Promise<string> {
