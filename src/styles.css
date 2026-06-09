@@ -86,7 +86,6 @@ p { color: var(--muted); line-height: 1.7; }
 .sync-pending .sync-dot { background: var(--amber); box-shadow: 0 0 0 3px #f5e8d1; }
 .sync-error .sync-dot { background: var(--red); box-shadow: 0 0 0 3px #f6dfdd; }
 .sync-offline .sync-dot, .sync-local .sync-dot { background: #89938f; box-shadow: 0 0 0 3px #e4e6e4; }
-.drive-menu { display: flex; align-items: center; gap: 8px; color: var(--green-800); font-size: 11px; font-weight: 700; }
 .account-menu { position: relative; flex: 0 0 auto; }
 .account-menu summary {
   display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 4px 9px 4px 5px;
@@ -983,7 +982,7 @@ tbody tr:hover { background: #fbfaf5; }
   .mobile-menu { display: block; }
   .topbar { padding: 10px 18px; }
   .connection-summary small, .online-state { display: none; }
-  .account-name, .account-chevron, .drive-menu span { display: none; }
+  .account-name, .account-chevron { display: none; }
   .account-menu summary { padding-right: 5px; }
   .page { padding: 28px 18px 55px; }
   .page-heading, .hero { align-items: flex-start; flex-direction: column; }

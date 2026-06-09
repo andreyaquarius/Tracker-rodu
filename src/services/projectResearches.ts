@@ -18,9 +18,6 @@ type ResearchRow = {
   updated_at: string;
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function asCustomFields(value: unknown): CustomFieldValues {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as CustomFieldValues;
@@ -61,10 +58,6 @@ function toRow(projectId: string, research: Research) {
     created_at: research.createdAt,
     updated_at: research.updatedAt,
   };
-}
-
-export function canMigrateResearches(researches: Research[]): boolean {
-  return researches.every((research) => UUID_PATTERN.test(research.id));
 }
 
 export async function listProjectResearches(projectId: string): Promise<Research[]> {

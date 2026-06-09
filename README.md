@@ -16,33 +16,22 @@
 - конструктор окремих розділів для краєзнавчих та інших проєктів;
 - глобальний пошук із групуванням результатів;
 - зберігання сканів, фотографій, аудіо та документів;
-- декілька проєктів в одному обліковому записі;
-- запрошення учасників із ролями **власник**, **редактор** і **лише перегляд**;
-- живе оновлення спільних даних і захист від конфліктного редагування;
+- кілька проєктів в одному обліковому записі;
+- спільна робота з ролями власника, редактора і переглядача;
 - резервні копії та відновлення проєкту.
 
 ## Архітектура
 
-Основне сховище застосунку:
+Єдиним постійним сховищем застосунку є Supabase:
 
-- **Supabase PostgreSQL** — записи, проєкти, учасники та права доступу;
+- **PostgreSQL** — проєкти, записи, зв'язки, налаштування та права доступу;
 - **Supabase Auth** — вхід через Google або email і пароль;
 - **Supabase Storage** — вкладення та резервні копії;
-- **Supabase Realtime** — живе оновлення спільних проєктів;
-- **Row Level Security** — ізоляція проєктів і перевірка ролей користувачів.
+- **Supabase Realtime** — оновлення спільних проєктів;
+- **Row Level Security** — ізоляція проєктів і перевірка ролей.
 
-Локальне сховище браузера використовується лише як кеш і для перенесення даних
-зі старих версій. Google Drive не використовується для поточного збереження або
-резервування: у застосунку залишено лише явний одноразовий імпорт старої бази.
-
-## Технології
-
-- React 19;
-- TypeScript;
-- Vite;
-- Supabase;
-- Fuse.js;
-- GitHub Actions і GitHub Pages.
+Кеш у браузері використовується лише для швидшого відображення вже отриманих
+даних. Він не є окремою базою та не є джерелом істини.
 
 ## Локальний запуск
 
@@ -60,7 +49,7 @@ npm run dev
 http://localhost:5173
 ```
 
-Перевірка типів і виробнича збірка:
+Перевірка:
 
 ```bash
 npm run lint
@@ -73,39 +62,34 @@ npm run preview
 Створіть `.env` на основі `.env.example`:
 
 ```env
-VITE_GOOGLE_CLIENT_ID=your_google_client_id_here
-VITE_GOOGLE_API_KEY=your_google_api_key_here
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key_here
 ```
 
-У браузері використовується лише публічний ключ Supabase. `service_role` та
-інші приватні ключі не можна додавати до `.env`, GitHub або клієнтського коду.
+У клієнтському коді використовується лише публічний ключ Supabase. Ключ
+`service_role` не можна додавати до `.env`, GitHub або браузерного коду.
 
 ## Supabase
 
-SQL-міграції розташовані в каталозі
-[`supabase/migrations`](supabase/migrations):
+SQL-схема розташована в каталозі [`supabase/migrations`](supabase/migrations).
+Міграції створюють таблиці, RLS-політики, приватні контейнери вкладень і
+резервних копій та Realtime-публікації.
 
-1. `202606090001_initial_schema.sql` — таблиці, ролі, запрошення та RLS;
-2. `202606090002_storage.sql` — приватне сховище вкладень;
-3. `202606090003_project_backups.sql` — резервні копії проєктів;
-4. `202606090004_realtime.sql` — Realtime для спільної роботи.
+У Supabase потрібно:
 
-Додаткові налаштування:
-
-- у **Authentication → Providers** увімкніть Google та Email;
-- у **Authentication → URL Configuration** додайте:
-  - `https://trekerrodu.com.ua`;
-  - `http://localhost:5173/`;
-- для реєстрації через email налаштуйте підтвердження пошти;
-- для вкладень і резервних копій застосуйте Storage-міграції.
+- увімкнути Google та Email у **Authentication → Providers**;
+- додати `https://trekerrodu.com.ua` і `http://localhost:5173/` у
+  **Authentication → URL Configuration**;
+- застосувати всі SQL-міграції;
+- розгорнути Edge Function для поштових запрошень.
 
 Докладніше: [`supabase/README.md`](supabase/README.md).
 
 ## Google OAuth
 
-У Google Cloud OAuth Client ID додайте дозволені JavaScript origins:
+Google використовується лише як спосіб входу через Supabase Auth.
+
+У Google Cloud OAuth Client додайте дозволені origins:
 
 ```text
 http://localhost:5173
@@ -113,15 +97,11 @@ https://trekerrodu.com.ua
 https://www.trekerrodu.com.ua
 ```
 
-Redirect URI для входу через Supabase:
+Redirect URI:
 
 ```text
 https://YOUR_PROJECT.supabase.co/auth/v1/callback
 ```
-
-Google OAuth через Supabase використовується для входу до облікового запису.
-Окремий доступ до Google Drive запитується лише тоді, коли власник запускає
-одноразове перенесення старої бази до активного Supabase-проєкту.
 
 ## Поштові запрошення
 
@@ -129,7 +109,7 @@ Edge Function
 [`send-project-invitation`](supabase/functions/send-project-invitation/index.ts)
 надсилає листи через Resend.
 
-Для неї потрібні секрети Supabase:
+Потрібні секрети Supabase:
 
 ```text
 RESEND_API_KEY
@@ -137,42 +117,25 @@ INVITATION_EMAIL_FROM
 APP_URL=https://trekerrodu.com.ua/
 ```
 
-Відправник `INVITATION_EMAIL_FROM` повинен використовувати підтверджений у
-Resend домен.
-
 ## Публікація
 
-Сайт автоматично збирається та публікується через
-[`deploy.yml`](.github/workflows/deploy.yml) після push до гілки `main`.
+GitHub Actions збирає та публікує сайт після push до `main`.
 
-У GitHub Actions потрібно створити секрети:
+У GitHub Actions потрібні секрети:
 
 ```text
-VITE_GOOGLE_CLIENT_ID
-VITE_GOOGLE_API_KEY
 VITE_SUPABASE_URL
 VITE_SUPABASE_PUBLISHABLE_KEY
 ```
 
-GitHub Pages використовує власний домен із файлу [`public/CNAME`](public/CNAME):
+Власний домен задається у [`public/CNAME`](public/CNAME).
 
-```text
-trekerrodu.com.ua
-```
-
-Для основного домену потрібні чотири `A`-записи GitHub Pages, а для `www` —
-`CNAME` на `andreyaquarius.github.io`.
-
-## Безпека даних
+## Безпека
 
 - кожен запис належить конкретному проєкту;
-- доступ перевіряється політиками Supabase RLS;
-- глядачі не можуть змінювати дані;
-- редактори працюють із записами, але не змінюють структуру проєкту;
-- лише власник керує учасниками, полями, власними розділами та проєктом;
-- вкладення зберігаються у приватних контейнерах Supabase Storage;
+- доступ перевіряють політики Supabase RLS;
+- переглядачі не можуть змінювати дані;
+- редактори працюють із записами та файлами;
+- лише власник керує учасниками і структурою проєкту;
+- вкладення зберігаються у приватному Supabase Storage;
 - конфліктне збереження застарілої версії запису блокується.
-
-## Ліцензія
-
-Проєкт наразі не має окремо визначеної відкритої ліцензії.

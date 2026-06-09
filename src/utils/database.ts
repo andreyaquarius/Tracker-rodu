@@ -45,18 +45,9 @@ export function normalizeDatabase(value: unknown): AppDatabase {
     throw new Error("Файл не містить коректної бази даних.");
   }
   const candidate = value as Omit<Partial<AppDatabase>, "version"> & { version?: number };
-  const supportedAppName =
-    candidate.appName === "Трекер Роду" ||
-    (candidate.appName as string | undefined) === "Родовий Навігатор";
   if (
-    !supportedAppName ||
-    (
-      candidate.version !== 1 &&
-      candidate.version !== 2 &&
-      candidate.version !== 3 &&
-      candidate.version !== 4 &&
-      candidate.version !== 5
-    )
+    candidate.appName !== "Трекер Роду" ||
+    candidate.version !== 5
   ) {
     throw new Error("Непідтримуваний формат або версія бази.");
   }
@@ -221,7 +212,7 @@ function normalizeCustomSections(value: unknown): CustomSectionDefinition[] {
 function normalizeSectionIcon(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "folder";
   const icon = value.trim();
-  const legacy: Record<string, string> = {
+  const iconAliases: Record<string, string> = {
     Р: "folder",
     І: "village",
     Б: "building",
@@ -229,7 +220,7 @@ function normalizeSectionIcon(value: unknown): string {
     У: "landmark",
     С: "microphone",
   };
-  return legacy[icon] ?? icon;
+  return iconAliases[icon] ?? icon;
 }
 
 function normalizeCustomSectionRecords(
@@ -302,7 +293,7 @@ function normalizeCustomFieldDefinitions(value: unknown): CustomFieldDefinition[
     }));
 }
 
-function normalizeParticipants(value: unknown, legacyPeople: unknown): FindingParticipant[] {
+function normalizeParticipants(value: unknown, peopleText: unknown): FindingParticipant[] {
   if (Array.isArray(value)) {
     return value
       .filter((item): item is Partial<FindingParticipant> => Boolean(item && typeof item === "object"))
@@ -313,11 +304,11 @@ function normalizeParticipants(value: unknown, legacyPeople: unknown): FindingPa
         notes: typeof item.notes === "string" ? item.notes : "",
       }));
   }
-  if (typeof legacyPeople === "string" && legacyPeople.trim()) {
+  if (typeof peopleText === "string" && peopleText.trim()) {
     return [{
       id: createId(),
       role: "Згадана особа",
-      name: legacyPeople.trim(),
+      name: peopleText.trim(),
       notes: "Перенесено зі старого поля осіб",
     }];
   }

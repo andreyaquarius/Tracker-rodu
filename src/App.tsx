@@ -30,7 +30,6 @@ import { LoginPage } from "./pages/LoginPage";
 import { PersonsPage } from "./pages/PersonsPage";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
-import { prepareGoogleSignIn } from "./services/googleAuth";
 import {
   createSupabaseWorkspace,
   deleteSupabaseWorkspace,
@@ -48,7 +47,6 @@ import {
   type SupabaseWorkspace,
 } from "./services/supabaseAuth";
 import {
-  canMigrateResearches,
   clearProjectResearchCache,
   deleteProjectResearch,
   importProjectResearches,
@@ -58,7 +56,6 @@ import {
   saveProjectResearchCache,
 } from "./services/projectResearches";
 import {
-  canMigratePeople,
   clearProjectPeopleCache,
   deleteProjectPerson,
   deleteProjectPersonRelation,
@@ -70,7 +67,6 @@ import {
   saveProjectPersonRelation,
 } from "./services/projectPeople";
 import {
-  canMigrateDocuments,
   clearProjectDocumentsCache,
   deleteProjectDocument,
   deleteProjectYearMatrixRecord,
@@ -82,7 +78,6 @@ import {
   saveProjectYearMatrixRecord,
 } from "./services/projectDocuments";
 import {
-  canMigrateWorkRecords,
   clearProjectWorkRecordsCache,
   deleteProjectFinding,
   deleteProjectTask,
@@ -94,7 +89,6 @@ import {
   saveProjectWorkRecordsCache,
 } from "./services/projectWorkRecords";
 import {
-  canMigrateAnalysisRecords,
   clearProjectAnalysisRecordsCache,
   deleteProjectArchiveRequest,
   deleteProjectHypothesis,
@@ -107,7 +101,6 @@ import {
   saveProjectHypothesis,
 } from "./services/projectAnalysisRecords";
 import {
-  canMigrateCustomStructure,
   clearProjectCustomStructureCache,
   deleteProjectCustomRecord,
   deleteProjectCustomSection,
@@ -140,60 +133,11 @@ import {
   type ProjectRealtimeGroup,
 } from "./services/projectRealtime";
 import { assertProjectRecordUnchanged } from "./services/projectConflicts";
-import {
-  deleteMigratedLocalFiles,
-  migrateProjectAttachmentsToSupabase,
-  setProjectAttachmentTarget,
-} from "./services/scanStorage";
+import { setProjectAttachmentTarget } from "./services/scanStorage";
 import { createActivityEntries } from "./utils/activityLog";
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
-const RESEARCH_MIGRATION_KEY = "tracker-rodu-researches-migrated";
-const PEOPLE_MIGRATION_KEY = "tracker-rodu-people-migrated";
-const DOCUMENTS_MIGRATION_KEY = "tracker-rodu-documents-migrated";
-const WORK_RECORDS_MIGRATION_KEY = "tracker-rodu-work-records-migrated";
-const ANALYSIS_RECORDS_MIGRATION_KEY = "tracker-rodu-analysis-records-migrated";
-const CUSTOM_STRUCTURE_MIGRATION_KEY = "tracker-rodu-custom-structure-migrated";
-const PROJECT_ATTACHMENTS_MIGRATION_KEY = "tracker-rodu-project-attachments-migrated";
-const PROJECT_ATTACHMENT_METADATA_KEY = "tracker-rodu-attachment-metadata-synced";
-const LEGACY_MIGRATION_OWNER_KEY = "tracker-rodu-legacy-migration-owner";
-
-function canUseLegacyMigration(email: string): boolean {
-  const normalizedEmail = email.trim().toLocaleLowerCase("uk");
-  if (!normalizedEmail) return false;
-
-  const explicitOwner = localStorage.getItem(LEGACY_MIGRATION_OWNER_KEY);
-  if (explicitOwner) return explicitOwner === normalizedEmail;
-
-  const migrationPrefixes = [
-    RESEARCH_MIGRATION_KEY,
-    PEOPLE_MIGRATION_KEY,
-    DOCUMENTS_MIGRATION_KEY,
-    WORK_RECORDS_MIGRATION_KEY,
-    ANALYSIS_RECORDS_MIGRATION_KEY,
-    CUSTOM_STRUCTURE_MIGRATION_KEY,
-  ];
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index);
-    const prefix = migrationPrefixes.find((candidate) =>
-      key?.startsWith(`${candidate}:`),
-    );
-    if (!key || !prefix) continue;
-    const inferredOwner = key
-      .slice(prefix.length + 1)
-      .split(":")[0]
-      .trim()
-      .toLocaleLowerCase("uk");
-    if (inferredOwner) {
-      localStorage.setItem(LEGACY_MIGRATION_OWNER_KEY, inferredOwner);
-      return inferredOwner === normalizedEmail;
-    }
-  }
-
-  localStorage.setItem(LEGACY_MIGRATION_OWNER_KEY, normalizedEmail);
-  return true;
-}
 
 function chooseWorkspace(
   items: SupabaseWorkspace[],
@@ -327,8 +271,6 @@ export default function App() {
   const workspaceSetupRef = useRef<Promise<void> | null>(null);
   const lastPreparedUserRef = useRef<string | null>(null);
   const activeWorkspaceIdRef = useRef<string | null>(null);
-  const attachmentMigrationRef = useRef<string | null>(null);
-  const attachmentMetadataRef = useRef<string | null>(null);
   const automaticProjectBackupRef = useRef<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const syncedPreferencesRef = useRef<{
@@ -346,10 +288,6 @@ export default function App() {
       if (combined) return combined;
     }
     return fallback;
-  }, []);
-
-  useEffect(() => {
-    void prepareGoogleSignIn().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -593,39 +531,14 @@ export default function App() {
 
     let active = true;
     const projectId = workspace.projectId;
-    const canUseLegacy =
-      workspace.role === "owner" && canUseLegacyMigration(account.email);
     setResearchesReadyForProject(null);
-    const migrationKey = `${RESEARCH_MIGRATION_KEY}:${account.email}`;
-    const migratedProjectId = localStorage.getItem(migrationKey);
     const cached = loadProjectResearchCache(projectId);
-    const fallback =
-      cached.length || migratedProjectId || !canUseLegacy
-        ? cached
-        : app.db.researches;
+    const fallback = cached;
     setProjectResearches(fallback);
 
     void (async () => {
       try {
-        let researches = await listProjectResearches(projectId);
-
-        if (
-          canUseLegacy &&
-          !researches.length &&
-          !migratedProjectId &&
-          app.db.researches.length
-        ) {
-          if (!canMigrateResearches(app.db.researches)) {
-            throw new Error(
-              "Старі дослідження мають несумісні ідентифікатори. Автоматичне перенесення зупинено, щоб не пошкодити зв’язки.",
-            );
-          }
-          researches = await importProjectResearches(projectId, app.db.researches);
-          localStorage.setItem(migrationKey, projectId);
-          notify(`Дослідження перенесено до проєкту «${workspace.projectName}».`);
-        } else if (researches.length && !migratedProjectId) {
-          localStorage.setItem(migrationKey, projectId);
-        }
+        const researches = await listProjectResearches(projectId);
 
         if (!active) return;
         saveProjectResearchCache(projectId, researches);
@@ -648,7 +561,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [account, app.db.researches, notify, workspace]);
+  }, [account, describeError, notify, workspace]);
 
   useEffect(() => {
     if (!workspace || !account) {
@@ -667,51 +580,16 @@ export default function App() {
 
     let active = true;
     const projectId = workspace.projectId;
-    const canUseLegacy =
-      workspace.role === "owner" && canUseLegacyMigration(account.email);
     setPeopleReadyForProject(null);
-    const migrationKey = `${PEOPLE_MIGRATION_KEY}:${account.email}`;
-    const migratedProjectId = localStorage.getItem(migrationKey);
     const cached = loadProjectPeopleCache(projectId);
-    const fallbackPersons =
-      cached.persons.length || migratedProjectId || !canUseLegacy
-        ? cached.persons
-        : app.db.persons;
-    const fallbackRelations =
-      cached.relations.length || migratedProjectId || !canUseLegacy
-        ? cached.relations
-        : app.db.personRelations;
+    const fallbackPersons = cached.persons;
+    const fallbackRelations = cached.relations;
     setProjectPersons(fallbackPersons);
     setProjectPersonRelations(fallbackRelations);
 
     void (async () => {
       try {
-        let remote = await listProjectPeople(projectId);
-        const researchMigrationProjectId = localStorage.getItem(
-          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
-        );
-        const canImportHere =
-          canUseLegacy &&
-          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
-
-        if (!migratedProjectId && app.db.persons.length && canImportHere) {
-          if (!canMigratePeople(app.db.persons, app.db.personRelations)) {
-            throw new Error(
-              "Старі картки осіб або зв’язки мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
-            );
-          }
-          await importProjectPeople(
-            projectId,
-            app.db.persons,
-            app.db.personRelations,
-            new Set(projectResearches.map((research) => research.id)),
-          );
-          remote = await listProjectPeople(projectId);
-          localStorage.setItem(migrationKey, projectId);
-          notify(`Осіб і родинні зв’язки перенесено до проєкту «${workspace.projectName}».`);
-        } else if ((remote.persons.length || remote.relations.length) && !migratedProjectId) {
-          localStorage.setItem(migrationKey, projectId);
-        }
+        const remote = await listProjectPeople(projectId);
 
         if (!active) return;
         saveProjectPeopleCache(projectId, remote.persons, remote.relations);
@@ -737,8 +615,7 @@ export default function App() {
     };
   }, [
     account,
-    app.db.personRelations,
-    app.db.persons,
+    describeError,
     notify,
     researchesReadyForProject,
     workspace,
@@ -761,60 +638,16 @@ export default function App() {
 
     let active = true;
     const projectId = workspace.projectId;
-    const canUseLegacy =
-      workspace.role === "owner" && canUseLegacyMigration(account.email);
     setDocumentsReadyForProject(null);
-    const migrationKey = `${DOCUMENTS_MIGRATION_KEY}:${account.email}`;
-    const migratedProjectId = localStorage.getItem(migrationKey);
     const cached = loadProjectDocumentsCache(projectId);
-    const fallbackDocuments =
-      cached.documents.length || migratedProjectId || !canUseLegacy
-        ? cached.documents
-        : app.db.documents;
-    const fallbackMatrix =
-      cached.yearMatrix.length || migratedProjectId || !canUseLegacy
-        ? cached.yearMatrix
-        : app.db.yearMatrix;
+    const fallbackDocuments = cached.documents;
+    const fallbackMatrix = cached.yearMatrix;
     setProjectDocuments(fallbackDocuments);
     setProjectYearMatrix(fallbackMatrix);
 
     void (async () => {
       try {
-        let remote = await listProjectDocuments(projectId);
-        const researchMigrationProjectId = localStorage.getItem(
-          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
-        );
-        const canImportHere =
-          canUseLegacy &&
-          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
-
-        if (
-          !migratedProjectId &&
-          (app.db.documents.length || app.db.yearMatrix.length) &&
-          canImportHere
-        ) {
-          if (!canMigrateDocuments(app.db.documents, app.db.yearMatrix)) {
-            throw new Error(
-              "Старі документи або записи матриці років мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
-            );
-          }
-          await importProjectDocuments(
-            projectId,
-            app.db.documents,
-            app.db.yearMatrix,
-            new Set(projectResearches.map((research) => research.id)),
-          );
-          remote = await listProjectDocuments(projectId);
-          localStorage.setItem(migrationKey, projectId);
-          notify(
-            `Документи та матрицю років перенесено до проєкту «${workspace.projectName}».`,
-          );
-        } else if (
-          (remote.documents.length || remote.yearMatrix.length) &&
-          !migratedProjectId
-        ) {
-          localStorage.setItem(migrationKey, projectId);
-        }
+        const remote = await listProjectDocuments(projectId);
 
         if (!active) return;
         saveProjectDocumentsCache(projectId, remote.documents, remote.yearMatrix);
@@ -840,8 +673,7 @@ export default function App() {
     };
   }, [
     account,
-    app.db.documents,
-    app.db.yearMatrix,
+    describeError,
     notify,
     researchesReadyForProject,
     workspace,
@@ -868,57 +700,16 @@ export default function App() {
 
     let active = true;
     const projectId = workspace.projectId;
-    const canUseLegacy =
-      workspace.role === "owner" && canUseLegacyMigration(account.email);
     setWorkRecordsReadyForProject(null);
-    const migrationKey = `${WORK_RECORDS_MIGRATION_KEY}:${account.email}`;
-    const migratedProjectId = localStorage.getItem(migrationKey);
     const cached = loadProjectWorkRecordsCache(projectId);
-    const fallbackTasks =
-      cached.tasks.length || migratedProjectId || !canUseLegacy
-        ? cached.tasks
-        : app.db.tasks;
-    const fallbackFindings =
-      cached.findings.length || migratedProjectId || !canUseLegacy
-        ? cached.findings
-        : app.db.findings;
+    const fallbackTasks = cached.tasks;
+    const fallbackFindings = cached.findings;
     setProjectTasks(fallbackTasks);
     setProjectFindings(fallbackFindings);
 
     void (async () => {
       try {
-        let remote = await listProjectWorkRecords(projectId);
-        const researchMigrationProjectId = localStorage.getItem(
-          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
-        );
-        const canImportHere =
-          canUseLegacy &&
-          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
-
-        if (
-          !migratedProjectId &&
-          (app.db.tasks.length || app.db.findings.length) &&
-          canImportHere
-        ) {
-          if (!canMigrateWorkRecords(app.db.tasks, app.db.findings)) {
-            throw new Error(
-              "Старі завдання або знахідки мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
-            );
-          }
-          await importProjectWorkRecords(
-            projectId,
-            app.db.tasks,
-            app.db.findings,
-            new Set(projectResearches.map((research) => research.id)),
-            new Set(projectDocuments.map((document) => document.id)),
-            new Set(projectPersons.map((person) => person.id)),
-          );
-          remote = await listProjectWorkRecords(projectId);
-          localStorage.setItem(migrationKey, projectId);
-          notify(`Завдання та знахідки перенесено до проєкту «${workspace.projectName}».`);
-        } else if ((remote.tasks.length || remote.findings.length) && !migratedProjectId) {
-          localStorage.setItem(migrationKey, projectId);
-        }
+        const remote = await listProjectWorkRecords(projectId);
 
         if (!active) return;
         saveProjectWorkRecordsCache(projectId, remote.tasks, remote.findings);
@@ -944,8 +735,7 @@ export default function App() {
     };
   }, [
     account,
-    app.db.findings,
-    app.db.tasks,
+    describeError,
     documentsReadyForProject,
     notify,
     peopleReadyForProject,
@@ -975,68 +765,16 @@ export default function App() {
 
     let active = true;
     const projectId = workspace.projectId;
-    const canUseLegacy =
-      workspace.role === "owner" && canUseLegacyMigration(account.email);
     setAnalysisReadyForProject(null);
-    const migrationKey = `${ANALYSIS_RECORDS_MIGRATION_KEY}:${account.email}`;
-    const migratedProjectId = localStorage.getItem(migrationKey);
     const cached = loadProjectAnalysisRecordsCache(projectId);
-    const fallbackHypotheses =
-      cached.hypotheses.length || migratedProjectId || !canUseLegacy
-        ? cached.hypotheses
-        : app.db.hypotheses;
-    const fallbackRequests =
-      cached.archiveRequests.length || migratedProjectId || !canUseLegacy
-        ? cached.archiveRequests
-        : app.db.archiveRequests;
+    const fallbackHypotheses = cached.hypotheses;
+    const fallbackRequests = cached.archiveRequests;
     setProjectHypotheses(fallbackHypotheses);
     setProjectArchiveRequests(fallbackRequests);
 
     void (async () => {
       try {
-        let remote = await listProjectAnalysisRecords(projectId);
-        const researchMigrationProjectId = localStorage.getItem(
-          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
-        );
-        const canImportHere =
-          canUseLegacy &&
-          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
-
-        if (
-          !migratedProjectId &&
-          (app.db.hypotheses.length || app.db.archiveRequests.length) &&
-          canImportHere
-        ) {
-          if (
-            !canMigrateAnalysisRecords(
-              app.db.hypotheses,
-              app.db.archiveRequests,
-            )
-          ) {
-            throw new Error(
-              "Старі гіпотези або архівні запити мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
-            );
-          }
-          await importProjectAnalysisRecords(
-            projectId,
-            app.db.hypotheses,
-            app.db.archiveRequests,
-            new Set(projectResearches.map((research) => research.id)),
-            new Set(projectPersons.map((person) => person.id)),
-            new Set(projectDocuments.map((document) => document.id)),
-            new Set(projectFindings.map((finding) => finding.id)),
-          );
-          remote = await listProjectAnalysisRecords(projectId);
-          localStorage.setItem(migrationKey, projectId);
-          notify(
-            `Гіпотези та запити в архів перенесено до проєкту «${workspace.projectName}».`,
-          );
-        } else if (
-          (remote.hypotheses.length || remote.archiveRequests.length) &&
-          !migratedProjectId
-        ) {
-          localStorage.setItem(migrationKey, projectId);
-        }
+        const remote = await listProjectAnalysisRecords(projectId);
 
         if (!active) return;
         saveProjectAnalysisRecordsCache(
@@ -1066,8 +804,7 @@ export default function App() {
     };
   }, [
     account,
-    app.db.archiveRequests,
-    app.db.hypotheses,
+    describeError,
     documentsReadyForProject,
     notify,
     peopleReadyForProject,
@@ -1087,68 +824,18 @@ export default function App() {
 
     let active = true;
     const projectId = workspace.projectId;
-    const canUseLegacy =
-      workspace.role === "owner" && canUseLegacyMigration(account.email);
     setCustomStructureReadyForProject(null);
-    const migrationKey = `${CUSTOM_STRUCTURE_MIGRATION_KEY}:${account.email}`;
-    const migratedProjectId = localStorage.getItem(migrationKey);
     const cached = loadProjectCustomStructureCache(projectId);
     const hasCached =
       cached.definitions.length || cached.sections.length || cached.records.length;
-    const fallback = hasCached || migratedProjectId || !canUseLegacy
-      ? cached
-      : {
-          definitions: app.db.settings.customFields,
-          sections: app.db.customSections,
-          records: app.db.customSectionRecords,
-        };
+    const fallback = cached;
     setProjectCustomFields(fallback.definitions);
     setProjectCustomSections(fallback.sections);
     setProjectCustomRecords(fallback.records);
 
     void (async () => {
       try {
-        let remote = await listProjectCustomStructure(projectId);
-        const hasLocal =
-          app.db.settings.customFields.length ||
-          app.db.customSections.length ||
-          app.db.customSectionRecords.length;
-        const researchMigrationProjectId = localStorage.getItem(
-          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
-        );
-        const canImportHere =
-          canUseLegacy &&
-          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
-
-        if (!migratedProjectId && hasLocal && canImportHere) {
-          if (
-            !canMigrateCustomStructure(
-              app.db.settings.customFields,
-              app.db.customSections,
-              app.db.customSectionRecords,
-            )
-          ) {
-            throw new Error(
-              "Власні розділи або поля мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
-            );
-          }
-          await importProjectCustomStructure(
-            projectId,
-            app.db.settings.customFields,
-            app.db.customSections,
-            app.db.customSectionRecords,
-          );
-          remote = await listProjectCustomStructure(projectId);
-          localStorage.setItem(migrationKey, projectId);
-          notify(
-            `Власні розділи та додаткові поля перенесено до проєкту «${workspace.projectName}».`,
-          );
-        } else if (
-          (remote.definitions.length || remote.sections.length || remote.records.length) &&
-          !migratedProjectId
-        ) {
-          localStorage.setItem(migrationKey, projectId);
-        }
+        const remote = await listProjectCustomStructure(projectId);
 
         if (!active) return;
         saveProjectCustomStructureCache(
@@ -1180,9 +867,7 @@ export default function App() {
     };
   }, [
     account,
-    app.db.customSectionRecords,
-    app.db.customSections,
-    app.db.settings.customFields,
+    describeError,
     notify,
     workspace,
   ]);
@@ -1385,264 +1070,6 @@ export default function App() {
     describeError,
     notify,
     projectPreferences,
-    workspace,
-  ]);
-
-  useEffect(() => {
-    if (
-      !workspace ||
-      !account ||
-      workspace.role !== "owner" ||
-      !canUseLegacyMigration(account.email)
-    ) return;
-    if (
-      researchesReadyForProject !== workspace.projectId ||
-      peopleReadyForProject !== workspace.projectId ||
-      documentsReadyForProject !== workspace.projectId ||
-      workRecordsReadyForProject !== workspace.projectId ||
-      analysisReadyForProject !== workspace.projectId ||
-      customStructureReadyForProject !== workspace.projectId
-    ) {
-      return;
-    }
-
-    const projectId = workspace.projectId;
-    const migrationKey = `${PROJECT_ATTACHMENTS_MIGRATION_KEY}:${account.email}:${projectId}`;
-    if (localStorage.getItem(migrationKey) === "1") return;
-    if (attachmentMigrationRef.current === projectId) return;
-
-    let active = true;
-    attachmentMigrationRef.current = projectId;
-
-    void (async () => {
-      try {
-        const migration = await migrateProjectAttachmentsToSupabase(projectId, activeDb);
-        if (!active) return;
-
-        if (!migration.migrated.length && !migration.unavailable.length) {
-          localStorage.setItem(migrationKey, "1");
-          return;
-        }
-
-        const nextDb = migration.db;
-        const researchIds = new Set(nextDb.researches.map((item) => item.id));
-        const documentIds = new Set(nextDb.documents.map((item) => item.id));
-        const personIds = new Set(nextDb.persons.map((item) => item.id));
-        const findingIds = new Set(nextDb.findings.map((item) => item.id));
-        const customSectionsById = new Map(
-          nextDb.customSections.map((section) => [section.id, section]),
-        );
-        const originalResearches = new Map(activeDb.researches.map((item) => [item.id, item]));
-        const originalPersons = new Map(activeDb.persons.map((item) => [item.id, item]));
-        const originalDocuments = new Map(activeDb.documents.map((item) => [item.id, item]));
-        const originalYearMatrix = new Map(activeDb.yearMatrix.map((item) => [item.id, item]));
-        const originalTasks = new Map(activeDb.tasks.map((item) => [item.id, item]));
-        const originalFindings = new Map(activeDb.findings.map((item) => [item.id, item]));
-        const originalHypotheses = new Map(activeDb.hypotheses.map((item) => [item.id, item]));
-        const originalRequests = new Map(activeDb.archiveRequests.map((item) => [item.id, item]));
-        const originalCustomRecords = new Map(
-          activeDb.customSectionRecords.map((item) => [item.id, item]),
-        );
-
-        await Promise.all([
-          ...nextDb.researches
-            .filter((item) => originalResearches.get(item.id) !== item)
-            .map((item) => saveProjectResearch(projectId, item)),
-          ...nextDb.persons
-            .filter((item) => originalPersons.get(item.id) !== item)
-            .map((item) => saveProjectPerson(projectId, item, researchIds)),
-          ...nextDb.documents
-            .filter((item) => originalDocuments.get(item.id) !== item)
-            .map((item) => saveProjectDocument(projectId, item, researchIds)),
-          ...nextDb.yearMatrix
-            .filter((item) => originalYearMatrix.get(item.id) !== item)
-            .map((item) =>
-              saveProjectYearMatrixRecord(projectId, item, researchIds, documentIds)
-            ),
-          ...nextDb.tasks
-            .filter((item) => originalTasks.get(item.id) !== item)
-            .map((item) => saveProjectTask(projectId, item, researchIds, documentIds, personIds)),
-          ...nextDb.findings
-            .filter((item) => originalFindings.get(item.id) !== item)
-            .map((item) =>
-              saveProjectFinding(projectId, item, researchIds, documentIds, personIds)
-            ),
-          ...nextDb.hypotheses
-            .filter((item) => originalHypotheses.get(item.id) !== item)
-            .map((item) =>
-              saveProjectHypothesis(projectId, item, researchIds, personIds, documentIds, findingIds)
-            ),
-          ...nextDb.archiveRequests
-            .filter((item) => originalRequests.get(item.id) !== item)
-            .map((item) => saveProjectArchiveRequest(projectId, item, researchIds, personIds)),
-          ...nextDb.customSectionRecords
-            .filter((item) => originalCustomRecords.get(item.id) !== item)
-            .map((item) => {
-              const section = customSectionsById.get(item.sectionId);
-              const titleValue = section ? item.values[section.titleFieldId] : "";
-              const title = Array.isArray(titleValue)
-                ? titleValue.join(", ")
-                : typeof titleValue === "string"
-                  ? titleValue
-                  : section?.singularName ?? "Запис";
-              return saveProjectCustomRecord(projectId, item, title || "Запис");
-            }),
-        ]);
-
-        setProjectResearches(nextDb.researches);
-        saveProjectResearchCache(projectId, nextDb.researches);
-        setProjectPersons(nextDb.persons);
-        saveProjectPeopleCache(projectId, nextDb.persons, nextDb.personRelations);
-        setProjectDocuments(nextDb.documents);
-        setProjectYearMatrix(nextDb.yearMatrix);
-        saveProjectDocumentsCache(projectId, nextDb.documents, nextDb.yearMatrix);
-        setProjectTasks(nextDb.tasks);
-        setProjectFindings(nextDb.findings);
-        saveProjectWorkRecordsCache(projectId, nextDb.tasks, nextDb.findings);
-        setProjectHypotheses(nextDb.hypotheses);
-        setProjectArchiveRequests(nextDb.archiveRequests);
-        saveProjectAnalysisRecordsCache(projectId, nextDb.hypotheses, nextDb.archiveRequests);
-        setProjectCustomRecords(nextDb.customSectionRecords);
-        saveProjectCustomStructureCache(
-          projectId,
-          projectCustomFields,
-          projectCustomSections,
-          nextDb.customSectionRecords,
-        );
-
-        if (migration.migrated.length) {
-          await deleteMigratedLocalFiles(migration.migrated);
-          notify(`Файли та скани перенесено до сховища проєкту «${workspace.projectName}».`);
-        }
-        if (!migration.unavailable.length) {
-          localStorage.setItem(migrationKey, "1");
-        } else {
-          notify(
-            `Частину старих вкладень не вдалося перенести автоматично (${migration.unavailable.length}). Потрібен доступ до їх джерела.`,
-            true,
-          );
-        }
-      } catch (error) {
-        if (!active) return;
-        notify(
-          describeError(error, "Не вдалося перенести файли та скани до сховища проєкту."),
-          true,
-        );
-      } finally {
-        if (attachmentMigrationRef.current === projectId) {
-          attachmentMigrationRef.current = null;
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [
-    account,
-    activeDb,
-    analysisReadyForProject,
-    customStructureReadyForProject,
-    describeError,
-    documentsReadyForProject,
-    notify,
-    peopleReadyForProject,
-    projectCustomFields,
-    projectCustomSections,
-    researchesReadyForProject,
-    workRecordsReadyForProject,
-    workspace,
-  ]);
-
-  useEffect(() => {
-    if (!workspace || !account || workspace.role !== "owner") return;
-    if (
-      researchesReadyForProject !== workspace.projectId ||
-      peopleReadyForProject !== workspace.projectId ||
-      documentsReadyForProject !== workspace.projectId ||
-      workRecordsReadyForProject !== workspace.projectId ||
-      analysisReadyForProject !== workspace.projectId ||
-      customStructureReadyForProject !== workspace.projectId
-    ) {
-      return;
-    }
-
-    const projectId = workspace.projectId;
-    const syncKey = `${PROJECT_ATTACHMENT_METADATA_KEY}:${account.email}:${projectId}`;
-    if (localStorage.getItem(syncKey) === "1") return;
-    if (attachmentMetadataRef.current === projectId) return;
-    attachmentMetadataRef.current = projectId;
-
-    let active = true;
-    void (async () => {
-      try {
-        const collections: Array<[CollectionKey, AppEntity[]]> = [
-          ["researches", activeDb.researches],
-          ["documents", activeDb.documents],
-          ["yearMatrix", activeDb.yearMatrix],
-          ["tasks", activeDb.tasks],
-          ["findings", activeDb.findings],
-          ["hypotheses", activeDb.hypotheses],
-          ["archiveRequests", activeDb.archiveRequests],
-          ["persons", activeDb.persons],
-        ];
-        for (const [collection, records] of collections) {
-          for (const record of records) {
-            await syncProjectAttachmentMetadata(
-              projectId,
-              collection,
-              record.id,
-              projectAttachmentFields(collection, record, activeDb),
-            );
-          }
-        }
-
-        const sections = new Map(
-          activeDb.customSections.map((section) => [section.id, section]),
-        );
-        for (const record of activeDb.customSectionRecords) {
-          const section = sections.get(record.sectionId);
-          const fields = Object.fromEntries(
-            (section?.fields ?? [])
-              .filter((field) => field.type === "attachments")
-              .map((field) => [field.id, scanList(record.values[field.id])]),
-          );
-          await syncProjectAttachmentMetadata(
-            projectId,
-            `custom:${record.sectionId}`,
-            record.id,
-            fields,
-          );
-        }
-
-        if (active) localStorage.setItem(syncKey, "1");
-      } catch (error) {
-        if (!active) return;
-        notify(
-          describeError(error, "Не вдалося заповнити метадані перенесених вкладень."),
-          true,
-        );
-      } finally {
-        if (attachmentMetadataRef.current === projectId) {
-          attachmentMetadataRef.current = null;
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [
-    account,
-    activeDb,
-    analysisReadyForProject,
-    customStructureReadyForProject,
-    describeError,
-    documentsReadyForProject,
-    notify,
-    peopleReadyForProject,
-    researchesReadyForProject,
-    workRecordsReadyForProject,
     workspace,
   ]);
 

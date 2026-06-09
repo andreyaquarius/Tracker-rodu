@@ -144,9 +144,7 @@ function formatFileSize(size: number): string {
 }
 
 function storageLabel(scan: ScanAttachment): string {
-  if (scan.storage === "supabase") return "Сховище проєкту";
-  if (scan.storage === "drive") return "Google Drive";
-  return "цей браузер";
+  return scan.storage === "supabase" ? "Сховище проєкту" : "";
 }
 
 function attachmentIcon(scan: ScanAttachment): string {

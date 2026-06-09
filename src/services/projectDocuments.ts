@@ -49,9 +49,6 @@ const DOCUMENT_SELECT =
 const YEAR_MATRIX_SELECT =
   "id, project_id, research_id, document_id, year_text, place, document_type, status, notes, custom_fields, created_at, updated_at";
 const SCANS_KEY = "__trackerRoduDocumentScans";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -164,16 +161,6 @@ function matrixToRow(
     created_at: record.createdAt,
     updated_at: record.updatedAt,
   };
-}
-
-export function canMigrateDocuments(
-  documents: DocumentRecord[],
-  yearMatrix: YearMatrixRecord[],
-): boolean {
-  return (
-    documents.every((document) => UUID_PATTERN.test(document.id)) &&
-    yearMatrix.every((record) => UUID_PATTERN.test(record.id))
-  );
 }
 
 export async function listProjectDocuments(projectId: string): Promise<{

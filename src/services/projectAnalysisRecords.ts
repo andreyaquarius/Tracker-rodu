@@ -56,9 +56,6 @@ const HYPOTHESIS_SELECT =
 const ARCHIVE_REQUEST_SELECT =
   "id, project_id, research_id, archive, archive_details, request_date, response_date, status, subject, notes, custom_fields, created_at, updated_at";
 const ARCHIVE_SCANS_KEY = "__trackerRoduArchiveScans";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -178,16 +175,6 @@ function archiveRequestToRow(
     created_at: request.createdAt,
     updated_at: request.updatedAt,
   };
-}
-
-export function canMigrateAnalysisRecords(
-  hypotheses: Hypothesis[],
-  archiveRequests: ArchiveRequest[],
-): boolean {
-  return (
-    hypotheses.every((hypothesis) => UUID_PATTERN.test(hypothesis.id)) &&
-    archiveRequests.every((request) => UUID_PATTERN.test(request.id))
-  );
 }
 
 export async function listProjectAnalysisRecords(projectId: string): Promise<{

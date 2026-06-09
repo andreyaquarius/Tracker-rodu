@@ -73,9 +73,6 @@ const TASK_SELECT =
 const FINDING_SELECT =
   "id, project_id, research_id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields, created_at, updated_at";
 const FINDING_META_KEY = "__trackerRoduFindingMeta";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -223,20 +220,6 @@ function participantToRow(
     role: participant.role,
     notes: participant.notes,
   };
-}
-
-export function canMigrateWorkRecords(
-  tasks: TaskRecord[],
-  findings: Finding[],
-): boolean {
-  return (
-    tasks.every((task) => UUID_PATTERN.test(task.id)) &&
-    findings.every(
-      (finding) =>
-        UUID_PATTERN.test(finding.id) &&
-        finding.participants.every((participant) => UUID_PATTERN.test(participant.id)),
-    )
-  );
 }
 
 export async function listProjectWorkRecords(projectId: string): Promise<{

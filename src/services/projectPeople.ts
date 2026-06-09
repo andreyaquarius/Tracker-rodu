@@ -63,9 +63,6 @@ const PERSON_SELECT =
 const RELATION_SELECT =
   "id, project_id, person_id, related_person_id, relation_type, status, evidence_text, notes, created_at, updated_at";
 const SCANS_KEY = "__trackerRoduPersonScans";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -198,19 +195,6 @@ function relationToRow(projectId: string, relation: PersonRelation) {
     created_at: relation.createdAt,
     updated_at: relation.updatedAt,
   };
-}
-
-export function canMigratePeople(persons: Person[], relations: PersonRelation[]): boolean {
-  const personIds = new Set(persons.map((person) => person.id));
-  return (
-    persons.every((person) => UUID_PATTERN.test(person.id)) &&
-    relations.every(
-      (relation) =>
-        UUID_PATTERN.test(relation.id) &&
-        personIds.has(relation.personId) &&
-        personIds.has(relation.relatedPersonId),
-    )
-  );
 }
 
 export async function listProjectPeople(projectId: string): Promise<{

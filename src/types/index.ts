@@ -1,5 +1,4 @@
 export type EntityId = string;
-export type SyncStatus = "local" | "synced" | "pending" | "error" | "offline";
 
 export interface BaseEntity {
   id: EntityId;
@@ -13,9 +12,8 @@ export interface ScanAttachment {
   mimeType: string;
   size: number;
   createdAt: string;
-  storage: "local" | "drive" | "supabase";
-  driveFileId?: string;
-  storagePath?: string;
+  storage: "supabase";
+  storagePath: string;
 }
 
 export type CustomFieldModule =
@@ -333,9 +331,9 @@ export interface AppSettings {
   customFields: CustomFieldDefinition[];
 }
 
-export type BackupType = "automatic" | "manual" | "pre-import" | "pre-clear";
+export type BackupType = "automatic" | "manual";
 
-export interface DriveBackupFile {
+export interface BackupFile {
   id: string;
   name: string;
   createdTime: string;
@@ -383,15 +381,3 @@ export type AppEntity =
   | Hypothesis
   | ArchiveRequest
   | Person;
-
-export interface GoogleUser {
-  name: string;
-  email: string;
-  picture?: string;
-}
-
-export interface SyncState {
-  status: SyncStatus;
-  lastSyncedAt: string | null;
-  message?: string;
-}

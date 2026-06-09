@@ -45,9 +45,6 @@ type RecordRow = {
   updated_at: string;
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function asOptions(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
@@ -103,22 +100,6 @@ function recordFromRow(row: RecordRow): CustomSectionRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-export function canMigrateCustomStructure(
-  definitions: CustomFieldDefinition[],
-  sections: CustomSectionDefinition[],
-  records: CustomSectionRecord[],
-): boolean {
-  return (
-    definitions.every((item) => UUID_PATTERN.test(item.id)) &&
-    sections.every(
-      (section) =>
-        UUID_PATTERN.test(section.id) &&
-        section.fields.every((field) => UUID_PATTERN.test(field.id)),
-    ) &&
-    records.every((record) => UUID_PATTERN.test(record.id))
-  );
 }
 
 export async function listProjectCustomStructure(projectId: string): Promise<{

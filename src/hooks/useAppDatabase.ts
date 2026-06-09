@@ -1,24 +1,22 @@
 import { useCallback, useState } from "react";
 import type { AppDatabase, AppEntity, CollectionKey } from "../types";
-import { saveLocalCopy, loadLocalCopy } from "../services/localStorageDb";
 import { nowIso } from "../utils/dateHelpers";
 import { createActivityEntries } from "../utils/activityLog";
+import { createEmptyDatabase } from "../utils/database";
 
 /**
- * Keeps a browser cache for startup defaults and one-time legacy imports.
- * Project records are read from and written to Supabase in App.tsx.
+ * Keeps the assembled project view in memory.
+ * Persistent records are read from and written to Supabase in App.tsx.
  */
 export function useAppDatabase() {
-  const [db, setDbState] = useState<AppDatabase>(() => loadLocalCopy());
+  const [db, setDbState] = useState<AppDatabase>(() => createEmptyDatabase());
 
   const setDatabase = useCallback((
     next: AppDatabase | ((current: AppDatabase) => AppDatabase),
   ) => {
     setDbState((current) => {
       const resolved = typeof next === "function" ? next(current) : next;
-      const stamped = { ...resolved, updatedAt: nowIso() };
-      saveLocalCopy(stamped);
-      return stamped;
+      return { ...resolved, updatedAt: nowIso() };
     });
   }, []);
 

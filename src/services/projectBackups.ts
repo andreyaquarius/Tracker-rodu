@@ -1,12 +1,10 @@
-import type { AppDatabase, BackupType, DriveBackupFile } from "../types";
+import type { AppDatabase, BackupFile, BackupType } from "../types";
 import { normalizeDatabase } from "../utils/database";
 import { getSupabaseClient } from "./supabaseAuth";
 
 const PROJECT_BACKUP_BUCKET = "project-backups";
 
 function backupTypeFromName(name: string): BackupType {
-  if (name.includes("-pre-import-")) return "pre-import";
-  if (name.includes("-pre-clear-")) return "pre-clear";
   if (name.includes("-automatic-")) return "automatic";
   return "manual";
 }
@@ -23,7 +21,7 @@ export async function createProjectBackup(
   projectId: string,
   db: AppDatabase,
   type: BackupType,
-): Promise<DriveBackupFile> {
+): Promise<BackupFile> {
   const name = backupName(type);
   const path = `${projectId}/${name}`;
   const content = JSON.stringify(db, null, 2);
@@ -59,7 +57,7 @@ export async function createProjectBackup(
 
 export async function listProjectBackups(
   projectId: string,
-): Promise<DriveBackupFile[]> {
+): Promise<BackupFile[]> {
   const { data, error } = await getSupabaseClient().storage
     .from(PROJECT_BACKUP_BUCKET)
     .list(projectId, {
