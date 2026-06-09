@@ -74,9 +74,14 @@ function mapMembership(row: MembershipRow): SupabaseWorkspace | null {
 
 async function readMemberships(): Promise<SupabaseWorkspace[]> {
   const client = requireSupabase();
+  const { data: userData, error: userError } = await client.auth.getUser();
+  if (userError) throw userError;
+  if (!userData.user) return [];
+
   const { data, error } = await client
     .from("project_members")
     .select("role, projects!inner(id, name)")
+    .eq("user_id", userData.user.id)
     .order("joined_at", { ascending: true });
   if (error) throw error;
   const mapped = (data as MembershipRow[])
