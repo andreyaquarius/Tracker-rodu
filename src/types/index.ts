@@ -13,8 +13,97 @@ export interface ScanAttachment {
   mimeType: string;
   size: number;
   createdAt: string;
-  storage: "local" | "drive";
+  storage: "local" | "drive" | "supabase";
   driveFileId?: string;
+  storagePath?: string;
+}
+
+export type CustomFieldModule =
+  | "researches"
+  | "documents"
+  | "persons"
+  | "findings"
+  | "tasks"
+  | "hypotheses"
+  | "archiveRequests"
+  | "yearMatrix";
+
+export type CustomFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "year"
+  | "date"
+  | "time"
+  | "approximate-date"
+  | "place"
+  | "select"
+  | "multiselect"
+  | "boolean"
+  | "url"
+  | "email"
+  | "tel"
+  | "attachments"
+  | "relation";
+
+export interface CustomFieldDefinition {
+  id: EntityId;
+  module: CustomFieldModule;
+  label: string;
+  type: CustomFieldType;
+  options: string[];
+  relationTarget?: CustomSectionRelationTarget;
+}
+
+export type CustomFieldValue = string | boolean | string[] | ScanAttachment[];
+export type CustomFieldValues = Record<EntityId, CustomFieldValue>;
+
+export type CustomSectionFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "date"
+  | "select"
+  | "boolean"
+  | "url"
+  | "attachments"
+  | "relation";
+
+export type CustomSectionRelationTarget =
+  | "all"
+  | CollectionKey
+  | `custom:${EntityId}`;
+
+export interface CustomSectionField {
+  id: EntityId;
+  label: string;
+  type: CustomSectionFieldType;
+  required: boolean;
+  options: string[];
+  relationTarget?: CustomSectionRelationTarget;
+}
+
+export interface CustomSectionDefinition {
+  id: EntityId;
+  name: string;
+  singularName: string;
+  description: string;
+  icon: string;
+  titleFieldId: EntityId;
+  fields: CustomSectionField[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CustomSectionRecordValue =
+  | string
+  | boolean
+  | string[]
+  | ScanAttachment[];
+
+export interface CustomSectionRecord extends BaseEntity {
+  sectionId: EntityId;
+  values: Record<EntityId, CustomSectionRecordValue>;
 }
 
 export interface Research extends BaseEntity {
@@ -27,6 +116,7 @@ export interface Research extends BaseEntity {
   archives: string;
   status: "активне" | "призупинене" | "завершене";
   notes: string;
+  customFields: CustomFieldValues;
 }
 
 export interface DocumentRecord extends BaseEntity {
@@ -46,6 +136,7 @@ export interface DocumentRecord extends BaseEntity {
   reviewStatus: string;
   notes: string;
   scans: ScanAttachment[];
+  customFields: CustomFieldValues;
 }
 
 export interface YearMatrixRecord extends BaseEntity {
@@ -56,6 +147,7 @@ export interface YearMatrixRecord extends BaseEntity {
   documentType: string;
   status: string;
   notes: string;
+  customFields: CustomFieldValues;
 }
 
 export interface TaskRecord extends BaseEntity {
@@ -73,6 +165,7 @@ export interface TaskRecord extends BaseEntity {
   priority: string;
   deadline: string;
   notes: string;
+  customFields: CustomFieldValues;
 }
 
 export interface Finding extends BaseEntity {
@@ -97,6 +190,7 @@ export interface Finding extends BaseEntity {
   needsReview: boolean;
   notes: string;
   scans: ScanAttachment[];
+  customFields: CustomFieldValues;
 }
 
 export interface FindingParticipant {
@@ -120,7 +214,10 @@ export type ActivityActionType =
   | "archive_request_created"
   | "archive_request_status_changed"
   | "person_created"
-  | "person_updated";
+  | "person_updated"
+  | "record_created"
+  | "record_updated"
+  | "record_deleted";
 
 export interface ActivityLogEntry {
   id: EntityId;
@@ -145,6 +242,7 @@ export interface Hypothesis extends BaseEntity {
   status: string;
   probability: string;
   notes: string;
+  customFields: CustomFieldValues;
 }
 
 export interface ArchiveRequest extends BaseEntity {
@@ -159,6 +257,7 @@ export interface ArchiveRequest extends BaseEntity {
   notes: string;
   requestScans: ScanAttachment[];
   responseScans: ScanAttachment[];
+  customFields: CustomFieldValues;
 }
 
 export type PersonGender = "чоловік" | "жінка" | "невідомо";
@@ -198,6 +297,7 @@ export interface Person extends BaseEntity {
   marriageScans: ScanAttachment[];
   deathScans: ScanAttachment[];
   mentionScans: ScanAttachment[];
+  customFields: CustomFieldValues;
 }
 
 export type PersonRelationType =
@@ -230,6 +330,7 @@ export interface AppSettings {
   researcherName: string;
   compactTables: boolean;
   lastAutomaticBackupAt: string | null;
+  customFields: CustomFieldDefinition[];
 }
 
 export type BackupType = "automatic" | "manual" | "pre-import" | "pre-clear";
@@ -244,7 +345,7 @@ export interface DriveBackupFile {
 }
 
 export interface AppDatabase {
-  version: 3;
+  version: 5;
   appName: "Трекер Роду";
   tagline: "Не губи сліди свого роду";
   updatedAt: string;
@@ -257,6 +358,8 @@ export interface AppDatabase {
   archiveRequests: ArchiveRequest[];
   persons: Person[];
   personRelations: PersonRelation[];
+  customSections: CustomSectionDefinition[];
+  customSectionRecords: CustomSectionRecord[];
   activityLog: ActivityLogEntry[];
   settings: AppSettings;
 }

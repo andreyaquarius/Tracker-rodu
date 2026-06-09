@@ -36,6 +36,8 @@ export interface ImportPreview {
   findings: number;
   hypotheses: number;
   archiveRequests: number;
+  customSections: number;
+  customSectionRecords: number;
 }
 
 export function createImportPreview(db: AppDatabase): ImportPreview {
@@ -48,6 +50,8 @@ export function createImportPreview(db: AppDatabase): ImportPreview {
     findings: db.findings.length,
     hypotheses: db.hypotheses.length,
     archiveRequests: db.archiveRequests.length,
+    customSections: db.customSections.length,
+    customSectionRecords: db.customSectionRecords.length,
   };
 }
 

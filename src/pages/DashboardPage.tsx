@@ -2,7 +2,10 @@ import { useMemo, useState } from "react";
 import type { AppDatabase } from "../types";
 import type { PageKey } from "../components/Sidebar";
 import { formatDateTime } from "../utils/dateHelpers";
-import { searchDatabase } from "../utils/globalSearch";
+import {
+  createGlobalSearchIndex,
+  type HighlightRange,
+} from "../utils/globalSearch";
 
 export function DashboardPage({
   db,
@@ -37,9 +40,10 @@ export function DashboardPage({
   const recentActivity = [...db.activityLog]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 10);
+  const globalSearchIndex = useMemo(() => createGlobalSearchIndex(db), [db]);
   const globalResults = useMemo(
-    () => searchDatabase(db, globalQuery),
-    [db, globalQuery],
+    () => globalSearchIndex.search(globalQuery),
+    [globalQuery, globalSearchIndex],
   );
   const groupedResults = useMemo(
     () => Object.entries(
@@ -105,8 +109,15 @@ export function DashboardPage({
                           {activityIcon(result.page)}
                         </span>
                         <span>
-                          <strong>{result.title}</strong>
-                          <small>{result.description || result.moduleLabel}</small>
+                          <strong>
+                            <HighlightedText text={result.title} ranges={result.titleMatches} />
+                          </strong>
+                          <small>
+                            <HighlightedText
+                              text={result.description || result.moduleLabel}
+                              ranges={result.descriptionMatches}
+                            />
+                          </small>
                         </span>
                         <span className="activity-arrow">→</span>
                       </button>
@@ -195,8 +206,39 @@ export function DashboardPage({
   );
 }
 
+function HighlightedText({
+  text,
+  ranges,
+}: {
+  text: string;
+  ranges: HighlightRange[];
+}) {
+  if (!ranges.length) return text;
+  const merged = [...ranges]
+    .sort((a, b) => a[0] - b[0])
+    .reduce<Array<[number, number]>>((result, [from, to]) => {
+      const last = result[result.length - 1];
+      if (last && from <= last[1] + 1) {
+        last[1] = Math.max(last[1], to);
+      } else {
+        result.push([from, to]);
+      }
+      return result;
+    }, []);
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const [from, to] of merged) {
+    if (from > cursor) parts.push(text.slice(cursor, from));
+    parts.push(<mark key={`${from}-${to}`}>{text.slice(from, to + 1)}</mark>);
+    cursor = to + 1;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return <>{parts}</>;
+}
+
 function moduleLabel(module: PageKey): string {
-  const labels: Record<PageKey, string> = {
+  if (module.startsWith("custom:")) return "Власний розділ";
+  const labels: Record<Exclude<PageKey, `custom:${string}`>, string> = {
     dashboard: "Панель огляду",
     researches: "Дослідження",
     documents: "Документи",
@@ -209,11 +251,12 @@ function moduleLabel(module: PageKey): string {
     backup: "Резервні копії",
     settings: "Налаштування",
   };
-  return labels[module];
+  return labels[module as Exclude<PageKey, `custom:${string}`>];
 }
 
 function activityIcon(module: PageKey): string {
-  const icons: Record<PageKey, string> = {
+  if (module.startsWith("custom:")) return "Р";
+  const icons: Record<Exclude<PageKey, `custom:${string}`>, string> = {
     dashboard: "О",
     researches: "Д",
     documents: "Ф",
@@ -226,5 +269,5 @@ function activityIcon(module: PageKey): string {
     backup: "↻",
     settings: "Н",
   };
-  return icons[module];
+  return icons[module as Exclude<PageKey, `custom:${string}`>];
 }

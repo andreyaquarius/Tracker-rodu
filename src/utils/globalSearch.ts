@@ -1,3 +1,4 @@
+import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import type {
   AppDatabase,
   AppEntity,
@@ -13,15 +14,33 @@ import type {
 } from "../types";
 import type { PageKey } from "../components/Sidebar";
 import { primaryParticipantName } from "./findingParticipants";
+import { customRecordSearchText, customRecordTitle } from "./customSections";
+
+export type HighlightRange = readonly [number, number];
 
 export interface GlobalSearchResult {
   id: string;
-  module: CollectionKey;
+  module: string;
+  page: PageKey;
+  moduleLabel: string;
+  title: string;
+  description: string;
+  titleMatches: HighlightRange[];
+  descriptionMatches: HighlightRange[];
+}
+
+interface SearchDocument {
+  id: string;
+  module: string;
   page: PageKey;
   moduleLabel: string;
   title: string;
   description: string;
   searchText: string;
+}
+
+export interface GlobalSearchIndex {
+  search: (query: string) => GlobalSearchResult[];
 }
 
 const moduleLabels: Record<CollectionKey, string> = {
@@ -35,16 +54,24 @@ const moduleLabels: Record<CollectionKey, string> = {
   persons: "Особи",
 };
 
-export function searchDatabase(db: AppDatabase, query: string): GlobalSearchResult[] {
-  const normalizedQuery = normalize(query);
-  if (normalizedQuery.length < 2) return [];
+const fuseOptions: IFuseOptions<SearchDocument> = {
+  keys: [
+    { name: "title", weight: 0.45 },
+    { name: "description", weight: 0.25 },
+    { name: "searchText", weight: 0.3 },
+  ],
+  includeMatches: true,
+  includeScore: true,
+  ignoreLocation: true,
+  isCaseSensitive: false,
+  minMatchCharLength: 2,
+  threshold: 0.35,
+};
 
-  const results: GlobalSearchResult[] = [];
+export function createGlobalSearchIndex(db: AppDatabase): GlobalSearchIndex {
+  const documents: SearchDocument[] = [];
   const addCollection = (collection: CollectionKey, items: AppEntity[]) => {
-    for (const entity of items) {
-      const result = createResult(db, collection, entity);
-      if (result.searchText.includes(normalizedQuery)) results.push(result);
-    }
+    for (const entity of items) documents.push(createDocument(db, collection, entity));
   };
 
   addCollection("researches", db.researches);
@@ -53,32 +80,114 @@ export function searchDatabase(db: AppDatabase, query: string): GlobalSearchResu
   addCollection("tasks", db.tasks);
   addCollection("findings", db.findings);
   addCollection("hypotheses", db.hypotheses);
-  addCollection("archiveRequests", db.archiveRequests);
   addCollection("persons", db.persons);
+  addCollection("archiveRequests", db.archiveRequests);
+  for (const section of db.customSections) {
+    for (const record of db.customSectionRecords.filter((item) => item.sectionId === section.id)) {
+      documents.push({
+        id: record.id,
+        module: `custom:${section.id}`,
+        page: `custom:${section.id}`,
+        moduleLabel: section.name,
+        title: customRecordTitle(section, record),
+        description: customRecordSearchText(db, section, record),
+        searchText: customRecordSearchText(db, section, record),
+      });
+    }
+  }
 
-  return results
-    .sort((a, b) => relevance(b, normalizedQuery) - relevance(a, normalizedQuery))
-    .slice(0, 30);
+  const index = Fuse.createIndex(
+    ["title", "description", "searchText"],
+    documents,
+  );
+  const fuse = new Fuse(documents, fuseOptions, index);
+
+  return {
+    search(query) {
+      const trimmed = query.trim();
+      if (trimmed.length < 2) return [];
+      return fuse.search(trimmed, { limit: 40 }).map(({ item, matches = [] }) => {
+        const titleMatches = rangesFor(matches, "title");
+        const descriptionRanges = rangesFor(matches, "description");
+        if (descriptionRanges.length) {
+          return {
+            ...publicResult(item),
+            description: item.description,
+            titleMatches,
+            descriptionMatches: descriptionRanges,
+          };
+        }
+        const searchTextMatch = matches.find((match) => match.key === "searchText");
+        const snippet = searchTextMatch ? matchSnippet(searchTextMatch) : null;
+        return {
+          ...publicResult(item),
+          description: snippet?.text || item.description,
+          titleMatches,
+          descriptionMatches: snippet?.ranges ?? [],
+        };
+      });
+    },
+  };
 }
 
-function createResult(
+function createDocument(
   db: AppDatabase,
   module: CollectionKey,
   entity: AppEntity,
-): GlobalSearchResult {
+): SearchDocument {
   const research = "researchId" in entity
     ? db.researches.find((item) => item.id === entity.researchId)
     : undefined;
   const relatedText = relationText(db, entity);
+  const title = entityTitle(module, entity);
+  const description = entityDescription(module, entity, research);
   return {
     id: entity.id,
     module,
     page: module,
     moduleLabel: moduleLabels[module],
-    title: entityTitle(module, entity),
-    description: entityDescription(module, entity, research),
-    searchText: normalize(`${flatten(entity)} ${research?.title ?? ""} ${relatedText}`),
+    title,
+    description,
+    searchText: `${flatten(entity)} ${research?.title ?? ""} ${relatedText}`.trim(),
   };
+}
+
+function publicResult(item: SearchDocument) {
+  return {
+    id: item.id,
+    module: item.module,
+    page: item.page,
+    moduleLabel: item.moduleLabel,
+    title: item.title,
+  };
+}
+
+function rangesFor(matches: readonly FuseResultMatch[], key: string): HighlightRange[] {
+  return matches
+    .filter((match) => match.key === key)
+    .flatMap((match) => match.indices);
+}
+
+function matchSnippet(match: FuseResultMatch): {
+  text: string;
+  ranges: HighlightRange[];
+} | null {
+  const value = match.value ?? "";
+  const first = match.indices[0];
+  if (!value || !first) return null;
+  const start = Math.max(0, first[0] - 38);
+  const end = Math.min(value.length, first[1] + 55);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < value.length ? "…" : "";
+  const text = `${prefix}${value.slice(start, end)}${suffix}`;
+  const offset = prefix.length - start;
+  const ranges = match.indices
+    .filter(([from, to]) => to >= start && from < end)
+    .map(([from, to]) => [
+      Math.max(0, from + offset),
+      Math.min(text.length - 1, to + offset),
+    ] as const);
+  return { text, ranges };
 }
 
 function entityTitle(module: CollectionKey, entity: AppEntity): string {
@@ -105,7 +214,9 @@ function entityTitle(module: CollectionKey, entity: AppEntity): string {
     }
     case "persons": {
       const person = entity as Person;
-      return person.fullName || [person.surname, person.givenName, person.patronymic].filter(Boolean).join(" ") || "Особа без імені";
+      return person.fullName ||
+        [person.surname, person.givenName, person.patronymic].filter(Boolean).join(" ") ||
+        "Особа без імені";
     }
   }
 }
@@ -166,12 +277,8 @@ function relationText(db: AppDatabase, entity: AppEntity): string {
   const personIds = Array.isArray(record.personIds) ? record.personIds : [];
   return [
     ...db.documents.filter((item) => ids.includes(item.id)).map((item) => flatten(item)),
-    ...db.findings
-      .filter((item) => findingIds.includes(item.id))
-      .map((item) => flatten(item)),
-    ...db.persons
-      .filter((item) => personIds.includes(item.id))
-      .map((item) => flatten(item)),
+    ...db.findings.filter((item) => findingIds.includes(item.id)).map((item) => flatten(item)),
+    ...db.persons.filter((item) => personIds.includes(item.id)).map((item) => flatten(item)),
   ].join(" ");
 }
 
@@ -183,18 +290,6 @@ function flatten(value: unknown): string {
   if (Array.isArray(value)) return value.map(flatten).join(" ");
   if (typeof value === "object") return Object.values(value).map(flatten).join(" ");
   return "";
-}
-
-function normalize(value: string): string {
-  return value.trim().toLocaleLowerCase("uk");
-}
-
-function relevance(result: GlobalSearchResult, query: string): number {
-  const title = normalize(result.title);
-  if (title === query) return 4;
-  if (title.startsWith(query)) return 3;
-  if (title.includes(query)) return 2;
-  return 1;
 }
 
 function period(from: string, to: string): string {

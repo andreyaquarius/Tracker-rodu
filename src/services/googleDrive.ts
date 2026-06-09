@@ -7,7 +7,7 @@ const UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 export const DATABASE_FILE_NAME = "tracker-rodu-db.json";
 const LEGACY_DATABASE_FILE_NAME = "rodovyi-navigator-db.json";
 
-interface DriveFile {
+export interface DriveFile {
   id: string;
   name: string;
   createdTime?: string;

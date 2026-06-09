@@ -1,45 +1,72 @@
 import type { AppDatabase, ScanAttachment } from "../types";
 import { getAccessToken } from "./googleAuth";
+import { getSupabaseClient, isSupabaseConfigured } from "./supabaseAuth";
+import { storageService } from "./storage/storageService";
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 
 const DB_NAME = "tracker-rodu-files";
 const STORE_NAME = "scans";
-const DRIVE_API = "https://www.googleapis.com/drive/v3";
-const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
-const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
+const PROJECT_BUCKET = "project-attachments";
 
 interface LocalScan {
   id: string;
   blob: Blob;
 }
 
+let activeProjectId: string | null = null;
+
+export function setProjectAttachmentTarget(projectId: string | null): void {
+  activeProjectId = projectId;
+}
+
 export async function saveScan(file: File): Promise<ScanAttachment> {
   if (!isSupportedAttachment(file)) {
-    throw new Error(`Формат файла «${file.name}» не підтримується.`);
+    throw new Error(`Формат файлу «${file.name}» не підтримується.`);
   }
   if (file.size > MAX_FILE_SIZE) {
     throw new Error(`Файл «${file.name}» перевищує дозволені 2 ГБ.`);
   }
 
   const id = createId();
-  const token = getAccessToken();
-  if (!token) {
-    throw new Error(
-      "Підключіть Google Drive перед додаванням файлів. Вкладення зберігаються лише у приватному сховищі застосунку на Google Drive.",
-    );
+  const mimeType = file.type || "application/octet-stream";
+
+  if (activeProjectId && isSupabaseConfigured) {
+    const storagePath = await uploadProjectAttachment(activeProjectId, file, id);
+    return {
+      id,
+      name: file.name,
+      mimeType,
+      size: file.size,
+      createdAt: nowIso(),
+      storage: "supabase",
+      storagePath,
+    };
   }
 
-  const driveFileId = await uploadToDrive(token, file, id);
+  const token = getAccessToken();
+  if (token) {
+    const driveFileId = await storageService.uploadAttachment(token, file, id);
+    return {
+      id,
+      name: file.name,
+      mimeType,
+      size: file.size,
+      createdAt: nowIso(),
+      storage: "drive",
+      driveFileId,
+    };
+  }
+
+  await saveLocalBlob(id, file);
   return {
     id,
     name: file.name,
-    mimeType: file.type || "application/octet-stream",
+    mimeType,
     size: file.size,
     createdAt: nowIso(),
-    storage: "drive",
-    driveFileId,
+    storage: "local",
   };
 }
 
@@ -56,10 +83,11 @@ export async function migrateLocalAttachmentsToDrive(
   if (!token) throw new Error("Підключіть Google Drive для перенесення вкладень.");
   const migrated: ScanAttachment[] = [];
   const unavailable: string[] = [];
+
   const migrateList = async (scans: ScanAttachment[] = []) =>
-    Promise.all(scans.map(async (scan) => {
+    mapScans(scans, async (scan) => {
       if (scan.storage === "drive") return scan;
-      const blob = await readLocalBlob(scan.id);
+      const blob = await readSourceBlob(scan, token);
       if (!blob) {
         unavailable.push(scan.name);
         return scan;
@@ -67,84 +95,155 @@ export async function migrateLocalAttachmentsToDrive(
       const file = new File([blob], scan.name, {
         type: scan.mimeType || blob.type || "application/octet-stream",
       });
-      const driveFileId = await uploadToDrive(token, file, scan.id);
-      const next = { ...scan, storage: "drive" as const, driveFileId };
+      const driveFileId = await storageService.uploadAttachment(token, file, scan.id);
       migrated.push(scan);
-      return next;
-    }));
+      return {
+        ...scan,
+        mimeType: file.type || scan.mimeType,
+        size: file.size,
+        storage: "drive" as const,
+        driveFileId,
+        storagePath: undefined,
+      };
+    });
 
-  const documents = await Promise.all(db.documents.map(async (item) => ({
-    ...item,
-    scans: await migrateList(item.scans),
-  })));
-  const findings = await Promise.all(db.findings.map(async (item) => ({
-    ...item,
-    scans: await migrateList(item.scans),
-  })));
-  const persons = await Promise.all(db.persons.map(async (item) => ({
-    ...item,
-    birthScans: await migrateList(item.birthScans),
-    marriageScans: await migrateList(item.marriageScans),
-    deathScans: await migrateList(item.deathScans),
-    mentionScans: await migrateList(item.mentionScans),
-  })));
-  const archiveRequests = await Promise.all(db.archiveRequests.map(async (item) => ({
-    ...item,
-    requestScans: await migrateList(item.requestScans),
-    responseScans: await migrateList(item.responseScans),
-  })));
+  return migrateAttachmentsInDatabase(db, migrateList, migrated, unavailable);
+}
 
-  return {
-    db: {
-      ...db,
-      documents,
-      findings,
-      persons,
-      archiveRequests,
-      updatedAt: migrated.length ? nowIso() : db.updatedAt,
-    },
-    migrated,
-    unavailable: [...new Set(unavailable)],
-  };
+export async function migrateProjectAttachmentsToSupabase(
+  projectId: string,
+  db: AppDatabase,
+): Promise<AttachmentMigrationResult> {
+  if (!isSupabaseConfigured) {
+    throw new Error("У локальних налаштуваннях не вказано адресу або ключ Supabase.");
+  }
+
+  const token = getAccessToken();
+  const migrated: ScanAttachment[] = [];
+  const unavailable: string[] = [];
+
+  const migrateList = async (scans: ScanAttachment[] = []) =>
+    mapScans(scans, async (scan) => {
+      if (scan.storage === "supabase" && scan.storagePath) return scan;
+      const blob = await readSourceBlob(scan, token);
+      if (!blob) {
+        unavailable.push(scan.name);
+        return scan;
+      }
+      const file = new File([blob], scan.name, {
+        type: scan.mimeType || blob.type || "application/octet-stream",
+      });
+      const storagePath = await uploadProjectAttachment(projectId, file, scan.id);
+      migrated.push(scan);
+      return {
+        ...scan,
+        mimeType: file.type || scan.mimeType,
+        size: file.size,
+        storage: "supabase" as const,
+        driveFileId: undefined,
+        storagePath,
+      };
+    });
+
+  return migrateAttachmentsInDatabase(db, migrateList, migrated, unavailable);
 }
 
 export async function deleteMigratedLocalFiles(scans: ScanAttachment[]): Promise<void> {
-  await Promise.allSettled(scans.map((scan) => deleteLocalBlob(scan.id)));
+  const localScans = scans.filter((scan) => scan.storage === "local");
+  await Promise.allSettled(localScans.map((scan) => deleteLocalBlob(scan.id)));
 }
 
 function isSupportedAttachment(file: File): boolean {
   const supportedTypes = new Set([
     "application/pdf",
+    "image/vnd.djvu",
+    "application/vnd.ms-xpsdocument",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/rtf",
     "application/vnd.oasis.opendocument.text",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "text/csv",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.presentation",
     "text/plain",
+    "text/markdown",
+    "application/xml",
+    "text/xml",
+    "text/html",
+    "application/epub+zip",
   ]);
   const extension = file.name.split(".").pop()?.toLocaleLowerCase() ?? "";
   return (
     file.type.startsWith("image/") ||
+    file.type.startsWith("audio/") ||
     supportedTypes.has(file.type) ||
-    ["pdf", "doc", "docx", "odt", "txt"].includes(extension)
+    [
+      "pdf",
+      "djvu",
+      "djv",
+      "xps",
+      "doc",
+      "docx",
+      "rtf",
+      "odt",
+      "xls",
+      "xlsx",
+      "ods",
+      "csv",
+      "ppt",
+      "pptx",
+      "odp",
+      "txt",
+      "md",
+      "xml",
+      "html",
+      "htm",
+      "epub",
+      "mp3",
+      "wav",
+      "m4a",
+      "aac",
+      "ogg",
+      "opus",
+      "flac",
+      "wma",
+      "webm",
+    ].includes(extension)
   );
 }
 
 export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
+  if (scan.storage === "supabase") {
+    if (!scan.storagePath) {
+      throw new Error("У файлу відсутній шлях у сховищі проєкту.");
+    }
+    const { data, error } = await getSupabaseClient()
+      .storage
+      .from(PROJECT_BUCKET)
+      .download(scan.storagePath);
+    if (error || !data) {
+      throw error ?? new Error("Не вдалося завантажити файл зі сховища проєкту.");
+    }
+    return data;
+  }
+
   if (scan.storage === "drive") {
     const token = getAccessToken();
     if (!token) {
-      throw new Error("Підключіть Google Drive, щоб відкрити цей скан.");
+      throw new Error("Підключіть Google Drive, щоб відкрити цей файл.");
     }
-    if (!scan.driveFileId) throw new Error("У скану відсутній ідентифікатор Google Drive.");
-    const response = await fetch(
-      `${DRIVE_API}/files/${encodeURIComponent(scan.driveFileId)}?alt=media`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    if (!response.ok) throw new Error("Не вдалося завантажити скан із Google Drive.");
-    return response.blob();
+    if (!scan.driveFileId) {
+      throw new Error("У файлу відсутній ідентифікатор Google Drive.");
+    }
+    return storageService.downloadAttachment(token, scan.driveFileId);
   }
 
   const local = await readLocalBlob(scan.id);
-  if (!local) throw new Error("Локальний файл скану не знайдено в цьому браузері.");
+  if (!local) throw new Error("Локальне вкладення не знайдено в цьому браузері.");
   return local;
 }
 
@@ -175,114 +274,239 @@ export async function downloadScan(scan: ScanAttachment): Promise<void> {
 }
 
 export async function deleteScanFile(scan: ScanAttachment): Promise<void> {
-  if (scan.storage === "drive") {
-    const token = getAccessToken();
-    if (!token) throw new Error("Підключіть Google Drive, щоб видалити цей скан.");
-    if (!scan.driveFileId) return;
-    const response = await fetch(`${DRIVE_API}/files/${encodeURIComponent(scan.driveFileId)}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok && response.status !== 404) {
-      throw new Error("Не вдалося видалити скан із Google Drive.");
-    }
+  if (scan.storage === "supabase") {
+    if (!scan.storagePath) return;
+    const { error } = await getSupabaseClient()
+      .storage
+      .from(PROJECT_BUCKET)
+      .remove([scan.storagePath]);
+    if (error) throw error;
     return;
   }
+
+  if (scan.storage === "drive") {
+    const token = getAccessToken();
+    if (!token) throw new Error("Підключіть Google Drive, щоб видалити цей файл.");
+    if (!scan.driveFileId) return;
+    await storageService.deleteAttachment(token, scan.driveFileId);
+    return;
+  }
+
   await deleteLocalBlob(scan.id);
 }
 
-async function uploadToDrive(token: string, file: File, id: string): Promise<string> {
-  const metadata = {
-    name: `scan-${id}-${safeFileName(file.name)}`,
-    parents: ["appDataFolder"],
-    mimeType: file.type || "application/octet-stream",
-    appProperties: { trackerRoduType: "scan", attachmentId: id },
-  };
-  const sessionResponse = await fetch(
-    `${DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json; charset=UTF-8",
-        "X-Upload-Content-Type": file.type || "application/octet-stream",
-        "X-Upload-Content-Length": String(file.size),
-      },
-      body: JSON.stringify(metadata),
-    },
-  );
-  if (!sessionResponse.ok) {
-    throw new Error(`Не вдалося розпочати завантаження «${file.name}» у Google Drive.`);
+async function uploadProjectAttachment(
+  projectId: string,
+  file: Blob,
+  attachmentId: string,
+): Promise<string> {
+  const fileName = file instanceof File ? file.name : `scan-${attachmentId}`;
+  const path = `${projectId}/${attachmentId}/${safeFileName(fileName)}`;
+  const { error } = await getSupabaseClient()
+    .storage
+    .from(PROJECT_BUCKET)
+    .upload(path, file, {
+      upsert: true,
+      contentType: file.type || "application/octet-stream",
+    });
+  if (error) {
+    throw new Error(`Не вдалося завантажити файл «${fileName}» у сховище проєкту.`);
   }
-  const sessionUrl = sessionResponse.headers.get("Location");
-  if (!sessionUrl) throw new Error("Google Drive не повернув адресу сесії завантаження.");
-
-  let offset = 0;
-  while (offset < file.size) {
-    const endExclusive = Math.min(offset + UPLOAD_CHUNK_SIZE, file.size);
-    const response = await uploadChunk(
-      sessionUrl,
-      file.slice(offset, endExclusive),
-      offset,
-      endExclusive,
-      file.size,
-      file.type || "application/octet-stream",
-    );
-    if (response.status === 200 || response.status === 201) {
-      const result = await response.json() as { id: string };
-      return result.id;
-    }
-    if (response.status !== 308) {
-      throw new Error(`Завантаження «${file.name}» перервано Google Drive.`);
-    }
-    offset = uploadedBytes(response.headers.get("Range")) ?? endExclusive;
-  }
-  throw new Error(`Google Drive не підтвердив завершення завантаження «${file.name}».`);
+  return path;
 }
 
-async function uploadChunk(
-  sessionUrl: string,
-  chunk: Blob,
-  start: number,
-  endExclusive: number,
-  total: number,
-  mimeType: string,
-): Promise<Response> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+async function readSourceBlob(
+  scan: ScanAttachment,
+  token: string | null,
+): Promise<Blob | null> {
+  if (scan.storage === "supabase") {
+    if (!scan.storagePath) return null;
     try {
-      const response = await fetch(sessionUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": mimeType,
-          "Content-Range": `bytes ${start}-${endExclusive - 1}/${total}`,
-        },
-        body: chunk,
-      });
-      if (response.status < 500) return response;
-      lastError = new Error(`Google Drive тимчасово недоступний: ${response.status}.`);
-    } catch (error) {
-      lastError = error;
+      return await getScanBlob(scan);
+    } catch {
+      return null;
     }
-    await wait(750 * (attempt + 1));
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Не вдалося передати частину файлу в Google Drive.");
+
+  if (scan.storage === "drive") {
+    if (!token || !scan.driveFileId) return null;
+    try {
+      return await storageService.downloadAttachment(token, scan.driveFileId);
+    } catch {
+      return null;
+    }
+  }
+
+  return readLocalBlob(scan.id);
 }
 
-function uploadedBytes(range: string | null): number | null {
-  if (!range) return null;
-  const match = range.match(/bytes=0-(\d+)/);
-  return match ? Number(match[1]) + 1 : null;
+async function migrateAttachmentsInDatabase(
+  db: AppDatabase,
+  migrateList: (scans?: ScanAttachment[]) => Promise<ScanAttachment[]>,
+  migrated: ScanAttachment[],
+  unavailable: string[],
+): Promise<AttachmentMigrationResult> {
+  const customAttachmentFieldIds = db.settings.customFields
+    .filter((field) => field.type === "attachments")
+    .reduce<Record<string, string[]>>((groups, field) => {
+      (groups[field.module] ??= []).push(field.id);
+      return groups;
+    }, {});
+
+  const migrateCustomFields = async <T extends { customFields?: Record<string, unknown> }>(
+    module: string,
+    item: T,
+  ): Promise<T> => {
+    const source = item.customFields ?? {};
+    const values = { ...source };
+    let changed = false;
+    for (const fieldId of customAttachmentFieldIds[module] ?? []) {
+      const current = values[fieldId];
+      const next = await migrateList(
+        Array.isArray(current) ? current as ScanAttachment[] : [],
+      );
+      if (next !== current) {
+        values[fieldId] = next;
+        changed = true;
+      }
+    }
+    return changed ? { ...item, customFields: values } : item;
+  };
+
+  const documents = await mapItems(db.documents, async (item) => {
+    const customFields = await migrateCustomFields("documents", item);
+    const scans = await migrateList(item.scans);
+    return customFields !== item || scans !== item.scans
+      ? { ...customFields, scans }
+      : item;
+  });
+
+  const findings = await mapItems(db.findings, async (item) => {
+    const customFields = await migrateCustomFields("findings", item);
+    const scans = await migrateList(item.scans);
+    return customFields !== item || scans !== item.scans
+      ? { ...customFields, scans }
+      : item;
+  });
+
+  const persons = await mapItems(db.persons, async (item) => {
+    const customFields = await migrateCustomFields("persons", item);
+    const birthScans = await migrateList(item.birthScans);
+    const marriageScans = await migrateList(item.marriageScans);
+    const deathScans = await migrateList(item.deathScans);
+    const mentionScans = await migrateList(item.mentionScans);
+    return customFields !== item ||
+      birthScans !== item.birthScans ||
+      marriageScans !== item.marriageScans ||
+      deathScans !== item.deathScans ||
+      mentionScans !== item.mentionScans
+      ? {
+          ...customFields,
+          birthScans,
+          marriageScans,
+          deathScans,
+          mentionScans,
+        }
+      : item;
+  });
+
+  const archiveRequests = await mapItems(db.archiveRequests, async (item) => {
+    const customFields = await migrateCustomFields("archiveRequests", item);
+    const requestScans = await migrateList(item.requestScans);
+    const responseScans = await migrateList(item.responseScans);
+    return customFields !== item ||
+      requestScans !== item.requestScans ||
+      responseScans !== item.responseScans
+      ? { ...customFields, requestScans, responseScans }
+      : item;
+  });
+
+  const researches = await mapItems(db.researches, (item) =>
+    migrateCustomFields("researches", item),
+  );
+  const yearMatrix = await mapItems(db.yearMatrix, (item) =>
+    migrateCustomFields("yearMatrix", item),
+  );
+  const tasks = await mapItems(db.tasks, (item) =>
+    migrateCustomFields("tasks", item),
+  );
+  const hypotheses = await mapItems(db.hypotheses, (item) =>
+    migrateCustomFields("hypotheses", item),
+  );
+
+  const attachmentFields = new Map(
+    db.customSections.map((section) => [
+      section.id,
+      section.fields.filter((field) => field.type === "attachments").map((field) => field.id),
+    ]),
+  );
+
+  const customSectionRecords = await mapItems(db.customSectionRecords, async (item) => {
+    const values = { ...item.values };
+    let changed = false;
+    for (const fieldId of attachmentFields.get(item.sectionId) ?? []) {
+      const current = values[fieldId];
+      const next = await migrateList(
+        Array.isArray(current) ? current as ScanAttachment[] : [],
+      );
+      if (next !== current) {
+        values[fieldId] = next;
+        changed = true;
+      }
+    }
+    return changed ? { ...item, values } : item;
+  });
+
+  const changed =
+    researches !== db.researches ||
+    documents !== db.documents ||
+    yearMatrix !== db.yearMatrix ||
+    tasks !== db.tasks ||
+    findings !== db.findings ||
+    hypotheses !== db.hypotheses ||
+    persons !== db.persons ||
+    archiveRequests !== db.archiveRequests ||
+    customSectionRecords !== db.customSectionRecords;
+
+  return {
+    db: changed
+      ? {
+          ...db,
+          researches,
+          documents,
+          yearMatrix,
+          tasks,
+          findings,
+          hypotheses,
+          persons,
+          archiveRequests,
+          customSectionRecords,
+          updatedAt: migrated.length ? nowIso() : db.updatedAt,
+        }
+      : db,
+    migrated,
+    unavailable: [...new Set(unavailable)],
+  };
 }
 
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+async function mapScans(
+  scans: ScanAttachment[],
+  mapper: (scan: ScanAttachment) => Promise<ScanAttachment>,
+): Promise<ScanAttachment[]> {
+  return mapItems(scans, mapper);
 }
 
-function safeFileName(value: string): string {
-  return value.replace(/[\\/:*?"<>|]+/g, "_");
+async function mapItems<T>(
+  items: T[],
+  mapper: (item: T) => Promise<T>,
+): Promise<T[]> {
+  let changed = false;
+  const next = await Promise.all(items.map(async (item) => {
+    const mapped = await mapper(item);
+    if (mapped !== item) changed = true;
+    return mapped;
+  }));
+  return changed ? next : items;
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -334,4 +558,8 @@ function transactionResult<T = unknown>(
       reject(transaction.error ?? new Error("Помилка локального сховища сканів."));
     };
   });
+}
+
+function safeFileName(value: string): string {
+  return value.replace(/[\\/:*?"<>|]+/g, "_");
 }

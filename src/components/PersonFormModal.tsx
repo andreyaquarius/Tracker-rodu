@@ -1,9 +1,20 @@
 import { useState, type FormEvent } from "react";
-import type { Person, PersonGender, PersonStatus, Research, ScanAttachment } from "../types";
+import type {
+  AppDatabase,
+  CustomFieldDefinition,
+  Person,
+  PersonGender,
+  PersonStatus,
+  Research,
+  ScanAttachment,
+} from "../types";
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import { Modal } from "./Modal";
 import { ScanAttachmentsEditor } from "./ScanAttachments";
+import { CustomFieldsEditor } from "./CustomFields";
+import { normalizeCustomFieldValues } from "../utils/customFields";
+import { InlineCustomFieldCreator } from "./InlineCustomFieldCreator";
 
 const genders: PersonGender[] = ["невідомо", "чоловік", "жінка"];
 const statuses: PersonStatus[] = [
@@ -46,21 +57,28 @@ function emptyPerson(initialFullName = "", researchId = ""): PersonDraft {
     marriageScans: [],
     deathScans: [],
     mentionScans: [],
+    customFields: {},
   };
 }
 
 export function PersonFormModal({
   person,
+  db,
   researches,
   initialFullName = "",
   initialResearchId = "",
+  customFieldDefinitions = [],
+  onAddCustomField,
   onClose,
   onSave,
 }: {
   person?: Person | null;
+  db: AppDatabase;
   researches: Research[];
   initialFullName?: string;
   initialResearchId?: string;
+  customFieldDefinitions?: CustomFieldDefinition[];
+  onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onClose: () => void;
   onSave: (person: Person) => void;
 }) {
@@ -95,6 +113,7 @@ export function PersonFormModal({
           marriageScans: person.marriageScans ?? [],
           deathScans: person.deathScans ?? [],
           mentionScans: person.mentionScans ?? [],
+          customFields: normalizeCustomFieldValues(person.customFields),
         }
       : emptyPerson(initialFullName, initialResearchId),
   );
@@ -115,8 +134,9 @@ export function PersonFormModal({
       fullName: form.fullName.trim() || composedName,
       id: person?.id ?? createId(),
       createdAt: person?.createdAt ?? timestamp,
+      __baseUpdatedAt: person?.updatedAt,
       updatedAt: timestamp,
-    });
+    } as Person);
   };
 
   return (
@@ -257,6 +277,20 @@ export function PersonFormModal({
             scans={form.mentionScans}
             onChange={(scans: ScanAttachment[]) => update("mentionScans", scans)}
           />
+          <CustomFieldsEditor
+            db={db}
+            definitions={customFieldDefinitions}
+            values={form.customFields}
+            onChange={(values) => update("customFields", values)}
+          />
+          {onAddCustomField ? (
+            <InlineCustomFieldCreator
+              module="persons"
+              db={db}
+              definitions={customFieldDefinitions}
+              onAdd={onAddCustomField}
+            />
+          ) : null}
         </div>
         <div className="modal-actions">
           <button type="button" className="button button-ghost" onClick={onClose}>Скасувати</button>

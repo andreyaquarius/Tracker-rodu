@@ -32,7 +32,8 @@ npm run preview
 5. Додайте дозволені джерела JavaScript:
    - `http://localhost:5173` для локального запуску;
    - адресу сайту Netlify або Vercel;
-   - для GitHub Pages адресу на зразок `https://username.github.io`.
+   - для робочого сайту: `https://trekerrodu.com.ua`;
+   - для сумісності можна також додати `https://www.trekerrodu.com.ua`.
 6. Скопіюйте Client ID у `.env`:
 
 ```env

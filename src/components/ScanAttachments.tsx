@@ -8,8 +8,8 @@ import {
 } from "../services/scanStorage";
 
 export function ScanAttachmentsEditor({
-  title = "Скани",
-  description = "Зображення, PDF, DOC, DOCX, ODT або TXT, до 2 ГБ кожен. Файли зберігаються у приватному сховищі застосунку на Google Drive.",
+  title = "Файли та вкладення",
+  description = "Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB, до 2 ГБ кожен. Файли зберігаються у захищеному сховищі застосунку.",
   scans,
   onChange,
 }: {
@@ -32,7 +32,7 @@ export function ScanAttachmentsEditor({
       }
       onChange([...scans, ...added]);
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Не вдалося додати скан.");
+      setError(uploadError instanceof Error ? uploadError.message : "Не вдалося додати файл.");
       if (added.length) onChange([...scans, ...added]);
     } finally {
       setUploading(false);
@@ -40,13 +40,13 @@ export function ScanAttachmentsEditor({
   };
 
   const remove = async (scan: ScanAttachment) => {
-    if (!window.confirm(`Видалити скан «${scan.name}»?`)) return;
+    if (!window.confirm(`Видалити файл «${scan.name}»?`)) return;
     setError("");
     try {
       await deleteScanFile(scan);
       onChange(scans.filter((item) => item.id !== scan.id));
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Не вдалося видалити скан.");
+      setError(deleteError instanceof Error ? deleteError.message : "Не вдалося видалити файл.");
     }
   };
 
@@ -58,10 +58,10 @@ export function ScanAttachmentsEditor({
           <p>{description} Великі файли завантажуються частинами.</p>
         </div>
         <label className={`button button-secondary scan-upload-button ${uploading ? "disabled" : ""}`}>
-          {uploading ? "Завантаження…" : "+ Додати скани"}
+          {uploading ? "Завантаження…" : "+ Додати файли"}
           <input
             type="file"
-            accept="image/*,application/pdf,.doc,.docx,.odt,.txt"
+            accept="image/*,audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.wma,.webm,.pdf,.djvu,.djv,.xps,.doc,.docx,.rtf,.odt,.xls,.xlsx,.ods,.csv,.ppt,.pptx,.odp,.txt,.md,.xml,.html,.htm,.epub"
             multiple
             disabled={uploading}
             onChange={(event) => {
@@ -79,14 +79,14 @@ export function ScanAttachmentsEditor({
           ))}
         </div>
       ) : (
-        <div className="scan-empty">Сканів поки немає.</div>
+        <div className="scan-empty">Файлів поки немає.</div>
       )}
     </fieldset>
   );
 }
 
 export function ScanAttachmentsView({ scans }: { scans: ScanAttachment[] }) {
-  if (!scans.length) return <div className="detail-text">Сканів немає.</div>;
+  if (!scans.length) return <div className="detail-text">Файлів немає.</div>;
   return (
     <div className="scan-list scan-list-details">
       {scans.map((scan) => <ScanRow key={scan.id} scan={scan} />)}
@@ -102,6 +102,7 @@ function ScanRow({
   onDelete?: () => void;
 }) {
   const [error, setError] = useState("");
+
   const run = async (action: () => Promise<void>) => {
     setError("");
     try {
@@ -110,13 +111,14 @@ function ScanRow({
       setError(actionError instanceof Error ? actionError.message : "Не вдалося виконати дію.");
     }
   };
+
   return (
     <div className="scan-row">
       <span className="scan-file-icon">{attachmentIcon(scan)}</span>
       <div className="scan-file-info">
         <strong>{scan.name}</strong>
         <small>
-          {formatFileSize(scan.size)} · {scan.storage === "drive" ? "Google Drive" : "цей браузер"}
+          {formatFileSize(scan.size)} · {storageLabel(scan)}
         </small>
         {error ? <em>{error}</em> : null}
       </div>
@@ -128,7 +130,7 @@ function ScanRow({
           Завантажити
         </button>
         {onDelete ? (
-          <button type="button" className="icon-button danger" title="Видалити скан" onClick={onDelete}>×</button>
+          <button type="button" className="icon-button danger" title="Видалити файл" onClick={onDelete}>×</button>
         ) : null}
       </div>
     </div>
@@ -141,9 +143,33 @@ function formatFileSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+function storageLabel(scan: ScanAttachment): string {
+  if (scan.storage === "supabase") return "Сховище проєкту";
+  if (scan.storage === "drive") return "Google Drive";
+  return "цей браузер";
+}
+
 function attachmentIcon(scan: ScanAttachment): string {
-  if (scan.mimeType === "application/pdf" || scan.name.toLocaleLowerCase().endsWith(".pdf")) return "PDF";
+  const extension = scan.name.split(".").pop()?.toLocaleUpperCase() ?? "";
+  if (scan.mimeType.startsWith("audio/") || audioExtensions.has(extension)) return "AUD";
+  if (scan.mimeType === "application/pdf" || extension === "PDF") return "PDF";
+  if (["DJVU", "DJV"].includes(extension)) return "DJVU";
   if (scan.mimeType.startsWith("image/")) return "IMG";
-  if (scan.name.toLocaleLowerCase().endsWith(".txt")) return "TXT";
+  if (["XLS", "XLSX", "ODS", "CSV"].includes(extension)) return "XLS";
+  if (["PPT", "PPTX", "ODP"].includes(extension)) return "PPT";
+  if (["TXT", "MD", "RTF", "XML", "HTML", "HTM"].includes(extension)) return "TXT";
+  if (extension === "EPUB") return "BOOK";
   return "DOC";
 }
+
+const audioExtensions = new Set([
+  "MP3",
+  "WAV",
+  "M4A",
+  "AAC",
+  "OGG",
+  "OPUS",
+  "FLAC",
+  "WMA",
+  "WEBM",
+]);

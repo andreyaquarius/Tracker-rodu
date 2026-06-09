@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type {
   AppEntity,
+  AppDatabase,
+  CustomFieldDefinition,
+  CustomFieldValues,
   DocumentRecord,
   Finding,
   FindingParticipant,
@@ -26,14 +29,24 @@ import {
 } from "../components/ScanAttachments";
 import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile } from "../services/scanStorage";
+import { CustomFieldsEditor, CustomFieldsView } from "../components/CustomFields";
+import { InlineCustomFieldCreator } from "../components/InlineCustomFieldCreator";
+import {
+  definitionsForModule,
+  normalizeCustomFieldValues,
+  supportsCustomFields,
+} from "../utils/customFields";
 
 interface CrudPageProps {
   config: EntityConfig;
+  db: AppDatabase;
   items: AppEntity[];
   researches: Research[];
   documents: DocumentRecord[];
   findings: Finding[];
   persons?: Person[];
+  customFieldDefinitions?: CustomFieldDefinition[];
+  onAddCustomField?: (definition: CustomFieldDefinition) => void;
   initialSearch?: string;
   initialOpenEntityId?: string;
   initialCreateRequest?: {
@@ -44,6 +57,7 @@ interface CrudPageProps {
   onSavePerson?: (person: Person) => void;
   onSave: (entity: AppEntity) => void;
   onDelete: (id: string) => void;
+  readOnly?: boolean;
 }
 
 type FormValue = string | boolean | string[] | FindingParticipant[] | ScanAttachment[];
@@ -51,11 +65,14 @@ type FormRecord = Record<string, FormValue>;
 
 export function CrudPage({
   config,
+  db,
   items,
   researches,
   documents,
   findings,
   persons = [],
+  customFieldDefinitions = [],
+  onAddCustomField,
   initialSearch = "",
   initialOpenEntityId = "",
   initialCreateRequest,
@@ -63,6 +80,7 @@ export function CrudPage({
   onSavePerson,
   onSave,
   onDelete,
+  readOnly = false,
 }: CrudPageProps) {
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
@@ -80,12 +98,17 @@ export function CrudPage({
     if (entity) setViewing(entity);
   }, [initialOpenEntityId, items]);
   useEffect(() => {
-    if (!initialCreateRequest) return;
+    if (!viewing) return;
+    setViewing(items.find((item) => item.id === viewing.id) ?? null);
+  }, [items, viewing?.id]);
+  useEffect(() => {
+    if (!initialCreateRequest || readOnly) return;
     setViewing(null);
     setCreateInitialValues(initialCreateRequest.initialValues);
     setEditing("new");
   }, [initialCreateRequest?.id]);
   const startNew = () => {
+    if (readOnly) return;
     setCreateInitialValues(undefined);
     setEditing("new");
   };
@@ -105,22 +128,26 @@ export function CrudPage({
   }, [items, researchFilter, search, statusFilter]);
 
   const confirmDelete = async (entity: AppEntity) => {
+    if (readOnly) return;
     if (window.confirm(`Видалити ${config.singular}? Цю дію не можна скасувати.`)) {
       const record = entity as unknown as Record<string, unknown>;
       const scans = Object.entries(record)
         .filter(([key, value]) => key.toLocaleLowerCase("uk").includes("scan") && Array.isArray(value))
-        .flatMap(([, value]) => value as ScanAttachment[]);
+        .flatMap(([, value]) => value as ScanAttachment[])
+        .concat(customAttachmentScans(record.customFields, customFieldDefinitions, config.collection));
       await Promise.allSettled(scans.map(deleteScanFile));
       onDelete(entity.id);
     }
   };
 
   const quickStatus = (entity: AppEntity, status: string) => {
+    if (readOnly) return;
     const key = config.statusKey;
     if (!key) return;
     onSave({
       ...(entity as unknown as Record<string, unknown>),
       [key]: status,
+      __baseUpdatedAt: entity.updatedAt,
       updatedAt: nowIso(),
     } as unknown as AppEntity);
   };
@@ -133,9 +160,11 @@ export function CrudPage({
           <h1>{config.title}</h1>
           <p>{config.description}</p>
         </div>
-        <button className="button button-primary" onClick={startNew}>
-          + Додати {config.singular}
-        </button>
+        {!readOnly ? (
+          <button className="button button-primary" onClick={startNew}>
+            + Додати {config.singular}
+          </button>
+        ) : null}
       </div>
 
       <section className="panel">
@@ -179,23 +208,28 @@ export function CrudPage({
             onOpenRelated={onOpenRelated}
             onQuickStatus={config.statusKey ? quickStatus : undefined}
             statusOptions={config.statusOptions}
+            readOnly={readOnly}
           />
         ) : (
           <div className="empty-state">
-            <button
-              type="button"
-              className="empty-mark"
-              onClick={startNew}
-              aria-label={`Додати ${config.singular}`}
-              title={`Додати ${config.singular}`}
-            >
-              +
-            </button>
+            {!readOnly ? (
+              <button
+                type="button"
+                className="empty-mark"
+                onClick={startNew}
+                aria-label={`Додати ${config.singular}`}
+                title={`Додати ${config.singular}`}
+              >
+                +
+              </button>
+            ) : null}
             <h2>{search || researchFilter || statusFilter ? "Нічого не знайдено" : config.emptyText}</h2>
             <p>
               {search || researchFilter || statusFilter
-                ? `Змініть фільтри або додайте ${config.singular}.`
-                : `Натисніть плюс, щоб додати ${config.singular}.`}
+                ? `Змініть фільтри${readOnly ? "." : ` або додайте ${config.singular}.`}`
+                : readOnly
+                  ? "У цьому розділі поки немає записів."
+                  : `Натисніть плюс, щоб додати ${config.singular}.`}
             </p>
           </div>
         )}
@@ -204,29 +238,34 @@ export function CrudPage({
       {viewing ? (
         <EntityDetailsModal
           config={config}
+          db={db}
           entity={viewing}
           researches={researches}
           documents={documents}
           findings={findings}
           persons={persons}
+          customFieldDefinitions={customFieldDefinitions}
           onOpenRelated={onOpenRelated}
           onClose={() => setViewing(null)}
-          onEdit={() => {
-            setEditing(viewing);
-            setViewing(null);
-          }}
+          onEdit={readOnly ? undefined : () => {
+              setEditing(viewing);
+              setViewing(null);
+            }}
         />
       ) : null}
 
-      {editing ? (
+      {editing && !readOnly ? (
         <EntityModal
           config={config}
+          db={db}
           entity={editing === "new" ? null : editing}
           initialValues={editing === "new" ? createInitialValues : undefined}
           researches={researches}
           documents={documents}
           findings={findings}
           persons={persons}
+          customFieldDefinitions={customFieldDefinitions}
+          onAddCustomField={onAddCustomField}
           onSavePerson={onSavePerson}
           onClose={() => {
             setEditing(null);
@@ -243,28 +282,49 @@ export function CrudPage({
   );
 }
 
+function customAttachmentScans(
+  values: unknown,
+  definitions: CustomFieldDefinition[],
+  module: string,
+): ScanAttachment[] {
+  if (!values || typeof values !== "object" || Array.isArray(values)) return [];
+  const attachmentIds = new Set(
+    definitions
+      .filter((field) => field.module === module && field.type === "attachments")
+      .map((field) => field.id),
+  );
+  return Object.entries(values)
+    .filter(([id, value]) => attachmentIds.has(id) && Array.isArray(value))
+    .flatMap(([, value]) => value as ScanAttachment[]);
+}
+
 function EntityDetailsModal({
   config,
+  db,
   entity,
   researches,
   documents,
   findings,
   persons,
+  customFieldDefinitions,
   onOpenRelated,
   onClose,
   onEdit,
 }: {
   config: EntityConfig;
+  db: AppDatabase;
   entity: AppEntity;
   researches: Research[];
   documents: DocumentRecord[];
   findings: Finding[];
   persons: Person[];
+  customFieldDefinitions: CustomFieldDefinition[];
   onOpenRelated?: (page: PageKey, entityId: string) => void;
   onClose: () => void;
-  onEdit: () => void;
+  onEdit?: () => void;
 }) {
   const record = entity as unknown as Record<string, unknown>;
+  const customDefinitions = definitionsForModule(customFieldDefinitions, config.collection);
   const visibleFields = config.fields.filter((field) => {
     const value = record[field.key];
     return value === true || (
@@ -278,7 +338,7 @@ function EntityDetailsModal({
   return (
     <Modal title={getEntityTitle(config, record)} onClose={onClose}>
       <div className="details-body">
-        {visibleFields.length ? (
+        {visibleFields.length || customDefinitions.length ? (
           <div className="details-grid">
             {visibleFields.map((field) => (
               <div
@@ -297,6 +357,11 @@ function EntityDetailsModal({
                 />
               </div>
             ))}
+            <CustomFieldsView
+              db={db}
+              definitions={customDefinitions}
+              values={normalizeCustomFieldValues(record.customFields)}
+            />
           </div>
         ) : (
           <div className="empty-inline">У цьому записі ще немає заповнених даних.</div>
@@ -309,9 +374,11 @@ function EntityDetailsModal({
           <button type="button" className="button button-ghost" onClick={onClose}>
             Закрити
           </button>
-          <button type="button" className="button button-primary" onClick={onEdit}>
-            Редагувати
-          </button>
+          {onEdit ? (
+            <button type="button" className="button button-primary" onClick={onEdit}>
+              Редагувати
+            </button>
+          ) : null}
         </div>
       </div>
     </Modal>
@@ -467,23 +534,29 @@ function formatEntityDate(value: string): string {
 
 function EntityModal({
   config,
+  db,
   entity,
   initialValues,
   researches,
   documents,
   findings,
   persons,
+  customFieldDefinitions,
+  onAddCustomField,
   onSavePerson,
   onClose,
   onSave,
 }: {
   config: EntityConfig;
+  db: AppDatabase;
   entity: AppEntity | null;
   initialValues?: Record<string, unknown>;
   researches: Research[];
   documents: DocumentRecord[];
   findings: Finding[];
   persons: Person[];
+  customFieldDefinitions: CustomFieldDefinition[];
+  onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onSavePerson?: (person: Person) => void;
   onClose: () => void;
   onSave: (entity: AppEntity) => void;
@@ -497,6 +570,10 @@ function EntityModal({
     return defaults;
   });
   const [personSeed, setPersonSeed] = useState<string | null>(null);
+  const customDefinitions = definitionsForModule(customFieldDefinitions, config.collection);
+  const [customValues, setCustomValues] = useState<CustomFieldValues>(() =>
+    normalizeCustomFieldValues((entity as unknown as { customFields?: unknown } | null)?.customFields),
+  );
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -517,8 +594,10 @@ function EntityModal({
       ...(config.collection === "findings"
         ? { people: participantSummary(participants), participants }
         : {}),
+      ...(supportsCustomFields(config.collection) ? { customFields: customValues } : {}),
       id: entity?.id ?? createId(),
       createdAt: entity?.createdAt ?? timestamp,
+      __baseUpdatedAt: entity?.updatedAt,
       updatedAt: timestamp,
     } as unknown as AppEntity);
   };
@@ -555,6 +634,20 @@ function EntityModal({
               onChange={(value) => setForm((current) => ({ ...current, [field.key]: value }))}
             />
           ))}
+          <CustomFieldsEditor
+            db={db}
+            definitions={customDefinitions}
+            values={customValues}
+            onChange={setCustomValues}
+          />
+          {supportsCustomFields(config.collection) && onAddCustomField ? (
+            <InlineCustomFieldCreator
+              module={config.collection}
+              db={db}
+              definitions={customFieldDefinitions}
+              onAdd={onAddCustomField}
+            />
+          ) : null}
         </div>
         <div className="modal-actions">
           <button type="button" className="button button-ghost" onClick={onClose}>Скасувати</button>
@@ -564,8 +657,11 @@ function EntityModal({
       {personSeed !== null && onSavePerson ? (
         <PersonFormModal
           researches={researches}
+          db={db}
           initialFullName={personSeed}
           initialResearchId={String(form.researchId ?? "")}
+          customFieldDefinitions={definitionsForModule(customFieldDefinitions, "persons")}
+          onAddCustomField={onAddCustomField}
           onClose={() => setPersonSeed(null)}
           onSave={(person) => {
             onSavePerson(person);
@@ -980,16 +1076,14 @@ function ParticipantsEditor({
 
 function searchableValue(value: unknown): string {
   if (typeof value === "string") return value.toLocaleLowerCase("uk");
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value).toLocaleLowerCase("uk");
+  }
   if (Array.isArray(value)) {
-    return value
-      .map((item) => {
-        if (item && typeof item === "object") {
-          return Object.values(item).filter((part) => typeof part === "string").join(" ");
-        }
-        return String(item ?? "");
-      })
-      .join(" ")
-      .toLocaleLowerCase("uk");
+    return value.map(searchableValue).join(" ");
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).map(searchableValue).join(" ");
   }
   return "";
 }

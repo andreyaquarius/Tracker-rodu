@@ -1,4 +1,7 @@
-export type PageKey =
+import type { CustomSectionDefinition } from "../types";
+import { SectionIcon } from "./SectionIcon";
+
+export type StandardPageKey =
   | "dashboard"
   | "researches"
   | "documents"
@@ -11,7 +14,9 @@ export type PageKey =
   | "backup"
   | "settings";
 
-const items: Array<{ key: PageKey; label: string; icon: string }> = [
+export type PageKey = StandardPageKey | `custom:${string}`;
+
+const mainItems: Array<{ key: StandardPageKey; label: string; icon: string }> = [
   { key: "dashboard", label: "Панель огляду", icon: "⌂" },
   { key: "researches", label: "Дослідження", icon: "Д" },
   { key: "documents", label: "Документи", icon: "Ф" },
@@ -21,6 +26,9 @@ const items: Array<{ key: PageKey; label: string; icon: string }> = [
   { key: "findings", label: "Знахідки", icon: "✓" },
   { key: "hypotheses", label: "Гіпотези", icon: "?" },
   { key: "persons", label: "Особи", icon: "О" },
+];
+
+const systemItems: Array<{ key: StandardPageKey; label: string; icon: string }> = [
   { key: "backup", label: "Резервні копії", icon: "↻" },
   { key: "settings", label: "Налаштування", icon: "⚙" },
 ];
@@ -28,11 +36,12 @@ const items: Array<{ key: PageKey; label: string; icon: string }> = [
 interface SidebarProps {
   page: PageKey;
   onNavigate: (page: PageKey) => void;
+  customSections: CustomSectionDefinition[];
   open: boolean;
   onClose: () => void;
 }
 
-export function Sidebar({ page, onNavigate, open, onClose }: SidebarProps) {
+export function Sidebar({ page, onNavigate, customSections, open, onClose }: SidebarProps) {
   return (
     <>
       {open && <button className="sidebar-scrim" aria-label="Закрити меню" onClick={onClose} />}
@@ -45,7 +54,43 @@ export function Sidebar({ page, onNavigate, open, onClose }: SidebarProps) {
           </div>
         </div>
         <nav>
-          {items.map((item) => (
+          {mainItems.map((item) => (
+            <button
+              key={item.key}
+              className={page === item.key ? "active" : ""}
+              onClick={() => {
+                onNavigate(item.key);
+                onClose();
+              }}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+          {customSections.length ? (
+            <div className="custom-nav-group">
+              <span>Власні розділи</span>
+              {customSections.map((section) => {
+                const key = `custom:${section.id}` as const;
+                return (
+                  <button
+                    key={section.id}
+                    className={page === key ? "active" : ""}
+                    onClick={() => {
+                      onNavigate(key);
+                      onClose();
+                    }}
+                  >
+                    <span className="nav-icon">
+                      <SectionIcon icon={section.icon} size={17} />
+                    </span>
+                    {section.name}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {systemItems.map((item) => (
             <button
               key={item.key}
               className={page === item.key ? "active" : ""}

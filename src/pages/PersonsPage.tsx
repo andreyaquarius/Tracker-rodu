@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type {
+  AppDatabase,
   ArchiveRequest,
+  CustomFieldDefinition,
   Finding,
   Hypothesis,
   Person,
@@ -8,6 +10,7 @@ import type {
   PersonRelationStatus,
   PersonRelationType,
   Research,
+  ScanAttachment,
   TaskRecord,
 } from "../types";
 import { Modal } from "../components/Modal";
@@ -17,6 +20,8 @@ import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile } from "../services/scanStorage";
+import { CustomFieldsView } from "../components/CustomFields";
+import { normalizeCustomFieldValues } from "../utils/customFields";
 
 type PersonTab =
   | "overview"
@@ -28,6 +33,7 @@ type PersonTab =
   | "notes";
 
 export function PersonsPage({
+  db,
   persons,
   relations,
   researches,
@@ -35,6 +41,8 @@ export function PersonsPage({
   tasks,
   hypotheses,
   archiveRequests,
+  customFieldDefinitions = [],
+  onAddCustomField,
   initialSearch = "",
   initialOpenPersonId = "",
   onSavePerson,
@@ -43,7 +51,9 @@ export function PersonsPage({
   onDeleteRelation,
   onOpenRelated,
   onCreateRelated,
+  readOnly = false,
 }: {
+  db: AppDatabase;
   persons: Person[];
   relations: PersonRelation[];
   researches: Research[];
@@ -51,6 +61,8 @@ export function PersonsPage({
   tasks: TaskRecord[];
   hypotheses: Hypothesis[];
   archiveRequests: ArchiveRequest[];
+  customFieldDefinitions?: CustomFieldDefinition[];
+  onAddCustomField?: (definition: CustomFieldDefinition) => void;
   initialSearch?: string;
   initialOpenPersonId?: string;
   onSavePerson: (person: Person) => void;
@@ -59,6 +71,7 @@ export function PersonsPage({
   onDeleteRelation: (id: string) => void;
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
+  readOnly?: boolean;
 }) {
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
@@ -75,6 +88,10 @@ export function PersonsPage({
     const person = persons.find((item) => item.id === initialOpenPersonId);
     if (person) setViewing(person);
   }, [initialOpenPersonId, persons]);
+  useEffect(() => {
+    if (!viewing) return;
+    setViewing(persons.find((person) => person.id === viewing.id) ?? null);
+  }, [persons, viewing?.id]);
 
   const filtered = useMemo(() => {
     const query = normalize(search);
@@ -108,12 +125,14 @@ export function PersonsPage({
   }, [genderFilter, persons, placeFilter, researchFilter, search, statusFilter, surnameFilter]);
 
   const remove = async (person: Person) => {
+    if (readOnly) return;
     if (window.confirm(`Видалити особу «${personDisplayName(person)}»? Пов’язані записи залишаться, але прив’язку буде прибрано.`)) {
       const scans = [
         ...(person.birthScans ?? []),
         ...(person.marriageScans ?? []),
         ...(person.deathScans ?? []),
         ...(person.mentionScans ?? []),
+        ...customAttachmentScans(person.customFields, customFieldDefinitions),
       ];
       await Promise.allSettled(scans.map(deleteScanFile));
       onDeletePerson(person.id);
@@ -129,7 +148,9 @@ export function PersonsPage({
           <h1>Особи</h1>
           <p>Картки людей, варіанти імен, життєві події та зв’язки з доказами.</p>
         </div>
-        <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
+        {!readOnly ? (
+          <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
+        ) : null}
       </div>
 
       <section className="panel">
@@ -201,8 +222,12 @@ export function PersonsPage({
                     <td data-label="Гіпотези">{linkedCount(hypotheses, person.id)}</td>
                     <td data-label="Дії" className="row-actions" onClick={(event) => event.stopPropagation()}>
                       <button className="icon-button" title="Переглянути" onClick={() => setViewing(person)}>◉</button>
-                      <button className="icon-button" title="Редагувати" onClick={() => setEditing(person)}>✎</button>
-                      <button className="icon-button danger" title="Видалити" onClick={() => void remove(person)}>×</button>
+                      {!readOnly ? (
+                        <>
+                          <button className="icon-button" title="Редагувати" onClick={() => setEditing(person)}>✎</button>
+                          <button className="icon-button danger" title="Видалити" onClick={() => void remove(person)}>×</button>
+                        </>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -211,17 +236,22 @@ export function PersonsPage({
           </div>
         ) : (
           <div className="empty-state">
-            <button className="empty-mark" onClick={() => setEditing("new")}>+</button>
+            {!readOnly ? (
+              <button className="empty-mark" onClick={() => setEditing("new")}>+</button>
+            ) : null}
             <h2>Осіб не знайдено</h2>
             <p>Змініть фільтри або додайте першу картку особи.</p>
           </div>
         )}
       </section>
 
-      {editing ? (
+      {editing && !readOnly ? (
         <PersonFormModal
+          db={db}
           person={editing === "new" ? null : editing}
           researches={researches}
+          customFieldDefinitions={customFieldDefinitions}
+          onAddCustomField={onAddCustomField}
           onClose={() => setEditing(null)}
           onSave={(person) => {
             onSavePerson(person);
@@ -232,33 +262,53 @@ export function PersonsPage({
 
       {viewing ? (
         <PersonCardModal
+          db={db}
           person={persons.find((person) => person.id === viewing.id) ?? viewing}
           persons={persons}
           researches={researches}
+          customFieldDefinitions={customFieldDefinitions}
           relations={relations}
           findings={findings}
           tasks={tasks}
           hypotheses={hypotheses}
           archiveRequests={archiveRequests}
           onClose={() => setViewing(null)}
-          onEdit={() => {
-            setEditing(viewing);
-            setViewing(null);
-          }}
+          onEdit={readOnly ? undefined : () => {
+              setEditing(viewing);
+              setViewing(null);
+            }}
           onSaveRelation={onSaveRelation}
           onDeleteRelation={onDeleteRelation}
           onOpenRelated={onOpenRelated}
           onCreateRelated={onCreateRelated}
+          readOnly={readOnly}
         />
       ) : null}
     </>
   );
 }
 
+function customAttachmentScans(
+  values: unknown,
+  definitions: CustomFieldDefinition[],
+): ScanAttachment[] {
+  if (!values || typeof values !== "object" || Array.isArray(values)) return [];
+  const attachmentIds = new Set(
+    definitions
+      .filter((field) => field.type === "attachments")
+      .map((field) => field.id),
+  );
+  return Object.entries(values)
+    .filter(([id, value]) => attachmentIds.has(id) && Array.isArray(value))
+    .flatMap(([, value]) => value as ScanAttachment[]);
+}
+
 function PersonCardModal({
+  db,
   person,
   persons,
   researches,
+  customFieldDefinitions,
   relations,
   findings,
   tasks,
@@ -270,21 +320,25 @@ function PersonCardModal({
   onDeleteRelation,
   onOpenRelated,
   onCreateRelated,
+  readOnly,
 }: {
+  db: AppDatabase;
   person: Person;
   persons: Person[];
   researches: Research[];
+  customFieldDefinitions: CustomFieldDefinition[];
   relations: PersonRelation[];
   findings: Finding[];
   tasks: TaskRecord[];
   hypotheses: Hypothesis[];
   archiveRequests: ArchiveRequest[];
   onClose: () => void;
-  onEdit: () => void;
+  onEdit?: () => void;
   onSaveRelation: (relation: PersonRelation) => void;
   onDeleteRelation: (id: string) => void;
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
+  readOnly: boolean;
 }) {
   const [tab, setTab] = useState<PersonTab>("overview");
   const [relationFormOpen, setRelationFormOpen] = useState(false);
@@ -316,13 +370,21 @@ function PersonCardModal({
           ))}
         </div>
         <div className="person-tab-content">
-          {tab === "overview" ? <PersonOverview person={person} researches={researches} /> : null}
+          {tab === "overview" ? (
+            <PersonOverview
+              db={db}
+              person={person}
+              researches={researches}
+              customFieldDefinitions={customFieldDefinitions}
+            />
+          ) : null}
           {tab === "findings" ? (
             <LinkedRecordsSection
               records={linkedFindings}
               type="finding"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("findings", findingDraftFor(person))}
+              readOnly={readOnly}
             />
           ) : null}
           {tab === "tasks" ? (
@@ -331,6 +393,7 @@ function PersonCardModal({
               type="task"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("tasks", taskDraftFor(person))}
+              readOnly={readOnly}
             />
           ) : null}
           {tab === "hypotheses" ? (
@@ -339,6 +402,7 @@ function PersonCardModal({
               type="hypothesis"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("hypotheses", hypothesisDraftFor(person))}
+              readOnly={readOnly}
             />
           ) : null}
           {tab === "archiveRequests" ? (
@@ -347,6 +411,7 @@ function PersonCardModal({
               type="archiveRequest"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("archiveRequests", archiveRequestDraftFor(person))}
+              readOnly={readOnly}
             />
           ) : null}
           {tab === "notes" ? (
@@ -359,7 +424,9 @@ function PersonCardModal({
                   <h3>Зв’язки особи</h3>
                   <p>Прості спискові зв’язки з оцінкою доказовості.</p>
                 </div>
-                <button className="button button-secondary" onClick={() => setRelationFormOpen(true)}>+ Додати зв’язок</button>
+                {!readOnly ? (
+                  <button className="button button-secondary" onClick={() => setRelationFormOpen(true)}>+ Додати зв’язок</button>
+                ) : null}
               </div>
               {linkedRelations.length ? (
                 <div className="relation-list">
@@ -383,13 +450,15 @@ function PersonCardModal({
                           {relation.evidenceText ? <p>{relation.evidenceText}</p> : null}
                           {relation.notes ? <small>{relation.notes}</small> : null}
                         </div>
-                        <button
-                          className="icon-button danger"
-                          title="Видалити зв’язок"
-                          onClick={() => {
-                            if (window.confirm("Видалити цей зв’язок?")) onDeleteRelation(relation.id);
-                          }}
-                        >×</button>
+                        {!readOnly ? (
+                          <button
+                            className="icon-button danger"
+                            title="Видалити зв’язок"
+                            onClick={() => {
+                              if (window.confirm("Видалити цей зв’язок?")) onDeleteRelation(relation.id);
+                            }}
+                          >×</button>
+                        ) : null}
                       </article>
                     );
                   })}
@@ -400,10 +469,12 @@ function PersonCardModal({
         </div>
         <div className="details-actions">
           <button className="button button-ghost" onClick={onClose}>Закрити</button>
-          <button className="button button-primary" onClick={onEdit}>Редагувати</button>
+          {onEdit ? (
+            <button className="button button-primary" onClick={onEdit}>Редагувати</button>
+          ) : null}
         </div>
       </div>
-      {relationFormOpen ? (
+      {relationFormOpen && !readOnly ? (
         <RelationFormModal
           person={person}
           persons={persons}
@@ -419,11 +490,15 @@ function PersonCardModal({
 }
 
 function PersonOverview({
+  db,
   person,
   researches,
+  customFieldDefinitions,
 }: {
+  db: AppDatabase;
   person: Person;
   researches: Research[];
+  customFieldDefinitions: CustomFieldDefinition[];
 }) {
   const research = researches.find((item) => item.id === person.researchId);
   const values = [
@@ -475,6 +550,11 @@ function PersonOverview({
           <ScanAttachmentsView scans={scans} />
         </div>
       ))}
+      <CustomFieldsView
+        db={db}
+        definitions={customFieldDefinitions}
+        values={normalizeCustomFieldValues(person.customFields)}
+      />
     </div>
   );
 }
@@ -484,11 +564,13 @@ function LinkedRecordsSection({
   type,
   onOpen,
   onAdd,
+  readOnly,
 }: {
   records: Array<Finding | TaskRecord | Hypothesis | ArchiveRequest>;
   type: "finding" | "task" | "hypothesis" | "archiveRequest";
   onOpen: (page: PageKey, entityId: string) => void;
   onAdd: () => void;
+  readOnly: boolean;
 }) {
   const labels = {
     finding: ["Знахідки особи", "Додати знахідку"],
@@ -504,9 +586,11 @@ function LinkedRecordsSection({
           <h3>{title}</h3>
           <p>Новий запис автоматично буде прив’язаний до цієї особи.</p>
         </div>
-        <button type="button" className="button button-secondary" onClick={onAdd}>
-          + {buttonLabel}
-        </button>
+        {!readOnly ? (
+          <button type="button" className="button button-secondary" onClick={onAdd}>
+            + {buttonLabel}
+          </button>
+        ) : null}
       </div>
       <LinkedRecords records={records} type={type} onOpen={onOpen} />
     </div>

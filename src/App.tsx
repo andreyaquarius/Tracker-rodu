@@ -1,5 +1,22 @@
-import { useEffect, useState } from "react";
-import type { AppEntity, CollectionKey, Person, PersonRelation } from "./types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  ActivityLogEntry,
+  ArchiveRequest,
+  AppDatabase,
+  AppEntity,
+  CollectionKey,
+  CustomFieldDefinition,
+  CustomSectionRecord,
+  DocumentRecord,
+  Finding,
+  Hypothesis,
+  Person,
+  PersonRelation,
+  Research,
+  ScanAttachment,
+  TaskRecord,
+  YearMatrixRecord,
+} from "./types";
 import { useAppDatabase } from "./hooks/useAppDatabase";
 import { Layout } from "./components/Layout";
 import type { PageKey } from "./components/Sidebar";
@@ -11,10 +28,244 @@ import { BackupPage } from "./pages/BackupPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PersonsPage } from "./pages/PersonsPage";
+import { CustomSectionPage } from "./pages/CustomSectionPage";
+import { ProjectTeamModal } from "./components/ProjectTeamModal";
 import { prepareGoogleSignIn } from "./services/googleAuth";
+import {
+  createSupabaseWorkspace,
+  deleteSupabaseWorkspace,
+  ensureSupabaseWorkspace,
+  getAccountFromSession,
+  getSupabaseSession,
+  isSupabaseConfigured,
+  listSupabaseWorkspaces,
+  onSupabaseAuthChange,
+  signInWithSupabaseGoogle,
+  signInWithSupabaseEmail,
+  signUpWithSupabaseEmail,
+  signOutFromSupabase,
+  type SupabaseAccount,
+  type SupabaseWorkspace,
+} from "./services/supabaseAuth";
+import {
+  canMigrateResearches,
+  clearProjectResearchCache,
+  deleteProjectResearch,
+  importProjectResearches,
+  listProjectResearches,
+  loadProjectResearchCache,
+  saveProjectResearch,
+  saveProjectResearchCache,
+} from "./services/projectResearches";
+import {
+  canMigratePeople,
+  clearProjectPeopleCache,
+  deleteProjectPerson,
+  deleteProjectPersonRelation,
+  importProjectPeople,
+  listProjectPeople,
+  loadProjectPeopleCache,
+  saveProjectPeopleCache,
+  saveProjectPerson,
+  saveProjectPersonRelation,
+} from "./services/projectPeople";
+import {
+  canMigrateDocuments,
+  clearProjectDocumentsCache,
+  deleteProjectDocument,
+  deleteProjectYearMatrixRecord,
+  importProjectDocuments,
+  listProjectDocuments,
+  loadProjectDocumentsCache,
+  saveProjectDocument,
+  saveProjectDocumentsCache,
+  saveProjectYearMatrixRecord,
+} from "./services/projectDocuments";
+import {
+  canMigrateWorkRecords,
+  clearProjectWorkRecordsCache,
+  deleteProjectFinding,
+  deleteProjectTask,
+  importProjectWorkRecords,
+  listProjectWorkRecords,
+  loadProjectWorkRecordsCache,
+  saveProjectFinding,
+  saveProjectTask,
+  saveProjectWorkRecordsCache,
+} from "./services/projectWorkRecords";
+import {
+  canMigrateAnalysisRecords,
+  clearProjectAnalysisRecordsCache,
+  deleteProjectArchiveRequest,
+  deleteProjectHypothesis,
+  deleteProjectHypothesisTargetLinks,
+  importProjectAnalysisRecords,
+  listProjectAnalysisRecords,
+  loadProjectAnalysisRecordsCache,
+  saveProjectAnalysisRecordsCache,
+  saveProjectArchiveRequest,
+  saveProjectHypothesis,
+} from "./services/projectAnalysisRecords";
+import {
+  canMigrateCustomStructure,
+  clearProjectCustomStructureCache,
+  deleteProjectCustomRecord,
+  deleteProjectCustomSection,
+  importProjectCustomStructure,
+  listProjectCustomStructure,
+  loadProjectCustomStructureCache,
+  saveProjectCustomFieldDefinition,
+  saveProjectCustomRecord,
+  saveProjectCustomSection,
+  saveProjectCustomStructureCache,
+} from "./services/projectCustomStructure";
+import {
+  addProjectActivity,
+  createGenericProjectActivity,
+  deleteProjectAttachmentMetadata,
+  listProjectActivity,
+  syncProjectAttachmentMetadata,
+} from "./services/projectMetadata";
+import {
+  loadProjectPreferences,
+  saveProjectPreferences,
+  type ProjectPreferences,
+} from "./services/projectSettings";
+import {
+  clearProjectRecords,
+  createProjectBackup,
+} from "./services/projectBackups";
+import {
+  subscribeProjectRealtime,
+  type ProjectRealtimeGroup,
+} from "./services/projectRealtime";
+import { assertProjectRecordUnchanged } from "./services/projectConflicts";
+import {
+  deleteMigratedLocalFiles,
+  migrateProjectAttachmentsToSupabase,
+  setProjectAttachmentTarget,
+} from "./services/scanStorage";
+import { createActivityEntries } from "./utils/activityLog";
 
-const ONBOARDING_KEY = "tracker-rodu-onboarded";
-const LEGACY_ONBOARDING_KEY = "rodovyi-navigator-onboarded";
+const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
+const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
+const RESEARCH_MIGRATION_KEY = "tracker-rodu-researches-migrated";
+const PEOPLE_MIGRATION_KEY = "tracker-rodu-people-migrated";
+const DOCUMENTS_MIGRATION_KEY = "tracker-rodu-documents-migrated";
+const WORK_RECORDS_MIGRATION_KEY = "tracker-rodu-work-records-migrated";
+const ANALYSIS_RECORDS_MIGRATION_KEY = "tracker-rodu-analysis-records-migrated";
+const CUSTOM_STRUCTURE_MIGRATION_KEY = "tracker-rodu-custom-structure-migrated";
+const PROJECT_ATTACHMENTS_MIGRATION_KEY = "tracker-rodu-project-attachments-migrated";
+const PROJECT_ATTACHMENT_METADATA_KEY = "tracker-rodu-attachment-metadata-synced";
+const LEGACY_MIGRATION_OWNER_KEY = "tracker-rodu-legacy-migration-owner";
+
+function canUseLegacyMigration(email: string): boolean {
+  const normalizedEmail = email.trim().toLocaleLowerCase("uk");
+  if (!normalizedEmail) return false;
+
+  const explicitOwner = localStorage.getItem(LEGACY_MIGRATION_OWNER_KEY);
+  if (explicitOwner) return explicitOwner === normalizedEmail;
+
+  const migrationPrefixes = [
+    RESEARCH_MIGRATION_KEY,
+    PEOPLE_MIGRATION_KEY,
+    DOCUMENTS_MIGRATION_KEY,
+    WORK_RECORDS_MIGRATION_KEY,
+    ANALYSIS_RECORDS_MIGRATION_KEY,
+    CUSTOM_STRUCTURE_MIGRATION_KEY,
+  ];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    const prefix = migrationPrefixes.find((candidate) =>
+      key?.startsWith(`${candidate}:`),
+    );
+    if (!key || !prefix) continue;
+    const inferredOwner = key
+      .slice(prefix.length + 1)
+      .split(":")[0]
+      .trim()
+      .toLocaleLowerCase("uk");
+    if (inferredOwner) {
+      localStorage.setItem(LEGACY_MIGRATION_OWNER_KEY, inferredOwner);
+      return inferredOwner === normalizedEmail;
+    }
+  }
+
+  localStorage.setItem(LEGACY_MIGRATION_OWNER_KEY, normalizedEmail);
+  return true;
+}
+
+function chooseWorkspace(
+  items: SupabaseWorkspace[],
+  preferredProjectId: string | null,
+  fallbackProjectId?: string,
+): SupabaseWorkspace | null {
+  if (!items.length) return null;
+  return (
+    items.find((item) => item.projectId === preferredProjectId) ??
+    items.find((item) => item.projectId === fallbackProjectId) ??
+    items[0]
+  );
+}
+
+function scanList(value: unknown): ScanAttachment[] {
+  return Array.isArray(value) ? value as ScanAttachment[] : [];
+}
+
+function projectAttachmentFields(
+  collection: CollectionKey,
+  entity: AppEntity,
+  db: AppDatabase,
+): Record<string, ScanAttachment[]> {
+  const fields: Record<string, ScanAttachment[]> = {};
+  const record = entity as unknown as Record<string, unknown>;
+
+  if (collection === "documents" || collection === "findings") {
+    fields.scans = scanList(record.scans);
+  }
+  if (collection === "persons") {
+    fields.birthScans = scanList(record.birthScans);
+    fields.marriageScans = scanList(record.marriageScans);
+    fields.deathScans = scanList(record.deathScans);
+    fields.mentionScans = scanList(record.mentionScans);
+  }
+  if (collection === "archiveRequests") {
+    fields.requestScans = scanList(record.requestScans);
+    fields.responseScans = scanList(record.responseScans);
+  }
+
+  const customValues = (
+    record.customFields &&
+    typeof record.customFields === "object" &&
+    !Array.isArray(record.customFields)
+  )
+    ? record.customFields as Record<string, unknown>
+    : {};
+  for (const definition of db.settings.customFields) {
+    if (definition.module !== collection || definition.type !== "attachments") continue;
+    fields[`custom:${definition.id}`] = scanList(customValues[definition.id]);
+  }
+  return fields;
+}
+
+function activityModuleLabel(collection: CollectionKey): string {
+  const labels: Record<CollectionKey, string> = {
+    researches: "Дослідження",
+    documents: "Документи",
+    yearMatrix: "Матриця років",
+    tasks: "Завдання",
+    findings: "Знахідки",
+    hypotheses: "Гіпотези",
+    archiveRequests: "Запити в архів",
+    persons: "Особи",
+  };
+  return labels[collection];
+}
+
+function baseUpdatedAt(entity: object): string | undefined {
+  const value = (entity as Record<string, unknown>).__baseUpdatedAt;
+  return typeof value === "string" ? value : undefined;
+}
 
 export default function App() {
   const app = useAppDatabase();
@@ -27,33 +278,1517 @@ export default function App() {
     initialValues: Record<string, unknown>;
   } | null>(null);
   const [onboarded, setOnboarded] = useState(() => {
-    const value =
-      localStorage.getItem(ONBOARDING_KEY) ??
-      localStorage.getItem(LEGACY_ONBOARDING_KEY);
-    if (value === "1") {
-      localStorage.setItem(ONBOARDING_KEY, "1");
-      localStorage.removeItem(LEGACY_ONBOARDING_KEY);
-      return true;
-    }
-    return false;
+    return localStorage.getItem(ACCOUNT_ONBOARDING_KEY) === "1";
   });
   const [loginError, setLoginError] = useState("");
+  const [isAccountSigningIn, setIsAccountSigningIn] = useState(false);
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [account, setAccount] = useState<SupabaseAccount | null>(null);
+  const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
+  const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
+  const [projectResearches, setProjectResearches] = useState<Research[]>([]);
+  const [researchesReadyForProject, setResearchesReadyForProject] = useState<string | null>(null);
+  const [projectPersons, setProjectPersons] = useState<Person[]>([]);
+  const [projectPersonRelations, setProjectPersonRelations] = useState<PersonRelation[]>([]);
+  const [projectDocuments, setProjectDocuments] = useState<DocumentRecord[]>([]);
+  const [projectYearMatrix, setProjectYearMatrix] = useState<YearMatrixRecord[]>([]);
+  const [documentsReadyForProject, setDocumentsReadyForProject] = useState<string | null>(null);
+  const [peopleReadyForProject, setPeopleReadyForProject] = useState<string | null>(null);
+  const [projectTasks, setProjectTasks] = useState<TaskRecord[]>([]);
+  const [projectFindings, setProjectFindings] = useState<Finding[]>([]);
+  const [workRecordsReadyForProject, setWorkRecordsReadyForProject] =
+    useState<string | null>(null);
+  const [projectHypotheses, setProjectHypotheses] = useState<Hypothesis[]>([]);
+  const [projectArchiveRequests, setProjectArchiveRequests] =
+    useState<ArchiveRequest[]>([]);
+  const [analysisReadyForProject, setAnalysisReadyForProject] = useState<string | null>(null);
+  const [projectCustomFields, setProjectCustomFields] =
+    useState<CustomFieldDefinition[]>([]);
+  const [projectCustomSections, setProjectCustomSections] = useState(
+    app.db.customSections,
+  );
+  const [projectCustomRecords, setProjectCustomRecords] = useState(
+    app.db.customSectionRecords,
+  );
+  const [customStructureReadyForProject, setCustomStructureReadyForProject] =
+    useState<string | null>(null);
+  const [projectActivity, setProjectActivity] = useState<ActivityLogEntry[]>([]);
+  const [projectPreferences, setProjectPreferences] = useState<ProjectPreferences>(
+    () => ({
+      researcherName: app.db.settings.researcherName,
+      compactTables: app.db.settings.compactTables,
+      lastAutomaticBackupAt: app.db.settings.lastAutomaticBackupAt,
+    }),
+  );
+  const [projectPreferencesReadyFor, setProjectPreferencesReadyFor] =
+    useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
+  const workspaceSetupRef = useRef<Promise<void> | null>(null);
+  const lastPreparedUserRef = useRef<string | null>(null);
+  const activeWorkspaceIdRef = useRef<string | null>(null);
+  const attachmentMigrationRef = useRef<string | null>(null);
+  const attachmentMetadataRef = useRef<string | null>(null);
+  const automaticProjectBackupRef = useRef<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const syncedPreferencesRef = useRef<{
+    projectId: string;
+    value: string;
+  } | null>(null);
+
+  const describeError = useCallback((error: unknown, fallback: string) => {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === "object" && error !== null) {
+      const message = "message" in error ? String(error.message ?? "") : "";
+      const details = "details" in error ? String(error.details ?? "") : "";
+      const hint = "hint" in error ? String(error.hint ?? "") : "";
+      const combined = [message, details, hint].filter(Boolean).join(" ");
+      if (combined) return combined;
+    }
+    return fallback;
+  }, []);
 
   useEffect(() => {
     void prepareGoogleSignIn().catch(() => undefined);
   }, []);
 
-  const notify = (message: string, error = false) => {
+  useEffect(() => {
+    if (!account) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("openTeam") !== "1") return;
+    setTeamOpen(true);
+    url.searchParams.delete("openTeam");
+    window.history.replaceState({}, "", url);
+  }, [account]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    let active = true;
+    const prepareWorkspace = async (session: Awaited<ReturnType<typeof getSupabaseSession>>) => {
+      if (!session) {
+        setAccount(null);
+        setWorkspace(null);
+        setWorkspaces([]);
+        setIsAccountSigningIn(false);
+        lastPreparedUserRef.current = null;
+        return;
+      }
+
+      if (workspaceSetupRef.current) {
+        await workspaceSetupRef.current;
+        return;
+      }
+
+      const currentAccount = getAccountFromSession(session);
+      setAccount(currentAccount);
+      if (!currentAccount) {
+        setWorkspace(null);
+        setWorkspaces([]);
+        setIsAccountSigningIn(false);
+        return;
+      }
+
+      setIsAccountSigningIn(true);
+      workspaceSetupRef.current = (async () => {
+        const ensuredWorkspace = await ensureSupabaseWorkspace(session, currentAccount);
+        const fetchedWorkspaces = await listSupabaseWorkspaces();
+        if (!active) return;
+
+        const availableWorkspaces = fetchedWorkspaces.length ? fetchedWorkspaces : [ensuredWorkspace];
+        const activeWorkspace = chooseWorkspace(
+          availableWorkspaces,
+          localStorage.getItem(ACTIVE_WORKSPACE_KEY),
+          ensuredWorkspace.projectId,
+        );
+
+        setWorkspaces(availableWorkspaces);
+        setWorkspace(activeWorkspace);
+        if (activeWorkspace) {
+          localStorage.setItem(ACTIVE_WORKSPACE_KEY, activeWorkspace.projectId);
+        }
+        localStorage.setItem(ACCOUNT_ONBOARDING_KEY, "1");
+        setOnboarded(true);
+        lastPreparedUserRef.current = session.user.id;
+      })();
+
+      try {
+        await workspaceSetupRef.current;
+      } finally {
+        workspaceSetupRef.current = null;
+        if (active) setIsAccountSigningIn(false);
+      }
+    };
+
+    void getSupabaseSession()
+      .then((session) => {
+        if (!active) return;
+        return prepareWorkspace(session);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setIsAccountSigningIn(false);
+        setLoginError(
+          describeError(error, "Не вдалося перевірити вхід до облікового запису."),
+        );
+      });
+
+    const subscription = onSupabaseAuthChange((session) => {
+      if (!active) return;
+      void prepareWorkspace(session).catch((error: unknown) => {
+        if (!active) return;
+        setIsAccountSigningIn(false);
+        setLoginError(
+          describeError(error, "Не вдалося підготувати ваш робочий простір."),
+        );
+      });
+    });
+
+    return () => {
+      active = false;
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  const notify = useCallback((message: string, error = false) => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     setToast({ message, error });
-    window.setTimeout(() => setToast(null), 3500);
-  };
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 3500);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    activeWorkspaceIdRef.current = workspace?.projectId ?? null;
+    setProjectAttachmentTarget(workspace?.projectId ?? null);
+  }, [workspace?.projectId]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectPreferencesReadyFor(null);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const fallback = {
+      researcherName: app.db.settings.researcherName,
+      compactTables: app.db.settings.compactTables,
+      lastAutomaticBackupAt: app.db.settings.lastAutomaticBackupAt,
+    };
+    setProjectPreferencesReadyFor(null);
+    syncedPreferencesRef.current = null;
+    setProjectPreferences(fallback);
+    let active = true;
+    void loadProjectPreferences(projectId, fallback)
+      .then((preferences) => {
+        if (!active) return;
+        syncedPreferencesRef.current = {
+          projectId,
+          value: JSON.stringify(preferences),
+        };
+        setProjectPreferences(preferences);
+        setProjectPreferencesReadyFor(projectId);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        notify(
+          describeError(error, "Не вдалося завантажити налаштування проєкту."),
+          true,
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    app.db.settings.compactTables,
+    app.db.settings.lastAutomaticBackupAt,
+    app.db.settings.researcherName,
+    describeError,
+    notify,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (
+      !workspace ||
+      workspace.role !== "owner" ||
+      projectPreferencesReadyFor !== workspace.projectId
+    ) {
+      return;
+    }
+    const projectId = workspace.projectId;
+    const serialized = JSON.stringify(projectPreferences);
+    if (
+      syncedPreferencesRef.current?.projectId === projectId &&
+      syncedPreferencesRef.current.value === serialized
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const previousSynced = syncedPreferencesRef.current;
+      syncedPreferencesRef.current = { projectId, value: serialized };
+      void saveProjectPreferences(projectId, projectPreferences).catch(
+        (error: unknown) => {
+          syncedPreferencesRef.current = previousSynced;
+          notify(
+            describeError(error, "Не вдалося зберегти налаштування проєкту."),
+            true,
+          );
+        },
+      );
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    describeError,
+    notify,
+    projectPreferences,
+    projectPreferencesReadyFor,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectActivity([]);
+      return;
+    }
+    let active = true;
+    void listProjectActivity(workspace.projectId)
+      .then((entries) => {
+        if (active) setProjectActivity(entries);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        notify(
+          describeError(error, "Не вдалося завантажити журнал активності проєкту."),
+          true,
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [account, describeError, notify, workspace]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectResearches([]);
+      setResearchesReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    const canUseLegacy =
+      workspace.role === "owner" && canUseLegacyMigration(account.email);
+    setResearchesReadyForProject(null);
+    const migrationKey = `${RESEARCH_MIGRATION_KEY}:${account.email}`;
+    const migratedProjectId = localStorage.getItem(migrationKey);
+    const cached = loadProjectResearchCache(projectId);
+    const fallback =
+      cached.length || migratedProjectId || !canUseLegacy
+        ? cached
+        : app.db.researches;
+    setProjectResearches(fallback);
+
+    void (async () => {
+      try {
+        let researches = await listProjectResearches(projectId);
+
+        if (
+          canUseLegacy &&
+          !researches.length &&
+          !migratedProjectId &&
+          app.db.researches.length
+        ) {
+          if (!canMigrateResearches(app.db.researches)) {
+            throw new Error(
+              "Старі дослідження мають несумісні ідентифікатори. Автоматичне перенесення зупинено, щоб не пошкодити зв’язки.",
+            );
+          }
+          researches = await importProjectResearches(projectId, app.db.researches);
+          localStorage.setItem(migrationKey, projectId);
+          notify(`Дослідження перенесено до проєкту «${workspace.projectName}».`);
+        } else if (researches.length && !migratedProjectId) {
+          localStorage.setItem(migrationKey, projectId);
+        }
+
+        if (!active) return;
+        saveProjectResearchCache(projectId, researches);
+        setProjectResearches(researches);
+        setResearchesReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallback.length
+              ? "Не вдалося оновити дослідження з бази. Показано локальний кеш."
+              : "Не вдалося завантажити дослідження з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [account, app.db.researches, notify, workspace]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectPersons([]);
+      setProjectPersonRelations([]);
+      setPeopleReadyForProject(null);
+      return;
+    }
+    if (researchesReadyForProject !== workspace.projectId) {
+      const cached = loadProjectPeopleCache(workspace.projectId);
+      setProjectPersons(cached.persons);
+      setProjectPersonRelations(cached.relations);
+      setPeopleReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    const canUseLegacy =
+      workspace.role === "owner" && canUseLegacyMigration(account.email);
+    setPeopleReadyForProject(null);
+    const migrationKey = `${PEOPLE_MIGRATION_KEY}:${account.email}`;
+    const migratedProjectId = localStorage.getItem(migrationKey);
+    const cached = loadProjectPeopleCache(projectId);
+    const fallbackPersons =
+      cached.persons.length || migratedProjectId || !canUseLegacy
+        ? cached.persons
+        : app.db.persons;
+    const fallbackRelations =
+      cached.relations.length || migratedProjectId || !canUseLegacy
+        ? cached.relations
+        : app.db.personRelations;
+    setProjectPersons(fallbackPersons);
+    setProjectPersonRelations(fallbackRelations);
+
+    void (async () => {
+      try {
+        let remote = await listProjectPeople(projectId);
+        const researchMigrationProjectId = localStorage.getItem(
+          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
+        );
+        const canImportHere =
+          canUseLegacy &&
+          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
+
+        if (!migratedProjectId && app.db.persons.length && canImportHere) {
+          if (!canMigratePeople(app.db.persons, app.db.personRelations)) {
+            throw new Error(
+              "Старі картки осіб або зв’язки мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
+            );
+          }
+          await importProjectPeople(
+            projectId,
+            app.db.persons,
+            app.db.personRelations,
+            new Set(projectResearches.map((research) => research.id)),
+          );
+          remote = await listProjectPeople(projectId);
+          localStorage.setItem(migrationKey, projectId);
+          notify(`Осіб і родинні зв’язки перенесено до проєкту «${workspace.projectName}».`);
+        } else if ((remote.persons.length || remote.relations.length) && !migratedProjectId) {
+          localStorage.setItem(migrationKey, projectId);
+        }
+
+        if (!active) return;
+        saveProjectPeopleCache(projectId, remote.persons, remote.relations);
+        setProjectPersons(remote.persons);
+        setProjectPersonRelations(remote.relations);
+        setPeopleReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallbackPersons.length
+              ? "Не вдалося оновити осіб із бази. Показано локальний кеш."
+              : "Не вдалося завантажити осіб із бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    app.db.personRelations,
+    app.db.persons,
+    notify,
+    researchesReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectDocuments([]);
+      setProjectYearMatrix([]);
+      setDocumentsReadyForProject(null);
+      return;
+    }
+    if (researchesReadyForProject !== workspace.projectId) {
+      const cached = loadProjectDocumentsCache(workspace.projectId);
+      setProjectDocuments(cached.documents);
+      setProjectYearMatrix(cached.yearMatrix);
+      setDocumentsReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    const canUseLegacy =
+      workspace.role === "owner" && canUseLegacyMigration(account.email);
+    setDocumentsReadyForProject(null);
+    const migrationKey = `${DOCUMENTS_MIGRATION_KEY}:${account.email}`;
+    const migratedProjectId = localStorage.getItem(migrationKey);
+    const cached = loadProjectDocumentsCache(projectId);
+    const fallbackDocuments =
+      cached.documents.length || migratedProjectId || !canUseLegacy
+        ? cached.documents
+        : app.db.documents;
+    const fallbackMatrix =
+      cached.yearMatrix.length || migratedProjectId || !canUseLegacy
+        ? cached.yearMatrix
+        : app.db.yearMatrix;
+    setProjectDocuments(fallbackDocuments);
+    setProjectYearMatrix(fallbackMatrix);
+
+    void (async () => {
+      try {
+        let remote = await listProjectDocuments(projectId);
+        const researchMigrationProjectId = localStorage.getItem(
+          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
+        );
+        const canImportHere =
+          canUseLegacy &&
+          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
+
+        if (
+          !migratedProjectId &&
+          (app.db.documents.length || app.db.yearMatrix.length) &&
+          canImportHere
+        ) {
+          if (!canMigrateDocuments(app.db.documents, app.db.yearMatrix)) {
+            throw new Error(
+              "Старі документи або записи матриці років мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
+            );
+          }
+          await importProjectDocuments(
+            projectId,
+            app.db.documents,
+            app.db.yearMatrix,
+            new Set(projectResearches.map((research) => research.id)),
+          );
+          remote = await listProjectDocuments(projectId);
+          localStorage.setItem(migrationKey, projectId);
+          notify(
+            `Документи та матрицю років перенесено до проєкту «${workspace.projectName}».`,
+          );
+        } else if (
+          (remote.documents.length || remote.yearMatrix.length) &&
+          !migratedProjectId
+        ) {
+          localStorage.setItem(migrationKey, projectId);
+        }
+
+        if (!active) return;
+        saveProjectDocumentsCache(projectId, remote.documents, remote.yearMatrix);
+        setProjectDocuments(remote.documents);
+        setProjectYearMatrix(remote.yearMatrix);
+        setDocumentsReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallbackDocuments.length || fallbackMatrix.length
+              ? "Не вдалося оновити документи з бази. Показано локальний кеш."
+              : "Не вдалося завантажити документи з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    app.db.documents,
+    app.db.yearMatrix,
+    notify,
+    researchesReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectTasks([]);
+      setProjectFindings([]);
+      setWorkRecordsReadyForProject(null);
+      return;
+    }
+    if (
+      researchesReadyForProject !== workspace.projectId ||
+      peopleReadyForProject !== workspace.projectId ||
+      documentsReadyForProject !== workspace.projectId
+    ) {
+      const cached = loadProjectWorkRecordsCache(workspace.projectId);
+      setProjectTasks(cached.tasks);
+      setProjectFindings(cached.findings);
+      setWorkRecordsReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    const canUseLegacy =
+      workspace.role === "owner" && canUseLegacyMigration(account.email);
+    setWorkRecordsReadyForProject(null);
+    const migrationKey = `${WORK_RECORDS_MIGRATION_KEY}:${account.email}`;
+    const migratedProjectId = localStorage.getItem(migrationKey);
+    const cached = loadProjectWorkRecordsCache(projectId);
+    const fallbackTasks =
+      cached.tasks.length || migratedProjectId || !canUseLegacy
+        ? cached.tasks
+        : app.db.tasks;
+    const fallbackFindings =
+      cached.findings.length || migratedProjectId || !canUseLegacy
+        ? cached.findings
+        : app.db.findings;
+    setProjectTasks(fallbackTasks);
+    setProjectFindings(fallbackFindings);
+
+    void (async () => {
+      try {
+        let remote = await listProjectWorkRecords(projectId);
+        const researchMigrationProjectId = localStorage.getItem(
+          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
+        );
+        const canImportHere =
+          canUseLegacy &&
+          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
+
+        if (
+          !migratedProjectId &&
+          (app.db.tasks.length || app.db.findings.length) &&
+          canImportHere
+        ) {
+          if (!canMigrateWorkRecords(app.db.tasks, app.db.findings)) {
+            throw new Error(
+              "Старі завдання або знахідки мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
+            );
+          }
+          await importProjectWorkRecords(
+            projectId,
+            app.db.tasks,
+            app.db.findings,
+            new Set(projectResearches.map((research) => research.id)),
+            new Set(projectDocuments.map((document) => document.id)),
+            new Set(projectPersons.map((person) => person.id)),
+          );
+          remote = await listProjectWorkRecords(projectId);
+          localStorage.setItem(migrationKey, projectId);
+          notify(`Завдання та знахідки перенесено до проєкту «${workspace.projectName}».`);
+        } else if ((remote.tasks.length || remote.findings.length) && !migratedProjectId) {
+          localStorage.setItem(migrationKey, projectId);
+        }
+
+        if (!active) return;
+        saveProjectWorkRecordsCache(projectId, remote.tasks, remote.findings);
+        setProjectTasks(remote.tasks);
+        setProjectFindings(remote.findings);
+        setWorkRecordsReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallbackTasks.length || fallbackFindings.length
+              ? "Не вдалося оновити завдання і знахідки з бази. Показано локальний кеш."
+              : "Не вдалося завантажити завдання і знахідки з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    app.db.findings,
+    app.db.tasks,
+    documentsReadyForProject,
+    notify,
+    peopleReadyForProject,
+    researchesReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectHypotheses([]);
+      setProjectArchiveRequests([]);
+      setAnalysisReadyForProject(null);
+      return;
+    }
+    if (
+      researchesReadyForProject !== workspace.projectId ||
+      peopleReadyForProject !== workspace.projectId ||
+      documentsReadyForProject !== workspace.projectId ||
+      workRecordsReadyForProject !== workspace.projectId
+    ) {
+      const cached = loadProjectAnalysisRecordsCache(workspace.projectId);
+      setProjectHypotheses(cached.hypotheses);
+      setProjectArchiveRequests(cached.archiveRequests);
+      setAnalysisReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    const canUseLegacy =
+      workspace.role === "owner" && canUseLegacyMigration(account.email);
+    setAnalysisReadyForProject(null);
+    const migrationKey = `${ANALYSIS_RECORDS_MIGRATION_KEY}:${account.email}`;
+    const migratedProjectId = localStorage.getItem(migrationKey);
+    const cached = loadProjectAnalysisRecordsCache(projectId);
+    const fallbackHypotheses =
+      cached.hypotheses.length || migratedProjectId || !canUseLegacy
+        ? cached.hypotheses
+        : app.db.hypotheses;
+    const fallbackRequests =
+      cached.archiveRequests.length || migratedProjectId || !canUseLegacy
+        ? cached.archiveRequests
+        : app.db.archiveRequests;
+    setProjectHypotheses(fallbackHypotheses);
+    setProjectArchiveRequests(fallbackRequests);
+
+    void (async () => {
+      try {
+        let remote = await listProjectAnalysisRecords(projectId);
+        const researchMigrationProjectId = localStorage.getItem(
+          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
+        );
+        const canImportHere =
+          canUseLegacy &&
+          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
+
+        if (
+          !migratedProjectId &&
+          (app.db.hypotheses.length || app.db.archiveRequests.length) &&
+          canImportHere
+        ) {
+          if (
+            !canMigrateAnalysisRecords(
+              app.db.hypotheses,
+              app.db.archiveRequests,
+            )
+          ) {
+            throw new Error(
+              "Старі гіпотези або архівні запити мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
+            );
+          }
+          await importProjectAnalysisRecords(
+            projectId,
+            app.db.hypotheses,
+            app.db.archiveRequests,
+            new Set(projectResearches.map((research) => research.id)),
+            new Set(projectPersons.map((person) => person.id)),
+            new Set(projectDocuments.map((document) => document.id)),
+            new Set(projectFindings.map((finding) => finding.id)),
+          );
+          remote = await listProjectAnalysisRecords(projectId);
+          localStorage.setItem(migrationKey, projectId);
+          notify(
+            `Гіпотези та запити в архів перенесено до проєкту «${workspace.projectName}».`,
+          );
+        } else if (
+          (remote.hypotheses.length || remote.archiveRequests.length) &&
+          !migratedProjectId
+        ) {
+          localStorage.setItem(migrationKey, projectId);
+        }
+
+        if (!active) return;
+        saveProjectAnalysisRecordsCache(
+          projectId,
+          remote.hypotheses,
+          remote.archiveRequests,
+        );
+        setProjectHypotheses(remote.hypotheses);
+        setProjectArchiveRequests(remote.archiveRequests);
+        setAnalysisReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallbackHypotheses.length || fallbackRequests.length
+              ? "Не вдалося оновити гіпотези й архівні запити з бази. Показано локальний кеш."
+              : "Не вдалося завантажити гіпотези й архівні запити з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    app.db.archiveRequests,
+    app.db.hypotheses,
+    documentsReadyForProject,
+    notify,
+    peopleReadyForProject,
+    researchesReadyForProject,
+    workRecordsReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectCustomFields([]);
+      setProjectCustomSections([]);
+      setProjectCustomRecords([]);
+      setCustomStructureReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    const canUseLegacy =
+      workspace.role === "owner" && canUseLegacyMigration(account.email);
+    setCustomStructureReadyForProject(null);
+    const migrationKey = `${CUSTOM_STRUCTURE_MIGRATION_KEY}:${account.email}`;
+    const migratedProjectId = localStorage.getItem(migrationKey);
+    const cached = loadProjectCustomStructureCache(projectId);
+    const hasCached =
+      cached.definitions.length || cached.sections.length || cached.records.length;
+    const fallback = hasCached || migratedProjectId || !canUseLegacy
+      ? cached
+      : {
+          definitions: app.db.settings.customFields,
+          sections: app.db.customSections,
+          records: app.db.customSectionRecords,
+        };
+    setProjectCustomFields(fallback.definitions);
+    setProjectCustomSections(fallback.sections);
+    setProjectCustomRecords(fallback.records);
+
+    void (async () => {
+      try {
+        let remote = await listProjectCustomStructure(projectId);
+        const hasLocal =
+          app.db.settings.customFields.length ||
+          app.db.customSections.length ||
+          app.db.customSectionRecords.length;
+        const researchMigrationProjectId = localStorage.getItem(
+          `${RESEARCH_MIGRATION_KEY}:${account.email}`,
+        );
+        const canImportHere =
+          canUseLegacy &&
+          (!researchMigrationProjectId || researchMigrationProjectId === projectId);
+
+        if (!migratedProjectId && hasLocal && canImportHere) {
+          if (
+            !canMigrateCustomStructure(
+              app.db.settings.customFields,
+              app.db.customSections,
+              app.db.customSectionRecords,
+            )
+          ) {
+            throw new Error(
+              "Власні розділи або поля мають несумісні ідентифікатори. Автоматичне перенесення зупинено.",
+            );
+          }
+          await importProjectCustomStructure(
+            projectId,
+            app.db.settings.customFields,
+            app.db.customSections,
+            app.db.customSectionRecords,
+          );
+          remote = await listProjectCustomStructure(projectId);
+          localStorage.setItem(migrationKey, projectId);
+          notify(
+            `Власні розділи та додаткові поля перенесено до проєкту «${workspace.projectName}».`,
+          );
+        } else if (
+          (remote.definitions.length || remote.sections.length || remote.records.length) &&
+          !migratedProjectId
+        ) {
+          localStorage.setItem(migrationKey, projectId);
+        }
+
+        if (!active) return;
+        saveProjectCustomStructureCache(
+          projectId,
+          remote.definitions,
+          remote.sections,
+          remote.records,
+        );
+        setProjectCustomFields(remote.definitions);
+        setProjectCustomSections(remote.sections);
+        setProjectCustomRecords(remote.records);
+        setCustomStructureReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            hasCached
+              ? "Не вдалося оновити власні розділи з бази. Показано локальний кеш."
+              : "Не вдалося завантажити власні розділи з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    app.db.customSectionRecords,
+    app.db.customSections,
+    app.db.settings.customFields,
+    notify,
+    workspace,
+  ]);
+
+  const activeDb = useMemo<AppDatabase>(
+    () =>
+      workspace
+        ? {
+            ...app.db,
+            researches: projectResearches,
+            persons: projectPersons,
+            personRelations: projectPersonRelations,
+            documents: projectDocuments,
+            yearMatrix: projectYearMatrix,
+            tasks: projectTasks,
+            findings: projectFindings,
+            hypotheses: projectHypotheses,
+            archiveRequests: projectArchiveRequests,
+            customSections: projectCustomSections,
+            customSectionRecords: projectCustomRecords,
+            activityLog: projectActivity,
+            settings: {
+              ...app.db.settings,
+              ...projectPreferences,
+              customFields: projectCustomFields,
+            },
+          }
+        : app.db,
+    [
+      app.db,
+      projectDocuments,
+      projectArchiveRequests,
+      projectActivity,
+      projectCustomFields,
+      projectCustomRecords,
+      projectCustomSections,
+      projectFindings,
+      projectHypotheses,
+      projectPersonRelations,
+      projectPersons,
+      projectPreferences,
+      projectResearches,
+      projectTasks,
+      projectYearMatrix,
+      workspace,
+    ],
+  );
+
+  useEffect(() => {
+    if (!workspace || !account) return;
+    const projectId = workspace.projectId;
+    let active = true;
+    let refreshing = false;
+    const queued = new Set<ProjectRealtimeGroup>();
+
+    const refreshGroups = async (groups: Set<ProjectRealtimeGroup>) => {
+      groups.forEach((group) => queued.add(group));
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        while (active && queued.size) {
+          const current = new Set(queued);
+          queued.clear();
+          const jobs: Promise<void>[] = [];
+
+          if (current.has("project")) {
+            jobs.push(
+              loadProjectPreferences(projectId, projectPreferences).then(
+                (preferences) => {
+                  if (activeWorkspaceIdRef.current !== projectId) return;
+                  syncedPreferencesRef.current = {
+                    projectId,
+                    value: JSON.stringify(preferences),
+                  };
+                  setProjectPreferences(preferences);
+                },
+              ),
+            );
+          }
+          if (current.has("researches")) {
+            jobs.push(
+              listProjectResearches(projectId).then((records) => {
+                if (activeWorkspaceIdRef.current !== projectId) return;
+                setProjectResearches(records);
+                saveProjectResearchCache(projectId, records);
+              }),
+            );
+          }
+          if (current.has("people")) {
+            jobs.push(
+              listProjectPeople(projectId).then((records) => {
+                if (activeWorkspaceIdRef.current !== projectId) return;
+                setProjectPersons(records.persons);
+                setProjectPersonRelations(records.relations);
+                saveProjectPeopleCache(
+                  projectId,
+                  records.persons,
+                  records.relations,
+                );
+              }),
+            );
+          }
+          if (current.has("documents")) {
+            jobs.push(
+              listProjectDocuments(projectId).then((records) => {
+                if (activeWorkspaceIdRef.current !== projectId) return;
+                setProjectDocuments(records.documents);
+                setProjectYearMatrix(records.yearMatrix);
+                saveProjectDocumentsCache(
+                  projectId,
+                  records.documents,
+                  records.yearMatrix,
+                );
+              }),
+            );
+          }
+          if (current.has("work")) {
+            jobs.push(
+              listProjectWorkRecords(projectId).then((records) => {
+                if (activeWorkspaceIdRef.current !== projectId) return;
+                setProjectTasks(records.tasks);
+                setProjectFindings(records.findings);
+                saveProjectWorkRecordsCache(
+                  projectId,
+                  records.tasks,
+                  records.findings,
+                );
+              }),
+            );
+          }
+          if (current.has("analysis")) {
+            jobs.push(
+              listProjectAnalysisRecords(projectId).then((records) => {
+                if (activeWorkspaceIdRef.current !== projectId) return;
+                setProjectHypotheses(records.hypotheses);
+                setProjectArchiveRequests(records.archiveRequests);
+                saveProjectAnalysisRecordsCache(
+                  projectId,
+                  records.hypotheses,
+                  records.archiveRequests,
+                );
+              }),
+            );
+          }
+          if (current.has("custom")) {
+            jobs.push(
+              listProjectCustomStructure(projectId).then((records) => {
+                if (activeWorkspaceIdRef.current !== projectId) return;
+                setProjectCustomFields(records.definitions);
+                setProjectCustomSections(records.sections);
+                setProjectCustomRecords(records.records);
+                saveProjectCustomStructureCache(
+                  projectId,
+                  records.definitions,
+                  records.sections,
+                  records.records,
+                );
+              }),
+            );
+          }
+          if (current.has("activity")) {
+            jobs.push(
+              listProjectActivity(projectId).then((records) => {
+                if (activeWorkspaceIdRef.current === projectId) {
+                  setProjectActivity(records);
+                }
+              }),
+            );
+          }
+
+          const results = await Promise.allSettled(jobs);
+          if (results.some((result) => result.status === "rejected")) {
+            throw new Error("Не вдалося оновити частину змін проєкту.");
+          }
+        }
+      } catch (error) {
+        if (active) {
+          notify(describeError(error, "Не вдалося отримати зміни проєкту."), true);
+        }
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    const unsubscribe = subscribeProjectRealtime(
+      projectId,
+      account.id,
+      (groups, changedByOtherUser) => {
+      if (changedByOtherUser) {
+        notify("Інший учасник оновив дані проєкту.");
+      }
+      void refreshGroups(groups);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [
+    account,
+    describeError,
+    notify,
+    projectPreferences,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (
+      !workspace ||
+      !account ||
+      workspace.role !== "owner" ||
+      !canUseLegacyMigration(account.email)
+    ) return;
+    if (
+      researchesReadyForProject !== workspace.projectId ||
+      peopleReadyForProject !== workspace.projectId ||
+      documentsReadyForProject !== workspace.projectId ||
+      workRecordsReadyForProject !== workspace.projectId ||
+      analysisReadyForProject !== workspace.projectId ||
+      customStructureReadyForProject !== workspace.projectId
+    ) {
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const migrationKey = `${PROJECT_ATTACHMENTS_MIGRATION_KEY}:${account.email}:${projectId}`;
+    if (localStorage.getItem(migrationKey) === "1") return;
+    if (attachmentMigrationRef.current === projectId) return;
+
+    let active = true;
+    attachmentMigrationRef.current = projectId;
+
+    void (async () => {
+      try {
+        const migration = await migrateProjectAttachmentsToSupabase(projectId, activeDb);
+        if (!active) return;
+
+        if (!migration.migrated.length && !migration.unavailable.length) {
+          localStorage.setItem(migrationKey, "1");
+          return;
+        }
+
+        const nextDb = migration.db;
+        const researchIds = new Set(nextDb.researches.map((item) => item.id));
+        const documentIds = new Set(nextDb.documents.map((item) => item.id));
+        const personIds = new Set(nextDb.persons.map((item) => item.id));
+        const findingIds = new Set(nextDb.findings.map((item) => item.id));
+        const customSectionsById = new Map(
+          nextDb.customSections.map((section) => [section.id, section]),
+        );
+        const originalResearches = new Map(activeDb.researches.map((item) => [item.id, item]));
+        const originalPersons = new Map(activeDb.persons.map((item) => [item.id, item]));
+        const originalDocuments = new Map(activeDb.documents.map((item) => [item.id, item]));
+        const originalYearMatrix = new Map(activeDb.yearMatrix.map((item) => [item.id, item]));
+        const originalTasks = new Map(activeDb.tasks.map((item) => [item.id, item]));
+        const originalFindings = new Map(activeDb.findings.map((item) => [item.id, item]));
+        const originalHypotheses = new Map(activeDb.hypotheses.map((item) => [item.id, item]));
+        const originalRequests = new Map(activeDb.archiveRequests.map((item) => [item.id, item]));
+        const originalCustomRecords = new Map(
+          activeDb.customSectionRecords.map((item) => [item.id, item]),
+        );
+
+        await Promise.all([
+          ...nextDb.researches
+            .filter((item) => originalResearches.get(item.id) !== item)
+            .map((item) => saveProjectResearch(projectId, item)),
+          ...nextDb.persons
+            .filter((item) => originalPersons.get(item.id) !== item)
+            .map((item) => saveProjectPerson(projectId, item, researchIds)),
+          ...nextDb.documents
+            .filter((item) => originalDocuments.get(item.id) !== item)
+            .map((item) => saveProjectDocument(projectId, item, researchIds)),
+          ...nextDb.yearMatrix
+            .filter((item) => originalYearMatrix.get(item.id) !== item)
+            .map((item) =>
+              saveProjectYearMatrixRecord(projectId, item, researchIds, documentIds)
+            ),
+          ...nextDb.tasks
+            .filter((item) => originalTasks.get(item.id) !== item)
+            .map((item) => saveProjectTask(projectId, item, researchIds, documentIds, personIds)),
+          ...nextDb.findings
+            .filter((item) => originalFindings.get(item.id) !== item)
+            .map((item) =>
+              saveProjectFinding(projectId, item, researchIds, documentIds, personIds)
+            ),
+          ...nextDb.hypotheses
+            .filter((item) => originalHypotheses.get(item.id) !== item)
+            .map((item) =>
+              saveProjectHypothesis(projectId, item, researchIds, personIds, documentIds, findingIds)
+            ),
+          ...nextDb.archiveRequests
+            .filter((item) => originalRequests.get(item.id) !== item)
+            .map((item) => saveProjectArchiveRequest(projectId, item, researchIds, personIds)),
+          ...nextDb.customSectionRecords
+            .filter((item) => originalCustomRecords.get(item.id) !== item)
+            .map((item) => {
+              const section = customSectionsById.get(item.sectionId);
+              const titleValue = section ? item.values[section.titleFieldId] : "";
+              const title = Array.isArray(titleValue)
+                ? titleValue.join(", ")
+                : typeof titleValue === "string"
+                  ? titleValue
+                  : section?.singularName ?? "Запис";
+              return saveProjectCustomRecord(projectId, item, title || "Запис");
+            }),
+        ]);
+
+        setProjectResearches(nextDb.researches);
+        saveProjectResearchCache(projectId, nextDb.researches);
+        setProjectPersons(nextDb.persons);
+        saveProjectPeopleCache(projectId, nextDb.persons, nextDb.personRelations);
+        setProjectDocuments(nextDb.documents);
+        setProjectYearMatrix(nextDb.yearMatrix);
+        saveProjectDocumentsCache(projectId, nextDb.documents, nextDb.yearMatrix);
+        setProjectTasks(nextDb.tasks);
+        setProjectFindings(nextDb.findings);
+        saveProjectWorkRecordsCache(projectId, nextDb.tasks, nextDb.findings);
+        setProjectHypotheses(nextDb.hypotheses);
+        setProjectArchiveRequests(nextDb.archiveRequests);
+        saveProjectAnalysisRecordsCache(projectId, nextDb.hypotheses, nextDb.archiveRequests);
+        setProjectCustomRecords(nextDb.customSectionRecords);
+        saveProjectCustomStructureCache(
+          projectId,
+          projectCustomFields,
+          projectCustomSections,
+          nextDb.customSectionRecords,
+        );
+
+        if (migration.migrated.length) {
+          await deleteMigratedLocalFiles(migration.migrated);
+          notify(`Файли та скани перенесено до сховища проєкту «${workspace.projectName}».`);
+        }
+        if (!migration.unavailable.length) {
+          localStorage.setItem(migrationKey, "1");
+        } else {
+          notify(
+            `Частину старих вкладень не вдалося перенести автоматично (${migration.unavailable.length}). Потрібен доступ до їх джерела.`,
+            true,
+          );
+        }
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(error, "Не вдалося перенести файли та скани до сховища проєкту."),
+          true,
+        );
+      } finally {
+        if (attachmentMigrationRef.current === projectId) {
+          attachmentMigrationRef.current = null;
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    activeDb,
+    analysisReadyForProject,
+    customStructureReadyForProject,
+    describeError,
+    documentsReadyForProject,
+    notify,
+    peopleReadyForProject,
+    projectCustomFields,
+    projectCustomSections,
+    researchesReadyForProject,
+    workRecordsReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account || workspace.role !== "owner") return;
+    if (
+      researchesReadyForProject !== workspace.projectId ||
+      peopleReadyForProject !== workspace.projectId ||
+      documentsReadyForProject !== workspace.projectId ||
+      workRecordsReadyForProject !== workspace.projectId ||
+      analysisReadyForProject !== workspace.projectId ||
+      customStructureReadyForProject !== workspace.projectId
+    ) {
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const syncKey = `${PROJECT_ATTACHMENT_METADATA_KEY}:${account.email}:${projectId}`;
+    if (localStorage.getItem(syncKey) === "1") return;
+    if (attachmentMetadataRef.current === projectId) return;
+    attachmentMetadataRef.current = projectId;
+
+    let active = true;
+    void (async () => {
+      try {
+        const collections: Array<[CollectionKey, AppEntity[]]> = [
+          ["researches", activeDb.researches],
+          ["documents", activeDb.documents],
+          ["yearMatrix", activeDb.yearMatrix],
+          ["tasks", activeDb.tasks],
+          ["findings", activeDb.findings],
+          ["hypotheses", activeDb.hypotheses],
+          ["archiveRequests", activeDb.archiveRequests],
+          ["persons", activeDb.persons],
+        ];
+        for (const [collection, records] of collections) {
+          for (const record of records) {
+            await syncProjectAttachmentMetadata(
+              projectId,
+              collection,
+              record.id,
+              projectAttachmentFields(collection, record, activeDb),
+            );
+          }
+        }
+
+        const sections = new Map(
+          activeDb.customSections.map((section) => [section.id, section]),
+        );
+        for (const record of activeDb.customSectionRecords) {
+          const section = sections.get(record.sectionId);
+          const fields = Object.fromEntries(
+            (section?.fields ?? [])
+              .filter((field) => field.type === "attachments")
+              .map((field) => [field.id, scanList(record.values[field.id])]),
+          );
+          await syncProjectAttachmentMetadata(
+            projectId,
+            `custom:${record.sectionId}`,
+            record.id,
+            fields,
+          );
+        }
+
+        if (active) localStorage.setItem(syncKey, "1");
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(error, "Не вдалося заповнити метадані перенесених вкладень."),
+          true,
+        );
+      } finally {
+        if (attachmentMetadataRef.current === projectId) {
+          attachmentMetadataRef.current = null;
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    activeDb,
+    analysisReadyForProject,
+    customStructureReadyForProject,
+    describeError,
+    documentsReadyForProject,
+    notify,
+    peopleReadyForProject,
+    researchesReadyForProject,
+    workRecordsReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (
+      !workspace ||
+      workspace.role !== "owner" ||
+      projectPreferencesReadyFor !== workspace.projectId ||
+      researchesReadyForProject !== workspace.projectId ||
+      peopleReadyForProject !== workspace.projectId ||
+      documentsReadyForProject !== workspace.projectId ||
+      workRecordsReadyForProject !== workspace.projectId ||
+      analysisReadyForProject !== workspace.projectId ||
+      customStructureReadyForProject !== workspace.projectId
+    ) {
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const today = new Date().toISOString().slice(0, 10);
+    if (projectPreferences.lastAutomaticBackupAt?.slice(0, 10) === today) return;
+    if (automaticProjectBackupRef.current === projectId) return;
+    automaticProjectBackupRef.current = projectId;
+
+    void createProjectBackup(projectId, activeDb, "automatic")
+      .then(async () => {
+        const lastAutomaticBackupAt = new Date().toISOString();
+        const next = { ...projectPreferences, lastAutomaticBackupAt };
+        syncedPreferencesRef.current = {
+          projectId,
+          value: JSON.stringify(next),
+        };
+        setProjectPreferences(next);
+        await saveProjectPreferences(projectId, next);
+      })
+      .catch((error: unknown) => {
+        if (syncedPreferencesRef.current?.projectId === projectId) {
+          syncedPreferencesRef.current = null;
+        }
+        notify(
+          describeError(
+            error,
+            "Не вдалося створити автоматичну резервну копію проєкту.",
+          ),
+          true,
+        );
+      })
+      .finally(() => {
+        if (automaticProjectBackupRef.current === projectId) {
+          automaticProjectBackupRef.current = null;
+        }
+      });
+  }, [
+    activeDb,
+    analysisReadyForProject,
+    customStructureReadyForProject,
+    describeError,
+    documentsReadyForProject,
+    notify,
+    peopleReadyForProject,
+    projectPreferences,
+    projectPreferencesReadyFor,
+    researchesReadyForProject,
+    workRecordsReadyForProject,
+    workspace,
+  ]);
+
+  const recordEntityActivity = useCallback((
+    collection: CollectionKey,
+    previous: AppEntity | undefined,
+    next: AppEntity,
+  ) => {
+    if (!workspace) return;
+    const generated = createActivityEntries(collection, previous, next);
+    const entries = generated.length
+      ? generated
+      : [
+          createGenericProjectActivity(
+            collection,
+            next.id,
+            `${previous ? "Оновлено" : "Створено"} запис у розділі «${activityModuleLabel(collection)}».`,
+            previous ? "record_updated" : "record_created",
+          ),
+        ];
+    for (const entry of entries) {
+      void addProjectActivity(workspace.projectId, entry)
+        .then((saved) => {
+          if (activeWorkspaceIdRef.current !== workspace.projectId) return;
+          setProjectActivity((current) => [
+            saved,
+            ...current.filter((item) => item.id !== saved.id),
+          ].slice(0, 100));
+        })
+        .catch(() => undefined);
+    }
+  }, [workspace]);
+
+  const recordEntityDeletion = useCallback((
+    collection: CollectionKey,
+    relatedId: string,
+  ) => {
+    if (!workspace) return;
+    const entry = createGenericProjectActivity(
+      collection,
+      relatedId,
+      `Видалено запис із розділу «${activityModuleLabel(collection)}».`,
+      "record_deleted",
+    );
+    void addProjectActivity(workspace.projectId, entry)
+      .then((saved) => {
+        if (activeWorkspaceIdRef.current !== workspace.projectId) return;
+        setProjectActivity((current) => [saved, ...current].slice(0, 100));
+      })
+      .catch(() => undefined);
+  }, [workspace]);
+
+  const syncEntityAttachmentMetadata = useCallback((
+    collection: CollectionKey,
+    entity: AppEntity,
+  ) => {
+    if (!workspace) return;
+    const fields = projectAttachmentFields(collection, entity, activeDb);
+    void syncProjectAttachmentMetadata(
+      workspace.projectId,
+      collection,
+      entity.id,
+      fields,
+    ).catch((error: unknown) => {
+      notify(
+        describeError(error, "Запис збережено, але не вдалося оновити метадані вкладень."),
+        true,
+      );
+    });
+  }, [activeDb, describeError, notify, workspace]);
+
+  const deleteEntityAttachmentMetadata = useCallback((
+    collection: CollectionKey,
+    relatedId: string,
+  ) => {
+    if (!workspace) return;
+    void deleteProjectAttachmentMetadata(
+      workspace.projectId,
+      collection,
+      relatedId,
+    ).catch(() => undefined);
+  }, [workspace]);
 
   const connect = async () => {
     setLoginError("");
     try {
       await app.connectGoogle();
-      localStorage.setItem(ONBOARDING_KEY, "1");
+      localStorage.setItem(ACCOUNT_ONBOARDING_KEY, "1");
       setOnboarded(true);
       notify("Google Drive підключено.");
     } catch (error) {
@@ -63,17 +1798,921 @@ export default function App() {
     }
   };
 
-  const continueLocal = () => {
-    localStorage.setItem(ONBOARDING_KEY, "1");
-    setOnboarded(true);
+  const signIn = async () => {
+    setLoginError("");
+    setIsAccountSigningIn(true);
+    try {
+      await signInWithSupabaseGoogle();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Не вдалося увійти через Google.";
+      setLoginError(message);
+      setIsAccountSigningIn(false);
+      notify(message, true);
+    }
   };
 
-  if (!onboarded) {
-    return <LoginPage onGoogle={() => void connect()} onLocal={continueLocal} loading={app.isSigningIn} error={loginError} />;
+  const signOutAccount = async () => {
+    try {
+      await signOutFromSupabase();
+      setAccount(null);
+      setWorkspace(null);
+      setWorkspaces([]);
+      lastPreparedUserRef.current = null;
+      workspaceSetupRef.current = null;
+      localStorage.removeItem(ACCOUNT_ONBOARDING_KEY);
+      localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+      setOnboarded(false);
+      setLoginError("");
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "Не вдалося вийти з облікового запису.",
+        true,
+      );
+    }
+  };
+
+  const switchWorkspace = (projectId: string) => {
+    const nextWorkspace = workspaces.find((item) => item.projectId === projectId);
+    if (!nextWorkspace || nextWorkspace.projectId === workspace?.projectId) return;
+    setWorkspace(nextWorkspace);
+    localStorage.setItem(ACTIVE_WORKSPACE_KEY, nextWorkspace.projectId);
+    notify(`Активний проєкт: ${nextWorkspace.projectName}`);
+  };
+
+  const createWorkspace = async () => {
+    const session = await getSupabaseSession();
+    if (!session || !account) {
+      notify("Спочатку увійдіть до облікового запису.", true);
+      return;
+    }
+
+    const proposedName = window.prompt("Назва нового проєкту", `Проєкт ${account.name}`);
+    if (proposedName === null) return;
+
+    setIsCreatingWorkspace(true);
+    try {
+      const createdWorkspace = await createSupabaseWorkspace(session, proposedName);
+      const refreshed = await listSupabaseWorkspaces();
+      const availableWorkspaces = refreshed.length ? refreshed : [...workspaces, createdWorkspace];
+      setWorkspaces(availableWorkspaces);
+      const activeWorkspace =
+        availableWorkspaces.find((item) => item.projectId === createdWorkspace.projectId) ??
+        createdWorkspace;
+      setWorkspace(activeWorkspace);
+      localStorage.setItem(ACTIVE_WORKSPACE_KEY, activeWorkspace.projectId);
+      notify(`Створено проєкт «${activeWorkspace.projectName}».`);
+    } catch (error) {
+      notify(describeError(error, "Не вдалося створити новий проєкт."), true);
+    } finally {
+      setIsCreatingWorkspace(false);
+    }
+  };
+
+  const removeWorkspace = async (projectId: string) => {
+    const targetWorkspace = workspaces.find((item) => item.projectId === projectId);
+    if (!targetWorkspace) return;
+    if (targetWorkspace.role !== "owner") {
+      notify("Видаляти можна лише проєкти, де ви власник.", true);
+      return;
+    }
+    if (workspaces.length <= 1) {
+      notify("Не можна видалити останній проєкт.", true);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Видалити проєкт «${targetWorkspace.projectName}»? Цю дію не можна скасувати.`,
+    );
+    if (!confirmed) return;
+
+    setIsCreatingWorkspace(true);
+    try {
+      const refreshed = await deleteSupabaseWorkspace(projectId);
+      clearProjectResearchCache(projectId);
+      clearProjectPeopleCache(projectId);
+      clearProjectDocumentsCache(projectId);
+      clearProjectWorkRecordsCache(projectId);
+      clearProjectAnalysisRecordsCache(projectId);
+      clearProjectCustomStructureCache(projectId);
+      const nextWorkspace = chooseWorkspace(
+        refreshed,
+        workspace?.projectId === projectId ? null : workspace?.projectId ?? null,
+      );
+      setWorkspaces(refreshed);
+      setWorkspace(nextWorkspace);
+      if (nextWorkspace) {
+        localStorage.setItem(ACTIVE_WORKSPACE_KEY, nextWorkspace.projectId);
+      } else {
+        localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+      }
+      notify(`Проєкт «${targetWorkspace.projectName}» видалено.`);
+    } catch (error) {
+      notify(describeError(error, "Не вдалося видалити проєкт."), true);
+    } finally {
+      setIsCreatingWorkspace(false);
+    }
+  };
+
+  const acceptWorkspaceInvitation = async (projectId: string) => {
+    const refreshed = await listSupabaseWorkspaces();
+    const acceptedWorkspace = refreshed.find((item) => item.projectId === projectId);
+    setWorkspaces(refreshed);
+    if (acceptedWorkspace) {
+      setWorkspace(acceptedWorkspace);
+      localStorage.setItem(ACTIVE_WORKSPACE_KEY, acceptedWorkspace.projectId);
+      notify(`Проєкт «${acceptedWorkspace.projectName}» додано до вашого робочого простору.`);
+    }
+    setTeamOpen(false);
+  };
+
+  if (!account) {
+    return (
+      <LoginPage
+        onGoogle={() => void signIn()}
+        onEmailSignIn={signInWithSupabaseEmail}
+        onEmailSignUp={signUpWithSupabaseEmail}
+        loading={isAccountSigningIn}
+        error={loginError}
+      />
+    );
   }
 
-  const saveFor = (collection: CollectionKey) => (entity: AppEntity) => app.saveEntity(collection, entity);
-  const deleteFor = (collection: CollectionKey) => (id: string) => app.deleteEntity(collection, id);
+  const saveResearch = (entity: AppEntity) => {
+    if (!workspace) {
+      app.saveEntity("researches", entity);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const research = entity as Research;
+    const projectId = workspace.projectId;
+    const previous = projectResearches;
+    const previousEntity = previous.find((item) => item.id === research.id);
+    const optimistic = previous.some((item) => item.id === research.id)
+      ? previous.map((item) => (item.id === research.id ? research : item))
+      : [research, ...previous];
+    setProjectResearches(optimistic);
+    saveProjectResearchCache(projectId, optimistic);
+
+    void assertProjectRecordUnchanged(
+      "researches",
+      projectId,
+      research.id,
+      baseUpdatedAt(research) ?? previousEntity?.updatedAt,
+    )
+      .then(() => saveProjectResearch(projectId, research))
+      .then((saved) => {
+        recordEntityActivity("researches", previousEntity, saved);
+        syncEntityAttachmentMetadata("researches", saved);
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectResearchCache(projectId);
+          const next = cached.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectResearchCache(projectId, next);
+          return;
+        }
+        setProjectResearches((current) => {
+          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectResearchCache(projectId, next);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        saveProjectResearchCache(projectId, previous);
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectResearches(previous);
+        }
+        notify(describeError(error, "Не вдалося зберегти дослідження."), true);
+      });
+  };
+
+  const removeResearch = (id: string) => {
+    if (!workspace) {
+      app.deleteEntity("researches", id);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectResearches;
+    const previousPersons = projectPersons;
+    const previousDocuments = projectDocuments;
+    const previousMatrix = projectYearMatrix;
+    const previousTasks = projectTasks;
+    const previousFindings = projectFindings;
+    const previousHypotheses = projectHypotheses;
+    const previousRequests = projectArchiveRequests;
+    const optimistic = previous.filter((research) => research.id !== id);
+    const nextPersons = previousPersons.map((person) =>
+      person.researchId === id ? { ...person, researchId: "" } : person,
+    );
+    const nextDocuments = previousDocuments.map((document) =>
+      document.researchId === id ? { ...document, researchId: "" } : document,
+    );
+    const nextMatrix = previousMatrix.map((record) =>
+      record.researchId === id ? { ...record, researchId: "" } : record,
+    );
+    const nextTasks = previousTasks.map((task) =>
+      task.researchId === id ? { ...task, researchId: "" } : task,
+    );
+    const nextFindings = previousFindings.map((finding) =>
+      finding.researchId === id ? { ...finding, researchId: "" } : finding,
+    );
+    const nextHypotheses = previousHypotheses.map((hypothesis) =>
+      hypothesis.researchId === id
+        ? { ...hypothesis, researchId: "" }
+        : hypothesis,
+    );
+    const nextRequests = previousRequests.map((request) =>
+      request.researchId === id ? { ...request, researchId: "" } : request,
+    );
+    setProjectResearches(optimistic);
+    setProjectPersons(nextPersons);
+    setProjectDocuments(nextDocuments);
+    setProjectYearMatrix(nextMatrix);
+    setProjectTasks(nextTasks);
+    setProjectFindings(nextFindings);
+    setProjectHypotheses(nextHypotheses);
+    setProjectArchiveRequests(nextRequests);
+    saveProjectResearchCache(projectId, optimistic);
+    saveProjectPeopleCache(projectId, nextPersons, projectPersonRelations);
+    saveProjectDocumentsCache(projectId, nextDocuments, nextMatrix);
+    saveProjectWorkRecordsCache(projectId, nextTasks, nextFindings);
+    saveProjectAnalysisRecordsCache(
+      projectId,
+      nextHypotheses,
+      nextRequests,
+    );
+
+    void deleteProjectResearch(projectId, id).then(() => {
+      recordEntityDeletion("researches", id);
+      deleteEntityAttachmentMetadata("researches", id);
+    }).catch((error: unknown) => {
+      saveProjectResearchCache(projectId, previous);
+      saveProjectPeopleCache(projectId, previousPersons, projectPersonRelations);
+      saveProjectDocumentsCache(projectId, previousDocuments, previousMatrix);
+      saveProjectWorkRecordsCache(projectId, previousTasks, previousFindings);
+      saveProjectAnalysisRecordsCache(
+        projectId,
+        previousHypotheses,
+        previousRequests,
+      );
+      if (activeWorkspaceIdRef.current === projectId) {
+        setProjectResearches(previous);
+        setProjectPersons(previousPersons);
+        setProjectDocuments(previousDocuments);
+        setProjectYearMatrix(previousMatrix);
+        setProjectTasks(previousTasks);
+        setProjectFindings(previousFindings);
+        setProjectHypotheses(previousHypotheses);
+        setProjectArchiveRequests(previousRequests);
+      }
+      notify(describeError(error, "Не вдалося видалити дослідження."), true);
+    });
+  };
+
+  const saveDocument = (entity: AppEntity) => {
+    if (!workspace) {
+      app.saveEntity("documents", entity);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const document = entity as DocumentRecord;
+    const projectId = workspace.projectId;
+    const previous = projectDocuments;
+    const previousEntity = previous.find((item) => item.id === document.id);
+    const optimistic = previous.some((item) => item.id === document.id)
+      ? previous.map((item) => (item.id === document.id ? document : item))
+      : [document, ...previous];
+    setProjectDocuments(optimistic);
+    saveProjectDocumentsCache(projectId, optimistic, projectYearMatrix);
+
+    void assertProjectRecordUnchanged(
+      "documents",
+      projectId,
+      document.id,
+      baseUpdatedAt(document) ?? previousEntity?.updatedAt,
+    )
+      .then(() => saveProjectDocument(
+        projectId,
+        document,
+        new Set(projectResearches.map((research) => research.id)),
+      ))
+      .then((saved) => {
+        recordEntityActivity("documents", previousEntity, saved);
+        syncEntityAttachmentMetadata("documents", saved);
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectDocumentsCache(projectId);
+          const documents = cached.documents.map((item) =>
+            item.id === saved.id ? saved : item,
+          );
+          saveProjectDocumentsCache(projectId, documents, cached.yearMatrix);
+          return;
+        }
+        setProjectDocuments((current) => {
+          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectDocumentsCache(projectId, next, projectYearMatrix);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const cached = loadProjectDocumentsCache(projectId);
+        saveProjectDocumentsCache(projectId, previous, cached.yearMatrix);
+        if (activeWorkspaceIdRef.current === projectId) setProjectDocuments(previous);
+        notify(describeError(error, "Не вдалося зберегти документ."), true);
+      });
+  };
+
+  const removeDocument = (id: string) => {
+    if (!workspace) {
+      app.deleteEntity("documents", id);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previousDocuments = projectDocuments;
+    const previousMatrix = projectYearMatrix;
+    const previousTasks = projectTasks;
+    const previousFindings = projectFindings;
+    const previousHypotheses = projectHypotheses;
+    const nextDocuments = previousDocuments.filter((document) => document.id !== id);
+    const nextMatrix = previousMatrix.map((record) =>
+      record.documentId === id ? { ...record, documentId: "" } : record,
+    );
+    const nextTasks = previousTasks.map((task) =>
+      task.documentId === id ? { ...task, documentId: "" } : task,
+    );
+    const nextFindings = previousFindings.map((finding) =>
+      finding.documentId === id ? { ...finding, documentId: "" } : finding,
+    );
+    const nextHypotheses = previousHypotheses.map((hypothesis) => ({
+      ...hypothesis,
+      documentIds: hypothesis.documentIds.filter((documentId) => documentId !== id),
+    }));
+    setProjectDocuments(nextDocuments);
+    setProjectYearMatrix(nextMatrix);
+    setProjectTasks(nextTasks);
+    setProjectFindings(nextFindings);
+    setProjectHypotheses(nextHypotheses);
+    saveProjectDocumentsCache(projectId, nextDocuments, nextMatrix);
+    saveProjectWorkRecordsCache(projectId, nextTasks, nextFindings);
+    saveProjectAnalysisRecordsCache(
+      projectId,
+      nextHypotheses,
+      projectArchiveRequests,
+    );
+
+    void Promise.all([
+      deleteProjectDocument(projectId, id),
+      deleteProjectHypothesisTargetLinks(projectId, "document", id),
+    ]).then(() => {
+      recordEntityDeletion("documents", id);
+      deleteEntityAttachmentMetadata("documents", id);
+    }).catch((error: unknown) => {
+      saveProjectDocumentsCache(projectId, previousDocuments, previousMatrix);
+      saveProjectWorkRecordsCache(projectId, previousTasks, previousFindings);
+      saveProjectAnalysisRecordsCache(
+        projectId,
+        previousHypotheses,
+        projectArchiveRequests,
+      );
+      if (activeWorkspaceIdRef.current === projectId) {
+        setProjectDocuments(previousDocuments);
+        setProjectYearMatrix(previousMatrix);
+        setProjectTasks(previousTasks);
+        setProjectFindings(previousFindings);
+        setProjectHypotheses(previousHypotheses);
+      }
+      notify(describeError(error, "Не вдалося видалити документ."), true);
+    });
+  };
+
+  const saveYearMatrixRecord = (entity: AppEntity) => {
+    if (!workspace) {
+      app.saveEntity("yearMatrix", entity);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const record = entity as YearMatrixRecord;
+    const projectId = workspace.projectId;
+    const previous = projectYearMatrix;
+    const previousEntity = previous.find((item) => item.id === record.id);
+    const optimistic = previous.some((item) => item.id === record.id)
+      ? previous.map((item) => (item.id === record.id ? record : item))
+      : [record, ...previous];
+    setProjectYearMatrix(optimistic);
+    saveProjectDocumentsCache(projectId, projectDocuments, optimistic);
+
+    void assertProjectRecordUnchanged(
+      "year_matrix",
+      projectId,
+      record.id,
+      baseUpdatedAt(record) ?? previousEntity?.updatedAt,
+    )
+      .then(() => saveProjectYearMatrixRecord(
+        projectId,
+        record,
+        new Set(projectResearches.map((research) => research.id)),
+        new Set(projectDocuments.map((document) => document.id)),
+      ))
+      .then((saved) => {
+        recordEntityActivity("yearMatrix", previousEntity, saved);
+        syncEntityAttachmentMetadata("yearMatrix", saved);
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectDocumentsCache(projectId);
+          const yearMatrix = cached.yearMatrix.map((item) =>
+            item.id === saved.id ? saved : item,
+          );
+          saveProjectDocumentsCache(projectId, cached.documents, yearMatrix);
+          return;
+        }
+        setProjectYearMatrix((current) => {
+          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectDocumentsCache(projectId, projectDocuments, next);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const cached = loadProjectDocumentsCache(projectId);
+        saveProjectDocumentsCache(projectId, cached.documents, previous);
+        if (activeWorkspaceIdRef.current === projectId) setProjectYearMatrix(previous);
+        notify(describeError(error, "Не вдалося зберегти запис матриці років."), true);
+      });
+  };
+
+  const removeYearMatrixRecord = (id: string) => {
+    if (!workspace) {
+      app.deleteEntity("yearMatrix", id);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectYearMatrix;
+    const optimistic = previous.filter((record) => record.id !== id);
+    setProjectYearMatrix(optimistic);
+    saveProjectDocumentsCache(projectId, projectDocuments, optimistic);
+    void deleteProjectYearMatrixRecord(projectId, id).then(() => {
+      recordEntityDeletion("yearMatrix", id);
+      deleteEntityAttachmentMetadata("yearMatrix", id);
+    }).catch((error: unknown) => {
+      const cached = loadProjectDocumentsCache(projectId);
+      saveProjectDocumentsCache(projectId, cached.documents, previous);
+      if (activeWorkspaceIdRef.current === projectId) setProjectYearMatrix(previous);
+      notify(describeError(error, "Не вдалося видалити запис матриці років."), true);
+    });
+  };
+
+  const saveTask = (entity: AppEntity) => {
+    if (!workspace) {
+      app.saveEntity("tasks", entity);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const task = entity as TaskRecord;
+    const projectId = workspace.projectId;
+    const previous = projectTasks;
+    const previousEntity = previous.find((item) => item.id === task.id);
+    const optimistic = previous.some((item) => item.id === task.id)
+      ? previous.map((item) => (item.id === task.id ? task : item))
+      : [task, ...previous];
+    setProjectTasks(optimistic);
+    saveProjectWorkRecordsCache(projectId, optimistic, projectFindings);
+
+    void assertProjectRecordUnchanged(
+      "tasks",
+      projectId,
+      task.id,
+      baseUpdatedAt(task) ?? previousEntity?.updatedAt,
+    )
+      .then(() => saveProjectTask(
+        projectId,
+        task,
+        new Set(projectResearches.map((research) => research.id)),
+        new Set(projectDocuments.map((document) => document.id)),
+        new Set(projectPersons.map((person) => person.id)),
+      ))
+      .then((saved) => {
+        recordEntityActivity("tasks", previousEntity, saved);
+        syncEntityAttachmentMetadata("tasks", saved);
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectWorkRecordsCache(projectId);
+          const tasks = cached.tasks.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectWorkRecordsCache(projectId, tasks, cached.findings);
+          return;
+        }
+        setProjectTasks((current) => {
+          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectWorkRecordsCache(projectId, next, projectFindings);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const cached = loadProjectWorkRecordsCache(projectId);
+        saveProjectWorkRecordsCache(projectId, previous, cached.findings);
+        if (activeWorkspaceIdRef.current === projectId) setProjectTasks(previous);
+        notify(describeError(error, "Не вдалося зберегти завдання."), true);
+      });
+  };
+
+  const removeTask = (id: string) => {
+    if (!workspace) {
+      app.deleteEntity("tasks", id);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectTasks;
+    const optimistic = previous.filter((task) => task.id !== id);
+    setProjectTasks(optimistic);
+    saveProjectWorkRecordsCache(projectId, optimistic, projectFindings);
+    void deleteProjectTask(projectId, id).then(() => {
+      recordEntityDeletion("tasks", id);
+      deleteEntityAttachmentMetadata("tasks", id);
+    }).catch((error: unknown) => {
+      const cached = loadProjectWorkRecordsCache(projectId);
+      saveProjectWorkRecordsCache(projectId, previous, cached.findings);
+      if (activeWorkspaceIdRef.current === projectId) setProjectTasks(previous);
+      notify(describeError(error, "Не вдалося видалити завдання."), true);
+    });
+  };
+
+  const saveFinding = (entity: AppEntity) => {
+    if (!workspace) {
+      app.saveEntity("findings", entity);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const finding = entity as Finding;
+    const projectId = workspace.projectId;
+    const previous = projectFindings;
+    const previousEntity = previous.find((item) => item.id === finding.id);
+    const optimistic = previous.some((item) => item.id === finding.id)
+      ? previous.map((item) => (item.id === finding.id ? finding : item))
+      : [finding, ...previous];
+    setProjectFindings(optimistic);
+    saveProjectWorkRecordsCache(projectId, projectTasks, optimistic);
+
+    void assertProjectRecordUnchanged(
+      "findings",
+      projectId,
+      finding.id,
+      baseUpdatedAt(finding) ?? previousEntity?.updatedAt,
+    )
+      .then(() => saveProjectFinding(
+        projectId,
+        finding,
+        new Set(projectResearches.map((research) => research.id)),
+        new Set(projectDocuments.map((document) => document.id)),
+        new Set(projectPersons.map((person) => person.id)),
+      ))
+      .then((saved) => {
+        recordEntityActivity("findings", previousEntity, saved);
+        syncEntityAttachmentMetadata("findings", saved);
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectWorkRecordsCache(projectId);
+          const findings = cached.findings.map((item) =>
+            item.id === saved.id ? saved : item,
+          );
+          saveProjectWorkRecordsCache(projectId, cached.tasks, findings);
+          return;
+        }
+        setProjectFindings((current) => {
+          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectWorkRecordsCache(projectId, projectTasks, next);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const cached = loadProjectWorkRecordsCache(projectId);
+        saveProjectWorkRecordsCache(projectId, cached.tasks, previous);
+        if (activeWorkspaceIdRef.current === projectId) setProjectFindings(previous);
+        notify(describeError(error, "Не вдалося зберегти знахідку."), true);
+      });
+  };
+
+  const removeFinding = (id: string) => {
+    if (!workspace) {
+      app.deleteEntity("findings", id);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectFindings;
+    const previousHypotheses = projectHypotheses;
+    const optimistic = previous.filter((finding) => finding.id !== id);
+    const nextHypotheses = previousHypotheses.map((hypothesis) => ({
+      ...hypothesis,
+      findingIds: hypothesis.findingIds.filter((findingId) => findingId !== id),
+    }));
+    setProjectFindings(optimistic);
+    setProjectHypotheses(nextHypotheses);
+    saveProjectWorkRecordsCache(projectId, projectTasks, optimistic);
+    saveProjectAnalysisRecordsCache(
+      projectId,
+      nextHypotheses,
+      projectArchiveRequests,
+    );
+    void Promise.all([
+      deleteProjectFinding(projectId, id),
+      deleteProjectHypothesisTargetLinks(projectId, "finding", id),
+    ]).then(() => {
+      recordEntityDeletion("findings", id);
+      deleteEntityAttachmentMetadata("findings", id);
+    }).catch((error: unknown) => {
+      const cached = loadProjectWorkRecordsCache(projectId);
+      saveProjectWorkRecordsCache(projectId, cached.tasks, previous);
+      saveProjectAnalysisRecordsCache(
+        projectId,
+        previousHypotheses,
+        projectArchiveRequests,
+      );
+      if (activeWorkspaceIdRef.current === projectId) {
+        setProjectFindings(previous);
+        setProjectHypotheses(previousHypotheses);
+      }
+      notify(describeError(error, "Не вдалося видалити знахідку."), true);
+    });
+  };
+
+  const saveHypothesis = (entity: AppEntity) => {
+    if (!workspace) {
+      app.saveEntity("hypotheses", entity);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const hypothesis = entity as Hypothesis;
+    const projectId = workspace.projectId;
+    const previous = projectHypotheses;
+    const previousEntity = previous.find((item) => item.id === hypothesis.id);
+    const optimistic = previous.some((item) => item.id === hypothesis.id)
+      ? previous.map((item) => (item.id === hypothesis.id ? hypothesis : item))
+      : [hypothesis, ...previous];
+    setProjectHypotheses(optimistic);
+    saveProjectAnalysisRecordsCache(
+      projectId,
+      optimistic,
+      projectArchiveRequests,
+    );
+
+    void assertProjectRecordUnchanged(
+      "hypotheses",
+      projectId,
+      hypothesis.id,
+      baseUpdatedAt(hypothesis) ?? previousEntity?.updatedAt,
+    )
+      .then(() => saveProjectHypothesis(
+        projectId,
+        hypothesis,
+        new Set(projectResearches.map((research) => research.id)),
+        new Set(projectPersons.map((person) => person.id)),
+        new Set(projectDocuments.map((document) => document.id)),
+        new Set(projectFindings.map((finding) => finding.id)),
+      ))
+      .then((saved) => {
+        recordEntityActivity("hypotheses", previousEntity, saved);
+        syncEntityAttachmentMetadata("hypotheses", saved);
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectAnalysisRecordsCache(projectId);
+          const hypotheses = cached.hypotheses.map((item) =>
+            item.id === saved.id ? saved : item,
+          );
+          saveProjectAnalysisRecordsCache(
+            projectId,
+            hypotheses,
+            cached.archiveRequests,
+          );
+          return;
+        }
+        setProjectHypotheses((current) => {
+          const next = current.map((item) =>
+            item.id === saved.id ? saved : item,
+          );
+          saveProjectAnalysisRecordsCache(
+            projectId,
+            next,
+            projectArchiveRequests,
+          );
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const cached = loadProjectAnalysisRecordsCache(projectId);
+        saveProjectAnalysisRecordsCache(
+          projectId,
+          previous,
+          cached.archiveRequests,
+        );
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectHypotheses(previous);
+        }
+        notify(describeError(error, "Не вдалося зберегти гіпотезу."), true);
+      });
+  };
+
+  const removeHypothesis = (id: string) => {
+    if (!workspace) {
+      app.deleteEntity("hypotheses", id);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectHypotheses;
+    const optimistic = previous.filter((hypothesis) => hypothesis.id !== id);
+    setProjectHypotheses(optimistic);
+    saveProjectAnalysisRecordsCache(
+      projectId,
+      optimistic,
+      projectArchiveRequests,
+    );
+    void deleteProjectHypothesis(projectId, id).then(() => {
+      recordEntityDeletion("hypotheses", id);
+      deleteEntityAttachmentMetadata("hypotheses", id);
+    }).catch((error: unknown) => {
+      const cached = loadProjectAnalysisRecordsCache(projectId);
+      saveProjectAnalysisRecordsCache(
+        projectId,
+        previous,
+        cached.archiveRequests,
+      );
+      if (activeWorkspaceIdRef.current === projectId) {
+        setProjectHypotheses(previous);
+      }
+      notify(describeError(error, "Не вдалося видалити гіпотезу."), true);
+    });
+  };
+
+  const saveArchiveRequest = (entity: AppEntity) => {
+    if (!workspace) {
+      app.saveEntity("archiveRequests", entity);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const request = entity as ArchiveRequest;
+    const projectId = workspace.projectId;
+    const previous = projectArchiveRequests;
+    const previousEntity = previous.find((item) => item.id === request.id);
+    const optimistic = previous.some((item) => item.id === request.id)
+      ? previous.map((item) => (item.id === request.id ? request : item))
+      : [request, ...previous];
+    setProjectArchiveRequests(optimistic);
+    saveProjectAnalysisRecordsCache(projectId, projectHypotheses, optimistic);
+
+    void assertProjectRecordUnchanged(
+      "archive_requests",
+      projectId,
+      request.id,
+      baseUpdatedAt(request) ?? previousEntity?.updatedAt,
+    )
+      .then(() => saveProjectArchiveRequest(
+        projectId,
+        request,
+        new Set(projectResearches.map((research) => research.id)),
+        new Set(projectPersons.map((person) => person.id)),
+      ))
+      .then((saved) => {
+        recordEntityActivity("archiveRequests", previousEntity, saved);
+        syncEntityAttachmentMetadata("archiveRequests", saved);
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectAnalysisRecordsCache(projectId);
+          const requests = cached.archiveRequests.map((item) =>
+            item.id === saved.id ? saved : item,
+          );
+          saveProjectAnalysisRecordsCache(
+            projectId,
+            cached.hypotheses,
+            requests,
+          );
+          return;
+        }
+        setProjectArchiveRequests((current) => {
+          const next = current.map((item) =>
+            item.id === saved.id ? saved : item,
+          );
+          saveProjectAnalysisRecordsCache(projectId, projectHypotheses, next);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const cached = loadProjectAnalysisRecordsCache(projectId);
+        saveProjectAnalysisRecordsCache(
+          projectId,
+          cached.hypotheses,
+          previous,
+        );
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectArchiveRequests(previous);
+        }
+        notify(
+          describeError(error, "Не вдалося зберегти запит до архіву."),
+          true,
+        );
+      });
+  };
+
+  const removeArchiveRequest = (id: string) => {
+    if (!workspace) {
+      app.deleteEntity("archiveRequests", id);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectArchiveRequests;
+    const optimistic = previous.filter((request) => request.id !== id);
+    setProjectArchiveRequests(optimistic);
+    saveProjectAnalysisRecordsCache(projectId, projectHypotheses, optimistic);
+    void deleteProjectArchiveRequest(projectId, id).then(() => {
+      recordEntityDeletion("archiveRequests", id);
+      deleteEntityAttachmentMetadata("archiveRequests", id);
+    }).catch((error: unknown) => {
+      const cached = loadProjectAnalysisRecordsCache(projectId);
+      saveProjectAnalysisRecordsCache(
+        projectId,
+        cached.hypotheses,
+        previous,
+      );
+      if (activeWorkspaceIdRef.current === projectId) {
+        setProjectArchiveRequests(previous);
+      }
+      notify(
+        describeError(error, "Не вдалося видалити запит до архіву."),
+        true,
+      );
+    });
+  };
+
+  const saveFor = (collection: CollectionKey) => (entity: AppEntity) => {
+    if (collection === "researches") saveResearch(entity);
+    else if (collection === "documents") saveDocument(entity);
+    else if (collection === "yearMatrix") saveYearMatrixRecord(entity);
+    else if (collection === "tasks") saveTask(entity);
+    else if (collection === "findings") saveFinding(entity);
+    else if (collection === "hypotheses") saveHypothesis(entity);
+    else if (collection === "archiveRequests") saveArchiveRequest(entity);
+    else app.saveEntity(collection, entity);
+  };
+  const deleteFor = (collection: CollectionKey) => (id: string) => {
+    if (collection === "researches") removeResearch(id);
+    else if (collection === "documents") removeDocument(id);
+    else if (collection === "yearMatrix") removeYearMatrixRecord(id);
+    else if (collection === "tasks") removeTask(id);
+    else if (collection === "findings") removeFinding(id);
+    else if (collection === "hypotheses") removeHypothesis(id);
+    else if (collection === "archiveRequests") removeArchiveRequest(id);
+    else app.deleteEntity(collection, id);
+  };
   const navigate = (nextPage: PageKey) => {
     setModuleSearch("");
     setOpenEntityId("");
@@ -101,57 +2740,619 @@ export default function App() {
     });
     setPage(nextPage);
   };
-  const savePerson = (person: Person) => app.saveEntity("persons", person);
+  const savePerson = (person: Person) => {
+    if (!workspace) {
+      app.saveEntity("persons", person);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectPersons;
+    const previousEntity = previous.find((item) => item.id === person.id);
+    const optimistic = previous.some((item) => item.id === person.id)
+      ? previous.map((item) => (item.id === person.id ? person : item))
+      : [person, ...previous];
+    setProjectPersons(optimistic);
+    saveProjectPeopleCache(projectId, optimistic, projectPersonRelations);
+
+    void assertProjectRecordUnchanged(
+      "persons",
+      projectId,
+      person.id,
+      baseUpdatedAt(person) ?? previousEntity?.updatedAt,
+    )
+      .then(() => saveProjectPerson(
+        projectId,
+        person,
+        new Set(projectResearches.map((research) => research.id)),
+      ))
+      .then((saved) => {
+        recordEntityActivity("persons", previousEntity, saved);
+        syncEntityAttachmentMetadata("persons", saved);
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectPeopleCache(projectId);
+          const persons = cached.persons.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectPeopleCache(projectId, persons, cached.relations);
+          return;
+        }
+        setProjectPersons((current) => {
+          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectPeopleCache(projectId, next, projectPersonRelations);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const cached = loadProjectPeopleCache(projectId);
+        saveProjectPeopleCache(projectId, previous, cached.relations);
+        if (activeWorkspaceIdRef.current === projectId) setProjectPersons(previous);
+        notify(describeError(error, "Не вдалося зберегти особу."), true);
+      });
+  };
   const deletePerson = (id: string) => {
-    app.setDatabase((current) => ({
-      ...current,
-      persons: current.persons.filter((person) => person.id !== id),
-      personRelations: current.personRelations.filter(
-        (relation) => relation.personId !== id && relation.relatedPersonId !== id,
-      ),
-      tasks: current.tasks.map((task) => ({
-        ...task,
-        personIds: task.personIds.filter((personId) => personId !== id),
-      })),
-      findings: current.findings.map((finding) => ({
-        ...finding,
-        personIds: finding.personIds.filter((personId) => personId !== id),
-      })),
-      hypotheses: current.hypotheses.map((hypothesis) => ({
-        ...hypothesis,
-        personIds: hypothesis.personIds.filter((personId) => personId !== id),
-      })),
-      archiveRequests: current.archiveRequests.map((request) => ({
-        ...request,
-        personIds: request.personIds.filter((personId) => personId !== id),
-      })),
+    if (!workspace) {
+      app.setDatabase((current) => ({
+        ...current,
+        persons: current.persons.filter((person) => person.id !== id),
+        personRelations: current.personRelations.filter(
+          (relation) => relation.personId !== id && relation.relatedPersonId !== id,
+        ),
+        tasks: current.tasks.map((task) => ({
+          ...task,
+          personIds: task.personIds.filter((personId) => personId !== id),
+        })),
+        findings: current.findings.map((finding) => ({
+          ...finding,
+          personIds: finding.personIds.filter((personId) => personId !== id),
+        })),
+        hypotheses: current.hypotheses.map((hypothesis) => ({
+          ...hypothesis,
+          personIds: hypothesis.personIds.filter((personId) => personId !== id),
+        })),
+        archiveRequests: current.archiveRequests.map((request) => ({
+          ...request,
+          personIds: request.personIds.filter((personId) => personId !== id),
+        })),
+      }));
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previousPersons = projectPersons;
+    const previousRelations = projectPersonRelations;
+    const previousTasks = projectTasks;
+    const previousFindings = projectFindings;
+    const previousHypotheses = projectHypotheses;
+    const previousRequests = projectArchiveRequests;
+    const nextPersons = previousPersons.filter((person) => person.id !== id);
+    const nextRelations = previousRelations.filter(
+      (relation) => relation.personId !== id && relation.relatedPersonId !== id,
+    );
+    const nextTasks = previousTasks.map((task) => ({
+      ...task,
+      personIds: task.personIds.filter((personId) => personId !== id),
     }));
+    const nextFindings = previousFindings.map((finding) => ({
+      ...finding,
+      personIds: finding.personIds.filter((personId) => personId !== id),
+    }));
+    const nextHypotheses = previousHypotheses.map((hypothesis) => ({
+      ...hypothesis,
+      personIds: hypothesis.personIds.filter((personId) => personId !== id),
+    }));
+    const nextRequests = previousRequests.map((request) => ({
+      ...request,
+      personIds: request.personIds.filter((personId) => personId !== id),
+    }));
+    setProjectPersons(nextPersons);
+    setProjectPersonRelations(nextRelations);
+    setProjectTasks(nextTasks);
+    setProjectFindings(nextFindings);
+    setProjectHypotheses(nextHypotheses);
+    setProjectArchiveRequests(nextRequests);
+    saveProjectPeopleCache(projectId, nextPersons, nextRelations);
+    saveProjectWorkRecordsCache(projectId, nextTasks, nextFindings);
+    saveProjectAnalysisRecordsCache(
+      projectId,
+      nextHypotheses,
+      nextRequests,
+    );
+
+    void Promise.all([
+      deleteProjectPerson(projectId, id),
+      deleteProjectHypothesisTargetLinks(projectId, "person", id),
+    ])
+      .then(async () => {
+        recordEntityDeletion("persons", id);
+        deleteEntityAttachmentMetadata("persons", id);
+        const changedFindings = nextFindings.filter(
+          (finding, index) =>
+            finding.personIds.length !== previousFindings[index]?.personIds.length,
+        );
+        const updates = await Promise.allSettled(
+          changedFindings.map((finding) =>
+            saveProjectFinding(
+              projectId,
+              finding,
+              new Set(projectResearches.map((research) => research.id)),
+              new Set(projectDocuments.map((document) => document.id)),
+              new Set(nextPersons.map((person) => person.id)),
+            ),
+          ),
+        );
+        if (updates.some((result) => result.status === "rejected")) {
+          notify("Особу видалено, але частину пов’язаних знахідок не вдалося оновити.", true);
+        }
+      })
+      .catch((error: unknown) => {
+        saveProjectPeopleCache(projectId, previousPersons, previousRelations);
+        saveProjectWorkRecordsCache(projectId, previousTasks, previousFindings);
+        saveProjectAnalysisRecordsCache(
+          projectId,
+          previousHypotheses,
+          previousRequests,
+        );
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectPersons(previousPersons);
+          setProjectPersonRelations(previousRelations);
+          setProjectTasks(previousTasks);
+          setProjectFindings(previousFindings);
+          setProjectHypotheses(previousHypotheses);
+          setProjectArchiveRequests(previousRequests);
+        }
+      notify(describeError(error, "Не вдалося видалити особу."), true);
+      });
   };
   const saveRelation = (relation: PersonRelation) => {
-    app.setDatabase((current) => ({
-      ...current,
-      personRelations: current.personRelations.some((item) => item.id === relation.id)
-        ? current.personRelations.map((item) => item.id === relation.id ? relation : item)
-        : [...current.personRelations, relation],
-    }));
+    if (!workspace) {
+      app.setDatabase((current) => ({
+        ...current,
+        personRelations: current.personRelations.some((item) => item.id === relation.id)
+          ? current.personRelations.map((item) => item.id === relation.id ? relation : item)
+          : [...current.personRelations, relation],
+      }));
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectPersonRelations;
+    const optimistic = previous.some((item) => item.id === relation.id)
+      ? previous.map((item) => (item.id === relation.id ? relation : item))
+      : [...previous, relation];
+    setProjectPersonRelations(optimistic);
+    saveProjectPeopleCache(projectId, projectPersons, optimistic);
+
+    void saveProjectPersonRelation(projectId, relation)
+      .then((saved) => {
+        if (activeWorkspaceIdRef.current !== projectId) {
+          const cached = loadProjectPeopleCache(projectId);
+          const relations = cached.relations.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectPeopleCache(projectId, cached.persons, relations);
+          return;
+        }
+        setProjectPersonRelations((current) => {
+          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          saveProjectPeopleCache(projectId, projectPersons, next);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const cached = loadProjectPeopleCache(projectId);
+        saveProjectPeopleCache(projectId, cached.persons, previous);
+        if (activeWorkspaceIdRef.current === projectId) setProjectPersonRelations(previous);
+        notify(describeError(error, "Не вдалося зберегти зв’язок."), true);
+      });
   };
   const deleteRelation = (id: string) => {
-    app.setDatabase((current) => ({
-      ...current,
-      personRelations: current.personRelations.filter((relation) => relation.id !== id),
-    }));
+    if (!workspace) {
+      app.setDatabase((current) => ({
+        ...current,
+        personRelations: current.personRelations.filter((relation) => relation.id !== id),
+      }));
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectPersonRelations;
+    const optimistic = previous.filter((relation) => relation.id !== id);
+    setProjectPersonRelations(optimistic);
+    saveProjectPeopleCache(projectId, projectPersons, optimistic);
+    void deleteProjectPersonRelation(projectId, id).catch((error: unknown) => {
+      const cached = loadProjectPeopleCache(projectId);
+      saveProjectPeopleCache(projectId, cached.persons, previous);
+      if (activeWorkspaceIdRef.current === projectId) setProjectPersonRelations(previous);
+      notify(describeError(error, "Не вдалося видалити зв’язок."), true);
+    });
+  };
+  const saveCustomRecord = (record: CustomSectionRecord) => {
+    if (!workspace) {
+      app.setDatabase((current) => ({
+        ...current,
+        customSectionRecords: current.customSectionRecords.some((item) => item.id === record.id)
+          ? current.customSectionRecords.map((item) => item.id === record.id ? record : item)
+          : [record, ...current.customSectionRecords],
+      }));
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectCustomRecords;
+    const optimistic = previous.some((item) => item.id === record.id)
+      ? previous.map((item) => (item.id === record.id ? record : item))
+      : [record, ...previous];
+    setProjectCustomRecords(optimistic);
+    saveProjectCustomStructureCache(
+      projectId,
+      projectCustomFields,
+      projectCustomSections,
+      optimistic,
+    );
+    const section = projectCustomSections.find((item) => item.id === record.sectionId);
+    const titleValue = section ? record.values[section.titleFieldId] : "";
+    const title = Array.isArray(titleValue)
+      ? titleValue.join(", ")
+      : typeof titleValue === "string"
+        ? titleValue
+        : section?.singularName ?? "Запис";
+    const previousRecord = previous.find((item) => item.id === record.id);
+    void assertProjectRecordUnchanged(
+      "custom_records",
+      projectId,
+      record.id,
+      baseUpdatedAt(record) ?? previousRecord?.updatedAt,
+    ).then(() => saveProjectCustomRecord(projectId, record, title || "Запис")).then(
+      () => {
+        const attachmentFields = Object.fromEntries(
+          (section?.fields ?? [])
+            .filter((field) => field.type === "attachments")
+            .map((field) => [field.id, scanList(record.values[field.id])]),
+        );
+        void syncProjectAttachmentMetadata(
+          projectId,
+          `custom:${record.sectionId}`,
+          record.id,
+          attachmentFields,
+        ).catch((error: unknown) => {
+          notify(
+            describeError(error, "Запис збережено, але не вдалося оновити метадані вкладень."),
+            true,
+          );
+        });
+      },
+      (error: unknown) => {
+        setProjectCustomRecords(previous);
+        saveProjectCustomStructureCache(
+          projectId,
+          projectCustomFields,
+          projectCustomSections,
+          previous,
+        );
+        notify(describeError(error, "Не вдалося зберегти запис власного розділу."), true);
+      },
+    );
+  };
+  const deleteCustomRecord = (id: string) => {
+    if (!workspace) {
+      app.setDatabase((current) => ({
+        ...current,
+        customSectionRecords: current.customSectionRecords.filter((record) => record.id !== id),
+      }));
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+    const projectId = workspace.projectId;
+    const previous = projectCustomRecords;
+    const deletedRecord = previous.find((record) => record.id === id);
+    const optimistic = previous.filter((record) => record.id !== id);
+    setProjectCustomRecords(optimistic);
+    saveProjectCustomStructureCache(
+      projectId,
+      projectCustomFields,
+      projectCustomSections,
+      optimistic,
+    );
+    void deleteProjectCustomRecord(projectId, id).then(() => {
+      if (!deletedRecord) return;
+      void deleteProjectAttachmentMetadata(
+        projectId,
+        `custom:${deletedRecord.sectionId}`,
+        id,
+      ).catch(() => undefined);
+    }).catch((error: unknown) => {
+      setProjectCustomRecords(previous);
+      saveProjectCustomStructureCache(
+        projectId,
+        projectCustomFields,
+        projectCustomSections,
+        previous,
+      );
+      notify(describeError(error, "Не вдалося видалити запис власного розділу."), true);
+    });
+  };
+  const addCustomField = (definition: CustomFieldDefinition) => {
+    if (!workspace) {
+      app.setDatabase((current) => ({
+        ...current,
+        settings: {
+          ...current.settings,
+          customFields: [...current.settings.customFields, definition],
+        },
+      }));
+      return;
+    }
+    if (workspace.role !== "owner") {
+      notify("Додаткові поля може змінювати лише власник проєкту.", true);
+      return;
+    }
+    const projectId = workspace.projectId;
+    const previous = projectCustomFields;
+    const optimistic = [...previous, definition];
+    setProjectCustomFields(optimistic);
+    saveProjectCustomStructureCache(
+      projectId,
+      optimistic,
+      projectCustomSections,
+      projectCustomRecords,
+    );
+    void saveProjectCustomFieldDefinition(
+      projectId,
+      definition,
+      optimistic.length - 1,
+    ).catch((error: unknown) => {
+      setProjectCustomFields(previous);
+      saveProjectCustomStructureCache(
+        projectId,
+        previous,
+        projectCustomSections,
+        projectCustomRecords,
+      );
+      notify(describeError(error, "Не вдалося додати власне поле."), true);
+    });
+  };
+
+  const changeSettings = (next: AppDatabase) => {
+    if (!workspace) {
+      app.setDatabase(next);
+      return;
+    }
+    if (workspace.role !== "owner") {
+      notify("Структуру проєкту може змінювати лише власник.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    setProjectPreferences({
+      researcherName: next.settings.researcherName,
+      compactTables: next.settings.compactTables,
+      lastAutomaticBackupAt: next.settings.lastAutomaticBackupAt,
+    });
+    const previousSections = projectCustomSections;
+    const previousRecords = projectCustomRecords;
+    const nextSections = next.customSections;
+    const nextRecords = next.customSectionRecords;
+    setProjectCustomSections(nextSections);
+    setProjectCustomRecords(nextRecords);
+    saveProjectCustomStructureCache(
+      projectId,
+      projectCustomFields,
+      nextSections,
+      nextRecords,
+    );
+
+    const removed = previousSections.filter(
+      (section) => !nextSections.some((item) => item.id === section.id),
+    );
+    const changed = nextSections.filter((section) => {
+      const previous = previousSections.find((item) => item.id === section.id);
+      return !previous || JSON.stringify(previous) !== JSON.stringify(section);
+    });
+    void Promise.all([
+      ...removed.map((section) =>
+        deleteProjectCustomSection(projectId, section.id),
+      ),
+      ...changed.map((section) =>
+        saveProjectCustomSection(
+          projectId,
+          section,
+          nextSections.findIndex((item) => item.id === section.id),
+        ),
+      ),
+    ]).catch((error: unknown) => {
+      setProjectCustomSections(previousSections);
+      setProjectCustomRecords(previousRecords);
+      saveProjectCustomStructureCache(
+        projectId,
+        projectCustomFields,
+        previousSections,
+        previousRecords,
+      );
+      notify(describeError(error, "Не вдалося зберегти структуру розділів."), true);
+    });
+  };
+
+  const replaceProjectDatabase = async (next: AppDatabase) => {
+    if (!workspace) {
+      app.replaceDatabase(next);
+      return;
+    }
+    if (workspace.role !== "owner") {
+      throw new Error("Відновлювати резервні копії може лише власник проєкту.");
+    }
+
+    const projectId = workspace.projectId;
+    const researchIds = new Set(next.researches.map((item) => item.id));
+    const documentIds = new Set(next.documents.map((item) => item.id));
+    const personIds = new Set(next.persons.map((item) => item.id));
+    const findingIds = new Set(next.findings.map((item) => item.id));
+
+    await clearProjectRecords(projectId);
+    await importProjectResearches(projectId, next.researches);
+    await importProjectPeople(
+      projectId,
+      next.persons,
+      next.personRelations,
+      researchIds,
+    );
+    await importProjectDocuments(
+      projectId,
+      next.documents,
+      next.yearMatrix,
+      researchIds,
+    );
+    await importProjectWorkRecords(
+      projectId,
+      next.tasks,
+      next.findings,
+      researchIds,
+      documentIds,
+      personIds,
+    );
+    await importProjectAnalysisRecords(
+      projectId,
+      next.hypotheses,
+      next.archiveRequests,
+      researchIds,
+      personIds,
+      documentIds,
+      findingIds,
+    );
+    await importProjectCustomStructure(
+      projectId,
+      next.settings.customFields,
+      next.customSections,
+      next.customSectionRecords,
+    );
+
+    const preferences: ProjectPreferences = {
+      researcherName: next.settings.researcherName,
+      compactTables: next.settings.compactTables,
+      lastAutomaticBackupAt: next.settings.lastAutomaticBackupAt,
+    };
+    await saveProjectPreferences(projectId, preferences);
+
+    const collections: Array<[CollectionKey, AppEntity[]]> = [
+      ["researches", next.researches],
+      ["documents", next.documents],
+      ["yearMatrix", next.yearMatrix],
+      ["tasks", next.tasks],
+      ["findings", next.findings],
+      ["hypotheses", next.hypotheses],
+      ["archiveRequests", next.archiveRequests],
+      ["persons", next.persons],
+    ];
+    for (const [collection, records] of collections) {
+      for (const record of records) {
+        await syncProjectAttachmentMetadata(
+          projectId,
+          collection,
+          record.id,
+          projectAttachmentFields(collection, record, next),
+        );
+      }
+    }
+    const sections = new Map(
+      next.customSections.map((section) => [section.id, section]),
+    );
+    for (const record of next.customSectionRecords) {
+      const section = sections.get(record.sectionId);
+      const fields = Object.fromEntries(
+        (section?.fields ?? [])
+          .filter((field) => field.type === "attachments")
+          .map((field) => [field.id, scanList(record.values[field.id])]),
+      );
+      await syncProjectAttachmentMetadata(
+        projectId,
+        `custom:${record.sectionId}`,
+        record.id,
+        fields,
+      );
+    }
+
+    setProjectResearches(next.researches);
+    setProjectPersons(next.persons);
+    setProjectPersonRelations(next.personRelations);
+    setProjectDocuments(next.documents);
+    setProjectYearMatrix(next.yearMatrix);
+    setProjectTasks(next.tasks);
+    setProjectFindings(next.findings);
+    setProjectHypotheses(next.hypotheses);
+    setProjectArchiveRequests(next.archiveRequests);
+    setProjectCustomFields(next.settings.customFields);
+    setProjectCustomSections(next.customSections);
+    setProjectCustomRecords(next.customSectionRecords);
+    setProjectPreferences(preferences);
+    saveProjectResearchCache(projectId, next.researches);
+    saveProjectPeopleCache(projectId, next.persons, next.personRelations);
+    saveProjectDocumentsCache(projectId, next.documents, next.yearMatrix);
+    saveProjectWorkRecordsCache(projectId, next.tasks, next.findings);
+    saveProjectAnalysisRecordsCache(
+      projectId,
+      next.hypotheses,
+      next.archiveRequests,
+    );
+    saveProjectCustomStructureCache(
+      projectId,
+      next.settings.customFields,
+      next.customSections,
+      next.customSectionRecords,
+    );
   };
 
   const content = (() => {
+    const readOnly = Boolean(workspace && workspace.role === "viewer");
+    const canManageStructure = !workspace || workspace.role === "owner";
+    if (page.startsWith("custom:")) {
+      const sectionId = page.slice("custom:".length);
+      const section = activeDb.customSections.find((item) => item.id === sectionId);
+      if (!section) {
+        return (
+          <section className="panel empty-state">
+            <strong>Цей власний розділ не знайдено.</strong>
+            <button className="button button-primary" onClick={() => navigate("settings")}>
+              Відкрити конструктор
+            </button>
+          </section>
+        );
+      }
+      return (
+        <CustomSectionPage
+          db={activeDb}
+          section={section}
+          records={activeDb.customSectionRecords.filter((record) => record.sectionId === section.id)}
+          initialSearch={moduleSearch}
+          initialOpenRecordId={openEntityId}
+          onSave={saveCustomRecord}
+          onDelete={deleteCustomRecord}
+          onOpenRelated={openRelatedRecord}
+          readOnly={readOnly}
+        />
+      );
+    }
     switch (page) {
       case "dashboard":
-        return (
-          <DashboardPage
-            db={app.db}
-            onNavigate={navigate}
-            onOpenSearchResult={openSearchResult}
-          />
-        );
+        return <DashboardPage db={activeDb} onNavigate={navigate} onOpenSearchResult={openSearchResult} />;
       case "researches":
       case "documents":
       case "archiveRequests":
@@ -160,12 +3361,15 @@ export default function App() {
       case "hypotheses":
         return (
           <CrudPage
+            db={activeDb}
             config={configs[page]}
-            items={app.db[page]}
-            researches={app.db.researches}
-            documents={app.db.documents}
-            findings={app.db.findings}
-            persons={app.db.persons}
+            items={activeDb[page]}
+            researches={activeDb.researches}
+            documents={activeDb.documents}
+            findings={activeDb.findings}
+            persons={activeDb.persons}
+            customFieldDefinitions={activeDb.settings.customFields}
+            onAddCustomField={canManageStructure ? addCustomField : undefined}
             onSavePerson={savePerson}
             initialSearch={moduleSearch}
             initialOpenEntityId={openEntityId}
@@ -177,18 +3381,24 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
             onSave={saveFor(page)}
             onDelete={deleteFor(page)}
+            readOnly={readOnly}
           />
         );
       case "persons":
         return (
           <PersonsPage
-            persons={app.db.persons}
-            relations={app.db.personRelations}
-            researches={app.db.researches}
-            findings={app.db.findings}
-            tasks={app.db.tasks}
-            hypotheses={app.db.hypotheses}
-            archiveRequests={app.db.archiveRequests}
+            db={activeDb}
+            persons={activeDb.persons}
+            relations={activeDb.personRelations}
+            researches={activeDb.researches}
+            findings={activeDb.findings}
+            tasks={activeDb.tasks}
+            hypotheses={activeDb.hypotheses}
+            archiveRequests={activeDb.archiveRequests}
+            customFieldDefinitions={activeDb.settings.customFields.filter(
+              (field) => field.module === "persons",
+            )}
+            onAddCustomField={canManageStructure ? addCustomField : undefined}
             initialSearch={moduleSearch}
             initialOpenPersonId={openEntityId}
             onSavePerson={savePerson}
@@ -197,50 +3407,82 @@ export default function App() {
             onDeleteRelation={deleteRelation}
             onOpenRelated={openRelatedRecord}
             onCreateRelated={createRelatedRecord}
+            readOnly={readOnly}
           />
         );
       case "yearMatrix":
         return (
           <YearMatrixPage
-            items={app.db.yearMatrix}
-            researches={app.db.researches}
-            documents={app.db.documents}
-            findings={app.db.findings}
+            db={activeDb}
+            items={activeDb.yearMatrix}
+            researches={activeDb.researches}
+            documents={activeDb.documents}
+            findings={activeDb.findings}
+            customFieldDefinitions={activeDb.settings.customFields}
+            onAddCustomField={canManageStructure ? addCustomField : undefined}
             initialSearch={moduleSearch}
             onOpenRelated={openRelatedRecord}
             onSave={saveFor("yearMatrix")}
             onDelete={deleteFor("yearMatrix")}
+            readOnly={readOnly}
           />
         );
       case "backup":
         return (
           <BackupPage
-            db={app.db}
+            db={activeDb}
             user={app.user}
             sync={app.sync}
-            onReplace={app.replaceDatabase}
+            workspace={workspace}
+            onReplace={replaceProjectDatabase}
             onSync={app.forceSyncNow}
             notify={notify}
           />
         );
       case "settings":
-        return <SettingsPage db={app.db} onChange={app.setDatabase} />;
+        return (
+          <SettingsPage
+            db={activeDb}
+            onChange={changeSettings}
+            readOnly={Boolean(workspace && workspace.role !== "owner")}
+          />
+        );
     }
   })();
 
   return (
-    <div className={app.db.settings.compactTables ? "compact-tables" : ""}>
+    <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
         page={page}
         onNavigate={navigate}
-        user={app.user}
+        customSections={activeDb.customSections}
+        driveUser={app.user}
+        account={account}
+        workspace={workspace}
+        workspaces={workspaces}
         sync={app.sync}
         onConnect={() => void connect()}
-        onDisconnect={app.disconnectGoogle}
+        onDisconnectDrive={app.disconnectGoogle}
+        onSignInAccount={() => void signIn()}
+        onSignOutAccount={() => void signOutAccount()}
+        onSwitchWorkspace={switchWorkspace}
+        onCreateWorkspace={() => void createWorkspace()}
+        onDeleteWorkspace={(projectId) => void removeWorkspace(projectId)}
+        onOpenTeam={() => setTeamOpen(true)}
         isSigningIn={app.isSigningIn}
+        isAccountSigningIn={isAccountSigningIn}
+        isCreatingWorkspace={isCreatingWorkspace}
       >
         {content}
       </Layout>
+      {teamOpen && account ? (
+        <ProjectTeamModal
+          account={account}
+          workspace={workspace}
+          onClose={() => setTeamOpen(false)}
+          onInvitationAccepted={acceptWorkspaceInvitation}
+        />
+      ) : null}
       {toast ? <div className={`toast ${toast.error ? "toast-error" : ""}`}>{toast.message}</div> : null}
     </div>
   );

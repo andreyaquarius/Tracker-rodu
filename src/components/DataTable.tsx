@@ -18,6 +18,7 @@ interface DataTableProps {
   onOpenRelated?: (page: PageKey, entityId: string) => void;
   onQuickStatus?: (entity: AppEntity, status: string) => void;
   statusOptions?: string[];
+  readOnly?: boolean;
 }
 
 export function DataTable({
@@ -31,6 +32,7 @@ export function DataTable({
   onOpenRelated,
   onQuickStatus,
   statusOptions,
+  readOnly = false,
 }: DataTableProps) {
   if (!items.length) return null;
   return (
@@ -94,7 +96,7 @@ export function DataTable({
                   );
                 })}
                 <td className="row-actions" data-label="Дії">
-                  {onQuickStatus && statusOptions ? (
+                  {!readOnly && onQuickStatus && statusOptions ? (
                     <select
                       aria-label="Швидко змінити статус"
                       value={String(record.status ?? record.reviewStatus ?? "")}
@@ -109,26 +111,30 @@ export function DataTable({
                       ))}
                     </select>
                   ) : null}
-                  <button
-                    className="icon-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onEdit(entity);
-                    }}
-                    title="Редагувати"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    className="icon-button danger"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDelete(entity);
-                    }}
-                    title="Видалити"
-                  >
-                    ×
-                  </button>
+                  {!readOnly ? (
+                    <>
+                      <button
+                        className="icon-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onEdit(entity);
+                        }}
+                        title="Редагувати"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="icon-button danger"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDelete(entity);
+                        }}
+                        title="Видалити"
+                      >
+                        ×
+                      </button>
+                    </>
+                  ) : null}
                 </td>
               </tr>
             );

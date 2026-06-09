@@ -1,5 +1,13 @@
 import { useMemo, useState } from "react";
-import type { AppEntity, DocumentRecord, Finding, Research, YearMatrixRecord } from "../types";
+import type {
+  AppDatabase,
+  AppEntity,
+  CustomFieldDefinition,
+  DocumentRecord,
+  Finding,
+  Research,
+  YearMatrixRecord,
+} from "../types";
 import { analyzeYearGaps } from "../utils/yearGapAnalyzer";
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
@@ -45,25 +53,33 @@ const config: EntityConfig = {
 };
 
 interface Props {
+  db: AppDatabase;
   items: YearMatrixRecord[];
   researches: Research[];
   documents: DocumentRecord[];
   findings: Finding[];
   initialSearch?: string;
+  customFieldDefinitions?: CustomFieldDefinition[];
+  onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onSave: (entity: AppEntity) => void;
   onDelete: (id: string) => void;
+  readOnly?: boolean;
 }
 
 export function YearMatrixPage({
+  db,
   items,
   researches,
   documents,
   findings,
   initialSearch = "",
+  customFieldDefinitions = [],
+  onAddCustomField,
   onOpenRelated,
   onSave,
   onDelete,
+  readOnly = false,
 }: Props) {
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState("1840");
@@ -82,6 +98,7 @@ export function YearMatrixPage({
   );
 
   const addRange = () => {
+    if (readOnly) return;
     const start = Number(from);
     const end = Number(to);
     if (!Number.isInteger(start) || !Number.isInteger(end) || start > end || end - start > 500) {
@@ -105,6 +122,7 @@ export function YearMatrixPage({
         documentType,
         status: "не перевірено",
         notes: "",
+        customFields: {},
         createdAt: timestamp,
         updatedAt: timestamp,
       } as YearMatrixRecord);
@@ -125,7 +143,9 @@ export function YearMatrixPage({
           <label><span>Рік від</span><input type="number" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
           <label><span>Рік до</span><input type="number" value={to} onChange={(event) => setTo(event.target.value)} /></label>
           <label><span>Тип документа</span><select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>{["народження", "шлюби", "смерті", "сповідки", "ревізії", "інвентарі", "інше"].map((type) => <option key={type}>{type}</option>)}</select></label>
-          <button className="button button-secondary" onClick={addRange}>Додати діапазон</button>
+          {!readOnly ? (
+            <button className="button button-secondary" onClick={addRange}>Додати діапазон</button>
+          ) : null}
           <button className="button button-primary" onClick={() => setShowGaps(true)}>Знайти прогалини</button>
         </div>
         {showGaps ? (
@@ -136,15 +156,19 @@ export function YearMatrixPage({
         ) : null}
       </section>
       <CrudPage
+        db={db}
         config={config}
         items={items}
         researches={researches}
         documents={documents}
         findings={findings}
+        customFieldDefinitions={customFieldDefinitions}
+        onAddCustomField={onAddCustomField}
         initialSearch={initialSearch}
         onOpenRelated={onOpenRelated}
         onSave={onSave}
         onDelete={onDelete}
+        readOnly={readOnly}
       />
     </>
   );

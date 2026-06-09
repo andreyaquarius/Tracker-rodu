@@ -16,14 +16,7 @@ import {
   signInWithGoogle,
   signOutFromGoogle,
 } from "../services/googleAuth";
-import {
-  createDatabaseFileInAppDataFolder,
-  createAppDataBackup,
-  downloadDatabaseFile,
-  ensureDatabaseFileName,
-  findDatabaseFileInAppDataFolder,
-  updateDatabaseFile,
-} from "../services/googleDrive";
+import { storageService } from "../services/storage/storageService";
 import { scheduleAutoSave } from "../services/syncService";
 import { createActivityEntries } from "../utils/activityLog";
 import {
@@ -80,7 +73,7 @@ export function useAppDatabase() {
     }
     dailyBackupRunning.current = true;
     try {
-      await createAppDataBackup(token, dbRef.current, "automatic");
+      await storageService.createBackup(token, dbRef.current, "automatic");
       const backedUpAt = nowIso();
       setDatabase((current) => ({
         ...current,
@@ -110,16 +103,16 @@ export function useAppDatabase() {
     try {
       let fileId = driveFileId.current;
       if (!fileId) {
-        const existing = await findDatabaseFileInAppDataFolder(token);
+        const existing = await storageService.findDatabase(token);
         if (existing) fileId = existing.id;
-        else fileId = (await createDatabaseFileInAppDataFolder(token, dbRef.current)).id;
+        else fileId = (await storageService.createDatabase(token, dbRef.current)).id;
         driveFileId.current = fileId;
       }
       if (!driveFileNameEnsured.current) {
-        await ensureDatabaseFileName(token, fileId);
+        await storageService.ensureDatabaseName(token, fileId);
         driveFileNameEnsured.current = true;
       }
-      const remote = await downloadDatabaseFile(token, fileId);
+      const remote = await storageService.downloadDatabase(token, fileId);
       if (isDatabaseEmpty(dbRef.current) && !isDatabaseEmpty(remote)) {
         dbRef.current = remote;
         saveLocalCopy(remote);
@@ -129,7 +122,7 @@ export function useAppDatabase() {
           dbRef.current = migration.db;
           saveLocalCopy(migration.db);
           setDbState(migration.db);
-          await updateDatabaseFile(token, fileId, migration.db);
+          await storageService.updateDatabase(token, fileId, migration.db);
           await deleteMigratedLocalFiles(migration.migrated);
         }
         reportUnavailableAttachments(migration.unavailable);
@@ -145,7 +138,7 @@ export function useAppDatabase() {
         setDbState(migration.db);
       }
       reportUnavailableAttachments(migration.unavailable);
-      await updateDatabaseFile(token, fileId, dbRef.current);
+      await storageService.updateDatabase(token, fileId, dbRef.current);
       if (migration.migrated.length) {
         await deleteMigratedLocalFiles(migration.migrated);
       }
@@ -196,13 +189,13 @@ export function useAppDatabase() {
       const token = await signInWithGoogle();
       const [profile, driveFile] = await Promise.all([
         fetchGoogleUser(token),
-        findDatabaseFileInAppDataFolder(token),
+        storageService.findDatabase(token),
       ]);
       if (!driveFile) {
         const migration = await migrateLocalAttachmentsToDrive(dbRef.current);
         if (migration.migrated.length) replaceLocalDatabase(migration.db);
         reportUnavailableAttachments(migration.unavailable);
-        const created = await createDatabaseFileInAppDataFolder(token, dbRef.current);
+        const created = await storageService.createDatabase(token, dbRef.current);
         if (migration.migrated.length) {
           await deleteMigratedLocalFiles(migration.migrated);
         }
@@ -219,7 +212,7 @@ export function useAppDatabase() {
         return;
       }
       driveFileId.current = driveFile.id;
-      const remote = await downloadDatabaseFile(token, driveFile.id);
+      const remote = await storageService.downloadDatabase(token, driveFile.id);
       const localTime = new Date(dbRef.current.updatedAt).getTime();
       const remoteTime = new Date(remote.updatedAt).getTime();
       const localEmpty = isDatabaseEmpty(dbRef.current);
@@ -231,7 +224,7 @@ export function useAppDatabase() {
           "На цьому пристрої є дані, а база на Google Drive порожня. Завантажити локальні дані на Google Drive?",
         );
         if (uploadLocal) {
-          await updateDatabaseFile(token, driveFile.id, dbRef.current);
+          await storageService.updateDatabase(token, driveFile.id, dbRef.current);
         } else {
           throw new Error("Синхронізацію скасовано, щоб не втратити локальні дані.");
         }
@@ -246,8 +239,8 @@ export function useAppDatabase() {
             "Залишити локальну версію та замінити нею базу на Google Drive?",
           );
           if (uploadLocal) {
-            await createAppDataBackup(token, remote, "manual");
-            await updateDatabaseFile(token, driveFile.id, dbRef.current);
+            await storageService.createBackup(token, remote, "manual");
+            await storageService.updateDatabase(token, driveFile.id, dbRef.current);
           } else {
             throw new Error("Синхронізацію скасовано. Обидві версії залишено без змін.");
           }
@@ -257,8 +250,8 @@ export function useAppDatabase() {
           "Локальна копія новіша за Google Drive. Синхронізувати її з Google Drive?",
         );
         if (uploadLocal) {
-          await createAppDataBackup(token, remote, "manual");
-          await updateDatabaseFile(token, driveFile.id, dbRef.current);
+          await storageService.createBackup(token, remote, "manual");
+          await storageService.updateDatabase(token, driveFile.id, dbRef.current);
         } else {
           const useRemote = window.confirm(
             "Тоді завантажити версію з Google Drive замість локальної?",
@@ -273,7 +266,7 @@ export function useAppDatabase() {
       const migration = await migrateLocalAttachmentsToDrive(dbRef.current);
       if (migration.migrated.length) {
         replaceLocalDatabase(migration.db);
-        await updateDatabaseFile(token, driveFile.id, dbRef.current);
+        await storageService.updateDatabase(token, driveFile.id, dbRef.current);
         await deleteMigratedLocalFiles(migration.migrated);
       }
       reportUnavailableAttachments(migration.unavailable);
@@ -384,6 +377,8 @@ function isDatabaseEmpty(db: AppDatabase): boolean {
     db.hypotheses.length === 0 &&
     db.archiveRequests.length === 0 &&
     db.persons.length === 0 &&
-    db.personRelations.length === 0
+    db.personRelations.length === 0 &&
+    db.customSections.length === 0 &&
+    db.customSectionRecords.length === 0
   );
 }
