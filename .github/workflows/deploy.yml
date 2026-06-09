@@ -34,6 +34,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify deployment configuration
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ]; then
+            echo "::error::Repository secret VITE_SUPABASE_URL is missing."
+            exit 1
+          fi
+          if [ -z "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "::error::Repository secret VITE_SUPABASE_PUBLISHABLE_KEY is missing."
+            exit 1
+          fi
+
       - name: Build application
         env:
           CUSTOM_DOMAIN: trekerrodu.com.ua

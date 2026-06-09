@@ -44,7 +44,7 @@ const supabase = isSupabaseConfigured
 
 function requireSupabase() {
   if (!supabase) {
-    throw new Error("У локальних налаштуваннях не вказано адресу або ключ Supabase.");
+    throw new Error("На сайті не налаштовано підключення до Supabase.");
   }
   return supabase;
 }

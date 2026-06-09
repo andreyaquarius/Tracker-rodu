@@ -115,7 +115,7 @@ export async function migrateProjectAttachmentsToSupabase(
   db: AppDatabase,
 ): Promise<AttachmentMigrationResult> {
   if (!isSupabaseConfigured) {
-    throw new Error("У локальних налаштуваннях не вказано адресу або ключ Supabase.");
+    throw new Error("На сайті не налаштовано підключення до Supabase.");
   }
 
   const token = getAccessToken();
