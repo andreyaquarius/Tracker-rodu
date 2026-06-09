@@ -2,11 +2,51 @@
 
 **Не губи сліди свого роду**
 
-Робочий простір для генеалогічного дослідження. Ведіть осіб, документи, завдання, знахідки, гіпотези та прогалини по роках в одному місці.
+Трекер Роду — вебзастосунок для ведення генеалогічних, краєзнавчих та інших
+історичних досліджень.
 
-Застосунок працює без власного сервера: кожна зміна одразу зберігається у браузері, а після підключення Google автоматично синхронізується з прихованим файлом `tracker-rodu-db.json` у `appDataFolder`.
+Робочий сайт: [https://trekerrodu.com.ua](https://trekerrodu.com.ua)
+
+## Можливості
+
+- дослідження, документи, особи, завдання, знахідки та гіпотези;
+- матриця перевірених років і пошук прогалин;
+- запити до архівів із прикріпленням запиту та відповіді;
+- власні поля у стандартних розділах;
+- конструктор окремих розділів для краєзнавчих та інших проєктів;
+- глобальний пошук із групуванням результатів;
+- зберігання сканів, фотографій, аудіо та документів;
+- декілька проєктів в одному обліковому записі;
+- запрошення учасників із ролями **власник**, **редактор** і **лише перегляд**;
+- живе оновлення спільних даних і захист від конфліктного редагування;
+- резервні копії та відновлення проєкту.
+
+## Архітектура
+
+Основне сховище застосунку:
+
+- **Supabase PostgreSQL** — записи, проєкти, учасники та права доступу;
+- **Supabase Auth** — вхід через Google або email і пароль;
+- **Supabase Storage** — вкладення та резервні копії;
+- **Supabase Realtime** — живе оновлення спільних проєктів;
+- **Row Level Security** — ізоляція проєктів і перевірка ролей користувачів.
+
+Локальне сховище браузера використовується лише як кеш і для перенесення даних
+зі старих версій. Google Drive більше не є основною базою даних; старе
+підключення збережене як необов’язковий механізм сумісності та резервування.
+
+## Технології
+
+- React 19;
+- TypeScript;
+- Vite;
+- Supabase;
+- Fuse.js;
+- GitHub Actions і GitHub Pages.
 
 ## Локальний запуск
+
+Потрібні Node.js 22 або новіший і npm.
 
 ```bash
 npm install
@@ -14,85 +54,125 @@ copy .env.example .env
 npm run dev
 ```
 
-Для перевірки готової збірки:
+Застосунок буде доступний за адресою:
+
+```text
+http://localhost:5173
+```
+
+Перевірка типів і виробнича збірка:
 
 ```bash
+npm run lint
 npm run build
 npm run preview
 ```
 
-Без налаштованого Google OAuth Трекер Роду повністю працює локально, включно з JSON-експортом та імпортом.
+## Змінні середовища
 
-## Налаштування Google Cloud
-
-1. Відкрийте [Google Cloud Console](https://console.cloud.google.com/) і створіть новий проєкт.
-2. У **APIs & Services → Library** знайдіть і ввімкніть **Google Drive API**.
-3. Налаштуйте **Google Auth Platform** і вкажіть назву застосунку **Трекер Роду**. Для тестового застосунку додайте свій Google-акаунт до тестових користувачів.
-4. У **Google Auth Platform → Clients** створіть OAuth Client ID типу **Web application** з назвою **Трекер Роду Local**.
-5. Додайте дозволені джерела JavaScript:
-   - `http://localhost:5173` для локального запуску;
-   - адресу сайту Netlify або Vercel;
-   - для робочого сайту: `https://trekerrodu.com.ua`;
-   - для сумісності можна також додати `https://www.trekerrodu.com.ua`.
-6. Скопіюйте Client ID у `.env`:
+Створіть `.env` на основі `.env.example`:
 
 ```env
-VITE_GOOGLE_CLIENT_ID=000000000000-example.apps.googleusercontent.com
-VITE_GOOGLE_API_KEY=
+VITE_GOOGLE_CLIENT_ID=your_google_client_id_here
+VITE_GOOGLE_API_KEY=your_google_api_key_here
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key_here
 ```
 
-`VITE_GOOGLE_API_KEY` зарезервовано для можливого розширення, але поточна реалізація його не потребує.
+У браузері використовується лише публічний ключ Supabase. `service_role` та
+інші приватні ключі не можна додавати до `.env`, GitHub або клієнтського коду.
 
-## Дозволи Google
+## Supabase
 
-Основний вхід запитує:
+SQL-міграції розташовані в каталозі
+[`supabase/migrations`](supabase/migrations):
 
-- `openid`
-- `profile`
-- `email`
-- `https://www.googleapis.com/auth/drive.appdata`
+1. `202606090001_initial_schema.sql` — таблиці, ролі, запрошення та RLS;
+2. `202606090002_storage.sql` — приватне сховище вкладень;
+3. `202606090003_project_backups.sql` — резервні копії проєктів;
+4. `202606090004_realtime.sql` — Realtime для спільної роботи.
 
-Трекер Роду не просить повного доступу до Google Drive. Додатковий дозвіл `https://www.googleapis.com/auth/drive.file` запитується лише для створення видимої резервної копії.
+Додаткові налаштування:
 
-Google Identity Services видає короткостроковий access token у браузері. Після завершення його строку дії синхронізація може вимагати повторного підключення Google. Локальне автозбереження продовжує працювати.
+- у **Authentication → Providers** увімкніть Google та Email;
+- у **Authentication → URL Configuration** додайте:
+  - `https://trekerrodu.com.ua`;
+  - `http://localhost:5173/`;
+- для реєстрації через email налаштуйте підтвердження пошти;
+- для вкладень і резервних копій застосуйте Storage-міграції.
 
-## Розміщення
+Докладніше: [`supabase/README.md`](supabase/README.md).
 
-### Netlify
+## Google OAuth
 
-1. Імпортуйте репозиторій.
-2. Build command: `npm run build`.
-3. Publish directory: `dist`.
-4. Додайте `VITE_GOOGLE_CLIENT_ID` до Environment Variables.
-5. Додайте адресу Netlify до Authorized JavaScript origins у Google Cloud.
+У Google Cloud OAuth Client ID додайте дозволені JavaScript origins:
 
-### Vercel
+```text
+http://localhost:5173
+https://trekerrodu.com.ua
+https://www.trekerrodu.com.ua
+```
 
-1. Імпортуйте репозиторій як Vite-проєкт.
-2. Build command: `npm run build`.
-3. Output directory: `dist`.
-4. Додайте `VITE_GOOGLE_CLIENT_ID` до Environment Variables.
-5. Додайте адресу Vercel до Authorized JavaScript origins у Google Cloud.
+Redirect URI для входу через Supabase:
 
-### GitHub Pages
+```text
+https://YOUR_PROJECT.supabase.co/auth/v1/callback
+```
 
-Збірка використовує відносний `base: "./"`, тому каталог `dist` можна публікувати на GitHub Pages. Додайте адресу GitHub Pages до OAuth Client ID.
+Google OAuth використовується для входу до облікового запису. Доступ до Google
+Drive, якщо він потрібен для сумісності зі старими резервними копіями,
+підключається окремо всередині застосунку.
 
-## Зберігання та відновлення
+## Поштові запрошення
 
-- Локальний ключ: `tracker-rodu-local-db`.
-- Службовий файл Google Drive: `tracker-rodu-db.json` у `appDataFolder`.
-- Автосинхронізація: приблизно через 1,5 секунди після останньої зміни.
-- Автоматична резервна копія: один раз на добу після відкриття з підключеним Google Drive.
-- Зберігаються останні 7 автоматичних копій у `appDataFolder`.
-- Перед імпортом або відновленням створюється захисна копія поточного стану.
-- Видима резервна копія: `Трекер Роду backup YYYY-MM-DD HH-mm.json`.
-- JSON-експорт та імпорт доступні в розділі **Резервні копії**.
-- При різних локальній і Drive-версіях застосунок порівнює `updatedAt` та пропонує використати новішу.
-- Скани документів і знахідок розміром до 2 ГБ при підключеному Google завантажуються частинами й зберігаються окремими файлами в `appDataFolder`. У локальному режимі вони зберігаються лише в цьому браузері та залежать від доступної квоти браузера.
+Edge Function
+[`send-project-invitation`](supabase/functions/send-project-invitation/index.ts)
+надсилає листи через Resend.
 
-Старі локальні дані та файл `rodovyi-navigator-db.json` автоматично переносяться до нових назв після першого запуску оновленої версії.
+Для неї потрібні секрети Supabase:
 
-Поточна версія структури бази — `2`. Вона містить масиви `persons` і `personRelations`, а записи завдань, знахідок та гіпотез підтримують `personIds`. Бази версії `1` мігрують автоматично під час завантаження.
+```text
+RESEND_API_KEY
+INVITATION_EMAIL_FROM
+APP_URL=https://trekerrodu.com.ua/
+```
 
-Офіційна документація: [Google Identity Services](https://developers.google.com/identity/oauth2/web/guides/use-token-model), [appDataFolder](https://developers.google.com/workspace/drive/api/guides/appdata), [Drive uploads](https://developers.google.com/workspace/drive/api/guides/manage-uploads).
+Відправник `INVITATION_EMAIL_FROM` повинен використовувати підтверджений у
+Resend домен.
+
+## Публікація
+
+Сайт автоматично збирається та публікується через
+[`deploy.yml`](.github/workflows/deploy.yml) після push до гілки `main`.
+
+У GitHub Actions потрібно створити секрети:
+
+```text
+VITE_GOOGLE_CLIENT_ID
+VITE_GOOGLE_API_KEY
+VITE_SUPABASE_URL
+VITE_SUPABASE_PUBLISHABLE_KEY
+```
+
+GitHub Pages використовує власний домен із файлу [`public/CNAME`](public/CNAME):
+
+```text
+trekerrodu.com.ua
+```
+
+Для основного домену потрібні чотири `A`-записи GitHub Pages, а для `www` —
+`CNAME` на `andreyaquarius.github.io`.
+
+## Безпека даних
+
+- кожен запис належить конкретному проєкту;
+- доступ перевіряється політиками Supabase RLS;
+- глядачі не можуть змінювати дані;
+- редактори працюють із записами, але не змінюють структуру проєкту;
+- лише власник керує учасниками, полями, власними розділами та проєктом;
+- вкладення зберігаються у приватних контейнерах Supabase Storage;
+- конфліктне збереження застарілої версії запису блокується.
+
+## Ліцензія
+
+Проєкт наразі не має окремо визначеної відкритої ліцензії.
