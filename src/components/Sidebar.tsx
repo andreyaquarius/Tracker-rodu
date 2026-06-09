@@ -47,7 +47,9 @@ export function Sidebar({ page, onNavigate, customSections, open, onClose }: Sid
       {open && <button className="sidebar-scrim" aria-label="Закрити меню" onClick={onClose} />}
       <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
         <div className="brand">
-          <div className="brand-mark">ТР</div>
+          <div className="brand-mark">
+            <img src="/tracker-rodu-logo.png" alt="" />
+          </div>
           <div>
             <strong>Трекер Роду</strong>
             <small>Не губи сліди свого роду</small>

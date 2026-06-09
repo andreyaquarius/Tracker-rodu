@@ -82,7 +82,12 @@ export function LoginPage({
   return (
     <main className="login-page">
       <section className="login-copy">
-        <div className="brand login-brand"><div className="brand-mark">ТР</div><strong>Трекер Роду</strong></div>
+        <div className="brand login-brand">
+          <div className="brand-mark">
+            <img src="/tracker-rodu-logo.png" alt="" />
+          </div>
+          <strong>Трекер Роду</strong>
+        </div>
         <span className="eyebrow">Робочий простір для генеалогічного дослідження</span>
         <h1>Не губи сліди свого роду</h1>
         <p>Керуйте родовим дослідженням: від першої зачіпки до підтвердженого факту</p>

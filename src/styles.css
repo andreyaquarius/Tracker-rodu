@@ -39,9 +39,12 @@ p { color: var(--muted); line-height: 1.7; }
 }
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 26px; }
 .brand-mark {
-  display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 auto;
-  border: 1px solid rgba(255,255,255,.25); border-radius: 12px; color: #f0d6a4;
-  font-family: "Source Serif 4", serif; font-weight: 700;
+  display: grid; place-items: center; width: 52px; height: 52px; flex: 0 0 auto;
+  border-radius: 50%; overflow: hidden;
+}
+.brand-mark img {
+  display: block; width: 100%; height: 100%; object-fit: contain;
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,.2));
 }
 .brand strong, .brand small { display: block; }
 .brand strong { font-family: "Source Serif 4", serif; font-size: 17px; }
@@ -948,8 +951,11 @@ tbody tr:hover { background: #fbfaf5; }
 .login-copy h1 { max-width: 760px; margin-bottom: 0; color: white; font-size: clamp(2.8rem, 5vw, 5.4rem); }
 .login-copy > p { max-width: 760px; margin-top: 1.5em; color: #d2e0dc; font-size: clamp(19px, 1.35vw, 24px); line-height: 1.5; }
 .login-brand { padding-left: 0; margin-bottom: clamp(90px, 16vh, 170px); }
-.login-brand strong { font-size: clamp(17px, 1.3vw, 22px); }
-.login-brand .brand-mark { width: 38px; height: 38px; font-size: 13px; }
+.login-brand strong {
+  font-size: clamp(28px, 2.2vw, 38px);
+  line-height: 1.05;
+}
+.login-brand .brand-mark { width: 72px; height: 72px; }
 .login-points { margin-top: 28px; display: grid; gap: 12px; color: #dce8e4; font-size: 12px; }
 .login-card { margin: auto; width: min(420px, calc(100% - 50px)); padding: 38px; background: var(--paper); border-radius: 18px; box-shadow: 0 30px 80px rgba(0,0,0,.25); }
 .login-card h2 { font-size: 28px; }
