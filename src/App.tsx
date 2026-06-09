@@ -1790,20 +1790,6 @@ export default function App() {
     ).catch(() => undefined);
   }, [workspace]);
 
-  const connect = async () => {
-    setLoginError("");
-    try {
-      await app.connectGoogle();
-      localStorage.setItem(ACCOUNT_ONBOARDING_KEY, "1");
-      setOnboarded(true);
-      notify("Google Drive підключено.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Не вдалося підключити Google.";
-      setLoginError(message);
-      notify(message, true);
-    }
-  };
-
   const signIn = async () => {
     setLoginError("");
     setIsAccountSigningIn(true);
@@ -3202,8 +3188,7 @@ export default function App() {
 
   const replaceProjectDatabase = async (next: AppDatabase) => {
     if (!workspace) {
-      app.replaceDatabase(next);
-      return;
+      throw new Error("Спочатку виберіть або створіть проєкт.");
     }
     if (workspace.role !== "owner") {
       throw new Error("Відновлювати резервні копії може лише власник проєкту.");
@@ -3439,11 +3424,8 @@ export default function App() {
         return (
           <BackupPage
             db={activeDb}
-            user={app.user}
-            sync={app.sync}
             workspace={workspace}
             onReplace={replaceProjectDatabase}
-            onSync={app.forceSyncNow}
             notify={notify}
           />
         );
@@ -3458,30 +3440,43 @@ export default function App() {
     }
   })();
 
+  const displayedContent = workspace ? content : (
+    <section className="panel">
+      <span className="eyebrow">Робочий простір</span>
+      <h1>Проєкт ще не вибрано</h1>
+      <p>
+        Прийміть вхідне запрошення у розділі «Учасники та запрошення»
+        або створіть новий проєкт у меню профілю.
+      </p>
+      <button
+        type="button"
+        className="button button-primary"
+        onClick={() => setTeamOpen(true)}
+      >
+        Переглянути запрошення
+      </button>
+    </section>
+  );
+
   return (
     <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
         page={page}
         onNavigate={navigate}
         customSections={activeDb.customSections}
-        driveUser={app.user}
         account={account}
         workspace={workspace}
         workspaces={workspaces}
-        sync={app.sync}
-        onConnect={() => void connect()}
-        onDisconnectDrive={app.disconnectGoogle}
         onSignInAccount={() => void signIn()}
         onSignOutAccount={() => void signOutAccount()}
         onSwitchWorkspace={switchWorkspace}
         onCreateWorkspace={() => void createWorkspace()}
         onDeleteWorkspace={(projectId) => void removeWorkspace(projectId)}
         onOpenTeam={() => setTeamOpen(true)}
-        isSigningIn={app.isSigningIn}
         isAccountSigningIn={isAccountSigningIn}
         isCreatingWorkspace={isCreatingWorkspace}
       >
-        {content}
+        {displayedContent}
       </Layout>
       {teamOpen && account ? (
         <ProjectTeamModal

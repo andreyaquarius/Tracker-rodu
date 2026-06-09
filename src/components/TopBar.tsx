@@ -1,24 +1,16 @@
-import type { GoogleUser, SyncState } from "../types";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
-import { formatDateTime } from "../utils/dateHelpers";
-import { SyncStatusBadge } from "./SyncStatusBadge";
 
 interface TopBarProps {
-  driveUser: GoogleUser | null;
   account: SupabaseAccount | null;
   workspace: SupabaseWorkspace | null;
   workspaces: SupabaseWorkspace[];
-  sync: SyncState;
   onMenu: () => void;
-  onConnect: () => void;
-  onDisconnectDrive: () => void;
   onSignInAccount: () => void;
   onSignOutAccount: () => void;
   onSwitchWorkspace: (projectId: string) => void;
   onCreateWorkspace: () => void;
   onDeleteWorkspace: (projectId: string) => void;
   onOpenTeam: () => void;
-  isSigningIn: boolean;
   isAccountSigningIn: boolean;
   isCreatingWorkspace: boolean;
 }
@@ -30,21 +22,16 @@ function roleLabel(role: SupabaseWorkspace["role"]): string {
 }
 
 export function TopBar({
-  driveUser,
   account,
   workspace,
   workspaces,
-  sync,
   onMenu,
-  onConnect,
-  onDisconnectDrive,
   onSignInAccount,
   onSignOutAccount,
   onSwitchWorkspace,
   onCreateWorkspace,
   onDeleteWorkspace,
   onOpenTeam,
-  isSigningIn,
   isAccountSigningIn,
   isCreatingWorkspace,
 }: TopBarProps) {
@@ -66,22 +53,13 @@ export function TopBar({
         {workspace ? <small>{workspace.projectName}</small> : null}
       </div>
       <div className="connection-summary">
-        <SyncStatusBadge sync={sync} />
+        <span className="sync-badge sync-synced">
+          <span className="sync-dot" />
+          Збережено в Supabase
+        </span>
         <span className="online-state">{navigator.onLine ? "Онлайн" : "Офлайн"}</span>
-        <small>Остання синхронізація: {formatDateTime(sync.lastSyncedAt)}</small>
+        <small>Дані активного проєкту зберігаються автоматично</small>
       </div>
-      {driveUser ? (
-        <div className="drive-menu">
-          <span>Google Drive підключено</span>
-          <button className="text-button" onClick={onDisconnectDrive}>
-            Від'єднати
-          </button>
-        </div>
-      ) : (
-        <button className="button button-secondary" onClick={onConnect} disabled={isSigningIn}>
-          {isSigningIn ? "Підключення…" : "Підключити Google Drive"}
-        </button>
-      )}
       {account ? (
         <details className="account-menu">
           <summary aria-label="Відкрити меню профілю">

@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  AppDatabase,
-  DriveBackupFile,
-  GoogleUser,
-  SyncState,
-} from "../types";
+import type { AppDatabase, DriveBackupFile } from "../types";
 import type { SupabaseWorkspace } from "../services/supabaseAuth";
 import {
   createImportPreview,
@@ -12,28 +7,21 @@ import {
   type ImportPreview,
   readDatabaseFile,
 } from "../utils/exportImport";
-import { loadLocalCopy } from "../services/localStorageDb";
-import {
-  getAccessToken,
-  requestDriveFilePermission,
-} from "../services/googleAuth";
-import { storageService } from "../services/storage/storageService";
 import {
   createProjectBackup,
   deleteProjectBackup,
   downloadProjectBackup,
   listProjectBackups,
 } from "../services/projectBackups";
+import { signInWithGoogle } from "../services/googleAuth";
+import { storageService } from "../services/storage/storageService";
 import { formatDateTime } from "../utils/dateHelpers";
 import { Modal } from "../components/Modal";
 
 interface Props {
   db: AppDatabase;
-  user: GoogleUser | null;
   workspace: SupabaseWorkspace | null;
-  sync: SyncState;
   onReplace: (db: AppDatabase) => void | Promise<void>;
-  onSync: () => Promise<void>;
   notify: (message: string, error?: boolean) => void;
 }
 
@@ -45,11 +33,8 @@ interface PendingImport {
 
 export function BackupPage({
   db,
-  user,
   workspace,
-  sync,
   onReplace,
-  onSync,
   notify,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,7 +42,6 @@ export function BackupPage({
   const [backups, setBackups] = useState<DriveBackupFile[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(false);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
-  const projectMode = Boolean(workspace);
   const isOwner = workspace?.role === "owner";
 
   const closeImportPreview = () => {
@@ -65,49 +49,34 @@ export function BackupPage({
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  const requireToken = () => {
-    const token = getAccessToken();
-    if (!token) {
-      throw new Error("Спочатку підключіть Google Drive у верхній панелі.");
+  const requireWorkspace = (): SupabaseWorkspace => {
+    if (!workspace) {
+      throw new Error("Спочатку виберіть або створіть проєкт.");
     }
-    return token;
+    return workspace;
+  };
+
+  const requireOwner = (): SupabaseWorkspace => {
+    const activeWorkspace = requireWorkspace();
+    if (activeWorkspace.role !== "owner") {
+      throw new Error("Керувати резервними копіями може лише власник проєкту.");
+    }
+    return activeWorkspace;
   };
 
   const refreshBackups = useCallback(async () => {
-    if (workspace) {
-      if (workspace.role !== "owner") {
-        setBackups([]);
-        return;
-      }
-      setLoadingBackups(true);
-      try {
-        setBackups(await listProjectBackups(workspace.projectId));
-      } catch (error) {
-        notify(
-          error instanceof Error
-            ? error.message
-            : "Не вдалося завантажити резервні копії проєкту.",
-          true,
-        );
-      } finally {
-        setLoadingBackups(false);
-      }
-      return;
-    }
-
-    const token = getAccessToken();
-    if (!token) {
+    if (!workspace || workspace.role !== "owner") {
       setBackups([]);
       return;
     }
     setLoadingBackups(true);
     try {
-      setBackups(await storageService.listBackups(token));
+      setBackups(await listProjectBackups(workspace.projectId));
     } catch (error) {
       notify(
         error instanceof Error
           ? error.message
-          : "Не вдалося завантажити резервні копії.",
+          : "Не вдалося завантажити резервні копії проєкту.",
         true,
       );
     } finally {
@@ -117,7 +86,7 @@ export function BackupPage({
 
   useEffect(() => {
     void refreshBackups();
-  }, [refreshBackups, user, db.settings.lastAutomaticBackupAt]);
+  }, [db.settings.lastAutomaticBackupAt, refreshBackups]);
 
   const run = async (action: () => Promise<void>, success: string) => {
     setBusy(true);
@@ -152,43 +121,38 @@ export function BackupPage({
     }
   };
 
+  const selectLegacyDriveDatabase = () =>
+    run(async () => {
+      requireOwner();
+      const token = await signInWithGoogle();
+      const driveFile = await storageService.findDatabase(token);
+      if (!driveFile) {
+        throw new Error("Стару базу Трекера Роду на Google Drive не знайдено.");
+      }
+      const imported = await storageService.downloadDatabase(token, driveFile.id);
+      setPendingImport({
+        db: imported,
+        preview: createImportPreview(imported),
+        fileName: driveFile.name,
+      });
+    }, "Стару базу завантажено для попереднього перегляду.");
+
   const confirmImport = () =>
     run(async () => {
       if (!pendingImport) return;
-      if (workspace) {
-        if (!isOwner) {
-          throw new Error("Імпортувати дані може лише власник проєкту.");
-        }
-        await createProjectBackup(workspace.projectId, db, "pre-import");
-      } else {
-        await storageService.createBackup(requireToken(), db, "pre-import");
-      }
+      const activeWorkspace = requireOwner();
+      await createProjectBackup(activeWorkspace.projectId, db, "pre-import");
       await onReplace(pendingImport.db);
       closeImportPreview();
       await refreshBackups();
-    }, projectMode ? "Дані проєкту успішно імпортовано." : "Базу успішно імпортовано.");
+    }, "Дані проєкту успішно імпортовано.");
 
   const createInternalBackup = () =>
     run(async () => {
-      if (workspace) {
-        if (!isOwner) {
-          throw new Error("Створювати резервні копії може лише власник проєкту.");
-        }
-        await createProjectBackup(workspace.projectId, db, "manual");
-      } else {
-        await storageService.createBackup(requireToken(), db, "manual");
-      }
+      const activeWorkspace = requireOwner();
+      await createProjectBackup(activeWorkspace.projectId, db, "manual");
       await refreshBackups();
-    }, projectMode
-      ? "Резервну копію проєкту створено у Supabase."
-      : "Резервну копію створено в Google Drive.");
-
-  const visibleBackup = () =>
-    run(async () => {
-      let token = requireToken();
-      token = await requestDriveFilePermission();
-      await storageService.createVisibleBackup(token, db);
-    }, "Видиму резервну копію створено на Google Drive.");
+    }, "Резервну копію проєкту створено у Supabase.");
 
   const restoreBackup = (backup: DriveBackupFile) => {
     if (!window.confirm(
@@ -196,42 +160,24 @@ export function BackupPage({
     )) return;
 
     void run(async () => {
-      if (workspace) {
-        if (!isOwner) {
-          throw new Error("Відновлювати дані може лише власник проєкту.");
-        }
-        await createProjectBackup(workspace.projectId, db, "manual");
-        await onReplace(await downloadProjectBackup(backup.id));
-      } else {
-        const token = requireToken();
-        await storageService.createBackup(token, db, "manual");
-        await onReplace(await storageService.downloadBackup(token, backup.id));
-      }
+      const activeWorkspace = requireOwner();
+      await createProjectBackup(activeWorkspace.projectId, db, "manual");
+      await onReplace(await downloadProjectBackup(backup.id));
       await refreshBackups();
-    }, projectMode
-      ? "Проєкт відновлено з резервної копії."
-      : "Базу відновлено з резервної копії.");
+    }, "Проєкт відновлено з резервної копії.");
   };
 
   const downloadBackup = (backup: DriveBackupFile) =>
     run(async () => {
-      const restored = workspace
-        ? await downloadProjectBackup(backup.id)
-        : await storageService.downloadBackup(requireToken(), backup.id);
+      const restored = await downloadProjectBackup(backup.id);
       downloadDatabase(restored, backup.name);
     }, "Резервну копію підготовлено до завантаження.");
 
   const removeBackup = (backup: DriveBackupFile) => {
     if (!window.confirm(`Видалити резервну копію «${backup.name}»?`)) return;
     void run(async () => {
-      if (workspace) {
-        if (!isOwner) {
-          throw new Error("Видаляти резервні копії може лише власник проєкту.");
-        }
-        await deleteProjectBackup(backup.id);
-      } else {
-        await storageService.deleteBackup(requireToken(), backup.id);
-      }
+      requireOwner();
+      await deleteProjectBackup(backup.id);
       await refreshBackups();
     }, "Резервну копію видалено.");
   };
@@ -241,11 +187,10 @@ export function BackupPage({
       <div className="page-heading">
         <div>
           <span className="eyebrow">Захист даних Трекера Роду</span>
-          <h1>Резервні копії та синхронізація</h1>
+          <h1>Резервні копії проєкту</h1>
           <p>
-            {projectMode
-              ? "Копії активного проєкту зберігаються у приватному сховищі Supabase."
-              : "Локальні копії та резервні копії Google Drive залишаються доступними без проєкту."}
+            Дані й резервні копії зберігаються у приватному сховищі Supabase.
+            JSON використовується лише для контрольованого імпорту або експорту.
           </p>
         </div>
       </div>
@@ -257,48 +202,24 @@ export function BackupPage({
           <h2>
             {workspace
               ? `Проєкт «${workspace.projectName}» у PostgreSQL`
-              : user
-                ? "Google Drive підключено"
-                : "Працює локальний режим"}
+              : "Проєкт не вибрано"}
           </h2>
-          {projectMode ? (
-            <p>
-              Дані зберігаються у Supabase автоматично. Резервними копіями
-              керує власник проєкту.
-            </p>
-          ) : (
-            <>
-              <p>Остання синхронізація: {formatDateTime(sync.lastSyncedAt)}</p>
-              <p>
-                Остання автоматична копія:{" "}
-                {formatDateTime(db.settings.lastAutomaticBackupAt)}
-              </p>
-            </>
-          )}
+          <p>
+            {workspace
+              ? "Зміни зберігаються у Supabase автоматично."
+              : "Прийміть запрошення або створіть проєкт, щоб працювати з даними."}
+          </p>
         </div>
-        {!projectMode ? (
-          <button
-            className="button button-primary"
-            disabled={busy || !user}
-            onClick={() => run(onSync, "Синхронізацію завершено.")}
-          >
-            Синхронізувати зараз
-          </button>
-        ) : null}
       </section>
 
       <section className="backup-grid">
         <article className="panel backup-card">
-          <span className="card-icon">{projectMode ? "S" : "G"}</span>
+          <span className="card-icon">S</span>
           <h2>Внутрішня копія</h2>
-          <p>
-            {projectMode
-              ? "Створіть повний знімок активного проєкту в приватному сховищі."
-              : "Створіть ручну копію у приватній папці застосунку."}
-          </p>
+          <p>Створіть повний знімок активного проєкту у приватному сховищі.</p>
           <button
             className="button button-secondary"
-            disabled={busy || (projectMode ? !isOwner : !user)}
+            disabled={busy || !isOwner}
             onClick={createInternalBackup}
           >
             Створити резервну копію
@@ -307,10 +228,11 @@ export function BackupPage({
 
         <article className="panel backup-card">
           <span className="card-icon">↓</span>
-          <h2>JSON на комп'ютер</h2>
-          <p>Завантажте резервну копію поточних даних.</p>
+          <h2>Експорт JSON</h2>
+          <p>Завантажте контрольну копію поточних даних проєкту на комп’ютер.</p>
           <button
             className="button button-secondary"
+            disabled={!workspace}
             onClick={() => downloadDatabase(db)}
           >
             Завантажити JSON
@@ -319,8 +241,11 @@ export function BackupPage({
 
         <article className="panel backup-card">
           <span className="card-icon">↑</span>
-          <h2>Імпорт JSON</h2>
-          <p>Файл буде перевірено перед заміною поточних даних.</p>
+          <h2>Імпорт старої бази</h2>
+          <p>
+            Імпортуйте JSON зі старої локальної або Google Drive версії.
+            Перед заміною буде створено страхувальну копію.
+          </p>
           <input
             ref={inputRef}
             hidden
@@ -330,7 +255,7 @@ export function BackupPage({
           />
           <button
             className="button button-secondary"
-            disabled={busy || (projectMode ? !isOwner : !user)}
+            disabled={busy || !isOwner}
             onClick={() => inputRef.current?.click()}
           >
             Імпортувати JSON
@@ -339,62 +264,41 @@ export function BackupPage({
 
         <article className="panel backup-card">
           <span className="card-icon">G</span>
-          <h2>Видима копія у Drive</h2>
-          <p>Створіть датований JSON у звичайному розділі Google Drive.</p>
+          <h2>Перенесення зі старого Google Drive</h2>
+          <p>
+            Одноразово завантажте стару базу з приватної папки застосунку
+            та перенесіть її до активного Supabase-проєкту.
+          </p>
           <button
             className="button button-secondary"
-            disabled={busy || !user}
-            onClick={visibleBackup}
+            disabled={busy || !isOwner}
+            onClick={() => void selectLegacyDriveDatabase()}
           >
-            Створити видиму копію
+            Знайти стару базу
           </button>
         </article>
-
-        {!projectMode ? (
-          <article className="panel backup-card">
-            <span className="card-icon">↺</span>
-            <h2>Локальна копія</h2>
-            <p>Відновіть останні дані, збережені у цьому браузері.</p>
-            <button
-              className="button button-secondary"
-              onClick={() => {
-                void onReplace(loadLocalCopy());
-                notify("Локальну копію відновлено.");
-              }}
-            >
-              Відновити локальну копію
-            </button>
-          </article>
-        ) : null}
       </section>
 
       <section className="panel backup-list-panel">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">
-              {projectMode ? "Supabase Storage" : "Google Drive appDataFolder"}
-            </span>
+            <span className="eyebrow">Supabase Storage</span>
             <h2>Доступні резервні копії</h2>
           </div>
           <button
             className="button button-ghost"
-            disabled={
-              loadingBackups ||
-              (projectMode ? !isOwner : !user)
-            }
+            disabled={loadingBackups || !isOwner}
             onClick={() => void refreshBackups()}
           >
             {loadingBackups ? "Оновлення…" : "Оновити список"}
           </button>
         </div>
 
-        {projectMode && !isOwner ? (
+        {!workspace ? (
+          <div className="empty-inline">Проєкт не вибрано.</div>
+        ) : !isOwner ? (
           <div className="empty-inline">
             Резервні копії проєкту доступні лише його власнику.
-          </div>
-        ) : !projectMode && !user ? (
-          <div className="empty-inline">
-            Підключіть Google Drive, щоб переглянути резервні копії.
           </div>
         ) : backups.length ? (
           <div className="backup-table-wrap">
@@ -411,38 +315,21 @@ export function BackupPage({
               <tbody>
                 {backups.map((backup) => (
                   <tr key={backup.id}>
-                    <td data-label="Дата">
-                      {formatDateTime(backup.createdTime)}
-                    </td>
-                    <td data-label="Файл" className="backup-file-name">
-                      {backup.name}
-                    </td>
+                    <td data-label="Дата">{formatDateTime(backup.createdTime)}</td>
+                    <td data-label="Файл" className="backup-file-name">{backup.name}</td>
                     <td data-label="Тип">
-                      <span className="status-pill">
-                        {backupTypeLabel(backup.type)}
-                      </span>
+                      <span className="status-pill">{backupTypeLabel(backup.type)}</span>
                     </td>
-                    <td data-label="Розмір">
-                      {formatFileSize(backup.size)}
-                    </td>
+                    <td data-label="Розмір">{formatFileSize(backup.size)}</td>
                     <td data-label="Дії">
                       <div className="backup-actions">
-                        <button
-                          className="text-button"
-                          onClick={() => restoreBackup(backup)}
-                        >
+                        <button className="text-button" onClick={() => restoreBackup(backup)}>
                           Відновити
                         </button>
-                        <button
-                          className="text-button"
-                          onClick={() => void downloadBackup(backup)}
-                        >
+                        <button className="text-button" onClick={() => void downloadBackup(backup)}>
                           Завантажити
                         </button>
-                        <button
-                          className="text-button danger-text"
-                          onClick={() => removeBackup(backup)}
-                        >
+                        <button className="text-button danger-text" onClick={() => removeBackup(backup)}>
                           Видалити
                         </button>
                       </div>
@@ -470,20 +357,14 @@ export function BackupPage({
               страхувальну резервну копію.
             </div>
             <div className="preview-grid">
-              <PreviewItem
-                label="Останнє оновлення"
-                value={formatDateTime(pendingImport.preview.updatedAt)}
-              />
+              <PreviewItem label="Останнє оновлення" value={formatDateTime(pendingImport.preview.updatedAt)} />
               <PreviewItem label="Дослідження" value={pendingImport.preview.researches} />
               <PreviewItem label="Документи" value={pendingImport.preview.documents} />
               <PreviewItem label="Матриця років" value={pendingImport.preview.yearMatrix} />
               <PreviewItem label="Завдання" value={pendingImport.preview.tasks} />
               <PreviewItem label="Знахідки" value={pendingImport.preview.findings} />
               <PreviewItem label="Гіпотези" value={pendingImport.preview.hypotheses} />
-              <PreviewItem
-                label="Запити в архів"
-                value={pendingImport.preview.archiveRequests}
-              />
+              <PreviewItem label="Запити в архів" value={pendingImport.preview.archiveRequests} />
             </div>
             <div className="details-actions">
               <button className="button button-ghost" onClick={closeImportPreview}>

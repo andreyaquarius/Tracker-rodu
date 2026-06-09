@@ -106,7 +106,7 @@ export function Sidebar({ page, onNavigate, customSections, open, onClose }: Sid
         </nav>
         <div className="sidebar-foot">
           <span>Ваші дані належать вам</span>
-          <small>Локальна копія + Google Drive</small>
+          <small>PostgreSQL + приватне сховище Supabase</small>
         </div>
       </aside>
     </>

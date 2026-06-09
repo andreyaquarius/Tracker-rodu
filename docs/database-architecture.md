@@ -11,7 +11,7 @@
 - **Supabase Auth + Google**: вхід користувачів через Google.
 - **PostgreSQL**: проєкти, записи, зв’язки, ролі та налаштування.
 - **Supabase Storage**: приватні фото, аудіо, скани й документи.
-- **Google Drive**: після міграції залишається для резервних копій та експорту, а не як основна база.
+- **Google Drive**: використовується лише як одноразове джерело імпорту старої бази.
 
 ## Проєкти та доступ
 
@@ -77,6 +77,10 @@ dataService / repositories
         +-- legacyJsonDataProvider (тимчасово для міграції)
 
 backupService
+        |
+        +-- Supabase Storage
+
+legacyImportService
         |
         +-- googleDriveStorageProvider
 ```
