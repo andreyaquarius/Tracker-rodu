@@ -26,6 +26,12 @@ function describeAuthError(error: unknown): string {
   if (message.includes("Password should be")) {
     return "Пароль має містити щонайменше 6 символів.";
   }
+  if (message.includes("Email address not authorized")) {
+    return "Supabase поки не дозволяє надсилати листи на цю адресу. Потрібно налаштувати власну SMTP-пошту.";
+  }
+  if (message.toLocaleLowerCase().includes("rate limit")) {
+    return "Перевищено обмеження на надсилання листів. Спробуйте пізніше або перевірте SMTP-налаштування.";
+  }
   return message || "Не вдалося виконати авторизацію.";
 }
 

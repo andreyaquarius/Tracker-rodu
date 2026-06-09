@@ -395,17 +395,23 @@ export default function App() {
         const fetchedWorkspaces = await listSupabaseWorkspaces();
         if (!active) return;
 
-        const availableWorkspaces = fetchedWorkspaces.length ? fetchedWorkspaces : [ensuredWorkspace];
+        const availableWorkspaces = fetchedWorkspaces.length
+          ? fetchedWorkspaces
+          : ensuredWorkspace
+            ? [ensuredWorkspace]
+            : [];
         const activeWorkspace = chooseWorkspace(
           availableWorkspaces,
           localStorage.getItem(ACTIVE_WORKSPACE_KEY),
-          ensuredWorkspace.projectId,
+          ensuredWorkspace?.projectId,
         );
 
         setWorkspaces(availableWorkspaces);
         setWorkspace(activeWorkspace);
         if (activeWorkspace) {
           localStorage.setItem(ACTIVE_WORKSPACE_KEY, activeWorkspace.projectId);
+        } else {
+          localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
         }
         localStorage.setItem(ACCOUNT_ONBOARDING_KEY, "1");
         setOnboarded(true);
@@ -1914,13 +1920,15 @@ export default function App() {
   };
 
   const acceptWorkspaceInvitation = async (projectId: string) => {
-    const refreshed = await listSupabaseWorkspaces();
+    const refreshed = await listSupabaseWorkspaces(projectId);
     const acceptedWorkspace = refreshed.find((item) => item.projectId === projectId);
     setWorkspaces(refreshed);
     if (acceptedWorkspace) {
       setWorkspace(acceptedWorkspace);
       localStorage.setItem(ACTIVE_WORKSPACE_KEY, acceptedWorkspace.projectId);
       notify(`Проєкт «${acceptedWorkspace.projectName}» додано до вашого робочого простору.`);
+    } else {
+      notify("Запрошення прийнято, але проєкт ще не з’явився. Оновіть сторінку.", true);
     }
     setTeamOpen(false);
   };

@@ -79,9 +79,12 @@ async function readMemberships(): Promise<SupabaseWorkspace[]> {
     .select("role, projects!inner(id, name)")
     .order("joined_at", { ascending: true });
   if (error) throw error;
-  return (data as MembershipRow[])
+  const mapped = (data as MembershipRow[])
     .map(mapMembership)
     .filter((workspace): workspace is SupabaseWorkspace => workspace !== null);
+  return Array.from(
+    new Map(mapped.map((workspace) => [workspace.projectId, workspace])).values(),
+  );
 }
 
 function asErrorMessage(error: unknown, fallback: string): string {
@@ -169,8 +172,12 @@ export async function getSupabaseSession(): Promise<Session | null> {
   return data.session;
 }
 
-export async function listSupabaseWorkspaces(): Promise<SupabaseWorkspace[]> {
-  return readMemberships();
+export async function listSupabaseWorkspaces(
+  expectedProjectId?: string,
+): Promise<SupabaseWorkspace[]> {
+  return expectedProjectId
+    ? waitForMemberships(expectedProjectId)
+    : readMemberships();
 }
 
 export async function createSupabaseWorkspace(
@@ -227,11 +234,25 @@ export async function deleteSupabaseWorkspace(projectId: string): Promise<Supaba
 export async function ensureSupabaseWorkspace(
   session: Session,
   account: SupabaseAccount,
-): Promise<SupabaseWorkspace> {
+): Promise<SupabaseWorkspace | null> {
   const client = requireSupabase();
 
   const memberships = await readMemberships();
   if (memberships.length) return memberships[0];
+
+  const normalizedEmail = session.user.email?.trim().toLocaleLowerCase() ?? "";
+  if (normalizedEmail) {
+    const { data: pendingInvitation, error: invitationError } = await client
+      .from("project_invitations")
+      .select("id")
+      .ilike("email", normalizedEmail)
+      .eq("status", "pending")
+      .gt("expires_at", new Date().toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (invitationError) throw invitationError;
+    if (pendingInvitation) return null;
+  }
 
   const { data: existingProject, error: existingProjectError } = await client
     .from("projects")

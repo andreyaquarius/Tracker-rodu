@@ -129,8 +129,8 @@ Deno.serve(async (request) => {
                 Відкрити запрошення
               </a>
             </p>
-            <p>Увійдіть через Google-акаунт <strong>${escapeHtml(invitation.email)}</strong>,
-              щоб прийняти запрошення.</p>
+            <p>Увійдіть або зареєструйтеся з адресою
+              <strong>${escapeHtml(invitation.email)}</strong>, щоб прийняти запрошення.</p>
             <p style="color:#667a76;font-size:13px">Запрошення діє до
               ${new Date(invitation.expires_at).toLocaleDateString("uk-UA")}.</p>
           </div>

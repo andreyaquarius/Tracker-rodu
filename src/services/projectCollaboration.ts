@@ -63,6 +63,26 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null;
 }
 
+async function functionErrorMessage(
+  error: unknown,
+  fallback: string,
+): Promise<string> {
+  if (typeof error === "object" && error !== null && "context" in error) {
+    const context = error.context;
+    if (context instanceof Response) {
+      try {
+        const body = await context.clone().json() as { error?: unknown; message?: unknown };
+        const message = String(body.error ?? body.message ?? "").trim();
+        if (message) return message;
+      } catch {
+        // Fall back to the SDK error below when the response is not JSON.
+      }
+    }
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
 function memberFromRow(
   row: MemberRow,
   profiles: Map<string, ProfileRow>,
@@ -179,8 +199,10 @@ export async function createProjectInvitation(
     return {
       invitation,
       emailSent: false,
-      warning:
-        "Запрошення створено в застосунку, але лист не надіслано. Перевірте налаштування поштової функції Supabase.",
+      warning: `Запрошення створено, але лист не надіслано: ${await functionErrorMessage(
+        emailResult.error,
+        "перевірте налаштування поштової функції Supabase",
+      )}.`,
     };
   }
   return { invitation, emailSent: true };
@@ -194,9 +216,10 @@ export async function sendProjectInvitationEmail(
     { body: { invitationId } },
   );
   if (error) {
-    throw new Error(
+    throw new Error(await functionErrorMessage(
+      error,
       "Не вдалося надіслати лист. Перевірте Edge Function і поштові секрети Supabase.",
-    );
+    ));
   }
 }
 
