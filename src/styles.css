@@ -208,6 +208,29 @@ p { color: var(--muted); line-height: 1.7; }
   font-size: 18px;
   line-height: 1;
 }
+.workspace-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 8px;
+}
+.workspace-rename {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--green-800);
+  background: transparent;
+  border: 1px solid #b8c9c3;
+  border-radius: 10px;
+  font-size: 17px;
+  cursor: pointer;
+}
+.workspace-rename:hover {
+  background: #e7f0ed;
+  border-color: var(--green-700);
+}
 .workspace-delete:hover {
   background: #f7e3e1;
   border-color: #d8a9a3;

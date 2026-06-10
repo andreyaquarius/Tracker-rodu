@@ -39,6 +39,7 @@ import {
   isSupabaseConfigured,
   listSupabaseWorkspaces,
   onSupabaseAuthChange,
+  renameSupabaseWorkspace,
   signInWithSupabaseGoogle,
   signInWithSupabaseEmail,
   signUpWithSupabaseEmail,
@@ -1327,6 +1328,38 @@ export default function App() {
       notify(`Проєкт «${targetWorkspace.projectName}» видалено.`);
     } catch (error) {
       notify(describeError(error, "Не вдалося видалити проєкт."), true);
+    } finally {
+      setIsCreatingWorkspace(false);
+    }
+  };
+
+  const renameWorkspace = async (projectId: string) => {
+    const targetWorkspace = workspaces.find((item) => item.projectId === projectId);
+    if (!targetWorkspace) return;
+    if (targetWorkspace.role !== "owner") {
+      notify("Перейменовувати проєкт може лише його власник.", true);
+      return;
+    }
+
+    const proposedName = window.prompt(
+      "Нова назва проєкту",
+      targetWorkspace.projectName,
+    );
+    if (proposedName === null || proposedName.trim() === targetWorkspace.projectName) return;
+
+    setIsCreatingWorkspace(true);
+    try {
+      const refreshed = await renameSupabaseWorkspace(projectId, proposedName);
+      const renamedWorkspace = refreshed.find((item) => item.projectId === projectId);
+      setWorkspaces(refreshed);
+      setWorkspace((current) =>
+        current?.projectId === projectId && renamedWorkspace
+          ? renamedWorkspace
+          : current,
+      );
+      notify(`Проєкт перейменовано на «${renamedWorkspace?.projectName ?? proposedName.trim()}».`);
+    } catch (error) {
+      notify(describeError(error, "Не вдалося перейменувати проєкт."), true);
     } finally {
       setIsCreatingWorkspace(false);
     }
@@ -2898,6 +2931,7 @@ export default function App() {
         onSignOutAccount={() => void signOutAccount()}
         onSwitchWorkspace={switchWorkspace}
         onCreateWorkspace={() => void createWorkspace()}
+        onRenameWorkspace={(projectId) => void renameWorkspace(projectId)}
         onDeleteWorkspace={(projectId) => void removeWorkspace(projectId)}
         onOpenTeam={() => setTeamOpen(true)}
         isAccountSigningIn={isAccountSigningIn}

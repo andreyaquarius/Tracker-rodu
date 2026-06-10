@@ -236,6 +236,24 @@ export async function deleteSupabaseWorkspace(projectId: string): Promise<Supaba
   return waitForWorkspaceRemoval(projectId);
 }
 
+export async function renameSupabaseWorkspace(
+  projectId: string,
+  name: string,
+): Promise<SupabaseWorkspace[]> {
+  const projectName = name.trim();
+  if (!projectName) {
+    throw new Error("Назва проєкту не може бути порожньою.");
+  }
+
+  const client = requireSupabase();
+  const { error } = await client
+    .from("projects")
+    .update({ name: projectName })
+    .eq("id", projectId);
+  if (error) throw new Error(asErrorMessage(error, "Не вдалося перейменувати проєкт."));
+  return readMemberships();
+}
+
 export async function ensureSupabaseWorkspace(
   session: Session,
   account: SupabaseAccount,

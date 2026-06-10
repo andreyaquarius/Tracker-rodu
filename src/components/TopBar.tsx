@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
 
 interface TopBarProps {
@@ -9,6 +10,7 @@ interface TopBarProps {
   onSignOutAccount: () => void;
   onSwitchWorkspace: (projectId: string) => void;
   onCreateWorkspace: () => void;
+  onRenameWorkspace: (projectId: string) => void;
   onDeleteWorkspace: (projectId: string) => void;
   onOpenTeam: () => void;
   isAccountSigningIn: boolean;
@@ -30,11 +32,13 @@ export function TopBar({
   onSignOutAccount,
   onSwitchWorkspace,
   onCreateWorkspace,
+  onRenameWorkspace,
   onDeleteWorkspace,
   onOpenTeam,
   isAccountSigningIn,
   isCreatingWorkspace,
 }: TopBarProps) {
+  const accountMenuRef = useRef<HTMLDetailsElement>(null);
   const initials = account?.name
     .split(/\s+/)
     .filter(Boolean)
@@ -42,6 +46,28 @@ export function TopBar({
     .map((part) => part[0])
     .join("")
     .toUpperCase() || "К";
+
+  const closeAccountMenu = () => {
+    if (accountMenuRef.current) accountMenuRef.current.open = false;
+  };
+
+  useEffect(() => {
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const menu = accountMenuRef.current;
+      if (menu?.open && !menu.contains(event.target as Node)) {
+        menu.open = false;
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeAccountMenu();
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
 
   return (
     <header className="topbar">
@@ -61,7 +87,7 @@ export function TopBar({
         <small>Дані активного проєкту зберігаються автоматично</small>
       </div>
       {account ? (
-        <details className="account-menu">
+        <details className="account-menu" ref={accountMenuRef}>
           <summary aria-label="Відкрити меню профілю">
             {account.picture ? (
               <img src={account.picture} alt="" referrerPolicy="no-referrer" />
@@ -83,7 +109,14 @@ export function TopBar({
             <div className="workspace-switcher">
               <div className="workspace-switcher-heading">
                 <span>Ваші проєкти</span>
-                <button className="text-button" onClick={onCreateWorkspace} disabled={isCreatingWorkspace}>
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    closeAccountMenu();
+                    onCreateWorkspace();
+                  }}
+                  disabled={isCreatingWorkspace}
+                >
                   {isCreatingWorkspace ? "Створення…" : "Новий проєкт"}
                 </button>
               </div>
@@ -97,22 +130,42 @@ export function TopBar({
                   >
                     <button
                       className="workspace-switcher-select"
-                      onClick={() => onSwitchWorkspace(item.projectId)}
+                      onClick={() => {
+                        closeAccountMenu();
+                        onSwitchWorkspace(item.projectId);
+                      }}
                       type="button"
                     >
                       <strong>{item.projectName}</strong>
                       <small>{roleLabel(item.role)}</small>
                     </button>
                     {item.role === "owner" ? (
-                      <button
-                        className="workspace-delete"
-                        onClick={() => onDeleteWorkspace(item.projectId)}
-                        type="button"
-                        aria-label={`Видалити проєкт ${item.projectName}`}
-                        title="Видалити проєкт"
-                      >
-                        ×
-                      </button>
+                      <div className="workspace-item-actions">
+                        <button
+                          className="workspace-rename"
+                          onClick={() => {
+                            closeAccountMenu();
+                            onRenameWorkspace(item.projectId);
+                          }}
+                          type="button"
+                          aria-label={`Перейменувати проєкт ${item.projectName}`}
+                          title="Перейменувати проєкт"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="workspace-delete"
+                          onClick={() => {
+                            closeAccountMenu();
+                            onDeleteWorkspace(item.projectId);
+                          }}
+                          type="button"
+                          aria-label={`Видалити проєкт ${item.projectName}`}
+                          title="Видалити проєкт"
+                        >
+                          ×
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 ))}
@@ -120,12 +173,21 @@ export function TopBar({
             </div>
             <button
               className="button button-secondary account-team-button"
-              onClick={onOpenTeam}
+              onClick={() => {
+                closeAccountMenu();
+                onOpenTeam();
+              }}
               type="button"
             >
               Учасники та запрошення
             </button>
-            <button className="button button-secondary" onClick={onSignOutAccount}>
+            <button
+              className="button button-secondary"
+              onClick={() => {
+                closeAccountMenu();
+                onSignOutAccount();
+              }}
+            >
               Вийти з облікового запису
             </button>
           </div>
