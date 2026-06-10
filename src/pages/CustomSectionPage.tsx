@@ -22,6 +22,7 @@ import {
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import { deleteScanFile } from "../services/scanStorage";
+import { InlineCustomSectionFieldCreator } from "../components/InlineCustomSectionFieldCreator";
 
 export function CustomSectionPage({
   db,
@@ -32,6 +33,7 @@ export function CustomSectionPage({
   onSave,
   onDelete,
   onOpenRelated,
+  onAddField,
   readOnly = false,
 }: {
   db: AppDatabase;
@@ -42,6 +44,7 @@ export function CustomSectionPage({
   onSave: (record: CustomSectionRecord) => void;
   onDelete: (id: string) => void;
   onOpenRelated: (page: PageKey, entityId: string) => void;
+  onAddField?: (field: CustomSectionField) => void;
   readOnly?: boolean;
 }) {
   const [search, setSearch] = useState(initialSearch);
@@ -195,6 +198,7 @@ export function CustomSectionPage({
             onSave(record);
             setEditing(null);
           }}
+          onAddField={onAddField}
         />
       ) : null}
     </>
@@ -207,12 +211,14 @@ function CustomRecordEditor({
   record,
   onClose,
   onSave,
+  onAddField,
 }: {
   db: AppDatabase;
   section: CustomSectionDefinition;
   record: CustomSectionRecord | null;
   onClose: () => void;
   onSave: (record: CustomSectionRecord) => void;
+  onAddField?: (field: CustomSectionField) => void;
 }) {
   const [values, setValues] = useState<Record<string, CustomSectionRecordValue>>(() =>
     Object.fromEntries(section.fields.map((field) => [
@@ -220,6 +226,15 @@ function CustomRecordEditor({
       record?.values[field.id] ?? emptyCustomValue(field.type),
     ])),
   );
+  useEffect(() => {
+    setValues((current) => {
+      const next = { ...current };
+      for (const field of section.fields) {
+        if (!(field.id in next)) next[field.id] = emptyCustomValue(field.type);
+      }
+      return next;
+    });
+  }, [section.fields]);
   const update = (fieldId: string, value: CustomSectionRecordValue) => {
     setValues((current) => ({ ...current, [fieldId]: value }));
   };
@@ -263,6 +278,13 @@ function CustomRecordEditor({
               onChange={(value) => update(field.id, value)}
             />
           ))}
+          {onAddField ? (
+            <InlineCustomSectionFieldCreator
+              db={db}
+              fields={section.fields}
+              onAdd={onAddField}
+            />
+          ) : null}
         </div>
         <div className="modal-actions">
           <button type="button" className="button button-ghost" onClick={onClose}>Скасувати</button>
@@ -349,7 +371,31 @@ function CustomRecordField({
       </label>
     );
   }
+  if (field.type === "multiselect") {
+    const selected = Array.isArray(value) ? value as string[] : [];
+    return (
+      <label className="field-wide">
+        <span>{field.label}</span>
+        <select
+          multiple
+          required={field.required}
+          value={selected}
+          onChange={(event) => onChange(
+            Array.from(event.target.selectedOptions, (option) => option.value),
+          )}
+        >
+          {field.options.map((option) => <option key={option}>{option}</option>)}
+        </select>
+        <small className="field-hint">Для вибору кількох варіантів утримуйте Ctrl.</small>
+      </label>
+    );
+  }
   const stringValue = typeof value === "string" ? value : "";
+  const inputType = field.type === "year"
+    ? "number"
+    : ["approximate-date", "place"].includes(field.type)
+      ? "text"
+      : field.type;
   return (
     <label className={field.type === "textarea" ? "field-wide" : ""}>
       <span>{field.label}</span>
@@ -372,7 +418,9 @@ function CustomRecordField({
       ) : (
         <input
           required={field.required}
-          type={field.type}
+          type={inputType}
+          min={field.type === "year" ? 1 : undefined}
+          max={field.type === "year" ? 9999 : undefined}
           value={stringValue}
           onChange={(event) => onChange(event.target.value)}
         />
@@ -403,7 +451,7 @@ function CustomRecordDetails({
           {section.fields.map((field) => (
             <div
               key={field.id}
-              className={`detail-item ${["textarea", "attachments", "relation"].includes(field.type) ? "detail-wide" : ""}`}
+              className={`detail-item ${["textarea", "attachments", "relation", "multiselect"].includes(field.type) ? "detail-wide" : ""}`}
             >
               <span>{field.label}</span>
               <CustomRecordValue
@@ -464,8 +512,18 @@ function CustomRecordValue({
   if (field.type === "boolean") {
     return <div className="detail-text">{value ? "Так" : "Ні"}</div>;
   }
+  if (field.type === "multiselect") {
+    const values = Array.isArray(value) ? value as string[] : [];
+    return <div className="detail-text">{values.join(", ") || "—"}</div>;
+  }
   if (field.type === "url" && typeof value === "string" && value) {
     return <a href={value} target="_blank" rel="noreferrer">Відкрити посилання ↗</a>;
+  }
+  if (field.type === "email" && typeof value === "string" && value) {
+    return <a href={`mailto:${value}`}>{value}</a>;
+  }
+  if (field.type === "tel" && typeof value === "string" && value) {
+    return <a href={`tel:${value}`}>{value}</a>;
   }
   return <div className="detail-text">{String(value ?? "") || "—"}</div>;
 }

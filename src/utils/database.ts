@@ -193,6 +193,9 @@ function normalizeCustomSections(value: unknown): CustomSectionDefinition[] {
         : [];
       return {
         id: item.id!,
+        parentKey: typeof item.parentKey === "string"
+          ? item.parentKey as CustomSectionDefinition["parentKey"]
+          : null,
         name: item.name!.trim() || "Власний розділ",
         singularName: typeof item.singularName === "string" && item.singularName.trim()
           ? item.singularName.trim()

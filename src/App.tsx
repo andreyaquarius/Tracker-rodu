@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActivityLogEntry,
+  ActivityModule,
   ArchiveRequest,
   AppDatabase,
   AppEntity,
@@ -14,6 +15,7 @@ import type {
   PersonRelation,
   Research,
   ScanAttachment,
+  SectionParentKey,
   TaskRecord,
   YearMatrixRecord,
 } from "./types";
@@ -30,6 +32,8 @@ import { LoginPage } from "./pages/LoginPage";
 import { PersonsPage } from "./pages/PersonsPage";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
+import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
+import { isHierarchyPage } from "./utils/sectionHierarchy";
 import {
   createSupabaseWorkspace,
   deleteSupabaseWorkspace,
@@ -221,6 +225,10 @@ export default function App() {
     id: number;
     page: PageKey;
     initialValues: Record<string, unknown>;
+  } | null>(null);
+  const [sectionCreateRequest, setSectionCreateRequest] = useState<{
+    id: number;
+    parentKey: SectionParentKey;
   } | null>(null);
   const [onboarded, setOnboarded] = useState(() => {
     return localStorage.getItem(ACCOUNT_ONBOARDING_KEY) === "1";
@@ -482,7 +490,23 @@ export default function App() {
     const timer = window.setTimeout(() => {
       const previousSynced = syncedPreferencesRef.current;
       syncedPreferencesRef.current = { projectId, value: serialized };
-      void saveProjectPreferences(projectId, projectPreferences).catch(
+      void saveProjectPreferences(projectId, projectPreferences).then(() => {
+        const entry = createGenericProjectActivity(
+          "settings",
+          projectId,
+          "Оновлено загальні налаштування проєкту.",
+          "settings_updated",
+        );
+        void addProjectActivity(projectId, entry)
+          .then((saved) => {
+            if (activeWorkspaceIdRef.current !== projectId) return;
+            setProjectActivity((current) => [
+              saved,
+              ...current.filter((item) => item.id !== saved.id),
+            ].slice(0, 100));
+          })
+          .catch(() => undefined);
+      }).catch(
         (error: unknown) => {
           syncedPreferencesRef.current = previousSynced;
           notify(
@@ -1137,6 +1161,25 @@ export default function App() {
     workRecordsReadyForProject,
     workspace,
   ]);
+
+  const recordProjectActivity = useCallback((
+    module: ActivityModule,
+    relatedId: string,
+    text: string,
+    actionType: ActivityLogEntry["actionType"],
+  ) => {
+    if (!workspace) return;
+    const entry = createGenericProjectActivity(module, relatedId, text, actionType);
+    void addProjectActivity(workspace.projectId, entry)
+      .then((saved) => {
+        if (activeWorkspaceIdRef.current !== workspace.projectId) return;
+        setProjectActivity((current) => [
+          saved,
+          ...current.filter((item) => item.id !== saved.id),
+        ].slice(0, 100));
+      })
+      .catch(() => undefined);
+  }, [workspace]);
 
   const recordEntityActivity = useCallback((
     collection: CollectionKey,
@@ -2194,6 +2237,14 @@ export default function App() {
     });
     setPage(nextPage);
   };
+
+  const createSubsection = (parentKey: SectionParentKey) => {
+    setSectionCreateRequest({
+      id: Date.now(),
+      parentKey,
+    });
+    navigate("settings");
+  };
   const savePerson = (person: Person) => {
     if (!workspace) {
       app.saveEntity("persons", person);
@@ -2381,6 +2432,7 @@ export default function App() {
 
     const projectId = workspace.projectId;
     const previous = projectPersonRelations;
+    const previousRelation = previous.find((item) => item.id === relation.id);
     const optimistic = previous.some((item) => item.id === relation.id)
       ? previous.map((item) => (item.id === relation.id ? relation : item))
       : [...previous, relation];
@@ -2389,6 +2441,16 @@ export default function App() {
 
     void saveProjectPersonRelation(projectId, relation)
       .then((saved) => {
+        const firstPerson = projectPersons.find((person) => person.id === saved.personId);
+        const secondPerson = projectPersons.find((person) => person.id === saved.relatedPersonId);
+        const firstName = firstPerson?.fullName || firstPerson?.surname || "особою";
+        const secondName = secondPerson?.fullName || secondPerson?.surname || "особою";
+        recordProjectActivity(
+          "persons",
+          saved.personId,
+          `${previousRelation ? "Оновлено" : "Створено"} зв’язок між «${firstName}» та «${secondName}».`,
+          previousRelation ? "relation_updated" : "relation_created",
+        );
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectPeopleCache(projectId);
           const relations = cached.relations.map((item) => (item.id === saved.id ? saved : item));
@@ -2426,7 +2488,14 @@ export default function App() {
     const optimistic = previous.filter((relation) => relation.id !== id);
     setProjectPersonRelations(optimistic);
     saveProjectPeopleCache(projectId, projectPersons, optimistic);
-    void deleteProjectPersonRelation(projectId, id).catch((error: unknown) => {
+    void deleteProjectPersonRelation(projectId, id).then(() => {
+      recordProjectActivity(
+        "persons",
+        id,
+        "Видалено зв’язок між особами.",
+        "relation_deleted",
+      );
+    }).catch((error: unknown) => {
       const cached = loadProjectPeopleCache(projectId);
       saveProjectPeopleCache(projectId, cached.persons, previous);
       if (activeWorkspaceIdRef.current === projectId) setProjectPersonRelations(previous);
@@ -2450,6 +2519,7 @@ export default function App() {
 
     const projectId = workspace.projectId;
     const previous = projectCustomRecords;
+    const previousRecord = previous.find((item) => item.id === record.id);
     const optimistic = previous.some((item) => item.id === record.id)
       ? previous.map((item) => (item.id === record.id ? record : item))
       : [record, ...previous];
@@ -2467,7 +2537,6 @@ export default function App() {
       : typeof titleValue === "string"
         ? titleValue
         : section?.singularName ?? "Запис";
-    const previousRecord = previous.find((item) => item.id === record.id);
     void assertProjectRecordUnchanged(
       "custom_records",
       projectId,
@@ -2475,6 +2544,12 @@ export default function App() {
       baseUpdatedAt(record) ?? previousRecord?.updatedAt,
     ).then(() => saveProjectCustomRecord(projectId, record, title || "Запис")).then(
       () => {
+        recordProjectActivity(
+          `custom:${record.sectionId}`,
+          record.id,
+          `${previousRecord ? "Оновлено" : "Створено"} запис «${title || section?.singularName || "Без назви"}» у розділі «${section?.name || "Власний розділ"}».`,
+          previousRecord ? "record_updated" : "record_created",
+        );
         const attachmentFields = Object.fromEntries(
           (section?.fields ?? [])
             .filter((field) => field.type === "attachments")
@@ -2529,6 +2604,15 @@ export default function App() {
     );
     void deleteProjectCustomRecord(projectId, id).then(() => {
       if (!deletedRecord) return;
+      const section = projectCustomSections.find(
+        (item) => item.id === deletedRecord.sectionId,
+      );
+      recordProjectActivity(
+        `custom:${deletedRecord.sectionId}`,
+        id,
+        `Видалено запис із розділу «${section?.name || "Власний розділ"}».`,
+        "record_deleted",
+      );
       void deleteProjectAttachmentMetadata(
         projectId,
         `custom:${deletedRecord.sectionId}`,
@@ -2574,7 +2658,14 @@ export default function App() {
       projectId,
       definition,
       optimistic.length - 1,
-    ).catch((error: unknown) => {
+    ).then(() => {
+      recordProjectActivity(
+        definition.module,
+        definition.id,
+        `Додано поле «${definition.label}» до розділу «${activityModuleLabel(definition.module)}».`,
+        "field_created",
+      );
+    }).catch((error: unknown) => {
       setProjectCustomFields(previous);
       saveProjectCustomStructureCache(
         projectId,
@@ -2620,7 +2711,10 @@ export default function App() {
     );
     const changed = nextSections.filter((section) => {
       const previous = previousSections.find((item) => item.id === section.id);
-      return !previous || JSON.stringify(previous) !== JSON.stringify(section);
+      return !previous ||
+        JSON.stringify(previous) !== JSON.stringify(section) ||
+        previousSections.findIndex((item) => item.id === section.id) !==
+          nextSections.findIndex((item) => item.id === section.id);
     });
     void Promise.all([
       ...removed.map((section) =>
@@ -2633,7 +2727,48 @@ export default function App() {
           nextSections.findIndex((item) => item.id === section.id),
         ),
       ),
-    ]).catch((error: unknown) => {
+    ]).then(() => {
+      for (const section of removed) {
+        recordProjectActivity(
+          "settings",
+          section.id,
+          `Видалено розділ «${section.name}».`,
+          "section_deleted",
+        );
+      }
+      for (const section of changed) {
+        const previous = previousSections.find((item) => item.id === section.id);
+        if (!previous) {
+          recordProjectActivity(
+            `custom:${section.id}`,
+            section.id,
+            `Створено розділ «${section.name}».`,
+            "section_created",
+          );
+          continue;
+        }
+        const addedFields = section.fields.filter(
+          (field) => !previous.fields.some((item) => item.id === field.id),
+        );
+        if (addedFields.length) {
+          for (const field of addedFields) {
+            recordProjectActivity(
+              `custom:${section.id}`,
+              section.id,
+              `Додано поле «${field.label}» до розділу «${section.name}».`,
+              "field_created",
+            );
+          }
+          continue;
+        }
+        recordProjectActivity(
+          `custom:${section.id}`,
+          section.id,
+          `Оновлено структуру розділу «${section.name}».`,
+          "section_updated",
+        );
+      }
+    }).catch((error: unknown) => {
       setProjectCustomSections(previousSections);
       setProjectCustomRecords(previousRecords);
       saveProjectCustomStructureCache(
@@ -2799,6 +2934,21 @@ export default function App() {
           onSave={saveCustomRecord}
           onDelete={deleteCustomRecord}
           onOpenRelated={openRelatedRecord}
+          onAddField={canManageStructure ? (field) => {
+            changeSettings({
+              ...activeDb,
+              customSections: activeDb.customSections.map((item) =>
+                item.id === section.id
+                  ? {
+                      ...item,
+                      fields: [...item.fields, field],
+                      titleFieldId: item.titleFieldId || field.id,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : item,
+              ),
+            });
+          } : undefined}
           readOnly={readOnly}
         />
       );
@@ -2887,6 +3037,9 @@ export default function App() {
             workspace={workspace}
             onReplace={replaceProjectDatabase}
             notify={notify}
+            onActivity={(relatedId, text, actionType) =>
+              recordProjectActivity("backup", relatedId, text, actionType)
+            }
           />
         );
       case "settings":
@@ -2895,12 +3048,27 @@ export default function App() {
             db={activeDb}
             onChange={changeSettings}
             readOnly={Boolean(workspace && workspace.role !== "owner")}
+            sectionCreateRequest={sectionCreateRequest ?? undefined}
+            onSectionCreateRequestHandled={() => setSectionCreateRequest(null)}
           />
         );
     }
   })();
 
-  const displayedContent = workspace ? content : (
+  const structuredContent = isHierarchyPage(page) ? (
+    <>
+      <SectionHierarchyHeader
+        page={page}
+        sections={activeDb.customSections}
+        canManage={!workspace || workspace.role === "owner"}
+        onNavigate={navigate}
+        onCreateChild={createSubsection}
+      />
+      {content}
+    </>
+  ) : content;
+
+  const displayedContent = workspace ? structuredContent : (
     <section className="panel">
       <span className="eyebrow">Робочий простір</span>
       <h1>Проєкт ще не вибрано</h1>
@@ -2945,6 +3113,9 @@ export default function App() {
           workspace={workspace}
           onClose={() => setTeamOpen(false)}
           onInvitationAccepted={acceptWorkspaceInvitation}
+          onActivity={(relatedId, text, actionType) =>
+            recordProjectActivity("settings", relatedId, text, actionType)
+          }
         />
       ) : null}
       {toast ? <div className={`toast ${toast.error ? "toast-error" : ""}`}>{toast.message}</div> : null}

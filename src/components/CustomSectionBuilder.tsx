@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type {
   AppDatabase,
   CustomSectionDefinition,
   CustomSectionField,
   CustomSectionFieldType,
   ScanAttachment,
+  SectionParentKey,
 } from "../types";
 import { Modal } from "./Modal";
 import {
@@ -16,23 +17,45 @@ import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import { deleteScanFile } from "../services/scanStorage";
 import { SectionIcon, sectionIconOptions } from "./SectionIcon";
+import {
+  customSectionKey,
+  hierarchyRootKeys,
+  hierarchyRootLabels,
+  sectionDescendantIds,
+  sectionDepth,
+} from "../utils/sectionHierarchy";
 
 export function CustomSectionBuilder({
   db,
   onChange,
   readOnly = false,
+  createRequest,
+  onCreateRequestHandled,
 }: {
   db: AppDatabase;
   onChange: (db: AppDatabase) => void;
   readOnly?: boolean;
+  createRequest?: { id: number; parentKey: SectionParentKey };
+  onCreateRequestHandled?: () => void;
 }) {
   const [editing, setEditing] = useState<CustomSectionDefinition | null>(null);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [pendingParentKey, setPendingParentKey] = useState<SectionParentKey | null>(null);
+
+  useEffect(() => {
+    if (!createRequest || readOnly) return;
+    setPendingParentKey(createRequest.parentKey);
+    setTemplateOpen(true);
+    onCreateRequestHandled?.();
+  }, [createRequest?.id, readOnly]);
 
   const startTemplate = (templateId: string) => {
     const template = customSectionTemplates.find((item) => item.id === templateId);
     if (!template) return;
-    setEditing(sectionFromTemplate(template));
+    setEditing({
+      ...sectionFromTemplate(template),
+      parentKey: pendingParentKey,
+    });
     setTemplateOpen(false);
   };
 
@@ -47,7 +70,33 @@ export function CustomSectionBuilder({
     setEditing(null);
   };
 
+  const moveSection = (section: CustomSectionDefinition, direction: -1 | 1) => {
+    const siblingIds = db.customSections
+      .filter((item) => item.parentKey === section.parentKey)
+      .map((item) => item.id);
+    const siblingIndex = siblingIds.indexOf(section.id);
+    const targetId = siblingIds[siblingIndex + direction];
+    if (!targetId) return;
+    const currentIndex = db.customSections.findIndex((item) => item.id === section.id);
+    const targetIndex = db.customSections.findIndex((item) => item.id === targetId);
+    const nextSections = [...db.customSections];
+    [nextSections[currentIndex], nextSections[targetIndex]] = [
+      nextSections[targetIndex],
+      nextSections[currentIndex],
+    ];
+    onChange({ ...db, customSections: nextSections });
+  };
+
   const remove = async (section: CustomSectionDefinition) => {
+    const childCount = db.customSections.filter(
+      (item) => item.parentKey === customSectionKey(section.id),
+    ).length;
+    if (childCount) {
+      window.alert(
+        `Спочатку перемістіть або видаліть підрозділи (${childCount}), що містяться у «${section.name}».`,
+      );
+      return;
+    }
     const records = db.customSectionRecords.filter((item) => item.sectionId === section.id);
     if (!window.confirm(
       `Видалити розділ «${section.name}» і всі його записи (${records.length})? Цю дію не можна скасувати.`,
@@ -81,7 +130,10 @@ export function CustomSectionBuilder({
           type="button"
           className="button button-primary"
           disabled={readOnly}
-          onClick={() => setTemplateOpen(true)}
+          onClick={() => {
+            setPendingParentKey(null);
+            setTemplateOpen(true);
+          }}
         >
           + Створити розділ
         </button>
@@ -93,6 +145,10 @@ export function CustomSectionBuilder({
             const recordCount = db.customSectionRecords.filter(
               (record) => record.sectionId === section.id,
             ).length;
+            const siblings = db.customSections.filter(
+              (item) => item.parentKey === section.parentKey,
+            );
+            const siblingIndex = siblings.findIndex((item) => item.id === section.id);
             return (
               <article key={section.id}>
                 <span className="custom-section-icon">
@@ -101,11 +157,29 @@ export function CustomSectionBuilder({
                 <div>
                   <strong>{section.name}</strong>
                   <small>
-                    {section.fields.length} полів · {recordCount} записів
+                    Рівень {sectionDepth(db.customSections, section) + 1} · {section.fields.length} полів · {recordCount} записів
                   </small>
                   {section.description ? <p>{section.description}</p> : null}
                 </div>
                 <div className="custom-section-actions">
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title="Перемістити вище"
+                    disabled={readOnly || siblingIndex === 0}
+                    onClick={() => moveSection(section, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title="Перемістити нижче"
+                    disabled={readOnly || siblingIndex === siblings.length - 1}
+                    onClick={() => moveSection(section, 1)}
+                  >
+                    ↓
+                  </button>
                   <button
                     type="button"
                     className="button button-ghost"
@@ -176,6 +250,7 @@ function SectionEditor({
   onSave: (section: CustomSectionDefinition) => void;
 }) {
   const [form, setForm] = useState(section);
+  const unavailableParentIds = sectionDescendantIds(sections, form.id);
 
   const updateField = (id: string, patch: Partial<CustomSectionField>) => {
     setForm((current) => ({
@@ -249,6 +324,32 @@ function SectionEditor({
     <Modal title="Налаштування розділу" onClose={onClose}>
       <form className="section-builder-form" onSubmit={submit}>
         <div className="form-grid">
+          <label className="field-wide">
+            <span>Розташування розділу</span>
+            <select
+              value={form.parentKey ?? ""}
+              onChange={(event) => setForm({
+                ...form,
+                parentKey: (event.target.value || null) as SectionParentKey | null,
+              })}
+            >
+              <option value="">Кореневий власний розділ</option>
+              <optgroup label="Основні генеалогічні розділи">
+                {hierarchyRootKeys.map((key) => (
+                  <option key={key} value={key}>{hierarchyRootLabels[key]}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Власні розділи">
+                {sections
+                  .filter((item) => item.id !== form.id && !unavailableParentIds.has(item.id))
+                  .map((item) => (
+                    <option key={item.id} value={customSectionKey(item.id)}>
+                      {"— ".repeat(sectionDepth(sections, item))}{item.name}
+                    </option>
+                  ))}
+              </optgroup>
+            </select>
+          </label>
           <label>
             <span>Назва розділу</span>
             <input

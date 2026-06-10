@@ -26,6 +26,10 @@ export type CustomFieldModule =
   | "archiveRequests"
   | "yearMatrix";
 
+export type SectionParentKey =
+  | CustomFieldModule
+  | `custom:${EntityId}`;
+
 export type CustomFieldType =
   | "text"
   | "textarea"
@@ -56,16 +60,7 @@ export interface CustomFieldDefinition {
 export type CustomFieldValue = string | boolean | string[] | ScanAttachment[];
 export type CustomFieldValues = Record<EntityId, CustomFieldValue>;
 
-export type CustomSectionFieldType =
-  | "text"
-  | "textarea"
-  | "number"
-  | "date"
-  | "select"
-  | "boolean"
-  | "url"
-  | "attachments"
-  | "relation";
+export type CustomSectionFieldType = CustomFieldType;
 
 export type CustomSectionRelationTarget =
   | "all"
@@ -83,6 +78,7 @@ export interface CustomSectionField {
 
 export interface CustomSectionDefinition {
   id: EntityId;
+  parentKey: SectionParentKey | null;
   name: string;
   singularName: string;
   description: string;
@@ -215,14 +211,37 @@ export type ActivityActionType =
   | "person_updated"
   | "record_created"
   | "record_updated"
-  | "record_deleted";
+  | "record_deleted"
+  | "relation_created"
+  | "relation_updated"
+  | "relation_deleted"
+  | "section_created"
+  | "section_updated"
+  | "section_deleted"
+  | "field_created"
+  | "settings_updated"
+  | "invitation_created"
+  | "invitation_updated"
+  | "invitation_deleted"
+  | "invitation_accepted"
+  | "member_updated"
+  | "member_deleted"
+  | "backup_created"
+  | "backup_restored"
+  | "backup_deleted";
+
+export type ActivityModule =
+  | CollectionKey
+  | `custom:${EntityId}`
+  | "settings"
+  | "backup";
 
 export interface ActivityLogEntry {
   id: EntityId;
   createdAt: string;
   actionType: ActivityActionType;
   text: string;
-  module: CollectionKey;
+  module: ActivityModule;
   relatedId: EntityId;
 }
 

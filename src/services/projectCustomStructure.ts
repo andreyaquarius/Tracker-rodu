@@ -17,6 +17,7 @@ type DefinitionRow = {
 
 type SectionRow = {
   id: string;
+  parent_key: string | null;
   name: string;
   singular_name: string;
   description: string;
@@ -81,6 +82,7 @@ function fieldFromRow(row: FieldRow): CustomSectionField {
 function sectionFromRow(row: SectionRow, fields: CustomSectionField[]): CustomSectionDefinition {
   return {
     id: row.id,
+    parentKey: row.parent_key as CustomSectionDefinition["parentKey"],
     name: row.name,
     singularName: row.singular_name,
     description: row.description,
@@ -117,7 +119,7 @@ export async function listProjectCustomStructure(projectId: string): Promise<{
         .order("position", { ascending: true }),
       client
         .from("custom_sections")
-        .select("id, name, singular_name, description, icon, title_field_id, created_at, updated_at")
+        .select("id, parent_key, name, singular_name, description, icon, title_field_id, created_at, updated_at")
         .eq("project_id", projectId)
         .order("position", { ascending: true }),
       client
@@ -184,6 +186,7 @@ export async function saveProjectCustomSection(
     {
       id: section.id,
       project_id: projectId,
+      parent_key: section.parentKey,
       name: section.name,
       singular_name: section.singularName,
       description: section.description,

@@ -1,14 +1,18 @@
-import type { AppDatabase } from "../types";
+import type { AppDatabase, SectionParentKey } from "../types";
 import { CustomSectionBuilder } from "../components/CustomSectionBuilder";
 
 export function SettingsPage({
   db,
   onChange,
   readOnly = false,
+  sectionCreateRequest,
+  onSectionCreateRequestHandled,
 }: {
   db: AppDatabase;
   onChange: (db: AppDatabase) => void;
   readOnly?: boolean;
+  sectionCreateRequest?: { id: number; parentKey: SectionParentKey };
+  onSectionCreateRequestHandled?: () => void;
 }) {
   return (
     <>
@@ -70,7 +74,13 @@ export function SettingsPage({
         </label>
       </section>
 
-      <CustomSectionBuilder db={db} onChange={onChange} readOnly={readOnly} />
+      <CustomSectionBuilder
+        db={db}
+        onChange={onChange}
+        readOnly={readOnly}
+        createRequest={sectionCreateRequest}
+        onCreateRequestHandled={onSectionCreateRequestHandled}
+      />
 
       <section className="panel privacy-panel">
         <span className="card-icon">✓</span>

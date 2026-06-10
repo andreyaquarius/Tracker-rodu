@@ -17,12 +17,18 @@ import {
   type ProjectMemberRole,
 } from "../services/projectCollaboration";
 import { Modal } from "./Modal";
+import type { ActivityActionType } from "../types";
 
 interface ProjectTeamModalProps {
   account: SupabaseAccount;
   workspace: SupabaseWorkspace | null;
   onClose: () => void;
   onInvitationAccepted: (projectId: string) => Promise<void>;
+  onActivity?: (
+    relatedId: string,
+    text: string,
+    actionType: ActivityActionType,
+  ) => void;
 }
 
 function roleLabel(role: ProjectMemberRole): string {
@@ -48,6 +54,7 @@ export function ProjectTeamModal({
   workspace,
   onClose,
   onInvitationAccepted,
+  onActivity,
 }: ProjectTeamModalProps) {
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [sentInvitations, setSentInvitations] = useState<ProjectInvitation[]>([]);
@@ -94,6 +101,11 @@ export function ProjectTeamModal({
     try {
       const result = await createProjectInvitation(workspace.projectId, email, role);
       setSentInvitations((current) => [result.invitation, ...current]);
+      onActivity?.(
+        result.invitation.id,
+        `Створено запрошення для ${result.invitation.email} з роллю «${roleLabel(result.invitation.role)}».`,
+        "invitation_created",
+      );
       setEmail("");
       setNotice(
         result.emailSent
@@ -121,6 +133,11 @@ export function ProjectTeamModal({
           item.userId === member.userId ? { ...item, role: nextRole } : item
         ),
       );
+      onActivity?.(
+        member.userId,
+        `Змінено роль учасника ${member.displayName} на «${roleLabel(nextRole)}».`,
+        "member_updated",
+      );
     } catch (updateError) {
       setError(describeError(updateError, "Не вдалося змінити роль учасника."));
     } finally {
@@ -136,6 +153,11 @@ export function ProjectTeamModal({
     try {
       await removeProjectMember(workspace.projectId, member.userId);
       setMembers((current) => current.filter((item) => item.userId !== member.userId));
+      onActivity?.(
+        member.userId,
+        `Видалено учасника ${member.displayName} з проєкту.`,
+        "member_deleted",
+      );
     } catch (removeError) {
       setError(describeError(removeError, "Не вдалося видалити учасника."));
     } finally {
@@ -156,6 +178,11 @@ export function ProjectTeamModal({
           item.id === invitation.id ? { ...item, role: nextRole } : item
         ),
       );
+      onActivity?.(
+        invitation.id,
+        `Змінено роль у запрошенні для ${invitation.email} на «${roleLabel(nextRole)}».`,
+        "invitation_updated",
+      );
     } catch (updateError) {
       setError(describeError(updateError, "Не вдалося змінити роль у запрошенні."));
     } finally {
@@ -171,6 +198,11 @@ export function ProjectTeamModal({
       setSentInvitations((current) =>
         current.filter((item) => item.id !== invitation.id),
       );
+      onActivity?.(
+        invitation.id,
+        `Скасовано запрошення для ${invitation.email}.`,
+        "invitation_deleted",
+      );
     } catch (revokeError) {
       setError(describeError(revokeError, "Не вдалося скасувати запрошення."));
     } finally {
@@ -184,6 +216,11 @@ export function ProjectTeamModal({
     setNotice("");
     try {
       await sendProjectInvitationEmail(invitation.id);
+      onActivity?.(
+        invitation.id,
+        `Повторно надіслано запрошення для ${invitation.email}.`,
+        "invitation_updated",
+      );
       setNotice(`Лист повторно надіслано на ${invitation.email}.`);
     } catch (sendError) {
       setError(describeError(sendError, "Не вдалося повторно надіслати лист."));

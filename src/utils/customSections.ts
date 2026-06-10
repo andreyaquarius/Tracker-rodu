@@ -23,10 +23,17 @@ export const customSectionFieldTypes: Array<[CustomSectionFieldType, string]> = 
   ["text", "Короткий текст"],
   ["textarea", "Довгий текст"],
   ["number", "Число"],
+  ["year", "Рік"],
   ["date", "Дата"],
+  ["time", "Час"],
+  ["approximate-date", "Приблизна дата або період"],
+  ["place", "Місце"],
   ["select", "Список"],
+  ["multiselect", "Множинний список"],
   ["boolean", "Так / ні"],
   ["url", "Посилання"],
+  ["email", "Електронна пошта"],
+  ["tel", "Телефон"],
   ["attachments", "Файли та скани"],
   ["relation", "Зв’язок з іншими записами"],
 ];
@@ -138,6 +145,7 @@ export function sectionFromTemplate(template: CustomSectionTemplate): CustomSect
   }));
   return {
     id: createId(),
+    parentKey: null,
     name: template.sectionName,
     singularName: template.singularName,
     description: template.description,
@@ -210,7 +218,7 @@ export function relatedRecordLabel(
 
 export function emptyCustomValue(type: CustomSectionFieldType): CustomSectionRecordValue {
   if (type === "boolean") return false;
-  if (type === "attachments" || type === "relation") return [];
+  if (type === "attachments" || type === "relation" || type === "multiselect") return [];
   return "";
 }
 

@@ -298,6 +298,7 @@ create table public.custom_field_definitions (
 create table public.custom_sections (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
+  parent_key text,
   name text not null,
   singular_name text not null,
   description text not null default '',

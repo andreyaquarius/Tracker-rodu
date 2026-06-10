@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AppDatabase, BackupFile } from "../types";
+import type { ActivityActionType, AppDatabase, BackupFile } from "../types";
 import type { SupabaseWorkspace } from "../services/supabaseAuth";
 import { downloadDatabase } from "../utils/exportImport";
 import {
@@ -15,6 +15,11 @@ interface Props {
   workspace: SupabaseWorkspace | null;
   onReplace: (db: AppDatabase) => void | Promise<void>;
   notify: (message: string, error?: boolean) => void;
+  onActivity?: (
+    relatedId: string,
+    text: string,
+    actionType: ActivityActionType,
+  ) => void;
 }
 
 export function BackupPage({
@@ -22,6 +27,7 @@ export function BackupPage({
   workspace,
   onReplace,
   notify,
+  onActivity,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [backups, setBackups] = useState<BackupFile[]>([]);
@@ -75,7 +81,12 @@ export function BackupPage({
   const createInternalBackup = () =>
     run(async () => {
       const activeWorkspace = requireOwner();
-      await createProjectBackup(activeWorkspace.projectId, db, "manual");
+      const backup = await createProjectBackup(activeWorkspace.projectId, db, "manual");
+      onActivity?.(
+        backup.id,
+        `Створено резервну копію «${backup.name}».`,
+        "backup_created",
+      );
       await refreshBackups();
     }, "Резервну копію проєкту створено у Supabase.");
 
@@ -88,6 +99,11 @@ export function BackupPage({
       const activeWorkspace = requireOwner();
       await createProjectBackup(activeWorkspace.projectId, db, "manual");
       await onReplace(await downloadProjectBackup(backup.id));
+      onActivity?.(
+        backup.id,
+        `Відновлено проєкт із резервної копії «${backup.name}».`,
+        "backup_restored",
+      );
       await refreshBackups();
     }, "Проєкт відновлено з резервної копії.");
   };
@@ -103,6 +119,11 @@ export function BackupPage({
     void run(async () => {
       requireOwner();
       await deleteProjectBackup(backup.id);
+      onActivity?.(
+        backup.id,
+        `Видалено резервну копію «${backup.name}».`,
+        "backup_deleted",
+      );
       await refreshBackups();
     }, "Резервну копію видалено.");
   };

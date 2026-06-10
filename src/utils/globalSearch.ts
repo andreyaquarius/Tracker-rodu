@@ -15,6 +15,7 @@ import type {
 import type { PageKey } from "../components/Sidebar";
 import { primaryParticipantName } from "./findingParticipants";
 import { customRecordSearchText, customRecordTitle } from "./customSections";
+import { sectionAncestors } from "./sectionHierarchy";
 
 export type HighlightRange = readonly [number, number];
 
@@ -83,6 +84,18 @@ export function createGlobalSearchIndex(db: AppDatabase): GlobalSearchIndex {
   addCollection("persons", db.persons);
   addCollection("archiveRequests", db.archiveRequests);
   for (const section of db.customSections) {
+    const path = sectionAncestors(db.customSections, section)
+      .map((item) => item.label)
+      .join(" → ");
+    documents.push({
+      id: `section:${section.id}`,
+      module: `custom:${section.id}`,
+      page: `custom:${section.id}`,
+      moduleLabel: "Розділи",
+      title: section.name,
+      description: [path, section.description].filter(Boolean).join(" · "),
+      searchText: `${path} ${section.name} ${section.description}`,
+    });
     for (const record of db.customSectionRecords.filter((item) => item.sectionId === section.id)) {
       documents.push({
         id: record.id,

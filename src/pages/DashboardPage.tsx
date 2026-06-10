@@ -17,6 +17,7 @@ export function DashboardPage({
   onOpenSearchResult: (page: PageKey, query: string, entityId?: string) => void;
 }) {
   const [globalQuery, setGlobalQuery] = useState("");
+  const [showAllActivity, setShowAllActivity] = useState(false);
   const stats = [
     ["Дослідження", db.researches.length, "researches" as PageKey],
     ["Документи", db.documents.length, "documents" as PageKey],
@@ -37,9 +38,11 @@ export function DashboardPage({
     .filter((item) => ["не почато", "в роботі"].includes(item.status))
     .sort((a, b) => (priorityWeight[b.priority] ?? 0) - (priorityWeight[a.priority] ?? 0))
     .slice(0, 6);
-  const recentActivity = [...db.activityLog]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 10);
+  const sortedActivity = [...db.activityLog]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const recentActivity = showAllActivity
+    ? sortedActivity
+    : sortedActivity.slice(0, 10);
   const globalSearchIndex = useMemo(() => createGlobalSearchIndex(db), [db]);
   const globalResults = useMemo(
     () => globalSearchIndex.search(globalQuery),
@@ -103,7 +106,11 @@ export function DashboardPage({
                       <button
                         type="button"
                         key={`${result.module}-${result.id}`}
-                        onClick={() => onOpenSearchResult(result.page, globalQuery.trim(), result.id)}
+                        onClick={() => onOpenSearchResult(
+                          result.page,
+                          globalQuery.trim(),
+                          result.id.startsWith("section:") ? undefined : result.id,
+                        )}
                       >
                         <span className={`activity-icon activity-${result.module}`}>
                           {activityIcon(result.page)}
@@ -173,7 +180,20 @@ export function DashboardPage({
             <span className="eyebrow">Історія роботи</span>
             <h2>Журнал активності</h2>
           </div>
-          <span className="activity-count">Останні {recentActivity.length} дій</span>
+          <div className="activity-heading-actions">
+            <span className="activity-count">
+              {showAllActivity ? `Усі ${recentActivity.length} дій` : `Останні ${recentActivity.length} дій`}
+            </span>
+            {sortedActivity.length > 10 ? (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setShowAllActivity((current) => !current)}
+              >
+                {showAllActivity ? "Показати останні 10" : `Показати всі (${sortedActivity.length})`}
+              </button>
+            ) : null}
+          </div>
         </div>
         {recentActivity.length ? (
           <div className="activity-list">

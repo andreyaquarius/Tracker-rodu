@@ -1,6 +1,6 @@
 import type {
   ActivityLogEntry,
-  CollectionKey,
+  ActivityModule,
   ScanAttachment,
 } from "../types";
 import { createId } from "../utils/id";
@@ -8,6 +8,8 @@ import { nowIso } from "../utils/dateHelpers";
 import { getSupabaseClient, getSupabaseSession } from "./supabaseAuth";
 
 const PROJECT_BUCKET = "project-attachments";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ActivityRow = {
   id: number;
@@ -25,7 +27,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function activityFromRow(row: ActivityRow): ActivityLogEntry | null {
   const details = asRecord(row.details);
-  const module = String(details.module ?? row.entity_type) as CollectionKey;
+  const module = String(details.module ?? row.entity_type) as ActivityModule;
   const text = String(details.text ?? "");
   if (!text) return null;
   return {
@@ -68,7 +70,7 @@ export async function addProjectActivity(
       actor_id: session.user.id,
       action: entry.actionType,
       entity_type: entry.module,
-      entity_id: entry.relatedId || null,
+      entity_id: UUID_PATTERN.test(entry.relatedId) ? entry.relatedId : null,
       details: {
         text: entry.text,
         module: entry.module,
@@ -83,7 +85,7 @@ export async function addProjectActivity(
 }
 
 export function createGenericProjectActivity(
-  module: CollectionKey,
+  module: ActivityModule,
   relatedId: string,
   text: string,
   actionType: ActivityLogEntry["actionType"],
