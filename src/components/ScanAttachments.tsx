@@ -9,7 +9,7 @@ import {
 
 export function ScanAttachmentsEditor({
   title = "Файли та вкладення",
-  description = "Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB, до 2 ГБ кожен. Файли зберігаються у захищеному сховищі застосунку.",
+  description = "Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB, до 25 МБ кожен. Файли зберігаються у захищеному сховищі застосунку.",
   scans,
   onChange,
 }: {
@@ -55,7 +55,7 @@ export function ScanAttachmentsEditor({
       <div className="scan-picker-heading">
         <div>
           <legend>{title}</legend>
-          <p>{description} Великі файли завантажуються частинами.</p>
+          <p>{description}</p>
         </div>
         <label className={`button button-secondary scan-upload-button ${uploading ? "disabled" : ""}`}>
           {uploading ? "Завантаження…" : "+ Додати файли"}
