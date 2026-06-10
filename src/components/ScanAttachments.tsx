@@ -3,13 +3,14 @@ import type { ScanAttachment } from "../types";
 import {
   deleteScanFile,
   downloadScan,
+  MAX_ATTACHMENT_SIZE_MB,
   openScan,
   saveScan,
 } from "../services/scanStorage";
 
 export function ScanAttachmentsEditor({
   title = "Файли та вкладення",
-  description = "Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB, до 25 МБ кожен. Файли зберігаються у захищеному сховищі застосунку.",
+  description = `Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB. Максимальний розмір одного файлу — ${MAX_ATTACHMENT_SIZE_MB} МБ. Файли зберігаються у захищеному сховищі застосунку.`,
   scans,
   onChange,
 }: {

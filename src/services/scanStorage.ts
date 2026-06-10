@@ -3,7 +3,8 @@ import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import { getSupabaseClient, isSupabaseConfigured } from "./supabaseAuth";
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+export const MAX_ATTACHMENT_SIZE_MB = 25;
+const MAX_FILE_SIZE = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024;
 const PROJECT_BUCKET = "project-attachments";
 
 let activeProjectId: string | null = null;
@@ -17,7 +18,7 @@ export async function saveScan(file: File): Promise<ScanAttachment> {
     throw new Error(`Формат файлу «${file.name}» не підтримується.`);
   }
   if (file.size > MAX_FILE_SIZE) {
-    throw new Error(`Файл «${file.name}» перевищує дозволені 25 МБ.`);
+    throw new Error(`Файл «${file.name}» перевищує дозволені ${MAX_ATTACHMENT_SIZE_MB} МБ.`);
   }
   if (!isSupabaseConfigured) {
     throw new Error("З'єднання із Supabase не налаштовано.");
