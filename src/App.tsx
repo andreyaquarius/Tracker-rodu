@@ -2984,6 +2984,8 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
             onSave={saveFor(page)}
             onDelete={deleteFor(page)}
+            projectId={workspace?.projectId}
+            onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
             readOnly={readOnly}
           />
         );

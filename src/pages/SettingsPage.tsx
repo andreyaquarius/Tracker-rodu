@@ -1,5 +1,6 @@
 import type { AppDatabase, SectionParentKey } from "../types";
 import { CustomSectionBuilder } from "../components/CustomSectionBuilder";
+import { AiAgentSettings } from "../components/AiAgentSettings";
 
 export function SettingsPage({
   db,
@@ -73,6 +74,8 @@ export function SettingsPage({
           />
         </label>
       </section>
+
+      <AiAgentSettings />
 
       <CustomSectionBuilder
         db={db}

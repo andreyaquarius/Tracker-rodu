@@ -7,9 +7,11 @@ import type {
   DocumentRecord,
   Finding,
   FindingParticipant,
+  Hypothesis,
   Person,
   Research,
   ScanAttachment,
+  TaskRecord,
 } from "../types";
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
@@ -31,6 +33,7 @@ import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile } from "../services/scanStorage";
 import { CustomFieldsEditor, CustomFieldsView } from "../components/CustomFields";
 import { InlineCustomFieldCreator } from "../components/InlineCustomFieldCreator";
+import { HypothesisAiAgent } from "../components/HypothesisAiAgent";
 import {
   definitionsForModule,
   normalizeCustomFieldValues,
@@ -57,6 +60,8 @@ interface CrudPageProps {
   onSavePerson?: (person: Person) => void;
   onSave: (entity: AppEntity) => void;
   onDelete: (id: string) => void;
+  projectId?: string;
+  onCreateTask?: (task: TaskRecord) => void;
   readOnly?: boolean;
 }
 
@@ -80,6 +85,8 @@ export function CrudPage({
   onSavePerson,
   onSave,
   onDelete,
+  projectId = "",
+  onCreateTask,
   readOnly = false,
 }: CrudPageProps) {
   const [search, setSearch] = useState(initialSearch);
@@ -246,6 +253,9 @@ export function CrudPage({
           persons={persons}
           customFieldDefinitions={customFieldDefinitions}
           onOpenRelated={onOpenRelated}
+          projectId={projectId}
+          canCreateTasks={!readOnly}
+          onCreateTask={onCreateTask}
           onClose={() => setViewing(null)}
           onEdit={readOnly ? undefined : () => {
               setEditing(viewing);
@@ -308,6 +318,9 @@ function EntityDetailsModal({
   persons,
   customFieldDefinitions,
   onOpenRelated,
+  projectId,
+  canCreateTasks,
+  onCreateTask,
   onClose,
   onEdit,
 }: {
@@ -320,6 +333,9 @@ function EntityDetailsModal({
   persons: Person[];
   customFieldDefinitions: CustomFieldDefinition[];
   onOpenRelated?: (page: PageKey, entityId: string) => void;
+  projectId: string;
+  canCreateTasks: boolean;
+  onCreateTask?: (task: TaskRecord) => void;
   onClose: () => void;
   onEdit?: () => void;
 }) {
@@ -371,6 +387,14 @@ function EntityDetailsModal({
           <span>Оновлено: {formatEntityDate(entity.updatedAt)}</span>
         </div>
         <div className="details-actions">
+          {config.collection === "hypotheses" && projectId ? (
+            <HypothesisAiAgent
+              hypothesis={entity as Hypothesis}
+              db={db}
+              canCreateTasks={canCreateTasks}
+              onCreateTask={onCreateTask}
+            />
+          ) : null}
           <button type="button" className="button button-ghost" onClick={onClose}>
             Закрити
           </button>
