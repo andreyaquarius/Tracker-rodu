@@ -176,10 +176,14 @@ export function customRecordSearchText(
 ): string {
   return section.fields.map((field) => {
     const value = record.values[field.id];
-    if (field.type !== "relation" || !Array.isArray(value)) return flattenValue(value);
-    return (value as string[])
+    const fieldDefinitionText = [field.label, ...field.options].join(" ");
+    if (field.type !== "relation" || !Array.isArray(value)) {
+      return `${fieldDefinitionText} ${flattenValue(value)}`;
+    }
+    const relatedValues = (value as string[])
       .map((id) => relatedRecordLabel(db, field.relationTarget, id))
       .join(" ");
+    return `${fieldDefinitionText} ${relatedValues}`;
   }).join(" ");
 }
 

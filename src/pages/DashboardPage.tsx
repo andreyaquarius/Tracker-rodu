@@ -109,7 +109,7 @@ export function DashboardPage({
                         onClick={() => onOpenSearchResult(
                           result.page,
                           globalQuery.trim(),
-                          result.id.startsWith("section:") ? undefined : result.id,
+                          result.entityId,
                         )}
                       >
                         <span className={`activity-icon activity-${result.module}`}>

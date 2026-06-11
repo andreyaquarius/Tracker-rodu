@@ -4,6 +4,9 @@ import type {
   AppEntity,
   ArchiveRequest,
   CollectionKey,
+  CustomFieldDefinition,
+  CustomFieldModule,
+  CustomSectionField,
   DocumentRecord,
   Finding,
   Hypothesis,
@@ -15,12 +18,14 @@ import type {
 import type { PageKey } from "../components/Sidebar";
 import { primaryParticipantName } from "./findingParticipants";
 import { customRecordSearchText, customRecordTitle } from "./customSections";
+import { customFieldModuleLabels } from "./customFields";
 import { sectionAncestors } from "./sectionHierarchy";
 
 export type HighlightRange = readonly [number, number];
 
 export interface GlobalSearchResult {
   id: string;
+  entityId?: string;
   module: string;
   page: PageKey;
   moduleLabel: string;
@@ -32,6 +37,7 @@ export interface GlobalSearchResult {
 
 interface SearchDocument {
   id: string;
+  entityId?: string;
   module: string;
   page: PageKey;
   moduleLabel: string;
@@ -83,10 +89,16 @@ export function createGlobalSearchIndex(db: AppDatabase): GlobalSearchIndex {
   addCollection("hypotheses", db.hypotheses);
   addCollection("persons", db.persons);
   addCollection("archiveRequests", db.archiveRequests);
+  for (const field of db.settings.customFields) {
+    documents.push(createCustomFieldDocument(field));
+  }
   for (const section of db.customSections) {
     const path = sectionAncestors(db.customSections, section)
       .map((item) => item.label)
       .join(" → ");
+    const fieldDefinitions = section.fields
+      .map((field) => customSectionFieldSearchText(field))
+      .join(" ");
     documents.push({
       id: `section:${section.id}`,
       module: `custom:${section.id}`,
@@ -94,11 +106,23 @@ export function createGlobalSearchIndex(db: AppDatabase): GlobalSearchIndex {
       moduleLabel: "Розділи",
       title: section.name,
       description: [path, section.description].filter(Boolean).join(" · "),
-      searchText: `${path} ${section.name} ${section.description}`,
+      searchText: `${path} ${section.name} ${section.singularName} ${section.description} ${fieldDefinitions}`,
     });
+    for (const field of section.fields) {
+      documents.push({
+        id: `section-field:${section.id}:${field.id}`,
+        module: `custom:${section.id}`,
+        page: `custom:${section.id}`,
+        moduleLabel: "Поля користувацьких розділів",
+        title: field.label,
+        description: `Поле розділу «${section.name}»${path ? ` · ${path}` : ""}`,
+        searchText: `${path} ${section.name} ${section.description} ${customSectionFieldSearchText(field)}`,
+      });
+    }
     for (const record of db.customSectionRecords.filter((item) => item.sectionId === section.id)) {
       documents.push({
         id: record.id,
+        entityId: record.id,
         module: `custom:${section.id}`,
         page: `custom:${section.id}`,
         moduleLabel: section.name,
@@ -156,18 +180,56 @@ function createDocument(
   const description = entityDescription(module, entity, research);
   return {
     id: entity.id,
+    entityId: entity.id,
     module,
     page: module,
     moduleLabel: moduleLabels[module],
     title,
     description,
-    searchText: `${flatten(entity)} ${research?.title ?? ""} ${relatedText}`.trim(),
+    searchText: `${flatten(entity)} ${customFieldValuesSearchText(db, module, entity)} ${research?.title ?? ""} ${relatedText}`.trim(),
   };
+}
+
+function createCustomFieldDocument(field: CustomFieldDefinition): SearchDocument {
+  const moduleLabel = customFieldModuleLabels[field.module];
+  return {
+    id: `custom-field:${field.id}`,
+    module: field.module,
+    page: field.module,
+    moduleLabel: "Додаткові поля",
+    title: field.label,
+    description: `Додаткове поле розділу «${moduleLabel}»`,
+    searchText: `${moduleLabel} ${field.label} ${field.type} ${field.options.join(" ")}`,
+  };
+}
+
+function customFieldValuesSearchText(
+  db: AppDatabase,
+  module: CustomFieldModule,
+  entity: AppEntity,
+): string {
+  const values = (
+    entity as unknown as { customFields?: Record<string, unknown> }
+  ).customFields ?? {};
+  return db.settings.customFields
+    .filter((field) => field.module === module)
+    .map((field) => `${field.label} ${field.options.join(" ")} ${flatten(values[field.id])}`)
+    .join(" ");
+}
+
+function customSectionFieldSearchText(field: CustomSectionField): string {
+  return [
+    field.label,
+    field.type,
+    ...field.options,
+    field.relationTarget ?? "",
+  ].join(" ");
 }
 
 function publicResult(item: SearchDocument) {
   return {
     id: item.id,
+    entityId: item.entityId,
     module: item.module,
     page: item.page,
     moduleLabel: item.moduleLabel,
