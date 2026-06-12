@@ -23,6 +23,11 @@ export interface FieldConfig {
   options?: string[];
   required?: boolean;
   wide?: boolean;
+  attachmentPolicy?: "all" | "finding" | "archive-request";
+  attachmentAccept?: string;
+  attachmentDescription?: string;
+  attachmentLimitMessage?: string;
+  maxFiles?: number;
 }
 
 export interface EntityConfig {
@@ -126,7 +131,6 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
       { key: "yearTo", label: "Рік до", type: "number" },
       { key: "place", label: "Населений пункт" },
       { key: "url", label: "Посилання на документ", type: "url", wide: true },
-      { key: "scans", label: "Скани документа", type: "scans", wide: true },
       { key: "pagesCount", label: "Кількість сторінок / аркушів", type: "number" },
       { key: "lastPage", label: "Остання переглянута сторінка", type: "number" },
       { key: "reviewStatus", label: "Статус перегляду", type: "select", options: ["не почато", "в роботі", "переглянуто", "потрібно повторно перевірити", "недоступно"] },
@@ -134,8 +138,15 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
     ],
     columns: [
       { key: "title", label: "Документ" },
+      { key: "year", label: "Рік", render: (item) => {
+        const row = item as unknown as Record<string, string>;
+        const from = String(row.yearFrom ?? "").trim();
+        const to = String(row.yearTo ?? "").trim();
+        return from && to && from !== to ? `${from}–${to}` : from || to || "—";
+      } },
       { key: "archive", label: "Архів" },
       { key: "documentType", label: "Тип" },
+      { key: "place", label: "Населений пункт" },
       { key: "nextPage", label: "Наступна сторінка", render: (item) => {
         const page = Number((item as unknown as Record<string, string>).lastPage || 0) + 1;
         return String(page);
@@ -166,8 +177,28 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
         options: ["чернетка", "надіслано", "очікується відповідь", "отримано відповідь", "виконано", "відмовлено"],
       },
       { key: "subject", label: "Про що запит", type: "textarea", required: true, wide: true },
-      { key: "requestScans", label: "Файл або скан запиту", type: "scans", wide: true },
-      { key: "responseScans", label: "Файл або скан відповіді архіву", type: "scans", wide: true },
+      {
+        key: "requestScans",
+        label: "Файл запиту",
+        type: "scans",
+        wide: true,
+        attachmentPolicy: "archive-request",
+        attachmentAccept: ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        attachmentDescription: "Додайте один файл запиту у форматі Word (DOC, DOCX) або PDF. Максимальний розмір — 25 МБ.",
+        attachmentLimitMessage: "До одного архівного запиту можна прикріпити лише один файл запиту.",
+        maxFiles: 1,
+      },
+      {
+        key: "responseScans",
+        label: "Файл відповіді архіву",
+        type: "scans",
+        wide: true,
+        attachmentPolicy: "archive-request",
+        attachmentAccept: ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        attachmentDescription: "Додайте один файл відповіді архіву у форматі Word (DOC, DOCX) або PDF. Максимальний розмір — 25 МБ.",
+        attachmentLimitMessage: "До одного архівного запиту можна прикріпити лише один файл відповіді.",
+        maxFiles: 1,
+      },
       { key: "notes", label: "Коментарі та нотатки", type: "textarea", wide: true },
     ],
     columns: [
@@ -233,7 +264,16 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
       { key: "description", label: "Опис" },
       { key: "file", label: "Справа" },
       { key: "page", label: "Аркуш або сторінка" },
-      { key: "scans", label: "Скани знахідки", type: "scans", wide: true },
+      {
+        key: "scans",
+        label: "Файл знахідки",
+        type: "scans",
+        wide: true,
+        attachmentPolicy: "finding",
+        attachmentAccept: "image/*,.pdf,.txt,.md,.rtf,.csv,.json,.xml,.html,.htm",
+        attachmentDescription: "Один файл: зображення, PDF або текстовий файл (TXT, Markdown, RTF, CSV, JSON, XML чи HTML). Максимальний розмір — 25 МБ.",
+        maxFiles: 1,
+      },
       { key: "summary", label: "Короткий зміст", type: "textarea", wide: true },
       { key: "transcription", label: "Точна транскрипція", type: "textarea", wide: true },
       { key: "conclusion", label: "Висновок", type: "textarea", wide: true },

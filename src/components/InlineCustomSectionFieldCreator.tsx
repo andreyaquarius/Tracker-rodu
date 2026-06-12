@@ -24,6 +24,11 @@ export function InlineCustomSectionFieldCreator({
   const [required, setRequired] = useState(false);
 
   const add = () => {
+    if (type === "attachments") {
+      window.alert("Створення додаткових файлових полів вимкнено.");
+      setType("text");
+      return;
+    }
     const fieldLabel = label.trim();
     const listOptions = options
       .split(/[,;\n]/)

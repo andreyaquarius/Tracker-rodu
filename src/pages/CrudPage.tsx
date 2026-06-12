@@ -92,6 +92,9 @@ export function CrudPage({
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [archiveFilter, setArchiveFilter] = useState("");
+  const [yearFilter, setYearFilter] = useState("");
+  const [documentTypeFilter, setDocumentTypeFilter] = useState("");
   const [editing, setEditing] = useState<AppEntity | null | "new">(null);
   const [viewing, setViewing] = useState<AppEntity | null>(null);
   const [createInitialValues, setCreateInitialValues] = useState<Record<string, unknown> | undefined>();
@@ -120,6 +123,21 @@ export function CrudPage({
     setEditing("new");
   };
 
+  const documentFilterOptions = useMemo(() => {
+    if (config.collection !== "documents") {
+      return { archives: [], documentTypes: [] };
+    }
+    const values = (key: string) => Array.from(new Set(
+      items
+        .map((item) => String((item as unknown as Record<string, unknown>)[key] ?? "").trim())
+        .filter(Boolean),
+    )).sort((left, right) => left.localeCompare(right, "uk"));
+    return {
+      archives: values("archive"),
+      documentTypes: values("documentType"),
+    };
+  }, [config.collection, items]);
+
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("uk");
     return items.filter((item) => {
@@ -130,9 +148,38 @@ export function CrudPage({
       const matchesResearch = !researchFilter || row.researchId === researchFilter;
       const statusValue = row.status ?? row.reviewStatus;
       const matchesStatus = !statusFilter || statusValue === statusFilter;
-      return matchesSearch && matchesResearch && matchesStatus;
+      const matchesArchive = config.collection !== "documents"
+        || !archiveFilter
+        || row.archive === archiveFilter;
+      const matchesDocumentType = config.collection !== "documents"
+        || !documentTypeFilter
+        || row.documentType === documentTypeFilter;
+      const matchesYear = config.collection !== "documents"
+        || documentMatchesYear(row, yearFilter);
+      return matchesSearch
+        && matchesResearch
+        && matchesStatus
+        && matchesArchive
+        && matchesDocumentType
+        && matchesYear;
     });
-  }, [items, researchFilter, search, statusFilter]);
+  }, [
+    archiveFilter,
+    config.collection,
+    documentTypeFilter,
+    items,
+    researchFilter,
+    search,
+    statusFilter,
+    yearFilter,
+  ]);
+  const hasActiveFilters = Boolean(
+    search
+      || researchFilter
+      || statusFilter
+      || (config.collection === "documents"
+        && (archiveFilter || yearFilter || documentTypeFilter)),
+  );
 
   const confirmDelete = async (entity: AppEntity) => {
     if (readOnly) return;
@@ -191,6 +238,37 @@ export function CrudPage({
               </select>
             </label>
           ) : null}
+          {config.collection === "documents" ? (
+            <>
+              <label>
+                <span>Архів</span>
+                <select value={archiveFilter} onChange={(event) => setArchiveFilter(event.target.value)}>
+                  <option value="">Усі архіви</option>
+                  {documentFilterOptions.archives.map((archive) => (
+                    <option key={archive} value={archive}>{archive}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Рік</span>
+                <input
+                  type="number"
+                  value={yearFilter}
+                  onChange={(event) => setYearFilter(event.target.value)}
+                  placeholder="Будь-який"
+                />
+              </label>
+              <label>
+                <span>Тип документа</span>
+                <select value={documentTypeFilter} onChange={(event) => setDocumentTypeFilter(event.target.value)}>
+                  <option value="">Усі типи</option>
+                  {documentFilterOptions.documentTypes.map((documentType) => (
+                    <option key={documentType} value={documentType}>{documentType}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : null}
           {config.statusOptions ? (
             <label>
               <span>Статус</span>
@@ -230,9 +308,9 @@ export function CrudPage({
                 +
               </button>
             ) : null}
-            <h2>{search || researchFilter || statusFilter ? "Нічого не знайдено" : config.emptyText}</h2>
+            <h2>{hasActiveFilters ? "Нічого не знайдено" : config.emptyText}</h2>
             <p>
-              {search || researchFilter || statusFilter
+              {hasActiveFilters
                 ? `Змініть фільтри${readOnly ? "." : ` або додайте ${config.singular}.`}`
                 : readOnly
                   ? "У цьому розділі поки немає записів."
@@ -290,6 +368,31 @@ export function CrudPage({
       ) : null}
     </>
   );
+}
+
+function documentMatchesYear(row: Record<string, unknown>, filter: string): boolean {
+  if (!filter) return true;
+  const requestedYear = Number(filter);
+  const yearFrom = numericYear(row.yearFrom);
+  const yearTo = numericYear(row.yearTo);
+
+  if (Number.isFinite(requestedYear)) {
+    if (Number.isFinite(yearFrom) && Number.isFinite(yearTo)) {
+      return requestedYear >= Math.min(yearFrom, yearTo)
+        && requestedYear <= Math.max(yearFrom, yearTo);
+    }
+    if (Number.isFinite(yearFrom)) return requestedYear === yearFrom;
+    if (Number.isFinite(yearTo)) return requestedYear === yearTo;
+  }
+
+  const normalizedFilter = filter.trim();
+  return String(row.yearFrom ?? "").trim() === normalizedFilter
+    || String(row.yearTo ?? "").trim() === normalizedFilter;
+}
+
+function numericYear(value: unknown): number {
+  const normalized = String(value ?? "").trim();
+  return normalized ? Number(normalized) : Number.NaN;
 }
 
 function customAttachmentScans(
@@ -747,7 +850,18 @@ function FormField({
   }
   if (field.type === "scans") {
     const scans = Array.isArray(value) ? value as ScanAttachment[] : [];
-    return <ScanAttachmentsEditor title={field.label} scans={scans} onChange={onChange} />;
+    return (
+      <ScanAttachmentsEditor
+        title={field.label}
+        description={field.attachmentDescription}
+        accept={field.attachmentAccept}
+        maxFiles={field.maxFiles}
+        limitMessage={field.attachmentLimitMessage}
+        policy={field.attachmentPolicy}
+        scans={scans}
+        onChange={onChange}
+      />
+    );
   }
   if (field.type === "persons") {
     const selected = Array.isArray(value) ? value as string[] : [];

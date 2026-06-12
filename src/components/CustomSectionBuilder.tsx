@@ -253,6 +253,7 @@ function SectionEditor({
   const unavailableParentIds = sectionDescendantIds(sections, form.id);
 
   const updateField = (id: string, patch: Partial<CustomSectionField>) => {
+    if (patch.type === "attachments") return;
     setForm((current) => ({
       ...current,
       fields: current.fields.map((field) => field.id === id ? { ...field, ...patch } : field),
@@ -445,6 +446,9 @@ function SectionEditor({
                     relationTarget: undefined,
                   })}
                 >
+                  {field.type === "attachments" ? (
+                    <option value="attachments">Файли та скани (наявне поле)</option>
+                  ) : null}
                   {customSectionFieldTypes.map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}

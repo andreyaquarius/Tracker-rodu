@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ScanAttachment } from "../types";
 import {
   deleteScanFile,
+  type AttachmentPolicy,
   downloadScan,
   MAX_ATTACHMENT_SIZE_MB,
   openScan,
@@ -11,11 +12,19 @@ import {
 export function ScanAttachmentsEditor({
   title = "Файли та вкладення",
   description = `Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB. Максимальний розмір одного файлу — ${MAX_ATTACHMENT_SIZE_MB} МБ. Файли зберігаються у захищеному сховищі застосунку.`,
+  accept = "image/*,audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.wma,.webm,.pdf,.djvu,.djv,.xps,.doc,.docx,.rtf,.odt,.xls,.xlsx,.ods,.csv,.ppt,.pptx,.odp,.txt,.md,.xml,.html,.htm,.epub",
+  maxFiles,
+  limitMessage,
+  policy = "all",
   scans,
   onChange,
 }: {
   title?: string;
   description?: string;
+  accept?: string;
+  maxFiles?: number;
+  limitMessage?: string;
+  policy?: AttachmentPolicy;
   scans: ScanAttachment[];
   onChange: (scans: ScanAttachment[]) => void;
 }) {
@@ -24,12 +33,22 @@ export function ScanAttachmentsEditor({
 
   const addFiles = async (files: FileList | null) => {
     if (!files?.length) return;
+    const selected = Array.from(files);
+    if (maxFiles && scans.length + selected.length > maxFiles) {
+      setError(
+        limitMessage ||
+        (maxFiles === 1
+          ? "До однієї знахідки можна прикріпити лише один файл."
+          : `Можна прикріпити не більше ${maxFiles} файлів.`),
+      );
+      return;
+    }
     setUploading(true);
     setError("");
     const added: ScanAttachment[] = [];
     try {
-      for (const file of Array.from(files)) {
-        added.push(await saveScan(file));
+      for (const file of selected) {
+        added.push(await saveScan(file, policy));
       }
       onChange([...scans, ...added]);
     } catch (uploadError) {
@@ -39,6 +58,7 @@ export function ScanAttachmentsEditor({
       setUploading(false);
     }
   };
+  const limitReached = Boolean(maxFiles && scans.length >= maxFiles);
 
   const remove = async (scan: ScanAttachment) => {
     if (!window.confirm(`Видалити файл «${scan.name}»?`)) return;
@@ -58,13 +78,19 @@ export function ScanAttachmentsEditor({
           <legend>{title}</legend>
           <p>{description}</p>
         </div>
-        <label className={`button button-secondary scan-upload-button ${uploading ? "disabled" : ""}`}>
-          {uploading ? "Завантаження…" : "+ Додати файли"}
+        <label className={`button button-secondary scan-upload-button ${uploading || limitReached ? "disabled" : ""}`}>
+          {uploading
+            ? "Завантаження…"
+            : limitReached
+              ? "Файл уже додано"
+              : maxFiles === 1
+                ? "+ Додати файл"
+                : "+ Додати файли"}
           <input
             type="file"
-            accept="image/*,audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.wma,.webm,.pdf,.djvu,.djv,.xps,.doc,.docx,.rtf,.odt,.xls,.xlsx,.ods,.csv,.ppt,.pptx,.odp,.txt,.md,.xml,.html,.htm,.epub"
-            multiple
-            disabled={uploading}
+            accept={accept}
+            multiple={!maxFiles || maxFiles > 1}
+            disabled={uploading || limitReached}
             onChange={(event) => {
               void addFiles(event.target.files);
               event.target.value = "";

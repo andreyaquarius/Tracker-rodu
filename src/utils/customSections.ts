@@ -34,7 +34,6 @@ export const customSectionFieldTypes: Array<[CustomSectionFieldType, string]> = 
   ["url", "Посилання"],
   ["email", "Електронна пошта"],
   ["tel", "Телефон"],
-  ["attachments", "Файли та скани"],
   ["relation", "Зв’язок з іншими записами"],
 ];
 
@@ -64,7 +63,6 @@ export const customSectionTemplates: CustomSectionTemplate[] = [
       { label: "Категорія", type: "select", required: false, options: ["подія", "місце", "установа", "переказ", "інше"] },
       { label: "Опис", type: "textarea", required: false, options: [] },
       { label: "Джерело", type: "textarea", required: false, options: [] },
-      { label: "Файли та світлини", type: "attachments", required: false, options: [] },
     ],
   },
   {
@@ -81,7 +79,6 @@ export const customSectionTemplates: CustomSectionTemplate[] = [
       { label: "Призначення", type: "text", required: false, options: [] },
       { label: "Стан", type: "select", required: false, options: ["збережена", "перебудована", "втрачена", "невідомо"] },
       { label: "Історія", type: "textarea", required: false, options: [] },
-      { label: "Світлини й документи", type: "attachments", required: false, options: [] },
     ],
   },
   {
@@ -98,7 +95,6 @@ export const customSectionTemplates: CustomSectionTemplate[] = [
       { label: "Місце", type: "text", required: false, options: [] },
       { label: "Опис", type: "textarea", required: false, options: [] },
       { label: "Джерела", type: "textarea", required: false, options: [] },
-      { label: "Вкладення", type: "attachments", required: false, options: [] },
     ],
   },
   {
@@ -115,7 +111,6 @@ export const customSectionTemplates: CustomSectionTemplate[] = [
       { label: "Рік припинення", type: "number", required: false, options: [] },
       { label: "Адреса або місце", type: "text", required: false, options: [] },
       { label: "Історія", type: "textarea", required: false, options: [] },
-      { label: "Документи та світлини", type: "attachments", required: false, options: [] },
     ],
   },
   {
@@ -132,7 +127,6 @@ export const customSectionTemplates: CustomSectionTemplate[] = [
       { label: "Місце запису", type: "text", required: false, options: [] },
       { label: "Текст свідчення", type: "textarea", required: false, options: [] },
       { label: "Коментар дослідника", type: "textarea", required: false, options: [] },
-      { label: "Аудіо, фото або документи", type: "attachments", required: false, options: [] },
     ],
   },
 ];

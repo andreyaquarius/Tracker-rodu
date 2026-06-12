@@ -22,7 +22,6 @@ const fieldTypes: Array<[CustomFieldType, string]> = [
   ["url", "Посилання"],
   ["email", "Електронна пошта"],
   ["tel", "Телефон"],
-  ["attachments", "Файли та скани"],
   ["relation", "Зв’язок з іншими записами"],
 ];
 
@@ -44,6 +43,11 @@ export function InlineCustomFieldCreator({
   const [relationTarget, setRelationTarget] = useState("all");
 
   const add = () => {
+    if (type === "attachments") {
+      window.alert("Створення додаткових файлових полів вимкнено.");
+      setType("text");
+      return;
+    }
     const fieldLabel = label.trim();
     const listOptions = options
       .split(/[,;\n]/)

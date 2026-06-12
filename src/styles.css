@@ -276,7 +276,7 @@ p { color: var(--muted); line-height: 1.7; }
 .icon-button.danger { color: var(--red); }
 
 .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 24px rgba(25,53,46,.04); }
-.filters { padding: 18px; display: flex; align-items: flex-end; gap: 12px; border-bottom: 1px solid var(--line); }
+.filters { padding: 18px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; border-bottom: 1px solid var(--line); }
 .filters label { min-width: 175px; }
 .filters .search-field { flex: 1; }
 label > span { display: block; margin-bottom: 7px; color: #263733; font-size: 11px; font-weight: 800; letter-spacing: .055em; text-transform: uppercase; }

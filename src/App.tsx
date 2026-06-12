@@ -2630,6 +2630,10 @@ export default function App() {
     });
   };
   const addCustomField = (definition: CustomFieldDefinition) => {
+    if (definition.type === "attachments") {
+      notify("Створення додаткових файлових полів вимкнено.", true);
+      return;
+    }
     if (!workspace) {
       app.setDatabase((current) => ({
         ...current,

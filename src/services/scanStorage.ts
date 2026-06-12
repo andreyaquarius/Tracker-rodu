@@ -4,6 +4,7 @@ import { nowIso } from "../utils/dateHelpers";
 import { getSupabaseClient, isSupabaseConfigured } from "./supabaseAuth";
 
 export const MAX_ATTACHMENT_SIZE_MB = 25;
+export type AttachmentPolicy = "all" | "finding" | "archive-request";
 const MAX_FILE_SIZE = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024;
 const PROJECT_BUCKET = "project-attachments";
 
@@ -13,8 +14,17 @@ export function setProjectAttachmentTarget(projectId: string | null): void {
   activeProjectId = projectId;
 }
 
-export async function saveScan(file: File): Promise<ScanAttachment> {
-  if (!isSupportedAttachment(file)) {
+export async function saveScan(
+  file: File,
+  policy: AttachmentPolicy = "all",
+): Promise<ScanAttachment> {
+  const supported =
+    policy === "finding"
+      ? isSupportedFindingAttachment(file)
+      : policy === "archive-request"
+        ? isSupportedArchiveRequestAttachment(file)
+        : isSupportedAttachment(file);
+  if (!supported) {
     throw new Error(`Формат файлу «${file.name}» не підтримується.`);
   }
   if (file.size > MAX_FILE_SIZE) {
@@ -87,6 +97,42 @@ export async function deleteScanFile(scan: ScanAttachment): Promise<void> {
     .from(PROJECT_BUCKET)
     .remove([scan.storagePath]);
   if (error) throw error;
+}
+
+function isSupportedFindingAttachment(file: File): boolean {
+  const extension = file.name.split(".").pop()?.toLocaleLowerCase() ?? "";
+  const textTypes = new Set([
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "text/rtf",
+    "application/rtf",
+    "application/json",
+    "application/xml",
+    "text/xml",
+    "text/html",
+  ]);
+  return (
+    file.type.startsWith("image/") ||
+    file.type === "application/pdf" ||
+    textTypes.has(file.type) ||
+    [
+      "jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff", "heic", "heif",
+      "pdf", "txt", "md", "rtf", "csv", "json", "xml", "html", "htm",
+    ].includes(extension)
+  );
+}
+
+function isSupportedArchiveRequestAttachment(file: File): boolean {
+  const extension = file.name.split(".").pop()?.toLocaleLowerCase() ?? "";
+  return (
+    [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ].includes(file.type) ||
+    ["pdf", "doc", "docx"].includes(extension)
+  );
 }
 
 function isSupportedAttachment(file: File): boolean {
