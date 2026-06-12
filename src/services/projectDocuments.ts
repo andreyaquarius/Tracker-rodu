@@ -5,6 +5,11 @@ import type {
   YearMatrixRecord,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import {
+  asProjectPage,
+  pageRange,
+  type ProjectPage,
+} from "./projectPagination";
 
 type DocumentRow = {
   id: string;
@@ -96,12 +101,12 @@ function documentFromRow(row: DocumentRow): DocumentRecord {
 function documentToRow(
   projectId: string,
   document: DocumentRecord,
-  researchIds: Set<string>,
+  _researchIds: Set<string>,
 ) {
   return {
     id: document.id,
     project_id: projectId,
-    research_id: researchIds.has(document.researchId) ? document.researchId : null,
+    research_id: document.researchId || null,
     title: document.title,
     document_type: document.documentType,
     archive: document.archive,
@@ -144,14 +149,14 @@ function matrixFromRow(row: YearMatrixRow): YearMatrixRecord {
 function matrixToRow(
   projectId: string,
   record: YearMatrixRecord,
-  researchIds: Set<string>,
-  documentIds: Set<string>,
+  _researchIds: Set<string>,
+  _documentIds: Set<string>,
 ) {
   return {
     id: record.id,
     project_id: projectId,
-    research_id: researchIds.has(record.researchId) ? record.researchId : null,
-    document_id: documentIds.has(record.documentId) ? record.documentId : null,
+    research_id: record.researchId || null,
+    document_id: record.documentId || null,
     year_text: record.year,
     place: record.place,
     document_type: record.documentType,
@@ -163,29 +168,34 @@ function matrixToRow(
   };
 }
 
-export async function listProjectDocuments(projectId: string): Promise<{
-  documents: DocumentRecord[];
-  yearMatrix: YearMatrixRecord[];
-}> {
-  const client = getSupabaseClient();
-  const [documentsResult, matrixResult] = await Promise.all([
-    client
-      .from("documents")
-      .select(DOCUMENT_SELECT)
-      .eq("project_id", projectId)
-      .order("updated_at", { ascending: false }),
-    client
-      .from("year_matrix")
-      .select(YEAR_MATRIX_SELECT)
-      .eq("project_id", projectId)
-      .order("year_text", { ascending: true }),
-  ]);
-  if (documentsResult.error) throw documentsResult.error;
-  if (matrixResult.error) throw matrixResult.error;
-  return {
-    documents: (documentsResult.data as DocumentRow[]).map(documentFromRow),
-    yearMatrix: (matrixResult.data as YearMatrixRow[]).map(matrixFromRow),
-  };
+export async function listProjectDocuments(
+  projectId: string,
+  page = 0,
+): Promise<ProjectPage<DocumentRecord>> {
+  const { from, to } = pageRange(page);
+  const { data, error } = await getSupabaseClient()
+    .from("documents")
+    .select(DOCUMENT_SELECT)
+    .eq("project_id", projectId)
+    .order("updated_at", { ascending: false })
+    .range(from, to);
+  if (error) throw error;
+  return asProjectPage((data as DocumentRow[]).map(documentFromRow));
+}
+
+export async function listProjectYearMatrix(
+  projectId: string,
+  page = 0,
+): Promise<ProjectPage<YearMatrixRecord>> {
+  const { from, to } = pageRange(page);
+  const { data, error } = await getSupabaseClient()
+    .from("year_matrix")
+    .select(YEAR_MATRIX_SELECT)
+    .eq("project_id", projectId)
+    .order("year_text", { ascending: true })
+    .range(from, to);
+  if (error) throw error;
+  return asProjectPage((data as YearMatrixRow[]).map(matrixFromRow));
 }
 
 export async function importProjectDocuments(

@@ -52,6 +52,9 @@ export function PersonsPage({
   onOpenRelated,
   onCreateRelated,
   readOnly = false,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }: {
   db: AppDatabase;
   persons: Person[];
@@ -72,6 +75,9 @@ export function PersonsPage({
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly?: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
@@ -243,6 +249,18 @@ export function PersonsPage({
             <p>Змініть фільтри або додайте першу картку особи.</p>
           </div>
         )}
+        {hasMore && onLoadMore ? (
+          <div className="pagination-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={loadingMore}
+              onClick={onLoadMore}
+            >
+              {loadingMore ? "Завантаження…" : "Завантажити ще 50"}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       {editing && !readOnly ? (

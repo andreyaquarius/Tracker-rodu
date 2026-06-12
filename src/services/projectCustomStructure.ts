@@ -5,6 +5,7 @@ import type {
   CustomSectionRecord,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import { asProjectPage, pageRange } from "./projectPagination";
 
 type DefinitionRow = {
   id: string;
@@ -104,39 +105,67 @@ function recordFromRow(row: RecordRow): CustomSectionRecord {
   };
 }
 
-export async function listProjectCustomStructure(projectId: string): Promise<{
+export async function listProjectCustomStructure(
+  projectId: string,
+  page = 0,
+  sectionId?: string,
+): Promise<{
   definitions: CustomFieldDefinition[];
   sections: CustomSectionDefinition[];
   records: CustomSectionRecord[];
+  hasMore: boolean;
 }> {
   const client = getSupabaseClient();
-  const [definitionsResult, sectionsResult, fieldsResult, recordsResult] =
-    await Promise.all([
+  const { from, to } = pageRange(page);
+  const metadataPromise = listProjectCustomMetadata(projectId);
+  let recordsQuery = client
+    .from("custom_records")
+    .select("id, section_id, values, created_at, updated_at")
+    .eq("project_id", projectId)
+    .order("updated_at", { ascending: false })
+    .range(from, to);
+  if (sectionId) recordsQuery = recordsQuery.eq("section_id", sectionId);
+  const [metadata, recordsResult] = await Promise.all([
+    metadataPromise,
+    recordsQuery,
+  ]);
+  if (recordsResult.error) throw recordsResult.error;
+  const records = (recordsResult.data as RecordRow[]).map(recordFromRow);
+  return {
+    ...metadata,
+    records,
+    hasMore: asProjectPage(records).hasMore,
+  };
+}
+
+export async function listProjectCustomMetadata(projectId: string): Promise<{
+  definitions: CustomFieldDefinition[];
+  sections: CustomSectionDefinition[];
+}> {
+  const client = getSupabaseClient();
+  const [definitionsResult, sectionsResult, fieldsResult] = await Promise.all([
       client
         .from("custom_field_definitions")
         .select("id, module_key, label, field_type, options, relation_target")
         .eq("project_id", projectId)
-        .order("position", { ascending: true }),
+        .order("position", { ascending: true })
+        .limit(500),
       client
         .from("custom_sections")
         .select("id, parent_key, name, singular_name, description, icon, title_field_id, created_at, updated_at")
         .eq("project_id", projectId)
-        .order("position", { ascending: true }),
+        .order("position", { ascending: true })
+        .limit(500),
       client
         .from("custom_section_fields")
         .select("id, section_id, label, field_type, options, relation_target, required, position")
         .eq("project_id", projectId)
-        .order("position", { ascending: true }),
-      client
-        .from("custom_records")
-        .select("id, section_id, values, created_at, updated_at")
-        .eq("project_id", projectId)
-        .order("updated_at", { ascending: false }),
+        .order("position", { ascending: true })
+        .limit(1000),
     ]);
   if (definitionsResult.error) throw definitionsResult.error;
   if (sectionsResult.error) throw sectionsResult.error;
   if (fieldsResult.error) throw fieldsResult.error;
-  if (recordsResult.error) throw recordsResult.error;
 
   const fieldsBySection = new Map<string, CustomSectionField[]>();
   for (const row of fieldsResult.data as FieldRow[]) {
@@ -150,7 +179,6 @@ export async function listProjectCustomStructure(projectId: string): Promise<{
     sections: (sectionsResult.data as SectionRow[]).map((row) =>
       sectionFromRow(row, fieldsBySection.get(row.id) ?? []),
     ),
-    records: (recordsResult.data as RecordRow[]).map(recordFromRow),
   };
 }
 

@@ -6,6 +6,11 @@ import type {
   TaskRecord,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import {
+  asProjectPage,
+  pageRange,
+  type ProjectPage,
+} from "./projectPagination";
 
 type TaskRow = {
   id: string;
@@ -104,13 +109,13 @@ function taskFromRow(row: TaskRow, personIds: string[]): TaskRecord {
 function taskToRow(
   projectId: string,
   task: TaskRecord,
-  researchIds: Set<string>,
-  documentIds: Set<string>,
+  _researchIds: Set<string>,
+  _documentIds: Set<string>,
 ) {
   return {
     id: task.id,
     project_id: projectId,
-    research_id: researchIds.has(task.researchId) ? task.researchId : null,
+    research_id: task.researchId || null,
     person_name: task.personName,
     title: task.title,
     description: task.description,
@@ -118,7 +123,7 @@ function taskToRow(
     year_from: task.yearFrom,
     year_to: task.yearTo,
     document_type: task.documentType,
-    document_id: documentIds.has(task.documentId) ? task.documentId : null,
+    document_id: task.documentId || null,
     status: task.status,
     priority: task.priority,
     deadline: task.deadline,
@@ -169,15 +174,15 @@ function findingFromRow(
 function findingToRow(
   projectId: string,
   finding: Finding,
-  researchIds: Set<string>,
-  documentIds: Set<string>,
-  personIds: Set<string>,
+  _researchIds: Set<string>,
+  _documentIds: Set<string>,
+  _personIds: Set<string>,
 ) {
   return {
     id: finding.id,
     project_id: projectId,
-    research_id: researchIds.has(finding.researchId) ? finding.researchId : null,
-    document_id: documentIds.has(finding.documentId) ? finding.documentId : null,
+    research_id: finding.researchId || null,
+    document_id: finding.documentId || null,
     finding_type: finding.findingType,
     event_date: finding.eventDate,
     people: finding.people,
@@ -197,7 +202,7 @@ function findingToRow(
     custom_fields: {
       ...(finding.customFields ?? {}),
       [FINDING_META_KEY]: {
-        personIds: finding.personIds.filter((id) => personIds.has(id)),
+        personIds: finding.personIds,
         scans: finding.scans ?? [],
       },
     },
@@ -222,42 +227,64 @@ function participantToRow(
   };
 }
 
-export async function listProjectWorkRecords(projectId: string): Promise<{
-  tasks: TaskRecord[];
-  findings: Finding[];
-}> {
+export async function listProjectTasks(
+  projectId: string,
+  page = 0,
+): Promise<ProjectPage<TaskRecord>> {
   const client = getSupabaseClient();
-  const [tasksResult, taskPersonsResult, findingsResult, participantsResult] =
-    await Promise.all([
-      client
-        .from("tasks")
-        .select(TASK_SELECT)
-        .eq("project_id", projectId)
-        .order("updated_at", { ascending: false }),
-      client
+  const { from, to } = pageRange(page);
+  const tasksResult = await client
+    .from("tasks")
+    .select(TASK_SELECT)
+    .eq("project_id", projectId)
+    .order("updated_at", { ascending: false })
+    .range(from, to);
+  if (tasksResult.error) throw tasksResult.error;
+  const taskRows = tasksResult.data as TaskRow[];
+  const taskIds = taskRows.map((row) => row.id);
+  const taskPersonsResult = taskIds.length
+    ? await client
         .from("task_persons")
         .select("task_id, person_id")
-        .eq("project_id", projectId),
-      client
-        .from("findings")
-        .select(FINDING_SELECT)
         .eq("project_id", projectId)
-        .order("updated_at", { ascending: false }),
-      client
-        .from("finding_participants")
-        .select("id, finding_id, person_id, name, role, notes")
-        .eq("project_id", projectId)
-        .order("created_at", { ascending: true }),
-    ]);
-  if (tasksResult.error) throw tasksResult.error;
+        .in("task_id", taskIds)
+        .limit(500)
+    : { data: [], error: null };
   if (taskPersonsResult.error) throw taskPersonsResult.error;
-  if (findingsResult.error) throw findingsResult.error;
-  if (participantsResult.error) throw participantsResult.error;
-
   const taskPersonMap = new Map<string, string[]>();
   for (const row of taskPersonsResult.data as TaskPersonRow[]) {
     taskPersonMap.set(row.task_id, [...(taskPersonMap.get(row.task_id) ?? []), row.person_id]);
   }
+  return asProjectPage(taskRows.map((row) =>
+    taskFromRow(row, taskPersonMap.get(row.id) ?? []),
+  ));
+}
+
+export async function listProjectFindings(
+  projectId: string,
+  page = 0,
+): Promise<ProjectPage<Finding>> {
+  const client = getSupabaseClient();
+  const { from, to } = pageRange(page);
+  const findingsResult = await client
+    .from("findings")
+    .select(FINDING_SELECT)
+    .eq("project_id", projectId)
+    .order("updated_at", { ascending: false })
+    .range(from, to);
+  if (findingsResult.error) throw findingsResult.error;
+  const findingRows = findingsResult.data as FindingRow[];
+  const findingIds = findingRows.map((row) => row.id);
+  const participantsResult = findingIds.length
+    ? await client
+        .from("finding_participants")
+        .select("id, finding_id, person_id, name, role, notes")
+        .eq("project_id", projectId)
+        .in("finding_id", findingIds)
+        .order("created_at", { ascending: true })
+        .limit(500)
+    : { data: [], error: null };
+  if (participantsResult.error) throw participantsResult.error;
   const participantMap = new Map<string, FindingParticipant[]>();
   for (const row of participantsResult.data as FindingParticipantRow[]) {
     const participant: FindingParticipant = {
@@ -272,20 +299,17 @@ export async function listProjectWorkRecords(projectId: string): Promise<{
     ]);
   }
 
-  return {
-    tasks: (tasksResult.data as TaskRow[]).map((row) =>
-      taskFromRow(row, taskPersonMap.get(row.id) ?? []),
-    ),
-    findings: (findingsResult.data as FindingRow[]).map((row) =>
+  return asProjectPage(
+    findingRows.map((row) =>
       findingFromRow(row, participantMap.get(row.id) ?? []),
     ),
-  };
+  );
 }
 
 async function replaceTaskPersons(
   projectId: string,
   task: TaskRecord,
-  validPersonIds: Set<string>,
+  _validPersonIds: Set<string>,
 ): Promise<void> {
   const client = getSupabaseClient();
   const { error: deleteError } = await client
@@ -294,7 +318,7 @@ async function replaceTaskPersons(
     .eq("project_id", projectId)
     .eq("task_id", task.id);
   if (deleteError) throw deleteError;
-  const personIds = [...new Set(task.personIds)].filter((id) => validPersonIds.has(id));
+  const personIds = [...new Set(task.personIds)];
   if (!personIds.length) return;
   const { error } = await client.from("task_persons").insert(
     personIds.map((personId) => ({
@@ -381,7 +405,7 @@ export async function saveProjectTask(
   await replaceTaskPersons(projectId, task, personIds);
   return taskFromRow(
     data as TaskRow,
-    task.personIds.filter((id) => personIds.has(id)),
+    task.personIds,
   );
 }
 
