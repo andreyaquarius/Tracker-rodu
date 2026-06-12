@@ -1,10 +1,5 @@
 import type { CustomFieldValues, Research } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
-import {
-  asProjectPage,
-  pageRange,
-  type ProjectPage,
-} from "./projectPagination";
 
 type ResearchRow = {
   id: string;
@@ -65,21 +60,16 @@ function toRow(projectId: string, research: Research) {
   };
 }
 
-export async function listProjectResearches(
-  projectId: string,
-  page = 0,
-): Promise<ProjectPage<Research>> {
-  const { from, to } = pageRange(page);
+export async function listProjectResearches(projectId: string): Promise<Research[]> {
   const { data, error } = await getSupabaseClient()
     .from("researches")
     .select(
       "id, project_id, title, goal, surnames, places, period_from, period_to, archives, status, notes, custom_fields, created_at, updated_at",
     )
     .eq("project_id", projectId)
-    .order("updated_at", { ascending: false })
-    .range(from, to);
+    .order("updated_at", { ascending: false });
   if (error) throw error;
-  return asProjectPage((data as ResearchRow[]).map(fromRow));
+  return (data as ResearchRow[]).map(fromRow);
 }
 
 export async function saveProjectResearch(

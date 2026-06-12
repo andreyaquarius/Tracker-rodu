@@ -82,8 +82,7 @@ async function readMemberships(): Promise<SupabaseWorkspace[]> {
     .from("project_members")
     .select("role, projects!inner(id, name)")
     .eq("user_id", userData.user.id)
-    .order("joined_at", { ascending: true })
-    .limit(100);
+    .order("joined_at", { ascending: true });
   if (error) throw error;
   const mapped = (data as MembershipRow[])
     .map(mapMembership)

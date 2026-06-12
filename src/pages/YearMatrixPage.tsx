@@ -65,9 +65,6 @@ interface Props {
   onSave: (entity: AppEntity) => void;
   onDelete: (id: string) => void;
   readOnly?: boolean;
-  hasMore?: boolean;
-  loadingMore?: boolean;
-  onLoadMore?: () => void;
 }
 
 export function YearMatrixPage({
@@ -83,9 +80,6 @@ export function YearMatrixPage({
   onSave,
   onDelete,
   readOnly = false,
-  hasMore = false,
-  loadingMore = false,
-  onLoadMore,
 }: Props) {
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState("1840");
@@ -175,9 +169,6 @@ export function YearMatrixPage({
         onSave={onSave}
         onDelete={onDelete}
         readOnly={readOnly}
-        hasMore={hasMore}
-        loadingMore={loadingMore}
-        onLoadMore={onLoadMore}
       />
     </>
   );

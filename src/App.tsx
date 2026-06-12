@@ -77,7 +77,6 @@ import {
   deleteProjectYearMatrixRecord,
   importProjectDocuments,
   listProjectDocuments,
-  listProjectYearMatrix,
   loadProjectDocumentsCache,
   saveProjectDocument,
   saveProjectDocumentsCache,
@@ -88,8 +87,7 @@ import {
   deleteProjectFinding,
   deleteProjectTask,
   importProjectWorkRecords,
-  listProjectFindings,
-  listProjectTasks,
+  listProjectWorkRecords,
   loadProjectWorkRecordsCache,
   saveProjectFinding,
   saveProjectTask,
@@ -101,8 +99,7 @@ import {
   deleteProjectHypothesis,
   deleteProjectHypothesisTargetLinks,
   importProjectAnalysisRecords,
-  listProjectArchiveRequests,
-  listProjectHypotheses,
+  listProjectAnalysisRecords,
   loadProjectAnalysisRecordsCache,
   saveProjectAnalysisRecordsCache,
   saveProjectArchiveRequest,
@@ -113,7 +110,6 @@ import {
   deleteProjectCustomRecord,
   deleteProjectCustomSection,
   importProjectCustomStructure,
-  listProjectCustomMetadata,
   listProjectCustomStructure,
   loadProjectCustomStructureCache,
   saveProjectCustomFieldDefinition,
@@ -145,11 +141,6 @@ import { assertProjectRecordUnchanged } from "./services/projectConflicts";
 import { setProjectAttachmentTarget } from "./services/scanStorage";
 import { clearGoogleDriveSession } from "./services/googleDriveStorage";
 import { createActivityEntries } from "./utils/activityLog";
-import {
-  emptyDashboardStats,
-  loadProjectDashboard,
-  type DashboardStats,
-} from "./services/projectDashboard";
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
@@ -226,10 +217,6 @@ function baseUpdatedAt(entity: object): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function mergeById<T extends { id: string }>(current: T[], next: T[]): T[] {
-  return [...new Map([...current, ...next].map((item) => [item.id, item])).values()];
-}
-
 export default function App() {
   const app = useAppDatabase();
   const [page, setPage] = useState<PageKey>("dashboard");
@@ -255,20 +242,21 @@ export default function App() {
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
   const [projectResearches, setProjectResearches] = useState<Research[]>([]);
-  const [researchesReadyForProject] = useState<string | null>(null);
+  const [researchesReadyForProject, setResearchesReadyForProject] = useState<string | null>(null);
   const [projectPersons, setProjectPersons] = useState<Person[]>([]);
   const [projectPersonRelations, setProjectPersonRelations] = useState<PersonRelation[]>([]);
   const [projectDocuments, setProjectDocuments] = useState<DocumentRecord[]>([]);
   const [projectYearMatrix, setProjectYearMatrix] = useState<YearMatrixRecord[]>([]);
-  const [documentsReadyForProject] = useState<string | null>(null);
-  const [peopleReadyForProject] = useState<string | null>(null);
+  const [documentsReadyForProject, setDocumentsReadyForProject] = useState<string | null>(null);
+  const [peopleReadyForProject, setPeopleReadyForProject] = useState<string | null>(null);
   const [projectTasks, setProjectTasks] = useState<TaskRecord[]>([]);
   const [projectFindings, setProjectFindings] = useState<Finding[]>([]);
-  const [workRecordsReadyForProject] = useState<string | null>(null);
+  const [workRecordsReadyForProject, setWorkRecordsReadyForProject] =
+    useState<string | null>(null);
   const [projectHypotheses, setProjectHypotheses] = useState<Hypothesis[]>([]);
   const [projectArchiveRequests, setProjectArchiveRequests] =
     useState<ArchiveRequest[]>([]);
-  const [analysisReadyForProject] = useState<string | null>(null);
+  const [analysisReadyForProject, setAnalysisReadyForProject] = useState<string | null>(null);
   const [projectCustomFields, setProjectCustomFields] =
     useState<CustomFieldDefinition[]>([]);
   const [projectCustomSections, setProjectCustomSections] = useState(
@@ -277,13 +265,9 @@ export default function App() {
   const [projectCustomRecords, setProjectCustomRecords] = useState(
     app.db.customSectionRecords,
   );
-  const [customStructureReadyForProject] = useState<string | null>(null);
+  const [customStructureReadyForProject, setCustomStructureReadyForProject] =
+    useState<string | null>(null);
   const [projectActivity, setProjectActivity] = useState<ActivityLogEntry[]>([]);
-  const [dashboardStats, setDashboardStats] =
-    useState<DashboardStats>(emptyDashboardStats);
-  const [dashboardTasks, setDashboardTasks] = useState<TaskRecord[]>([]);
-  const [hasMoreByPage, setHasMoreByPage] = useState<Partial<Record<PageKey, boolean>>>({});
-  const [loadingMorePage, setLoadingMorePage] = useState<PageKey | null>(null);
   const [projectPreferences, setProjectPreferences] = useState<ProjectPreferences>(
     () => ({
       researcherName: app.db.settings.researcherName,
@@ -303,8 +287,6 @@ export default function App() {
     projectId: string;
     value: string;
   } | null>(null);
-  const loadedPagesRef = useRef(new Set<string>());
-  const pageNumbersRef = useRef(new Map<string, number>());
 
   const describeError = useCallback((error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) return error.message;
@@ -550,12 +532,10 @@ export default function App() {
   useEffect(() => {
     if (!workspace || !account) {
       setProjectActivity([]);
-      setDashboardStats(emptyDashboardStats);
-      setDashboardTasks([]);
       return;
     }
     let active = true;
-    void listProjectActivity(workspace.projectId, 10)
+    void listProjectActivity(workspace.projectId)
       .then((entries) => {
         if (active) setProjectActivity(entries);
       })
@@ -572,123 +552,354 @@ export default function App() {
   }, [account, describeError, notify, workspace]);
 
   useEffect(() => {
-    loadedPagesRef.current.clear();
-    pageNumbersRef.current.clear();
-    setHasMoreByPage({});
-    setProjectResearches([]);
-    setProjectPersons([]);
-    setProjectPersonRelations([]);
-    setProjectDocuments([]);
-    setProjectYearMatrix([]);
-    setProjectTasks([]);
-    setProjectFindings([]);
-    setProjectHypotheses([]);
-    setProjectArchiveRequests([]);
-    setProjectCustomFields([]);
-    setProjectCustomSections([]);
-    setProjectCustomRecords([]);
-  }, [workspace?.projectId]);
+    if (!workspace || !account) {
+      setProjectResearches([]);
+      setResearchesReadyForProject(null);
+      return;
+    }
 
-  useEffect(() => {
-    if (!workspace || !account) return;
     let active = true;
-    void listProjectCustomMetadata(workspace.projectId)
-      .then((metadata) => {
-        if (!active || activeWorkspaceIdRef.current !== workspace.projectId) return;
-        setProjectCustomFields(metadata.definitions);
-        setProjectCustomSections(metadata.sections);
-      })
-      .catch((error: unknown) => {
-        if (active) {
-          notify(describeError(error, "Не вдалося завантажити структуру проєкту."), true);
-        }
-      });
+    const projectId = workspace.projectId;
+    setResearchesReadyForProject(null);
+    const cached = loadProjectResearchCache(projectId);
+    const fallback = cached;
+    setProjectResearches(fallback);
+
+    void (async () => {
+      try {
+        const researches = await listProjectResearches(projectId);
+
+        if (!active) return;
+        saveProjectResearchCache(projectId, researches);
+        setProjectResearches(researches);
+        setResearchesReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallback.length
+              ? "Не вдалося оновити дослідження з бази. Показано локальний кеш."
+              : "Не вдалося завантажити дослідження з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
     return () => {
       active = false;
     };
   }, [account, describeError, notify, workspace]);
 
   useEffect(() => {
-    if (!workspace || !account) return;
-    const projectId = workspace.projectId;
-    const pageKey = `${projectId}:${page}`;
-    if (loadedPagesRef.current.has(pageKey)) return;
+    if (!workspace || !account) {
+      setProjectPersons([]);
+      setProjectPersonRelations([]);
+      setPeopleReadyForProject(null);
+      return;
+    }
+    if (researchesReadyForProject !== workspace.projectId) {
+      const cached = loadProjectPeopleCache(workspace.projectId);
+      setProjectPersons(cached.persons);
+      setProjectPersonRelations(cached.relations);
+      setPeopleReadyForProject(null);
+      return;
+    }
+
     let active = true;
+    const projectId = workspace.projectId;
+    setPeopleReadyForProject(null);
+    const cached = loadProjectPeopleCache(projectId);
+    const fallbackPersons = cached.persons;
+    const fallbackRelations = cached.relations;
+    setProjectPersons(fallbackPersons);
+    setProjectPersonRelations(fallbackRelations);
 
-    const load = async () => {
-      if (page === "dashboard") {
-        const dashboard = await loadProjectDashboard(projectId);
+    void (async () => {
+      try {
+        const remote = await listProjectPeople(projectId);
+
         if (!active) return;
-        setDashboardStats(dashboard.stats);
-        setDashboardTasks(dashboard.tasks);
-        loadedPagesRef.current.add(pageKey);
-        return;
-      }
-      if (page === "researches") {
-        const result = await listProjectResearches(projectId, 0);
+        saveProjectPeopleCache(projectId, remote.persons, remote.relations);
+        setProjectPersons(remote.persons);
+        setProjectPersonRelations(remote.relations);
+        setPeopleReadyForProject(projectId);
+      } catch (error) {
         if (!active) return;
-        setProjectResearches(result.items);
-        setHasMoreByPage((current) => ({ ...current, researches: result.hasMore }));
-      } else if (page === "persons") {
-        const result = await listProjectPeople(projectId, 0);
-        if (!active) return;
-        setProjectPersons(result.persons);
-        setProjectPersonRelations(result.relations);
-        setHasMoreByPage((current) => ({ ...current, persons: result.hasMore }));
-      } else if (page === "documents") {
-        const result = await listProjectDocuments(projectId, 0);
-        if (!active) return;
-        setProjectDocuments(result.items);
-        setHasMoreByPage((current) => ({ ...current, documents: result.hasMore }));
-      } else if (page === "yearMatrix") {
-        const result = await listProjectYearMatrix(projectId, 0);
-        if (!active) return;
-        setProjectYearMatrix(result.items);
-        setHasMoreByPage((current) => ({ ...current, yearMatrix: result.hasMore }));
-      } else if (page === "tasks") {
-        const result = await listProjectTasks(projectId, 0);
-        if (!active) return;
-        setProjectTasks(result.items);
-        setHasMoreByPage((current) => ({ ...current, tasks: result.hasMore }));
-      } else if (page === "findings") {
-        const result = await listProjectFindings(projectId, 0);
-        if (!active) return;
-        setProjectFindings(result.items);
-        setHasMoreByPage((current) => ({ ...current, findings: result.hasMore }));
-      } else if (page === "hypotheses") {
-        const result = await listProjectHypotheses(projectId, 0);
-        if (!active) return;
-        setProjectHypotheses(result.items);
-        setHasMoreByPage((current) => ({ ...current, hypotheses: result.hasMore }));
-      } else if (page === "archiveRequests") {
-        const result = await listProjectArchiveRequests(projectId, 0);
-        if (!active) return;
-        setProjectArchiveRequests(result.items);
-        setHasMoreByPage((current) => ({ ...current, archiveRequests: result.hasMore }));
-      } else if (page === "settings" || page.startsWith("custom:")) {
-        const result = await listProjectCustomStructure(
-          projectId,
-          0,
-          page.startsWith("custom:") ? page.slice("custom:".length) : undefined,
+        notify(
+          describeError(
+            error,
+            fallbackPersons.length
+              ? "Не вдалося оновити осіб із бази. Показано локальний кеш."
+              : "Не вдалося завантажити осіб із бази.",
+          ),
+          true,
         );
-        if (!active) return;
-        setProjectCustomFields(result.definitions);
-        setProjectCustomSections(result.sections);
-        setProjectCustomRecords(result.records);
-        setHasMoreByPage((current) => ({ ...current, [page]: result.hasMore }));
       }
-      loadedPagesRef.current.add(pageKey);
-      pageNumbersRef.current.set(pageKey, 0);
-    };
+    })();
 
-    void load().catch((error: unknown) => {
-      if (!active) return;
-      notify(describeError(error, "Не вдалося завантажити дані розділу."), true);
-    });
     return () => {
       active = false;
     };
-  }, [account, describeError, notify, page, workspace]);
+  }, [
+    account,
+    describeError,
+    notify,
+    researchesReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectDocuments([]);
+      setProjectYearMatrix([]);
+      setDocumentsReadyForProject(null);
+      return;
+    }
+    if (researchesReadyForProject !== workspace.projectId) {
+      const cached = loadProjectDocumentsCache(workspace.projectId);
+      setProjectDocuments(cached.documents);
+      setProjectYearMatrix(cached.yearMatrix);
+      setDocumentsReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    setDocumentsReadyForProject(null);
+    const cached = loadProjectDocumentsCache(projectId);
+    const fallbackDocuments = cached.documents;
+    const fallbackMatrix = cached.yearMatrix;
+    setProjectDocuments(fallbackDocuments);
+    setProjectYearMatrix(fallbackMatrix);
+
+    void (async () => {
+      try {
+        const remote = await listProjectDocuments(projectId);
+
+        if (!active) return;
+        saveProjectDocumentsCache(projectId, remote.documents, remote.yearMatrix);
+        setProjectDocuments(remote.documents);
+        setProjectYearMatrix(remote.yearMatrix);
+        setDocumentsReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallbackDocuments.length || fallbackMatrix.length
+              ? "Не вдалося оновити документи з бази. Показано локальний кеш."
+              : "Не вдалося завантажити документи з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    describeError,
+    notify,
+    researchesReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectTasks([]);
+      setProjectFindings([]);
+      setWorkRecordsReadyForProject(null);
+      return;
+    }
+    if (
+      researchesReadyForProject !== workspace.projectId ||
+      peopleReadyForProject !== workspace.projectId ||
+      documentsReadyForProject !== workspace.projectId
+    ) {
+      const cached = loadProjectWorkRecordsCache(workspace.projectId);
+      setProjectTasks(cached.tasks);
+      setProjectFindings(cached.findings);
+      setWorkRecordsReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    setWorkRecordsReadyForProject(null);
+    const cached = loadProjectWorkRecordsCache(projectId);
+    const fallbackTasks = cached.tasks;
+    const fallbackFindings = cached.findings;
+    setProjectTasks(fallbackTasks);
+    setProjectFindings(fallbackFindings);
+
+    void (async () => {
+      try {
+        const remote = await listProjectWorkRecords(projectId);
+
+        if (!active) return;
+        saveProjectWorkRecordsCache(projectId, remote.tasks, remote.findings);
+        setProjectTasks(remote.tasks);
+        setProjectFindings(remote.findings);
+        setWorkRecordsReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallbackTasks.length || fallbackFindings.length
+              ? "Не вдалося оновити завдання і знахідки з бази. Показано локальний кеш."
+              : "Не вдалося завантажити завдання і знахідки з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    describeError,
+    documentsReadyForProject,
+    notify,
+    peopleReadyForProject,
+    researchesReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectHypotheses([]);
+      setProjectArchiveRequests([]);
+      setAnalysisReadyForProject(null);
+      return;
+    }
+    if (
+      researchesReadyForProject !== workspace.projectId ||
+      peopleReadyForProject !== workspace.projectId ||
+      documentsReadyForProject !== workspace.projectId ||
+      workRecordsReadyForProject !== workspace.projectId
+    ) {
+      const cached = loadProjectAnalysisRecordsCache(workspace.projectId);
+      setProjectHypotheses(cached.hypotheses);
+      setProjectArchiveRequests(cached.archiveRequests);
+      setAnalysisReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    setAnalysisReadyForProject(null);
+    const cached = loadProjectAnalysisRecordsCache(projectId);
+    const fallbackHypotheses = cached.hypotheses;
+    const fallbackRequests = cached.archiveRequests;
+    setProjectHypotheses(fallbackHypotheses);
+    setProjectArchiveRequests(fallbackRequests);
+
+    void (async () => {
+      try {
+        const remote = await listProjectAnalysisRecords(projectId);
+
+        if (!active) return;
+        saveProjectAnalysisRecordsCache(
+          projectId,
+          remote.hypotheses,
+          remote.archiveRequests,
+        );
+        setProjectHypotheses(remote.hypotheses);
+        setProjectArchiveRequests(remote.archiveRequests);
+        setAnalysisReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            fallbackHypotheses.length || fallbackRequests.length
+              ? "Не вдалося оновити гіпотези й архівні запити з бази. Показано локальний кеш."
+              : "Не вдалося завантажити гіпотези й архівні запити з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    describeError,
+    documentsReadyForProject,
+    notify,
+    peopleReadyForProject,
+    researchesReadyForProject,
+    workRecordsReadyForProject,
+    workspace,
+  ]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
+      setProjectCustomFields([]);
+      setProjectCustomSections([]);
+      setProjectCustomRecords([]);
+      setCustomStructureReadyForProject(null);
+      return;
+    }
+
+    let active = true;
+    const projectId = workspace.projectId;
+    setCustomStructureReadyForProject(null);
+    const cached = loadProjectCustomStructureCache(projectId);
+    const hasCached =
+      cached.definitions.length || cached.sections.length || cached.records.length;
+    const fallback = cached;
+    setProjectCustomFields(fallback.definitions);
+    setProjectCustomSections(fallback.sections);
+    setProjectCustomRecords(fallback.records);
+
+    void (async () => {
+      try {
+        const remote = await listProjectCustomStructure(projectId);
+
+        if (!active) return;
+        saveProjectCustomStructureCache(
+          projectId,
+          remote.definitions,
+          remote.sections,
+          remote.records,
+        );
+        setProjectCustomFields(remote.definitions);
+        setProjectCustomSections(remote.sections);
+        setProjectCustomRecords(remote.records);
+        setCustomStructureReadyForProject(projectId);
+      } catch (error) {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            hasCached
+              ? "Не вдалося оновити власні розділи з бази. Показано локальний кеш."
+              : "Не вдалося завантажити власні розділи з бази.",
+          ),
+          true,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    account,
+    describeError,
+    notify,
+    workspace,
+  ]);
 
   const activeDb = useMemo<AppDatabase>(
     () =>
@@ -751,20 +962,6 @@ export default function App() {
           queued.clear();
           const jobs: Promise<void>[] = [];
 
-          if (
-            page === "dashboard" &&
-            [...current].some((group) =>
-              ["researches", "people", "documents", "work", "analysis"].includes(group),
-            )
-          ) {
-            jobs.push(
-              loadProjectDashboard(projectId).then((dashboard) => {
-                if (activeWorkspaceIdRef.current !== projectId) return;
-                setDashboardStats(dashboard.stats);
-                setDashboardTasks(dashboard.tasks);
-              }),
-            );
-          }
           if (current.has("project")) {
             jobs.push(
               loadProjectPreferences(projectId, projectPreferences).then(
@@ -779,16 +976,16 @@ export default function App() {
               ),
             );
           }
-          if (current.has("researches") && page === "researches") {
+          if (current.has("researches")) {
             jobs.push(
-              listProjectResearches(projectId, 0).then((records) => {
+              listProjectResearches(projectId).then((records) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
-                setProjectResearches(records.items);
-                setHasMoreByPage((value) => ({ ...value, researches: records.hasMore }));
+                setProjectResearches(records);
+                saveProjectResearchCache(projectId, records);
               }),
             );
           }
-          if (current.has("people") && page === "persons") {
+          if (current.has("people")) {
             jobs.push(
               listProjectPeople(projectId).then((records) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
@@ -802,67 +999,51 @@ export default function App() {
               }),
             );
           }
-          if (current.has("documents") && page === "documents") {
+          if (current.has("documents")) {
             jobs.push(
-              listProjectDocuments(projectId, 0).then((records) => {
+              listProjectDocuments(projectId).then((records) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
-                setProjectDocuments(records.items);
-                setHasMoreByPage((value) => ({ ...value, documents: records.hasMore }));
+                setProjectDocuments(records.documents);
+                setProjectYearMatrix(records.yearMatrix);
+                saveProjectDocumentsCache(
+                  projectId,
+                  records.documents,
+                  records.yearMatrix,
+                );
               }),
             );
           }
-          if (current.has("documents") && page === "yearMatrix") {
+          if (current.has("work")) {
             jobs.push(
-              listProjectYearMatrix(projectId, 0).then((records) => {
+              listProjectWorkRecords(projectId).then((records) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
-                setProjectYearMatrix(records.items);
-                setHasMoreByPage((value) => ({ ...value, yearMatrix: records.hasMore }));
+                setProjectTasks(records.tasks);
+                setProjectFindings(records.findings);
+                saveProjectWorkRecordsCache(
+                  projectId,
+                  records.tasks,
+                  records.findings,
+                );
               }),
             );
           }
-          if (current.has("work") && page === "tasks") {
+          if (current.has("analysis")) {
             jobs.push(
-              listProjectTasks(projectId, 0).then((records) => {
+              listProjectAnalysisRecords(projectId).then((records) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
-                setProjectTasks(records.items);
-                setHasMoreByPage((value) => ({ ...value, tasks: records.hasMore }));
+                setProjectHypotheses(records.hypotheses);
+                setProjectArchiveRequests(records.archiveRequests);
+                saveProjectAnalysisRecordsCache(
+                  projectId,
+                  records.hypotheses,
+                  records.archiveRequests,
+                );
               }),
             );
           }
-          if (current.has("work") && page === "findings") {
+          if (current.has("custom")) {
             jobs.push(
-              listProjectFindings(projectId, 0).then((records) => {
-                if (activeWorkspaceIdRef.current !== projectId) return;
-                setProjectFindings(records.items);
-                setHasMoreByPage((value) => ({ ...value, findings: records.hasMore }));
-              }),
-            );
-          }
-          if (current.has("analysis") && page === "hypotheses") {
-            jobs.push(
-              listProjectHypotheses(projectId, 0).then((records) => {
-                if (activeWorkspaceIdRef.current !== projectId) return;
-                setProjectHypotheses(records.items);
-                setHasMoreByPage((value) => ({ ...value, hypotheses: records.hasMore }));
-              }),
-            );
-          }
-          if (current.has("analysis") && page === "archiveRequests") {
-            jobs.push(
-              listProjectArchiveRequests(projectId, 0).then((records) => {
-                if (activeWorkspaceIdRef.current !== projectId) return;
-                setProjectArchiveRequests(records.items);
-                setHasMoreByPage((value) => ({ ...value, archiveRequests: records.hasMore }));
-              }),
-            );
-          }
-          if (current.has("custom") && (page === "settings" || page.startsWith("custom:"))) {
-            jobs.push(
-              listProjectCustomStructure(
-                projectId,
-                0,
-                page.startsWith("custom:") ? page.slice("custom:".length) : undefined,
-              ).then((records) => {
+              listProjectCustomStructure(projectId).then((records) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
                 setProjectCustomFields(records.definitions);
                 setProjectCustomSections(records.sections);
@@ -878,7 +1059,7 @@ export default function App() {
           }
           if (current.has("activity")) {
             jobs.push(
-              listProjectActivity(projectId, 10).then((records) => {
+              listProjectActivity(projectId).then((records) => {
                 if (activeWorkspaceIdRef.current === projectId) {
                   setProjectActivity(records);
                 }
@@ -917,7 +1098,6 @@ export default function App() {
     account,
     describeError,
     notify,
-    page,
     projectPreferences,
     workspace,
   ]);
@@ -2041,66 +2221,6 @@ export default function App() {
     setCreateRequest(null);
     setPage(nextPage);
   };
-  const loadMore = async () => {
-    if (!workspace || loadingMorePage) return;
-    const projectId = workspace.projectId;
-    const pageKey = `${projectId}:${page}`;
-    const nextPage = (pageNumbersRef.current.get(pageKey) ?? 0) + 1;
-    setLoadingMorePage(page);
-    try {
-      if (page === "researches") {
-        const result = await listProjectResearches(projectId, nextPage);
-        setProjectResearches((current) => mergeById(current, result.items));
-        setHasMoreByPage((current) => ({ ...current, researches: result.hasMore }));
-      } else if (page === "persons") {
-        const result = await listProjectPeople(projectId, nextPage);
-        setProjectPersons((current) => mergeById(current, result.persons));
-        setProjectPersonRelations((current) => mergeById(current, result.relations));
-        setHasMoreByPage((current) => ({ ...current, persons: result.hasMore }));
-      } else if (page === "documents") {
-        const result = await listProjectDocuments(projectId, nextPage);
-        setProjectDocuments((current) => mergeById(current, result.items));
-        setHasMoreByPage((current) => ({ ...current, documents: result.hasMore }));
-      } else if (page === "yearMatrix") {
-        const result = await listProjectYearMatrix(projectId, nextPage);
-        setProjectYearMatrix((current) => mergeById(current, result.items));
-        setHasMoreByPage((current) => ({ ...current, yearMatrix: result.hasMore }));
-      } else if (page === "tasks") {
-        const result = await listProjectTasks(projectId, nextPage);
-        setProjectTasks((current) => mergeById(current, result.items));
-        setHasMoreByPage((current) => ({ ...current, tasks: result.hasMore }));
-      } else if (page === "findings") {
-        const result = await listProjectFindings(projectId, nextPage);
-        setProjectFindings((current) => mergeById(current, result.items));
-        setHasMoreByPage((current) => ({ ...current, findings: result.hasMore }));
-      } else if (page === "hypotheses") {
-        const result = await listProjectHypotheses(projectId, nextPage);
-        setProjectHypotheses((current) => mergeById(current, result.items));
-        setHasMoreByPage((current) => ({ ...current, hypotheses: result.hasMore }));
-      } else if (page === "archiveRequests") {
-        const result = await listProjectArchiveRequests(projectId, nextPage);
-        setProjectArchiveRequests((current) => mergeById(current, result.items));
-        setHasMoreByPage((current) => ({ ...current, archiveRequests: result.hasMore }));
-      } else if (page === "settings" || page.startsWith("custom:")) {
-        const result = await listProjectCustomStructure(
-          projectId,
-          nextPage,
-          page.startsWith("custom:") ? page.slice("custom:".length) : undefined,
-        );
-        setProjectCustomFields(result.definitions);
-        setProjectCustomSections(result.sections);
-        setProjectCustomRecords((current) => mergeById(current, result.records));
-        setHasMoreByPage((current) => ({ ...current, [page]: result.hasMore }));
-      } else {
-        return;
-      }
-      pageNumbersRef.current.set(pageKey, nextPage);
-    } catch (error) {
-      notify(describeError(error, "Не вдалося завантажити наступні записи."), true);
-    } finally {
-      setLoadingMorePage(null);
-    }
-  };
   const openSearchResult = (nextPage: PageKey, query: string, entityId?: string) => {
     setModuleSearch(query);
     setOpenEntityId(entityId ?? "");
@@ -2838,24 +2958,13 @@ export default function App() {
               ),
             });
           } : undefined}
-          hasMore={Boolean(hasMoreByPage[page])}
-          loadingMore={loadingMorePage === page}
-          onLoadMore={loadMore}
           readOnly={readOnly}
         />
       );
     }
     switch (page) {
       case "dashboard":
-        return (
-          <DashboardPage
-            db={activeDb}
-            stats={dashboardStats}
-            nextTasks={dashboardTasks}
-            onNavigate={navigate}
-            onOpenSearchResult={openSearchResult}
-          />
-        );
+        return <DashboardPage db={activeDb} onNavigate={navigate} onOpenSearchResult={openSearchResult} />;
       case "researches":
       case "documents":
       case "archiveRequests":
@@ -2886,9 +2995,6 @@ export default function App() {
             onDelete={deleteFor(page)}
             projectId={workspace?.projectId}
             onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
-            hasMore={Boolean(hasMoreByPage[page])}
-            loadingMore={loadingMorePage === page}
-            onLoadMore={loadMore}
             readOnly={readOnly}
           />
         );
@@ -2915,9 +3021,6 @@ export default function App() {
             onDeleteRelation={deleteRelation}
             onOpenRelated={openRelatedRecord}
             onCreateRelated={createRelatedRecord}
-            hasMore={Boolean(hasMoreByPage.persons)}
-            loadingMore={loadingMorePage === "persons"}
-            onLoadMore={loadMore}
             readOnly={readOnly}
           />
         );
@@ -2935,9 +3038,6 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
             onSave={saveFor("yearMatrix")}
             onDelete={deleteFor("yearMatrix")}
-            hasMore={Boolean(hasMoreByPage.yearMatrix)}
-            loadingMore={loadingMorePage === "yearMatrix"}
-            onLoadMore={loadMore}
             readOnly={readOnly}
           />
         );

@@ -6,40 +6,35 @@ import {
   createGlobalSearchIndex,
   type HighlightRange,
 } from "../utils/globalSearch";
-import type { DashboardStats } from "../services/projectDashboard";
 
 export function DashboardPage({
   db,
-  stats,
-  nextTasks,
   onNavigate,
   onOpenSearchResult,
 }: {
   db: AppDatabase;
-  stats: DashboardStats;
-  nextTasks: AppDatabase["tasks"];
   onNavigate: (page: PageKey) => void;
   onOpenSearchResult: (page: PageKey, query: string, entityId?: string) => void;
 }) {
   const [globalQuery, setGlobalQuery] = useState("");
   const [showAllActivity, setShowAllActivity] = useState(false);
-  const statCards = [
-    ["Дослідження", stats.researches, "researches" as PageKey],
-    ["Документи", stats.documents, "documents" as PageKey],
-    ["Документи в роботі", stats.documentsInProgress, "documents" as PageKey],
-    ["Переглянуто", stats.documentsReviewed, "documents" as PageKey],
-    ["Відкриті завдання", stats.openTasks, "tasks" as PageKey],
-    ["Завершені завдання", stats.completedTasks, "tasks" as PageKey],
-    ["Знахідки", stats.findings, "findings" as PageKey],
-    ["Запити в архів", stats.archiveRequests, "archiveRequests" as PageKey],
-    ["Особи", stats.persons, "persons" as PageKey],
-    ["Активні гіпотези", stats.activeHypotheses, "hypotheses" as PageKey],
-    ["Прогалини в роках", stats.yearGaps, "yearMatrix" as PageKey],
-    ["Не перевірені роки", stats.uncheckedYears, "yearMatrix" as PageKey],
+  const stats = [
+    ["Дослідження", db.researches.length, "researches" as PageKey],
+    ["Документи", db.documents.length, "documents" as PageKey],
+    ["Документи в роботі", db.documents.filter((item) => item.reviewStatus === "в роботі").length, "documents" as PageKey],
+    ["Переглянуто", db.documents.filter((item) => item.reviewStatus === "переглянуто").length, "documents" as PageKey],
+    ["Відкриті завдання", db.tasks.filter((item) => !["закрито", "перевірено"].includes(item.status)).length, "tasks" as PageKey],
+    ["Завершені завдання", db.tasks.filter((item) => ["закрито", "перевірено"].includes(item.status)).length, "tasks" as PageKey],
+    ["Знахідки", db.findings.length, "findings" as PageKey],
+    ["Запити в архів", db.archiveRequests.length, "archiveRequests" as PageKey],
+    ["Особи", db.persons.length, "persons" as PageKey],
+    ["Активні гіпотези", db.hypotheses.filter((item) => item.status === "активна").length, "hypotheses" as PageKey],
+    ["Прогалини в роках", db.yearMatrix.filter((item) => item.status === "прогалина").length, "yearMatrix" as PageKey],
+    ["Не перевірені роки", db.yearMatrix.filter((item) => item.status === "не перевірено").length, "yearMatrix" as PageKey],
   ] as const;
 
   const priorityWeight: Record<string, number> = { критичний: 4, високий: 3, середній: 2, низький: 1 };
-  const sortedTasks = nextTasks
+  const nextTasks = db.tasks
     .filter((item) => ["не почато", "в роботі"].includes(item.status))
     .sort((a, b) => (priorityWeight[b.priority] ?? 0) - (priorityWeight[a.priority] ?? 0))
     .slice(0, 6);
@@ -147,7 +142,7 @@ export function DashboardPage({
       </section>
 
       <section className="stat-grid">
-        {statCards.map(([label, value, page]) => (
+        {stats.map(([label, value, page]) => (
           <button className="stat-card" key={label} onClick={() => onNavigate(page)}>
             <span>{label}</span>
             <strong>{value}</strong>
@@ -164,9 +159,9 @@ export function DashboardPage({
           </div>
           <button className="text-button" onClick={() => onNavigate("tasks")}>Усі завдання</button>
         </div>
-        {sortedTasks.length ? (
+        {nextTasks.length ? (
           <div className="task-list">
-            {sortedTasks.map((task) => (
+            {nextTasks.map((task) => (
               <button key={task.id} onClick={() => onNavigate("tasks")}>
                 <span className={`priority priority-${task.priority}`}>{task.priority}</span>
                 <div><strong>{task.title}</strong><small>{task.personName || task.place || "Без уточнення"}</small></div>

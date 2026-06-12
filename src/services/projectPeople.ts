@@ -5,11 +5,6 @@ import type {
   ScanAttachment,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
-import {
-  asProjectPage,
-  pageRange,
-  type ProjectPage,
-} from "./projectPagination";
 
 type PersonRow = {
   id: string;
@@ -131,11 +126,11 @@ function personFromRow(row: PersonRow): Person {
   };
 }
 
-function personToRow(projectId: string, person: Person, _researchIds: Set<string>) {
+function personToRow(projectId: string, person: Person, researchIds: Set<string>) {
   return {
     id: person.id,
     project_id: projectId,
-    research_id: person.researchId || null,
+    research_id: researchIds.has(person.researchId) ? person.researchId : null,
     status: person.status,
     gender: person.gender,
     surname: person.surname,
@@ -202,38 +197,20 @@ function relationToRow(projectId: string, relation: PersonRelation) {
   };
 }
 
-export async function listProjectPeople(
-  projectId: string,
-  page = 0,
-): Promise<{
+export async function listProjectPeople(projectId: string): Promise<{
   persons: Person[];
   relations: PersonRelation[];
-  hasMore: boolean;
 }> {
   const client = getSupabaseClient();
-  const { from, to } = pageRange(page);
-  const personsResult = await client
-    .from("persons")
-    .select(PERSON_SELECT)
-    .eq("project_id", projectId)
-    .order("updated_at", { ascending: false })
-    .range(from, to);
+  const [personsResult, relationsResult] = await Promise.all([
+    client.from("persons").select(PERSON_SELECT).eq("project_id", projectId).order("updated_at", { ascending: false }),
+    client.from("person_relations").select(RELATION_SELECT).eq("project_id", projectId).order("updated_at", { ascending: false }),
+  ]);
   if (personsResult.error) throw personsResult.error;
-  const persons = (personsResult.data as PersonRow[]).map(personFromRow);
-  const personIds = persons.map((person) => person.id);
-  const relationsResult = personIds.length
-    ? await client
-        .from("person_relations")
-        .select(RELATION_SELECT)
-        .eq("project_id", projectId)
-        .or(`person_id.in.(${personIds.join(",")}),related_person_id.in.(${personIds.join(",")})`)
-        .limit(500)
-    : { data: [], error: null };
   if (relationsResult.error) throw relationsResult.error;
   return {
-    persons,
+    persons: (personsResult.data as PersonRow[]).map(personFromRow),
     relations: (relationsResult.data as RelationRow[]).map(relationFromRow),
-    hasMore: asProjectPage(persons).hasMore,
   };
 }
 

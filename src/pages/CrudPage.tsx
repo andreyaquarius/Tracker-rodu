@@ -63,9 +63,6 @@ interface CrudPageProps {
   projectId?: string;
   onCreateTask?: (task: TaskRecord) => void;
   readOnly?: boolean;
-  hasMore?: boolean;
-  loadingMore?: boolean;
-  onLoadMore?: () => void;
 }
 
 type FormValue = string | boolean | string[] | FindingParticipant[] | ScanAttachment[];
@@ -91,9 +88,6 @@ export function CrudPage({
   projectId = "",
   onCreateTask,
   readOnly = false,
-  hasMore = false,
-  loadingMore = false,
-  onLoadMore,
 }: CrudPageProps) {
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
@@ -288,33 +282,19 @@ export function CrudPage({
         </div>
 
         {filtered.length ? (
-          <>
-            <DataTable
-              items={filtered}
-              columns={config.columns}
-              documents={documents}
-              researches={researches}
-              onView={setViewing}
-              onEdit={setEditing}
-              onDelete={(entity) => void confirmDelete(entity)}
-              onOpenRelated={onOpenRelated}
-              onQuickStatus={config.statusKey ? quickStatus : undefined}
-              statusOptions={config.statusOptions}
-              readOnly={readOnly}
-            />
-            {hasMore && onLoadMore ? (
-              <div className="pagination-actions">
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  disabled={loadingMore}
-                  onClick={onLoadMore}
-                >
-                  {loadingMore ? "Завантаження…" : "Завантажити ще 50"}
-                </button>
-              </div>
-            ) : null}
-          </>
+          <DataTable
+            items={filtered}
+            columns={config.columns}
+            documents={documents}
+            researches={researches}
+            onView={setViewing}
+            onEdit={setEditing}
+            onDelete={(entity) => void confirmDelete(entity)}
+            onOpenRelated={onOpenRelated}
+            onQuickStatus={config.statusKey ? quickStatus : undefined}
+            statusOptions={config.statusOptions}
+            readOnly={readOnly}
+          />
         ) : (
           <div className="empty-state">
             {!readOnly ? (

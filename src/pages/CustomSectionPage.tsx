@@ -35,9 +35,6 @@ export function CustomSectionPage({
   onOpenRelated,
   onAddField,
   readOnly = false,
-  hasMore = false,
-  loadingMore = false,
-  onLoadMore,
 }: {
   db: AppDatabase;
   section: CustomSectionDefinition;
@@ -49,9 +46,6 @@ export function CustomSectionPage({
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onAddField?: (field: CustomSectionField) => void;
   readOnly?: boolean;
-  hasMore?: boolean;
-  loadingMore?: boolean;
-  onLoadMore?: () => void;
 }) {
   const [search, setSearch] = useState(initialSearch);
   const [viewing, setViewing] = useState<CustomSectionRecord | null>(null);
@@ -178,18 +172,6 @@ export function CustomSectionPage({
             <p>{search ? "Спробуйте змінити пошуковий запит." : `Додайте перший запис у розділ «${section.name}».`}</p>
           </div>
         )}
-        {hasMore && onLoadMore ? (
-          <div className="pagination-actions">
-            <button
-              type="button"
-              className="button button-secondary"
-              disabled={loadingMore}
-              onClick={onLoadMore}
-            >
-              {loadingMore ? "Завантаження…" : "Завантажити ще 50"}
-            </button>
-          </div>
-        ) : null}
       </section>
 
       {viewing ? (
