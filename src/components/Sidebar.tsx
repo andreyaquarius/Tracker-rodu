@@ -234,7 +234,7 @@ export function Sidebar({
         </nav>
         <div className="sidebar-foot">
           <span>Ваші дані належать вам</span>
-          <small>PostgreSQL + приватне сховище Supabase</small>
+          <small>PostgreSQL + ваш Google Drive</small>
         </div>
       </aside>
     </>

@@ -12,8 +12,9 @@ export interface ScanAttachment {
   mimeType: string;
   size: number;
   createdAt: string;
-  storage: "supabase";
+  storage: "google-drive";
   storagePath: string;
+  webViewLink?: string;
 }
 
 export type CustomFieldModule =

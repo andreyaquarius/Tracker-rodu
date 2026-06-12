@@ -38,6 +38,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
         run: |
           if [ -z "$VITE_SUPABASE_URL" ]; then
             echo "::error::Repository secret VITE_SUPABASE_URL is missing."
@@ -47,12 +48,17 @@ jobs:
             echo "::error::Repository secret VITE_SUPABASE_PUBLISHABLE_KEY is missing."
             exit 1
           fi
+          if [ -z "$VITE_GOOGLE_CLIENT_ID" ]; then
+            echo "::error::Repository secret VITE_GOOGLE_CLIENT_ID is missing."
+            exit 1
+          fi
 
       - name: Build application
         env:
           CUSTOM_DOMAIN: trekerrodu.com.ua
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
 
       - name: Configure GitHub Pages

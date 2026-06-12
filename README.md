@@ -26,7 +26,8 @@
 
 - **PostgreSQL** — проєкти, записи, зв'язки, налаштування та права доступу;
 - **Supabase Auth** — вхід через Google або email і пароль;
-- **Supabase Storage** — вкладення та резервні копії;
+- **Google Drive користувача** — прикріплені скани, аудіо та документи;
+- **Supabase Storage** — резервні копії проєктів;
 - **Supabase Realtime** — оновлення спільних проєктів;
 - **Row Level Security** — ізоляція проєктів і перевірка ролей.
 
@@ -64,6 +65,7 @@ npm run preview
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key_here
+VITE_GOOGLE_CLIENT_ID=your_google_oauth_client_id.apps.googleusercontent.com
 ```
 
 У клієнтському коді використовується лише публічний ключ Supabase. Ключ
@@ -87,7 +89,11 @@ SQL-схема розташована в каталозі [`supabase/migrations`
 
 ## Google OAuth
 
-Google використовується лише як спосіб входу через Supabase Auth.
+Google використовується для входу через Supabase Auth і для зберігання вкладень
+на особистому Google Drive користувача. Застосунок запитує обмежене право
+`drive.file` і працює лише з папками та файлами, які створив сам.
+
+У Google Cloud потрібно увімкнути **Google Drive API**.
 
 У Google Cloud OAuth Client додайте дозволені origins:
 
@@ -126,6 +132,7 @@ GitHub Actions збирає та публікує сайт після push до 
 ```text
 VITE_SUPABASE_URL
 VITE_SUPABASE_PUBLISHABLE_KEY
+VITE_GOOGLE_CLIENT_ID
 ```
 
 Власний домен задається у [`public/CNAME`](public/CNAME).
@@ -137,5 +144,5 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 - переглядачі не можуть змінювати дані;
 - редактори працюють із записами та файлами;
 - лише власник керує учасниками і структурою проєкту;
-- вкладення зберігаються у приватному Supabase Storage;
+- вкладення зберігаються у папці активного проєкту на Google Drive користувача;
 - конфліктне збереження застарілої версії запису блокується.

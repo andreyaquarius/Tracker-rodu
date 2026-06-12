@@ -139,6 +139,7 @@ import {
 } from "./services/projectRealtime";
 import { assertProjectRecordUnchanged } from "./services/projectConflicts";
 import { setProjectAttachmentTarget } from "./services/scanStorage";
+import { clearGoogleDriveSession } from "./services/googleDriveStorage";
 import { createActivityEntries } from "./utils/activityLog";
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
@@ -422,8 +423,11 @@ export default function App() {
 
   useEffect(() => {
     activeWorkspaceIdRef.current = workspace?.projectId ?? null;
-    setProjectAttachmentTarget(workspace?.projectId ?? null);
-  }, [workspace?.projectId]);
+    setProjectAttachmentTarget(
+      workspace?.projectId ?? null,
+      workspace?.projectName ?? "",
+    );
+  }, [workspace?.projectId, workspace?.projectName]);
 
   useEffect(() => {
     if (!workspace || !account) {
@@ -1276,6 +1280,7 @@ export default function App() {
 
   const signOutAccount = async () => {
     try {
+      clearGoogleDriveSession();
       await signOutFromSupabase();
       setAccount(null);
       setWorkspace(null);

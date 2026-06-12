@@ -1,17 +1,26 @@
 import type { ScanAttachment } from "../types";
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
-import { getSupabaseClient, isSupabaseConfigured } from "./supabaseAuth";
+import {
+  deleteFileFromGoogleDrive,
+  downloadFileFromGoogleDrive,
+  googleDriveViewUrl,
+  uploadFileToGoogleDrive,
+} from "./googleDriveStorage";
 
 export const MAX_ATTACHMENT_SIZE_MB = 25;
 export type AttachmentPolicy = "all" | "finding" | "archive-request";
 const MAX_FILE_SIZE = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024;
-const PROJECT_BUCKET = "project-attachments";
 
-let activeProjectId: string | null = null;
+let activeProject: { projectId: string; projectName: string } | null = null;
 
-export function setProjectAttachmentTarget(projectId: string | null): void {
-  activeProjectId = projectId;
+export function setProjectAttachmentTarget(
+  projectId: string | null,
+  projectName = "",
+): void {
+  activeProject = projectId
+    ? { projectId, projectName: projectName.trim() || "Трекер Роду" }
+    : null;
 }
 
 export async function saveScan(
@@ -30,54 +39,43 @@ export async function saveScan(
   if (file.size > MAX_FILE_SIZE) {
     throw new Error(`Файл «${file.name}» перевищує дозволені ${MAX_ATTACHMENT_SIZE_MB} МБ.`);
   }
-  if (!isSupabaseConfigured) {
-    throw new Error("З'єднання із Supabase не налаштовано.");
-  }
-  if (!activeProjectId) {
+  if (!activeProject) {
     throw new Error("Спочатку виберіть проєкт.");
   }
 
   const id = createId();
-  const storagePath = await uploadProjectAttachment(activeProjectId, file, id);
+  const uploaded = await uploadFileToGoogleDrive(activeProject, file, id);
   return {
     id,
     name: file.name,
     mimeType: file.type || "application/octet-stream",
     size: file.size,
     createdAt: nowIso(),
-    storage: "supabase",
-    storagePath,
+    storage: "google-drive",
+    storagePath: uploaded.id,
+    webViewLink: uploaded.webViewLink,
   };
 }
 
 export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
   if (!scan.storagePath) {
-    throw new Error("У файлу відсутній шлях у сховищі проєкту.");
+    throw new Error("У файлу відсутній ідентифікатор Google Drive.");
   }
-  const { data, error } = await getSupabaseClient()
-    .storage
-    .from(PROJECT_BUCKET)
-    .download(scan.storagePath);
-  if (error || !data) {
-    throw error ?? new Error("Не вдалося завантажити файл зі сховища проєкту.");
-  }
-  return data;
+  return downloadFileFromGoogleDrive(scan.storagePath);
 }
 
 export async function openScan(scan: ScanAttachment): Promise<void> {
-  const opened = window.open("about:blank", "_blank");
+  if (!scan.storagePath) {
+    throw new Error("У файлу відсутній ідентифікатор Google Drive.");
+  }
+  const opened = window.open(
+    scan.webViewLink || googleDriveViewUrl(scan.storagePath),
+    "_blank",
+  );
   if (!opened) {
     throw new Error("Браузер заблокував відкриття файлу. Дозвольте спливні вікна.");
   }
-  try {
-    const blob = await getScanBlob(scan);
-    const url = URL.createObjectURL(blob);
-    opened.location.href = url;
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  } catch (error) {
-    opened.close();
-    throw error;
-  }
+  opened.opener = null;
 }
 
 export async function downloadScan(scan: ScanAttachment): Promise<void> {
@@ -92,11 +90,7 @@ export async function downloadScan(scan: ScanAttachment): Promise<void> {
 
 export async function deleteScanFile(scan: ScanAttachment): Promise<void> {
   if (!scan.storagePath) return;
-  const { error } = await getSupabaseClient()
-    .storage
-    .from(PROJECT_BUCKET)
-    .remove([scan.storagePath]);
-  if (error) throw error;
+  await deleteFileFromGoogleDrive(scan.storagePath);
 }
 
 function isSupportedFindingAttachment(file: File): boolean {
@@ -170,27 +164,4 @@ function isSupportedAttachment(file: File): boolean {
       "aac", "ogg", "opus", "flac", "wma", "webm",
     ].includes(extension)
   );
-}
-
-async function uploadProjectAttachment(
-  projectId: string,
-  file: File,
-  attachmentId: string,
-): Promise<string> {
-  const path = `${projectId}/${attachmentId}/${safeFileName(file.name)}`;
-  const { error } = await getSupabaseClient()
-    .storage
-    .from(PROJECT_BUCKET)
-    .upload(path, file, {
-      upsert: true,
-      contentType: file.type || "application/octet-stream",
-    });
-  if (error) {
-    throw new Error(`Не вдалося завантажити файл «${file.name}» у сховище проєкту.`);
-  }
-  return path;
-}
-
-function safeFileName(value: string): string {
-  return value.replace(/[\\/:*?"<>|]+/g, "_");
 }
