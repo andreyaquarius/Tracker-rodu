@@ -90,7 +90,34 @@ export async function downloadScan(scan: ScanAttachment): Promise<void> {
 
 export async function deleteScanFile(scan: ScanAttachment): Promise<void> {
   if (!scan.storagePath) return;
-  await deleteFileFromGoogleDrive(scan.storagePath);
+  const storage = String(scan.storage ?? "");
+
+  // Legacy attachments may still point to the former Supabase Storage.
+  // Their physical object can no longer be managed by the Google Drive provider,
+  // but the attachment reference must still be removable from the record.
+  if (storage !== "google-drive") return;
+
+  try {
+    await deleteFileFromGoogleDrive(scan.storagePath);
+  } catch (error) {
+    if (isMissingStoredFileError(error)) return;
+    throw error;
+  }
+}
+
+function isMissingStoredFileError(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "";
+  return [
+    "file not found",
+    "object not found",
+    "not_found",
+    "not found",
+    "404",
+  ].some((part) => message.toLocaleLowerCase().includes(part));
 }
 
 function isSupportedFindingAttachment(file: File): boolean {
