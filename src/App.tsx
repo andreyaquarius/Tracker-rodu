@@ -43,11 +43,13 @@ import {
   isSupabaseConfigured,
   listSupabaseWorkspaces,
   onSupabaseAuthChange,
+  requestSupabasePasswordReset,
   renameSupabaseWorkspace,
   signInWithSupabaseGoogle,
   signInWithSupabaseEmail,
   signUpWithSupabaseEmail,
   signOutFromSupabase,
+  updateSupabasePassword,
   type SupabaseAccount,
   type SupabaseWorkspace,
 } from "./services/supabaseAuth";
@@ -235,6 +237,7 @@ export default function App() {
     return localStorage.getItem(ACCOUNT_ONBOARDING_KEY) === "1";
   });
   const [loginError, setLoginError] = useState("");
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [isAccountSigningIn, setIsAccountSigningIn] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
@@ -279,6 +282,7 @@ export default function App() {
     useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
   const workspaceSetupRef = useRef<Promise<void> | null>(null);
+  const passwordRecoveryRef = useRef(false);
   const lastPreparedUserRef = useRef<string | null>(null);
   const activeWorkspaceIdRef = useRef<string | null>(null);
   const automaticProjectBackupRef = useRef<string | null>(null);
@@ -314,6 +318,7 @@ export default function App() {
 
     let active = true;
     const prepareWorkspace = async (session: Awaited<ReturnType<typeof getSupabaseSession>>) => {
+      if (passwordRecoveryRef.current) return;
       if (!session) {
         setAccount(null);
         setWorkspace(null);
@@ -387,8 +392,18 @@ export default function App() {
         );
       });
 
-    const subscription = onSupabaseAuthChange((session) => {
+    const subscription = onSupabaseAuthChange((session, event) => {
       if (!active) return;
+      if (event === "PASSWORD_RECOVERY") {
+        passwordRecoveryRef.current = true;
+        setPasswordRecovery(true);
+        setAccount(null);
+        setWorkspace(null);
+        setWorkspaces([]);
+        setIsAccountSigningIn(false);
+        return;
+      }
+      if (passwordRecoveryRef.current) return;
       void prepareWorkspace(session).catch((error: unknown) => {
         if (!active) return;
         setIsAccountSigningIn(false);
@@ -1278,6 +1293,15 @@ export default function App() {
     }
   };
 
+  const completePasswordRecovery = async (password: string) => {
+    setLoginError("");
+    await updateSupabasePassword(password);
+    passwordRecoveryRef.current = false;
+    setPasswordRecovery(false);
+    const cleanUrl = new URL(import.meta.env.BASE_URL, window.location.href);
+    window.location.replace(cleanUrl.toString());
+  };
+
   const signOutAccount = async () => {
     try {
       clearGoogleDriveSession();
@@ -1433,6 +1457,9 @@ export default function App() {
         onGoogle={() => void signIn()}
         onEmailSignIn={signInWithSupabaseEmail}
         onEmailSignUp={signUpWithSupabaseEmail}
+        onPasswordResetRequest={requestSupabasePasswordReset}
+        onPasswordUpdate={completePasswordRecovery}
+        passwordRecovery={passwordRecovery}
         loading={isAccountSigningIn}
         error={loginError}
       />

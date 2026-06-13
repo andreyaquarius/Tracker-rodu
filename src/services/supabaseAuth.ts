@@ -1,4 +1,9 @@
-import { createClient, type Session, type Subscription } from "@supabase/supabase-js";
+import {
+  createClient,
+  type AuthChangeEvent,
+  type Session,
+  type Subscription,
+} from "@supabase/supabase-js";
 
 export interface SupabaseAccount {
   id: string;
@@ -170,6 +175,21 @@ export async function signUpWithSupabaseEmail(
   return { confirmationRequired: !data.session };
 }
 
+export async function requestSupabasePasswordReset(email: string): Promise<void> {
+  const { error } = await requireSupabase().auth.resetPasswordForEmail(
+    email.trim().toLocaleLowerCase(),
+    {
+      redirectTo: applicationUrl(),
+    },
+  );
+  if (error) throw error;
+}
+
+export async function updateSupabasePassword(password: string): Promise<void> {
+  const { error } = await requireSupabase().auth.updateUser({ password });
+  if (error) throw error;
+}
+
 export async function getSupabaseSession(): Promise<Session | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.auth.getSession();
@@ -309,10 +329,10 @@ export function getAccountFromSession(session: Session | null): SupabaseAccount 
 }
 
 export function onSupabaseAuthChange(
-  callback: (session: Session | null) => void,
+  callback: (session: Session | null, event: AuthChangeEvent) => void,
 ): Subscription | null {
   if (!supabase) return null;
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => callback(session));
+  const { data } = supabase.auth.onAuthStateChange((event, session) => callback(session, event));
   return data.subscription;
 }
 
