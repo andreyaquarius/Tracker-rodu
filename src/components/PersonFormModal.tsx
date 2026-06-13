@@ -6,12 +6,10 @@ import type {
   PersonGender,
   PersonStatus,
   Research,
-  ScanAttachment,
 } from "../types";
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import { Modal } from "./Modal";
-import { ScanAttachmentsEditor } from "./ScanAttachments";
 import { CustomFieldsEditor } from "./CustomFields";
 import { normalizeCustomFieldValues } from "../utils/customFields";
 import { InlineCustomFieldCreator } from "./InlineCustomFieldCreator";
@@ -210,12 +208,6 @@ export function PersonFormModal({
             <span>Рік народження до</span>
             <input type="number" value={form.birthYearTo} onChange={(event) => update("birthYearTo", event.target.value)} />
           </label>
-          <ScanAttachmentsEditor
-            title="Скани факту народження"
-            description="Метричний запис, свідоцтво або інше джерело про народження."
-            scans={form.birthScans}
-            onChange={(scans: ScanAttachment[]) => update("birthScans", scans)}
-          />
           <label>
             <span>Дата шлюбу</span>
             <input type="date" value={form.marriageDate} onChange={(event) => update("marriageDate", event.target.value)} />
@@ -224,12 +216,6 @@ export function PersonFormModal({
             <span>Місце шлюбу</span>
             <input value={form.marriagePlace} onChange={(event) => update("marriagePlace", event.target.value)} />
           </label>
-          <ScanAttachmentsEditor
-            title="Скани факту шлюбу"
-            description="Запис про шлюб, вінчання або інше підтвердження події."
-            scans={form.marriageScans}
-            onChange={(scans: ScanAttachment[]) => update("marriageScans", scans)}
-          />
           <label>
             <span>Дата смерті</span>
             <input type="date" value={form.deathDate} onChange={(event) => update("deathDate", event.target.value)} />
@@ -246,12 +232,6 @@ export function PersonFormModal({
             <span>Рік смерті до</span>
             <input type="number" value={form.deathYearTo} onChange={(event) => update("deathYearTo", event.target.value)} />
           </label>
-          <ScanAttachmentsEditor
-            title="Скани факту смерті"
-            description="Метричний запис, свідоцтво або інше джерело про смерть."
-            scans={form.deathScans}
-            onChange={(scans: ScanAttachment[]) => update("deathScans", scans)}
-          />
           <label className="field-wide">
             <span>Місця проживання</span>
             <textarea rows={3} value={form.residencePlaces} onChange={(event) => update("residencePlaces", event.target.value)} />
@@ -272,12 +252,6 @@ export function PersonFormModal({
             <span>Нотатки</span>
             <textarea rows={5} value={form.notes} onChange={(event) => update("notes", event.target.value)} />
           </label>
-          <ScanAttachmentsEditor
-            title="Скани інших згадок"
-            description="Переписи, сповідні розписи, посімейні списки та будь-які інші згадки про особу."
-            scans={form.mentionScans}
-            onChange={(scans: ScanAttachment[]) => update("mentionScans", scans)}
-          />
           <CustomFieldsEditor
             db={db}
             definitions={customFieldDefinitions}

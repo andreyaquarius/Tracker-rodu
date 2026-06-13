@@ -375,7 +375,9 @@ function PersonCardModal({
               db={db}
               person={person}
               researches={researches}
+              findings={linkedFindings}
               customFieldDefinitions={customFieldDefinitions}
+              onOpenFinding={(findingId) => onOpenRelated("findings", findingId)}
             />
           ) : null}
           {tab === "findings" ? (
@@ -494,12 +496,16 @@ function PersonOverview({
   db,
   person,
   researches,
+  findings,
   customFieldDefinitions,
+  onOpenFinding,
 }: {
   db: AppDatabase;
   person: Person;
   researches: Research[];
+  findings: Finding[];
   customFieldDefinitions: CustomFieldDefinition[];
+  onOpenFinding: (findingId: string) => void;
 }) {
   const research = researches.find((item) => item.id === person.researchId);
   const values = [
@@ -527,12 +533,7 @@ function PersonOverview({
     ["Віросповідання", person.religion],
     ["Професія або заняття", person.occupation],
   ];
-  const scanGroups = [
-    ["Скани факту народження", person.birthScans ?? []],
-    ["Скани факту шлюбу", person.marriageScans ?? []],
-    ["Скани факту смерті", person.deathScans ?? []],
-    ["Скани інших згадок", person.mentionScans ?? []],
-  ] as const;
+  const findingsWithFiles = findings.filter((finding) => finding.scans?.length);
   return (
     <div className="details-grid">
       {values.map(([label, value]) => (
@@ -545,12 +546,35 @@ function PersonOverview({
         <span>Нотатки</span>
         <div className="detail-text">{person.notes || "—"}</div>
       </div>
-      {scanGroups.map(([label, scans]) => (
-        <div className="detail-item detail-wide person-scan-group" key={label}>
-          <span>{label}</span>
-          <ScanAttachmentsView scans={scans} />
-        </div>
-      ))}
+      <div className="detail-item detail-wide person-scan-group">
+        <span>Файли пов’язаних знахідок</span>
+        {findingsWithFiles.length ? (
+          <div className="person-finding-files">
+            {findingsWithFiles.map((finding) => (
+              <section key={finding.id}>
+                <button
+                  type="button"
+                  className="person-finding-file-heading"
+                  onClick={() => onOpenFinding(finding.id)}
+                >
+                  <strong>{finding.findingType || "Знахідка"}</strong>
+                  <small>
+                    {[displayDate(finding.eventDate), finding.place]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </small>
+                  <span>Відкрити знахідку →</span>
+                </button>
+                <ScanAttachmentsView scans={finding.scans ?? []} />
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="detail-text">
+            У пов’язаних знахідках поки немає прикріплених файлів.
+          </div>
+        )}
+      </div>
       <CustomFieldsView
         db={db}
         definitions={customFieldDefinitions}
