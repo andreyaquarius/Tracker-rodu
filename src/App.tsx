@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import type {
   ActivityLogEntry,
   ActivityModule,
@@ -32,8 +33,14 @@ import { LoginPage } from "./pages/LoginPage";
 import { PersonsPage } from "./pages/PersonsPage";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
+import { ProjectsPage } from "./pages/ProjectsPage";
 import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
 import { isHierarchyPage } from "./utils/sectionHierarchy";
+import {
+  pagePath,
+  parseAppRoute,
+  projectDashboardPath,
+} from "./utils/appRoutes";
 import {
   createSupabaseWorkspace,
   deleteSupabaseWorkspace,
@@ -221,7 +228,8 @@ function baseUpdatedAt(entity: object): string | undefined {
 
 export default function App() {
   const app = useAppDatabase();
-  const [page, setPage] = useState<PageKey>("dashboard");
+  const location = useLocation();
+  const routerNavigate = useNavigate();
   const [moduleSearch, setModuleSearch] = useState("");
   const [openEntityId, setOpenEntityId] = useState("");
   const [createRequest, setCreateRequest] = useState<{
@@ -268,6 +276,14 @@ export default function App() {
   const [projectCustomRecords, setProjectCustomRecords] = useState(
     app.db.customSectionRecords,
   );
+  const route = useMemo(
+    () => parseAppRoute(location.pathname, projectCustomSections),
+    [location.pathname, projectCustomSections],
+  );
+  const page: PageKey =
+    route.kind === "project" || route.kind === "settings"
+      ? route.page
+      : "dashboard";
   const [customStructureReadyForProject, setCustomStructureReadyForProject] =
     useState<string | null>(null);
   const [projectActivity, setProjectActivity] = useState<ActivityLogEntry[]>([]);
@@ -314,6 +330,63 @@ export default function App() {
   }, [account]);
 
   useEffect(() => {
+    if (!account || isAccountSigningIn || passwordRecovery) return;
+
+    if (route.kind === "root") {
+      routerNavigate(
+        workspace ? projectDashboardPath(workspace.projectSlug) : "/projects",
+        { replace: true },
+      );
+      return;
+    }
+    if (route.kind === "unknown") {
+      routerNavigate("/projects", { replace: true });
+      return;
+    }
+    if (route.kind !== "project") return;
+
+    const requestedWorkspace = workspaces.find(
+      (item) =>
+        item.projectSlug === route.projectRef ||
+        item.projectId === route.projectRef,
+    );
+    if (!requestedWorkspace) {
+      routerNavigate("/projects", { replace: true });
+      return;
+    }
+    if (workspace?.projectId !== requestedWorkspace.projectId) {
+      setWorkspace(requestedWorkspace);
+      localStorage.setItem(ACTIVE_WORKSPACE_KEY, requestedWorkspace.projectId);
+      return;
+    }
+    if (
+      route.unresolvedSectionPath &&
+      customStructureReadyForProject !== requestedWorkspace.projectId
+    ) {
+      return;
+    }
+    const canonicalPath = pagePath(
+      requestedWorkspace.projectSlug,
+      route.page,
+      projectCustomSections,
+    );
+    if (location.pathname !== canonicalPath) {
+      routerNavigate(canonicalPath, { replace: true });
+    }
+  }, [
+    account,
+    isAccountSigningIn,
+    location.pathname,
+    passwordRecovery,
+    route,
+    routerNavigate,
+    customStructureReadyForProject,
+    projectCustomSections,
+    workspace,
+    workspaces,
+  ]);
+
+  useEffect(() => {
     if (!isSupabaseConfigured) return;
 
     let active = true;
@@ -353,9 +426,18 @@ export default function App() {
           : ensuredWorkspace
             ? [ensuredWorkspace]
             : [];
+        const requestedRoute = parseAppRoute(window.location.pathname);
+        const requestedWorkspace =
+          requestedRoute.kind === "project"
+            ? availableWorkspaces.find(
+                (item) =>
+                  item.projectSlug === requestedRoute.projectRef ||
+                  item.projectId === requestedRoute.projectRef,
+              )
+            : undefined;
         const activeWorkspace = chooseWorkspace(
           availableWorkspaces,
-          localStorage.getItem(ACTIVE_WORKSPACE_KEY),
+          requestedWorkspace?.projectId ?? localStorage.getItem(ACTIVE_WORKSPACE_KEY),
           ensuredWorkspace?.projectId,
         );
 
@@ -1315,6 +1397,7 @@ export default function App() {
       localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
       setOnboarded(false);
       setLoginError("");
+      routerNavigate("/", { replace: true });
     } catch (error) {
       notify(
         error instanceof Error ? error.message : "Не вдалося вийти з облікового запису.",
@@ -1325,9 +1408,10 @@ export default function App() {
 
   const switchWorkspace = (projectId: string) => {
     const nextWorkspace = workspaces.find((item) => item.projectId === projectId);
-    if (!nextWorkspace || nextWorkspace.projectId === workspace?.projectId) return;
+    if (!nextWorkspace) return;
     setWorkspace(nextWorkspace);
     localStorage.setItem(ACTIVE_WORKSPACE_KEY, nextWorkspace.projectId);
+    routerNavigate(projectDashboardPath(nextWorkspace.projectSlug));
     notify(`Активний проєкт: ${nextWorkspace.projectName}`);
   };
 
@@ -1352,6 +1436,7 @@ export default function App() {
         createdWorkspace;
       setWorkspace(activeWorkspace);
       localStorage.setItem(ACTIVE_WORKSPACE_KEY, activeWorkspace.projectId);
+      routerNavigate(projectDashboardPath(activeWorkspace.projectSlug));
       notify(`Створено проєкт «${activeWorkspace.projectName}».`);
     } catch (error) {
       notify(describeError(error, "Не вдалося створити новий проєкт."), true);
@@ -1394,8 +1479,10 @@ export default function App() {
       setWorkspace(nextWorkspace);
       if (nextWorkspace) {
         localStorage.setItem(ACTIVE_WORKSPACE_KEY, nextWorkspace.projectId);
+        routerNavigate(projectDashboardPath(nextWorkspace.projectSlug));
       } else {
         localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+        routerNavigate("/projects");
       }
       notify(`Проєкт «${targetWorkspace.projectName}» видалено.`);
     } catch (error) {
@@ -1429,6 +1516,12 @@ export default function App() {
           ? renamedWorkspace
           : current,
       );
+      if (workspace?.projectId === projectId && renamedWorkspace) {
+        routerNavigate(
+          pagePath(renamedWorkspace.projectSlug, page, projectCustomSections),
+          { replace: true },
+        );
+      }
       notify(`Проєкт перейменовано на «${renamedWorkspace?.projectName ?? proposedName.trim()}».`);
     } catch (error) {
       notify(describeError(error, "Не вдалося перейменувати проєкт."), true);
@@ -1444,6 +1537,7 @@ export default function App() {
     if (acceptedWorkspace) {
       setWorkspace(acceptedWorkspace);
       localStorage.setItem(ACTIVE_WORKSPACE_KEY, acceptedWorkspace.projectId);
+      routerNavigate(projectDashboardPath(acceptedWorkspace.projectSlug));
       notify(`Проєкт «${acceptedWorkspace.projectName}» додано до вашого робочого простору.`);
     } else {
       notify("Запрошення прийнято, але проєкт ще не з’явився. Оновіть сторінку.", true);
@@ -2246,18 +2340,28 @@ export default function App() {
     setModuleSearch("");
     setOpenEntityId("");
     setCreateRequest(null);
-    setPage(nextPage);
+    if (nextPage === "settings") {
+      routerNavigate("/settings");
+      return;
+    }
+    if (workspace) {
+      routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
+    }
   };
   const openSearchResult = (nextPage: PageKey, query: string, entityId?: string) => {
     setModuleSearch(query);
     setOpenEntityId(entityId ?? "");
-    setPage(nextPage);
+    if (workspace) {
+      routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
+    }
   };
   const openRelatedRecord = (nextPage: PageKey, entityId: string) => {
     setModuleSearch("");
     setOpenEntityId(entityId);
     setCreateRequest(null);
-    setPage(nextPage);
+    if (workspace) {
+      routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
+    }
   };
   const createRelatedRecord = (nextPage: PageKey, initialValues: Record<string, unknown>) => {
     setModuleSearch("");
@@ -2267,7 +2371,9 @@ export default function App() {
       page: nextPage,
       initialValues,
     });
-    setPage(nextPage);
+    if (workspace) {
+      routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
+    }
   };
 
   const createSubsection = (parentKey: SectionParentKey) => {
@@ -3106,7 +3212,14 @@ export default function App() {
     </>
   ) : content;
 
-  const displayedContent = workspace ? structuredContent : (
+  const displayedContent = route.kind === "projects" ? (
+    <ProjectsPage
+      workspaces={workspaces}
+      onOpen={switchWorkspace}
+      onCreate={() => void createWorkspace()}
+      creating={isCreatingWorkspace}
+    />
+  ) : workspace ? structuredContent : (
     <section className="panel">
       <span className="eyebrow">Робочий простір</span>
       <h1>Проєкт ще не вибрано</h1>
@@ -3127,7 +3240,7 @@ export default function App() {
   return (
     <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
-        page={page}
+        page={route.kind === "projects" ? null : page}
         onNavigate={navigate}
         customSections={activeDb.customSections}
         account={account}

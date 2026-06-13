@@ -41,7 +41,7 @@ const systemItems: Array<{ key: StandardPageKey; label: string; icon: string }> 
 ];
 
 interface SidebarProps {
-  page: PageKey;
+  page: PageKey | null;
   onNavigate: (page: PageKey) => void;
   customSections: CustomSectionDefinition[];
   open: boolean;
@@ -57,7 +57,7 @@ export function Sidebar({
 }: SidebarProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const activeAncestors = useMemo(() => {
-    if (!page.startsWith("custom:")) return [];
+    if (!page?.startsWith("custom:")) return [];
     const section = customSections.find(
       (item) => customSectionKey(item.id) === page,
     );

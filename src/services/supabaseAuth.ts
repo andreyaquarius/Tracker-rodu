@@ -15,6 +15,7 @@ export interface SupabaseAccount {
 export interface SupabaseWorkspace {
   projectId: string;
   projectName: string;
+  projectSlug: string;
   role: "owner" | "editor" | "viewer";
 }
 
@@ -24,12 +25,20 @@ type MembershipRow = {
     | {
         id: string;
         name: string;
+        slug?: string | null;
       }
     | Array<{
         id: string;
         name: string;
+        slug?: string | null;
       }>
     | null;
+};
+
+type ProjectRow = {
+  id: string;
+  name: string;
+  slug?: string | null;
 };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? "";
@@ -67,14 +76,58 @@ function workspaceNameFor(account: SupabaseAccount): string {
   return trimmed ? `Проєкт ${trimmed}` : "Мій проєкт";
 }
 
+function fallbackProjectSlug(name: string, projectId: string): string {
+  const transliterated = name
+    .trim()
+    .toLocaleLowerCase()
+    .replaceAll("щ", "shch")
+    .replaceAll("ж", "zh")
+    .replaceAll("ч", "ch")
+    .replaceAll("ш", "sh")
+    .replaceAll("ю", "iu")
+    .replaceAll("я", "ia")
+    .replaceAll("є", "ie")
+    .replaceAll("ї", "i")
+    .replaceAll("й", "i")
+    .replaceAll("х", "kh")
+    .replaceAll("ц", "ts")
+    .replaceAll("ґ", "g")
+    .replace(/[абвгдезиклмнопрстуфь]/g, (letter) => ({
+      а: "a", б: "b", в: "v", г: "h", д: "d", е: "e", з: "z", и: "y",
+      і: "i", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r",
+      с: "s", т: "t", у: "u", ф: "f", ь: "",
+    })[letter] ?? "")
+    .replace(/['’`]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `${transliterated || "project"}-${projectId.slice(0, 8)}`;
+}
+
+function projectSlug(project: ProjectRow): string {
+  return project.slug?.trim() || fallbackProjectSlug(project.name, project.id);
+}
+
 function mapMembership(row: MembershipRow): SupabaseWorkspace | null {
   const project = Array.isArray(row.projects) ? row.projects[0] : row.projects;
   if (!project) return null;
   return {
     projectId: project.id,
     projectName: project.name,
+    projectSlug: projectSlug(project),
     role: row.role,
   };
+}
+
+function isMissingSlugError(error: { message?: string; details?: string; hint?: string } | null): boolean {
+  const description = [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+  return description.includes("slug") && (
+    description.includes("column") ||
+    description.includes("schema cache") ||
+    description.includes("does not exist")
+  );
 }
 
 async function readMemberships(): Promise<SupabaseWorkspace[]> {
@@ -83,11 +136,22 @@ async function readMemberships(): Promise<SupabaseWorkspace[]> {
   if (userError) throw userError;
   if (!userData.user) return [];
 
-  const { data, error } = await client
+  const primaryMemberships = await client
     .from("project_members")
-    .select("role, projects!inner(id, name)")
+    .select("role, projects!inner(id, name, slug)")
     .eq("user_id", userData.user.id)
     .order("joined_at", { ascending: true });
+  let data = primaryMemberships.data as MembershipRow[] | null;
+  let error = primaryMemberships.error;
+  if (error && isMissingSlugError(error)) {
+    const fallback = await client
+      .from("project_members")
+      .select("role, projects!inner(id, name)")
+      .eq("user_id", userData.user.id)
+      .order("joined_at", { ascending: true });
+    data = fallback.data;
+    error = fallback.error;
+  }
   if (error) throw error;
   const mapped = (data as MembershipRow[])
     .map(mapMembership)
@@ -223,14 +287,28 @@ export async function createSupabaseWorkspace(
     });
   if (error) throw new Error(asErrorMessage(error, "Не вдалося створити новий проєкт."));
 
-  const { data: fallbackProject, error: fallbackProjectError } = await client
+  const primaryFallbackProject = await client
     .from("projects")
-    .select("id, name")
+    .select("id, name, slug")
     .eq("owner_id", session.user.id)
     .eq("name", projectName)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  let fallbackProject = primaryFallbackProject.data as ProjectRow | null;
+  let fallbackProjectError = primaryFallbackProject.error;
+  if (fallbackProjectError && isMissingSlugError(fallbackProjectError)) {
+    const fallback = await client
+      .from("projects")
+      .select("id, name")
+      .eq("owner_id", session.user.id)
+      .eq("name", projectName)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    fallbackProject = fallback.data;
+    fallbackProjectError = fallback.error;
+  }
   if (fallbackProjectError) {
     throw new Error(asErrorMessage(fallbackProjectError, "Не вдалося знайти новий проєкт після створення."));
   }
@@ -245,6 +323,7 @@ export async function createSupabaseWorkspace(
   return {
     projectId: fallbackProject.id,
     projectName: fallbackProject.name,
+    projectSlug: projectSlug(fallbackProject),
     role: "owner",
   };
 }
@@ -297,19 +376,33 @@ export async function ensureSupabaseWorkspace(
     if (pendingInvitation) return null;
   }
 
-  const { data: existingProject, error: existingProjectError } = await client
+  const primaryExistingProject = await client
     .from("projects")
-    .select("id, name")
+    .select("id, name, slug")
     .eq("owner_id", session.user.id)
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
+  let existingProject = primaryExistingProject.data as ProjectRow | null;
+  let existingProjectError = primaryExistingProject.error;
+  if (existingProjectError && isMissingSlugError(existingProjectError)) {
+    const fallback = await client
+      .from("projects")
+      .select("id, name")
+      .eq("owner_id", session.user.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    existingProject = fallback.data;
+    existingProjectError = fallback.error;
+  }
   if (existingProjectError) throw existingProjectError;
 
   if (existingProject) {
     return {
       projectId: existingProject.id,
       projectName: existingProject.name,
+      projectSlug: projectSlug(existingProject),
       role: "owner",
     };
   }

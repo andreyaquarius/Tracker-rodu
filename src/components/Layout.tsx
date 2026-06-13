@@ -5,7 +5,7 @@ import { Sidebar, type PageKey } from "./Sidebar";
 import { TopBar } from "./TopBar";
 
 interface LayoutProps {
-  page: PageKey;
+  page: PageKey | null;
   onNavigate: (page: PageKey) => void;
   customSections: CustomSectionDefinition[];
   account: SupabaseAccount | null;
