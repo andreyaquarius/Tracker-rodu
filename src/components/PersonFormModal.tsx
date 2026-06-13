@@ -122,16 +122,18 @@ export function PersonFormModal({
     setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const composedFullName = [form.surname, form.givenName, form.patronymic]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ");
+  const displayedFullName = composedFullName || form.fullName.trim();
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const timestamp = nowIso();
-    const composedName = [form.surname, form.givenName, form.patronymic]
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .join(" ");
     onSave({
       ...form,
-      fullName: form.fullName.trim() || composedName,
+      fullName: displayedFullName,
       id: person?.id ?? createId(),
       createdAt: person?.createdAt ?? timestamp,
       __baseUpdatedAt: person?.updatedAt,
@@ -177,12 +179,11 @@ export function PersonFormModal({
             </select>
           </label>
           <label className="field-wide">
-            <span>Повне ім’я *</span>
+            <span>Повне ім’я (автоматично)</span>
             <input
-              required={!form.surname && !form.givenName}
-              value={form.fullName}
-              placeholder="Можна залишити як записано у джерелі"
-              onChange={(event) => update("fullName", event.target.value)}
+              value={displayedFullName}
+              placeholder="Заповніть прізвище, ім’я та по батькові"
+              readOnly
             />
           </label>
           <label>

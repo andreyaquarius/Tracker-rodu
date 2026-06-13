@@ -127,6 +127,10 @@ function personFromRow(row: PersonRow): Person {
 }
 
 function personToRow(projectId: string, person: Person, researchIds: Set<string>) {
+  const composedFullName = [person.surname, person.givenName, person.patronymic]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ");
   return {
     id: person.id,
     project_id: projectId,
@@ -136,7 +140,7 @@ function personToRow(projectId: string, person: Person, researchIds: Set<string>
     surname: person.surname,
     given_name: person.givenName,
     patronymic: person.patronymic,
-    full_name: person.fullName,
+    full_name: composedFullName || person.fullName.trim(),
     name_variants: person.nameVariants,
     surname_variants: person.surnameVariants,
     birth_date: person.birthDate,

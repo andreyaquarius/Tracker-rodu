@@ -433,10 +433,11 @@ function PersonCardModal({
                   {linkedRelations.map((relation) => {
                     const otherId = relation.personId === person.id ? relation.relatedPersonId : relation.personId;
                     const other = persons.find((item) => item.id === otherId);
+                    const displayedRelationType = relationTypeForPerson(relation, person.id, other);
                     return (
                       <article key={relation.id}>
                         <div>
-                          <strong>{relation.relationType}: </strong>
+                          <strong>{displayedRelationType}: </strong>
                           {other ? (
                             <button
                               type="button"
@@ -724,6 +725,37 @@ function RelationFormModal({
 
 function personDisplayName(person: Person): string {
   return person.fullName || [person.surname, person.givenName, person.patronymic].filter(Boolean).join(" ") || "Особа без імені";
+}
+
+function relationTypeForPerson(
+  relation: PersonRelation,
+  currentPersonId: string,
+  otherPerson?: Person,
+): string {
+  if (relation.personId === currentPersonId) {
+    return relation.relationType;
+  }
+
+  switch (relation.relationType) {
+    case "чоловік":
+      return "дружина";
+    case "дружина":
+      return "чоловік";
+    case "батько":
+    case "мати":
+      return "дитина";
+    case "дитина":
+      if (otherPerson?.gender === "чоловік") return "батько";
+      if (otherPerson?.gender === "жінка") return "мати";
+      return "батько або мати";
+    case "брат":
+    case "сестра":
+      if (otherPerson?.gender === "чоловік") return "брат";
+      if (otherPerson?.gender === "жінка") return "сестра";
+      return relation.relationType;
+    default:
+      return relation.relationType;
+  }
 }
 
 function lifeYears(person: Person): string {
