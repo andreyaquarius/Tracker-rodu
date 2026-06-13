@@ -11,27 +11,16 @@ export type ProjectRealtimeGroup =
   | "custom"
   | "activity";
 
-const GROUP_TABLES: Record<ProjectRealtimeGroup, string[]> = {
-  project: ["projects"],
-  researches: ["researches"],
-  people: ["persons", "person_relations"],
-  documents: ["documents", "year_matrix"],
-  work: ["tasks", "task_persons", "findings", "finding_participants"],
-  analysis: [
-    "hypotheses",
-    "hypothesis_links",
-    "archive_requests",
-    "archive_request_persons",
-  ],
-  custom: [
-    "custom_field_definitions",
-    "custom_sections",
-    "custom_section_fields",
-    "custom_records",
-    "record_links",
-  ],
-  activity: ["activity_log"],
-};
+function groupForModule(module: string): ProjectRealtimeGroup | null {
+  if (module === "researches") return "researches";
+  if (module === "persons") return "people";
+  if (module === "documents" || module === "yearMatrix") return "documents";
+  if (module === "tasks" || module === "findings") return "work";
+  if (module === "hypotheses" || module === "archiveRequests") return "analysis";
+  if (module === "settings") return "project";
+  if (module.startsWith("custom:")) return "custom";
+  return null;
+}
 
 export function subscribeProjectRealtime(
   projectId: string,
@@ -42,56 +31,50 @@ export function subscribeProjectRealtime(
   ) => void,
 ): () => void {
   const client = getSupabaseClient();
-  let channel: RealtimeChannel = client.channel(`project:${projectId}`);
+  const channel: RealtimeChannel = client.channel(`project-activity:${projectId}`);
   const pending = new Set<ProjectRealtimeGroup>();
-  let pendingExternalActivity = false;
   let timer: number | null = null;
 
-  const queue = (group: ProjectRealtimeGroup, changedByOtherUser = false) => {
+  const queue = (group: ProjectRealtimeGroup) => {
     pending.add(group);
-    pendingExternalActivity ||= changedByOtherUser;
     if (timer !== null) return;
     timer = window.setTimeout(() => {
       timer = null;
       const changed = new Set(pending);
-      const externalActivity = pendingExternalActivity;
       pending.clear();
-      pendingExternalActivity = false;
-      onGroupsChanged(changed, externalActivity);
-    }, 250);
+      onGroupsChanged(changed, true);
+    }, 400);
   };
 
-  for (const [group, tables] of Object.entries(GROUP_TABLES) as Array<
-    [ProjectRealtimeGroup, string[]]
-  >) {
-    for (const table of tables) {
-      channel = channel.on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table,
-          filter:
-            table === "projects"
-              ? `id=eq.${projectId}`
-              : `project_id=eq.${projectId}`,
-        },
-        (payload) => {
-          if (table !== "activity_log") {
-            queue(group);
-            return;
-          }
-          const record = payload.eventType === "DELETE"
-            ? payload.old
-            : payload.new;
-          const actorId = typeof record.actor_id === "string"
-            ? record.actor_id
-            : "";
-          queue(group, Boolean(actorId && actorId !== currentUserId));
-        },
-      );
-    }
-  }
+  channel.on(
+    "postgres_changes",
+    {
+      event: "INSERT",
+      schema: "public",
+      table: "activity_log",
+      filter: `project_id=eq.${projectId}`,
+    },
+    (payload) => {
+      const record = payload.new;
+      const actorId = typeof record.actor_id === "string" ? record.actor_id : "";
+      if (!actorId || actorId === currentUserId) return;
+
+      const details = record.details &&
+        typeof record.details === "object" &&
+        !Array.isArray(record.details)
+        ? record.details as Record<string, unknown>
+        : {};
+      const module = String(details.module ?? record.entity_type ?? "");
+      const action = String(record.action ?? "");
+      if (action.startsWith("field_") || action.startsWith("section_")) {
+        queue("custom");
+      } else {
+        const group = groupForModule(module);
+        if (group) queue(group);
+      }
+      queue("activity");
+    },
+  );
 
   channel.subscribe();
   return () => {

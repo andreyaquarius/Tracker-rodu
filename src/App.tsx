@@ -535,7 +535,7 @@ export default function App() {
       return;
     }
     let active = true;
-    void listProjectActivity(workspace.projectId)
+    void listProjectActivity(workspace.projectId, 10)
       .then((entries) => {
         if (active) setProjectActivity(entries);
       })
@@ -1059,7 +1059,7 @@ export default function App() {
           }
           if (current.has("activity")) {
             jobs.push(
-              listProjectActivity(projectId).then((records) => {
+              listProjectActivity(projectId, 10).then((records) => {
                 if (activeWorkspaceIdRef.current === projectId) {
                   setProjectActivity(records);
                 }
