@@ -401,6 +401,15 @@ export default function App() {
         return;
       }
 
+      // Supabase re-emits auth events on token refresh and on every tab focus.
+      // Once a user is prepared, ignore the repeats: otherwise each event rebuilds
+      // `account`/`workspace`, which re-fires every data-load effect and floods
+      // PostgREST with duplicate full-table reads — the request storm behind the
+      // "Thread killed by timeout manager" timeouts.
+      if (lastPreparedUserRef.current === session.user.id) {
+        return;
+      }
+
       if (workspaceSetupRef.current) {
         await workspaceSetupRef.current;
         return;
