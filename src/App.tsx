@@ -3204,6 +3204,7 @@ export default function App() {
             });
           } : undefined}
           readOnly={readOnly}
+          projectName={workspace?.projectName}
         />
       );
     }
@@ -3250,6 +3251,7 @@ export default function App() {
             projectId={workspace?.projectId}
             onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
             readOnly={readOnly}
+            projectName={workspace?.projectName}
           />
         );
       case "persons":
@@ -3276,6 +3278,7 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
             onCreateRelated={createRelatedRecord}
             readOnly={readOnly}
+            projectName={workspace?.projectName}
           />
         );
       case "yearMatrix":
@@ -3293,6 +3296,7 @@ export default function App() {
             onSave={saveFor("yearMatrix")}
             onDelete={deleteFor("yearMatrix")}
             readOnly={readOnly}
+            projectName={workspace?.projectName}
           />
         );
       case "backup":

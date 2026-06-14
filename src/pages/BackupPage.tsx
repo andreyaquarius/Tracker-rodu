@@ -9,6 +9,7 @@ import {
   listProjectBackups,
 } from "../services/projectBackups";
 import { formatDateTime } from "../utils/dateHelpers";
+import { exportProjectToExcel } from "../utils/excelExport";
 
 interface Props {
   db: AppDatabase;
@@ -182,6 +183,22 @@ export function BackupPage({
             onClick={() => downloadDatabase(db)}
           >
             Завантажити JSON
+          </button>
+        </article>
+
+        <article className="panel backup-card">
+          <span className="card-icon">X</span>
+          <h2>Експорт у Excel</h2>
+          <p>
+            Завантажте весь проєкт одним файлом XLSX. Кожен стандартний і власний
+            розділ буде розміщено на окремому аркуші.
+          </p>
+          <button
+            className="button button-secondary"
+            disabled={!workspace}
+            onClick={() => exportProjectToExcel(db, workspace?.projectName ?? "Трекер Роду")}
+          >
+            Завантажити весь проєкт
           </button>
         </article>
       </section>

@@ -22,6 +22,8 @@ import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile } from "../services/scanStorage";
 import { CustomFieldsView } from "../components/CustomFields";
 import { normalizeCustomFieldValues } from "../utils/customFields";
+import { ExcelExportMenu } from "../components/ExcelExportMenu";
+import { exportPersonsToExcel } from "../utils/excelExport";
 
 type PersonTab =
   | "overview"
@@ -52,6 +54,7 @@ export function PersonsPage({
   onOpenRelated,
   onCreateRelated,
   readOnly = false,
+  projectName = "Трекер Роду",
 }: {
   db: AppDatabase;
   persons: Person[];
@@ -72,6 +75,7 @@ export function PersonsPage({
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly?: boolean;
+  projectName?: string;
 }) {
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
@@ -148,9 +152,29 @@ export function PersonsPage({
           <h1>Особи</h1>
           <p>Картки людей, варіанти імен, життєві події та зв’язки з доказами.</p>
         </div>
-        {!readOnly ? (
-          <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
-        ) : null}
+        <div className="page-heading-actions">
+          <ExcelExportMenu
+            filteredCount={filtered.length}
+            totalCount={persons.length}
+            onExportFiltered={() => exportPersonsToExcel(
+              db,
+              projectName,
+              filtered,
+              "filtered",
+              customFieldDefinitions,
+            )}
+            onExportAll={() => exportPersonsToExcel(
+              db,
+              projectName,
+              persons,
+              "all",
+              customFieldDefinitions,
+            )}
+          />
+          {!readOnly ? (
+            <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
+          ) : null}
+        </div>
       </div>
 
       <section className="panel">

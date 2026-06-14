@@ -253,6 +253,45 @@ p { color: var(--muted); line-height: 1.7; }
 .eyebrow { display: block; margin-bottom: 8px; color: #79551f; font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .page-heading, .hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin-bottom: 28px; }
 .page-heading p, .hero p { margin-bottom: 0; max-width: 680px; }
+.page-heading-actions {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.excel-export-menu { position: relative; z-index: 1; }
+.excel-export-menu > summary { list-style: none; cursor: pointer; white-space: nowrap; }
+.excel-export-menu > summary::-webkit-details-marker { display: none; }
+.excel-export-options {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: 0 18px 42px rgba(16, 47, 42, 0.24);
+}
+.excel-export-options button {
+  display: flex;
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--green-950);
+  text-align: left;
+  cursor: pointer;
+  flex-direction: column;
+  gap: 2px;
+}
+.excel-export-options button:hover { background: var(--cream); }
+.excel-export-options small { color: var(--muted); }
 .hero { padding: 34px; color: white; background:
   linear-gradient(105deg, rgba(16,47,42,.98), rgba(34,87,77,.9)),
   repeating-linear-gradient(45deg, transparent, transparent 18px, rgba(255,255,255,.02) 18px, rgba(255,255,255,.02) 19px);

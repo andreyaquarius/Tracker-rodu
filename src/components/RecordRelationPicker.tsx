@@ -4,6 +4,7 @@ import type {
   CustomSectionRelationTarget,
 } from "../types";
 import { customRecordTitle, relatedRecordLabel } from "../utils/customSections";
+import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 
 const standardGroups: Array<{ key: CollectionKey; label: string }> = [
   { key: "researches", label: "Дослідження" },
@@ -33,9 +34,10 @@ export function RecordRelationPicker({
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
+  const detailsRef = useDismissibleDetails();
   const groups = relationGroups(db, target);
   return (
-    <details className="relation-dropdown">
+    <details className="relation-dropdown" ref={detailsRef}>
       <summary>
         <span>
           {selected.length ? `Вибрано записів: ${selected.length}` : "Виберіть пов’язані записи"}

@@ -23,6 +23,9 @@ import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import { deleteScanFile } from "../services/scanStorage";
 import { InlineCustomSectionFieldCreator } from "../components/InlineCustomSectionFieldCreator";
+import { ExcelExportMenu } from "../components/ExcelExportMenu";
+import { exportCustomSectionToExcel } from "../utils/excelExport";
+import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 
 export function CustomSectionPage({
   db,
@@ -35,6 +38,7 @@ export function CustomSectionPage({
   onOpenRelated,
   onAddField,
   readOnly = false,
+  projectName = "Трекер Роду",
 }: {
   db: AppDatabase;
   section: CustomSectionDefinition;
@@ -46,6 +50,7 @@ export function CustomSectionPage({
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onAddField?: (field: CustomSectionField) => void;
   readOnly?: boolean;
+  projectName?: string;
 }) {
   const [search, setSearch] = useState(initialSearch);
   const [viewing, setViewing] = useState<CustomSectionRecord | null>(null);
@@ -95,11 +100,31 @@ export function CustomSectionPage({
           <h1>{section.name}</h1>
           <p>{section.description || "Власна структура записів вашого дослідження."}</p>
         </div>
-        {!readOnly ? (
-          <button className="button button-primary" onClick={() => setEditing("new")}>
-            + Додати {section.singularName}
-          </button>
-        ) : null}
+        <div className="page-heading-actions">
+          <ExcelExportMenu
+            filteredCount={filtered.length}
+            totalCount={records.length}
+            onExportFiltered={() => exportCustomSectionToExcel(
+              db,
+              projectName,
+              section,
+              filtered,
+              "filtered",
+            )}
+            onExportAll={() => exportCustomSectionToExcel(
+              db,
+              projectName,
+              section,
+              records,
+              "all",
+            )}
+          />
+          {!readOnly ? (
+            <button className="button button-primary" onClick={() => setEditing("new")}>
+              + Додати {section.singularName}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <section className="panel list-panel">
@@ -306,6 +331,7 @@ function CustomRecordField({
   value: CustomSectionRecordValue;
   onChange: (value: CustomSectionRecordValue) => void;
 }) {
+  const relationDetailsRef = useDismissibleDetails();
   if (field.type === "attachments") {
     return (
       <ScanAttachmentsEditor
@@ -321,7 +347,7 @@ function CustomRecordField({
     return (
       <fieldset className="field-wide relation-picker">
         <legend>{field.label}</legend>
-        <details className="relation-dropdown">
+        <details className="relation-dropdown" ref={relationDetailsRef}>
           <summary>
             <span>
               {selected.length

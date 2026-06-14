@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
+import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 
 interface TopBarProps {
   account: SupabaseAccount | null;
@@ -38,7 +38,7 @@ export function TopBar({
   isAccountSigningIn,
   isCreatingWorkspace,
 }: TopBarProps) {
-  const accountMenuRef = useRef<HTMLDetailsElement>(null);
+  const accountMenuRef = useDismissibleDetails();
   const initials = account?.name
     .split(/\s+/)
     .filter(Boolean)
@@ -50,24 +50,6 @@ export function TopBar({
   const closeAccountMenu = () => {
     if (accountMenuRef.current) accountMenuRef.current.open = false;
   };
-
-  useEffect(() => {
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      const menu = accountMenuRef.current;
-      if (menu?.open && !menu.contains(event.target as Node)) {
-        menu.open = false;
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeAccountMenu();
-    };
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, []);
 
   return (
     <header className="topbar">

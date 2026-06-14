@@ -39,6 +39,8 @@ import {
   normalizeCustomFieldValues,
   supportsCustomFields,
 } from "../utils/customFields";
+import { ExcelExportMenu } from "../components/ExcelExportMenu";
+import { exportEntityRecordsToExcel } from "../utils/excelExport";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -63,6 +65,7 @@ interface CrudPageProps {
   projectId?: string;
   onCreateTask?: (task: TaskRecord) => void;
   readOnly?: boolean;
+  projectName?: string;
 }
 
 type FormValue = string | boolean | string[] | FindingParticipant[] | ScanAttachment[];
@@ -88,6 +91,7 @@ export function CrudPage({
   projectId = "",
   onCreateTask,
   readOnly = false,
+  projectName = "Трекер Роду",
 }: CrudPageProps) {
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
@@ -214,11 +218,37 @@ export function CrudPage({
           <h1>{config.title}</h1>
           <p>{config.description}</p>
         </div>
-        {!readOnly ? (
-          <button className="button button-primary" onClick={startNew}>
-            + Додати {config.singular}
-          </button>
-        ) : null}
+        <div className="page-heading-actions">
+          <ExcelExportMenu
+            filteredCount={filtered.length}
+            totalCount={items.length}
+            onExportFiltered={() => exportEntityRecordsToExcel({
+              db,
+              collection: config.collection,
+              title: config.title,
+              projectName,
+              records: filtered,
+              fields: config.fields,
+              scope: "filtered",
+              customFieldDefinitions,
+            })}
+            onExportAll={() => exportEntityRecordsToExcel({
+              db,
+              collection: config.collection,
+              title: config.title,
+              projectName,
+              records: items,
+              fields: config.fields,
+              scope: "all",
+              customFieldDefinitions,
+            })}
+          />
+          {!readOnly ? (
+            <button className="button button-primary" onClick={startNew}>
+              + Додати {config.singular}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <section className="panel">
