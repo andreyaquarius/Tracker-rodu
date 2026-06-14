@@ -1,6 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AppDatabase } from "../types";
 import type { PageKey } from "../components/Sidebar";
+import type {
+  ProjectDashboardStats,
+  ProjectDashboardTask,
+} from "../services/projectDashboard";
 import { formatDateTime } from "../utils/dateHelpers";
 import {
   createGlobalSearchIndex,
@@ -9,33 +13,38 @@ import {
 
 export function DashboardPage({
   db,
+  stats,
+  dashboardTasks,
   onNavigate,
   onOpenSearchResult,
+  onRequestSearchData,
 }: {
   db: AppDatabase;
+  stats: ProjectDashboardStats;
+  dashboardTasks: ProjectDashboardTask[];
   onNavigate: (page: PageKey) => void;
   onOpenSearchResult: (page: PageKey, query: string, entityId?: string) => void;
+  onRequestSearchData: () => void;
 }) {
   const [globalQuery, setGlobalQuery] = useState("");
   const [showAllActivity, setShowAllActivity] = useState(false);
-  const stats = [
-    ["Дослідження", db.researches.length, "researches" as PageKey],
-    ["Документи", db.documents.length, "documents" as PageKey],
-    ["Документи в роботі", db.documents.filter((item) => item.reviewStatus === "в роботі").length, "documents" as PageKey],
-    ["Переглянуто", db.documents.filter((item) => item.reviewStatus === "переглянуто").length, "documents" as PageKey],
-    ["Відкриті завдання", db.tasks.filter((item) => !["закрито", "перевірено"].includes(item.status)).length, "tasks" as PageKey],
-    ["Завершені завдання", db.tasks.filter((item) => ["закрито", "перевірено"].includes(item.status)).length, "tasks" as PageKey],
-    ["Знахідки", db.findings.length, "findings" as PageKey],
-    ["Запити в архів", db.archiveRequests.length, "archiveRequests" as PageKey],
-    ["Особи", db.persons.length, "persons" as PageKey],
-    ["Активні гіпотези", db.hypotheses.filter((item) => item.status === "активна").length, "hypotheses" as PageKey],
-    ["Прогалини в роках", db.yearMatrix.filter((item) => item.status === "прогалина").length, "yearMatrix" as PageKey],
-    ["Не перевірені роки", db.yearMatrix.filter((item) => item.status === "не перевірено").length, "yearMatrix" as PageKey],
+  const statCards = [
+    ["Дослідження", stats.researches, "researches" as PageKey],
+    ["Документи", stats.documents, "documents" as PageKey],
+    ["Документи в роботі", stats.documentsInProgress, "documents" as PageKey],
+    ["Переглянуто", stats.documentsReviewed, "documents" as PageKey],
+    ["Відкриті завдання", stats.openTasks, "tasks" as PageKey],
+    ["Завершені завдання", stats.completedTasks, "tasks" as PageKey],
+    ["Знахідки", stats.findings, "findings" as PageKey],
+    ["Запити в архів", stats.archiveRequests, "archiveRequests" as PageKey],
+    ["Особи", stats.persons, "persons" as PageKey],
+    ["Активні гіпотези", stats.activeHypotheses, "hypotheses" as PageKey],
+    ["Прогалини в роках", stats.yearGaps, "yearMatrix" as PageKey],
+    ["Не перевірені роки", stats.uncheckedYears, "yearMatrix" as PageKey],
   ] as const;
 
   const priorityWeight: Record<string, number> = { критичний: 4, високий: 3, середній: 2, низький: 1 };
-  const nextTasks = db.tasks
-    .filter((item) => ["не почато", "в роботі"].includes(item.status))
+  const nextTasks = [...dashboardTasks]
     .sort((a, b) => (priorityWeight[b.priority] ?? 0) - (priorityWeight[a.priority] ?? 0))
     .slice(0, 6);
   const sortedActivity = [...db.activityLog]
@@ -57,6 +66,12 @@ export function DashboardPage({
     ),
     [globalResults],
   );
+
+  useEffect(() => {
+    if (globalQuery.trim().length >= 2) {
+      onRequestSearchData();
+    }
+  }, [globalQuery, onRequestSearchData]);
 
   return (
     <>
@@ -142,7 +157,7 @@ export function DashboardPage({
       </section>
 
       <section className="stat-grid">
-        {stats.map(([label, value, page]) => (
+        {statCards.map(([label, value, page]) => (
           <button className="stat-card" key={label} onClick={() => onNavigate(page)}>
             <span>{label}</span>
             <strong>{value}</strong>

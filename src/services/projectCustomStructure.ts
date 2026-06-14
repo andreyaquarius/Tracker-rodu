@@ -104,12 +104,22 @@ function recordFromRow(row: RecordRow): CustomSectionRecord {
   };
 }
 
-export async function listProjectCustomStructure(projectId: string): Promise<{
+export async function listProjectCustomStructure(
+  projectId: string,
+  includeRecords = true,
+): Promise<{
   definitions: CustomFieldDefinition[];
   sections: CustomSectionDefinition[];
   records: CustomSectionRecord[];
 }> {
   const client = getSupabaseClient();
+  const recordsPromise = includeRecords
+    ? client
+        .from("custom_records")
+        .select("id, section_id, values, created_at, updated_at")
+        .eq("project_id", projectId)
+        .order("updated_at", { ascending: false })
+    : Promise.resolve({ data: [] as RecordRow[], error: null });
   const [definitionsResult, sectionsResult, fieldsResult, recordsResult] =
     await Promise.all([
       client
@@ -127,11 +137,7 @@ export async function listProjectCustomStructure(projectId: string): Promise<{
         .select("id, section_id, label, field_type, options, relation_target, required, position")
         .eq("project_id", projectId)
         .order("position", { ascending: true }),
-      client
-        .from("custom_records")
-        .select("id, section_id, values, created_at, updated_at")
-        .eq("project_id", projectId)
-        .order("updated_at", { ascending: false }),
+      recordsPromise,
     ]);
   if (definitionsResult.error) throw definitionsResult.error;
   if (sectionsResult.error) throw sectionsResult.error;

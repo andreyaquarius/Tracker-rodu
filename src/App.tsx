@@ -150,9 +150,51 @@ import { assertProjectRecordUnchanged } from "./services/projectConflicts";
 import { setProjectAttachmentTarget } from "./services/scanStorage";
 import { clearGoogleDriveSession } from "./services/googleDriveStorage";
 import { createActivityEntries } from "./utils/activityLog";
+import {
+  emptyProjectDashboardStats,
+  loadProjectDashboard,
+  type ProjectDashboardStats,
+  type ProjectDashboardTask,
+} from "./services/projectDashboard";
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
+
+type ProjectDataGroup =
+  | "researches"
+  | "people"
+  | "documents"
+  | "work"
+  | "analysis";
+
+const ALL_PROJECT_DATA_GROUPS: ProjectDataGroup[] = [
+  "researches",
+  "people",
+  "documents",
+  "work",
+  "analysis",
+];
+
+function dataGroupsForPage(page: PageKey): Set<ProjectDataGroup> {
+  if (page === "researches") return new Set(["researches"]);
+  if (page === "documents") return new Set(["researches", "documents"]);
+  if (page === "archiveRequests") {
+    return new Set(["researches", "people", "analysis"]);
+  }
+  if (page === "yearMatrix") {
+    return new Set(["researches", "documents", "work"]);
+  }
+  if (page === "tasks" || page === "findings") {
+    return new Set(["researches", "people", "documents", "work"]);
+  }
+  if (page === "hypotheses" || page === "persons" || page === "backup") {
+    return new Set(ALL_PROJECT_DATA_GROUPS);
+  }
+  if (page.startsWith("custom:")) {
+    return new Set(ALL_PROJECT_DATA_GROUPS);
+  }
+  return new Set();
+}
 
 function chooseWorkspace(
   items: SupabaseWorkspace[],
@@ -287,6 +329,11 @@ export default function App() {
   const [customStructureReadyForProject, setCustomStructureReadyForProject] =
     useState<string | null>(null);
   const [projectActivity, setProjectActivity] = useState<ActivityLogEntry[]>([]);
+  const [dashboardStats, setDashboardStats] = useState<ProjectDashboardStats>(
+    emptyProjectDashboardStats,
+  );
+  const [dashboardTasks, setDashboardTasks] = useState<ProjectDashboardTask[]>([]);
+  const [searchDataProjectId, setSearchDataProjectId] = useState<string | null>(null);
   const [projectPreferences, setProjectPreferences] = useState<ProjectPreferences>(
     () => ({
       researcherName: app.db.settings.researcherName,
@@ -307,6 +354,12 @@ export default function App() {
     projectId: string;
     value: string;
   } | null>(null);
+  const requestedDataGroups = useMemo(() => {
+    if (workspace && searchDataProjectId === workspace.projectId) {
+      return new Set(ALL_PROJECT_DATA_GROUPS);
+    }
+    return dataGroupsForPage(page);
+  }, [page, searchDataProjectId, workspace]);
 
   const describeError = useCallback((error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) return error.message;
@@ -527,6 +580,12 @@ export default function App() {
       toastTimerRef.current = null;
     }, 3500);
   }, []);
+  const requestDashboardSearchData = useCallback(() => {
+    if (!workspace) return;
+    setSearchDataProjectId((current) =>
+      current === workspace.projectId ? current : workspace.projectId
+    );
+  }, [workspace]);
 
   useEffect(() => () => {
     if (toastTimerRef.current !== null) {
@@ -666,18 +725,51 @@ export default function App() {
 
   useEffect(() => {
     if (!workspace || !account) {
+      setDashboardStats(emptyProjectDashboardStats());
+      setDashboardTasks([]);
+      return;
+    }
+    if (page !== "dashboard") return;
+
+    let active = true;
+    void loadProjectDashboard(workspace.projectId)
+      .then((dashboard) => {
+        if (!active) return;
+        setDashboardStats(dashboard.stats);
+        setDashboardTasks(dashboard.tasks);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        notify(
+          describeError(
+            error,
+            "Не вдалося завантажити статистику панелі огляду.",
+          ),
+          true,
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [account, describeError, notify, page, workspace]);
+
+  useEffect(() => {
+    if (!workspace || !account) {
       setProjectResearches([]);
       setResearchesReadyForProject(null);
       return;
     }
 
-    let active = true;
     const projectId = workspace.projectId;
-    setResearchesReadyForProject(null);
     const cached = loadProjectResearchCache(projectId);
-    const fallback = cached;
-    setProjectResearches(fallback);
+    setProjectResearches(cached);
+    if (!requestedDataGroups.has("researches")) {
+      setResearchesReadyForProject(null);
+      return;
+    }
 
+    let active = true;
+    setResearchesReadyForProject(null);
     void (async () => {
       try {
         const researches = await listProjectResearches(projectId);
@@ -691,7 +783,7 @@ export default function App() {
         notify(
           describeError(
             error,
-            fallback.length
+            cached.length
               ? "Не вдалося оновити дослідження з бази. Показано локальний кеш."
               : "Не вдалося завантажити дослідження з бази.",
           ),
@@ -703,7 +795,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [account, describeError, notify, workspace]);
+  }, [account, describeError, notify, requestedDataGroups, workspace]);
 
   useEffect(() => {
     if (!workspace || !account) {
@@ -712,22 +804,19 @@ export default function App() {
       setPeopleReadyForProject(null);
       return;
     }
-    if (researchesReadyForProject !== workspace.projectId) {
-      const cached = loadProjectPeopleCache(workspace.projectId);
-      setProjectPersons(cached.persons);
-      setProjectPersonRelations(cached.relations);
+    const projectId = workspace.projectId;
+    const cached = loadProjectPeopleCache(projectId);
+    setProjectPersons(cached.persons);
+    setProjectPersonRelations(cached.relations);
+    if (!requestedDataGroups.has("people")) {
       setPeopleReadyForProject(null);
       return;
     }
 
     let active = true;
-    const projectId = workspace.projectId;
     setPeopleReadyForProject(null);
-    const cached = loadProjectPeopleCache(projectId);
     const fallbackPersons = cached.persons;
     const fallbackRelations = cached.relations;
-    setProjectPersons(fallbackPersons);
-    setProjectPersonRelations(fallbackRelations);
 
     void (async () => {
       try {
@@ -759,7 +848,7 @@ export default function App() {
     account,
     describeError,
     notify,
-    researchesReadyForProject,
+    requestedDataGroups,
     workspace,
   ]);
 
@@ -770,22 +859,19 @@ export default function App() {
       setDocumentsReadyForProject(null);
       return;
     }
-    if (researchesReadyForProject !== workspace.projectId) {
-      const cached = loadProjectDocumentsCache(workspace.projectId);
-      setProjectDocuments(cached.documents);
-      setProjectYearMatrix(cached.yearMatrix);
+    const projectId = workspace.projectId;
+    const cached = loadProjectDocumentsCache(projectId);
+    setProjectDocuments(cached.documents);
+    setProjectYearMatrix(cached.yearMatrix);
+    if (!requestedDataGroups.has("documents")) {
       setDocumentsReadyForProject(null);
       return;
     }
 
     let active = true;
-    const projectId = workspace.projectId;
     setDocumentsReadyForProject(null);
-    const cached = loadProjectDocumentsCache(projectId);
     const fallbackDocuments = cached.documents;
     const fallbackMatrix = cached.yearMatrix;
-    setProjectDocuments(fallbackDocuments);
-    setProjectYearMatrix(fallbackMatrix);
 
     void (async () => {
       try {
@@ -817,7 +903,7 @@ export default function App() {
     account,
     describeError,
     notify,
-    researchesReadyForProject,
+    requestedDataGroups,
     workspace,
   ]);
 
@@ -828,26 +914,19 @@ export default function App() {
       setWorkRecordsReadyForProject(null);
       return;
     }
-    if (
-      researchesReadyForProject !== workspace.projectId ||
-      peopleReadyForProject !== workspace.projectId ||
-      documentsReadyForProject !== workspace.projectId
-    ) {
-      const cached = loadProjectWorkRecordsCache(workspace.projectId);
-      setProjectTasks(cached.tasks);
-      setProjectFindings(cached.findings);
+    const projectId = workspace.projectId;
+    const cached = loadProjectWorkRecordsCache(projectId);
+    setProjectTasks(cached.tasks);
+    setProjectFindings(cached.findings);
+    if (!requestedDataGroups.has("work")) {
       setWorkRecordsReadyForProject(null);
       return;
     }
 
     let active = true;
-    const projectId = workspace.projectId;
     setWorkRecordsReadyForProject(null);
-    const cached = loadProjectWorkRecordsCache(projectId);
     const fallbackTasks = cached.tasks;
     const fallbackFindings = cached.findings;
-    setProjectTasks(fallbackTasks);
-    setProjectFindings(fallbackFindings);
 
     void (async () => {
       try {
@@ -878,10 +957,8 @@ export default function App() {
   }, [
     account,
     describeError,
-    documentsReadyForProject,
     notify,
-    peopleReadyForProject,
-    researchesReadyForProject,
+    requestedDataGroups,
     workspace,
   ]);
 
@@ -892,27 +969,19 @@ export default function App() {
       setAnalysisReadyForProject(null);
       return;
     }
-    if (
-      researchesReadyForProject !== workspace.projectId ||
-      peopleReadyForProject !== workspace.projectId ||
-      documentsReadyForProject !== workspace.projectId ||
-      workRecordsReadyForProject !== workspace.projectId
-    ) {
-      const cached = loadProjectAnalysisRecordsCache(workspace.projectId);
-      setProjectHypotheses(cached.hypotheses);
-      setProjectArchiveRequests(cached.archiveRequests);
+    const projectId = workspace.projectId;
+    const cached = loadProjectAnalysisRecordsCache(projectId);
+    setProjectHypotheses(cached.hypotheses);
+    setProjectArchiveRequests(cached.archiveRequests);
+    if (!requestedDataGroups.has("analysis")) {
       setAnalysisReadyForProject(null);
       return;
     }
 
     let active = true;
-    const projectId = workspace.projectId;
     setAnalysisReadyForProject(null);
-    const cached = loadProjectAnalysisRecordsCache(projectId);
     const fallbackHypotheses = cached.hypotheses;
     const fallbackRequests = cached.archiveRequests;
-    setProjectHypotheses(fallbackHypotheses);
-    setProjectArchiveRequests(fallbackRequests);
 
     void (async () => {
       try {
@@ -947,11 +1016,8 @@ export default function App() {
   }, [
     account,
     describeError,
-    documentsReadyForProject,
     notify,
-    peopleReadyForProject,
-    researchesReadyForProject,
-    workRecordsReadyForProject,
+    requestedDataGroups,
     workspace,
   ]);
 
@@ -968,6 +1034,11 @@ export default function App() {
     const projectId = workspace.projectId;
     setCustomStructureReadyForProject(null);
     const cached = loadProjectCustomStructureCache(projectId);
+    const includeRecords =
+      page === "settings" ||
+      page === "backup" ||
+      page.startsWith("custom:") ||
+      searchDataProjectId === projectId;
     const hasCached =
       cached.definitions.length || cached.sections.length || cached.records.length;
     const fallback = cached;
@@ -977,18 +1048,19 @@ export default function App() {
 
     void (async () => {
       try {
-        const remote = await listProjectCustomStructure(projectId);
+        const remote = await listProjectCustomStructure(projectId, includeRecords);
+        const records = includeRecords ? remote.records : fallback.records;
 
         if (!active) return;
         saveProjectCustomStructureCache(
           projectId,
           remote.definitions,
           remote.sections,
-          remote.records,
+          records,
         );
         setProjectCustomFields(remote.definitions);
         setProjectCustomSections(remote.sections);
-        setProjectCustomRecords(remote.records);
+        setProjectCustomRecords(records);
         setCustomStructureReadyForProject(projectId);
       } catch (error) {
         if (!active) return;
@@ -1011,6 +1083,8 @@ export default function App() {
     account,
     describeError,
     notify,
+    page,
+    searchDataProjectId,
     workspace,
   ]);
 
@@ -1155,17 +1229,25 @@ export default function App() {
             );
           }
           if (current.has("custom")) {
+            const includeRecords =
+              page === "settings" ||
+              page === "backup" ||
+              page.startsWith("custom:") ||
+              searchDataProjectId === projectId;
             jobs.push(
-              listProjectCustomStructure(projectId).then((records) => {
+              listProjectCustomStructure(projectId, includeRecords).then((records) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
+                const nextRecords = includeRecords
+                  ? records.records
+                  : loadProjectCustomStructureCache(projectId).records;
                 setProjectCustomFields(records.definitions);
                 setProjectCustomSections(records.sections);
-                setProjectCustomRecords(records.records);
+                setProjectCustomRecords(nextRecords);
                 saveProjectCustomStructureCache(
                   projectId,
                   records.definitions,
                   records.sections,
-                  records.records,
+                  nextRecords,
                 );
               }),
             );
@@ -1176,6 +1258,18 @@ export default function App() {
                 if (activeWorkspaceIdRef.current === projectId) {
                   setProjectActivity(records);
                 }
+              }),
+            );
+          }
+          if (
+            page === "dashboard" &&
+            [...current].some((group) => group !== "activity")
+          ) {
+            jobs.push(
+              loadProjectDashboard(projectId).then((dashboard) => {
+                if (activeWorkspaceIdRef.current !== projectId) return;
+                setDashboardStats(dashboard.stats);
+                setDashboardTasks(dashboard.tasks);
               }),
             );
           }
@@ -1211,7 +1305,9 @@ export default function App() {
     account,
     describeError,
     notify,
+    page,
     projectPreferences,
+    searchDataProjectId,
     workspace,
   ]);
 
@@ -3113,7 +3209,16 @@ export default function App() {
     }
     switch (page) {
       case "dashboard":
-        return <DashboardPage db={activeDb} onNavigate={navigate} onOpenSearchResult={openSearchResult} />;
+        return (
+          <DashboardPage
+            db={activeDb}
+            stats={dashboardStats}
+            dashboardTasks={dashboardTasks}
+            onNavigate={navigate}
+            onOpenSearchResult={openSearchResult}
+            onRequestSearchData={requestDashboardSearchData}
+          />
+        );
       case "researches":
       case "documents":
       case "archiveRequests":

@@ -46,14 +46,9 @@ const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? 
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && publishableKey);
 
-// Cap how many HTTP requests hit Supabase at once. On project load the app fans
-// out a full read of every table (plus auth and storage calls); firing them all
-// simultaneously can exhaust PostgREST's connection pool, and requests that
-// cannot get a worker in time are aborted server-side as
-// "Warp server error: Thread killed by timeout manager". Queuing them through a
-// small concurrency limit loads the same data while keeping the database within
-// its pool. The realtime websocket does not go through fetch, so it is unaffected.
-const MAX_CONCURRENT_REQUESTS = 6;
+// Keep route-level reads from exhausting PostgREST when a page needs several
+// related tables at once. The realtime websocket does not use this fetch queue.
+const MAX_CONCURRENT_REQUESTS = 4;
 
 function createConcurrencyLimitedFetch(maxConcurrent: number): typeof fetch {
   let active = 0;
