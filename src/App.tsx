@@ -426,8 +426,15 @@ export default function App() {
 
       setIsAccountSigningIn(true);
       workspaceSetupRef.current = (async () => {
-        const ensuredWorkspace = await ensureSupabaseWorkspace(session, currentAccount);
-        const fetchedWorkspaces = await listSupabaseWorkspaces();
+        const fetchedWorkspaces = await listSupabaseWorkspaces(
+          undefined,
+          session.user.id,
+        );
+        const ensuredWorkspace = fetchedWorkspaces[0] ?? await ensureSupabaseWorkspace(
+          session,
+          currentAccount,
+          fetchedWorkspaces,
+        );
         if (!active) return;
 
         const availableWorkspaces = fetchedWorkspaces.length

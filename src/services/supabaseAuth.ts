@@ -160,16 +160,20 @@ function isMissingSlugError(error: { message?: string; details?: string; hint?: 
   );
 }
 
-async function readMemberships(): Promise<SupabaseWorkspace[]> {
+async function readMemberships(knownUserId?: string): Promise<SupabaseWorkspace[]> {
   const client = requireSupabase();
-  const { data: userData, error: userError } = await client.auth.getUser();
-  if (userError) throw userError;
-  if (!userData.user) return [];
+  let userId = knownUserId;
+  if (!userId) {
+    const { data: userData, error: userError } = await client.auth.getUser();
+    if (userError) throw userError;
+    userId = userData.user?.id;
+  }
+  if (!userId) return [];
 
   const primaryMemberships = await client
     .from("project_members")
     .select("role, projects!inner(id, name, slug)")
-    .eq("user_id", userData.user.id)
+    .eq("user_id", userId)
     .order("joined_at", { ascending: true });
   let data = primaryMemberships.data as MembershipRow[] | null;
   let error = primaryMemberships.error;
@@ -177,7 +181,7 @@ async function readMemberships(): Promise<SupabaseWorkspace[]> {
     const fallback = await client
       .from("project_members")
       .select("role, projects!inner(id, name)")
-      .eq("user_id", userData.user.id)
+      .eq("user_id", userId)
       .order("joined_at", { ascending: true });
     data = fallback.data;
     error = fallback.error;
@@ -293,10 +297,11 @@ export async function getSupabaseSession(): Promise<Session | null> {
 
 export async function listSupabaseWorkspaces(
   expectedProjectId?: string,
+  knownUserId?: string,
 ): Promise<SupabaseWorkspace[]> {
   return expectedProjectId
     ? waitForMemberships(expectedProjectId)
-    : readMemberships();
+    : readMemberships(knownUserId);
 }
 
 export async function createSupabaseWorkspace(
@@ -386,10 +391,11 @@ export async function renameSupabaseWorkspace(
 export async function ensureSupabaseWorkspace(
   session: Session,
   account: SupabaseAccount,
+  knownMemberships?: SupabaseWorkspace[],
 ): Promise<SupabaseWorkspace | null> {
   const client = requireSupabase();
 
-  const memberships = await readMemberships();
+  const memberships = knownMemberships ?? await readMemberships();
   if (memberships.length) return memberships[0];
 
   const normalizedEmail = session.user.email?.trim().toLocaleLowerCase() ?? "";
