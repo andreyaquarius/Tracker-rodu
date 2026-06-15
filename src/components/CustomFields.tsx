@@ -14,11 +14,13 @@ export function CustomFieldsEditor({
   definitions,
   values,
   onChange,
+  onDeleteDefinition,
 }: {
   db: AppDatabase;
   definitions: CustomFieldDefinition[];
   values: CustomFieldValues;
   onChange: (values: CustomFieldValues) => void;
+  onDeleteDefinition?: (definition: CustomFieldDefinition) => void;
 }) {
   if (!definitions.length) return null;
   const update = (id: string, value: CustomFieldValue) => {
@@ -30,72 +32,107 @@ export function CustomFieldsEditor({
         const multiple = definition.type === "multiselect" || definition.type === "relation";
         const value = values[definition.id] ??
           (definition.type === "boolean" ? false : multiple || definition.type === "attachments" ? [] : "");
+        const removeButton = onDeleteDefinition ? (
+          <button
+            type="button"
+            className="custom-field-delete"
+            title={`Видалити поле «${definition.label}»`}
+            aria-label={`Видалити поле «${definition.label}»`}
+            onClick={() => onDeleteDefinition(definition)}
+          >
+            ×
+          </button>
+        ) : null;
         if (definition.type === "attachments") {
           return (
-            <ScanAttachmentsEditor
-              key={definition.id}
-              title={definition.label}
-              scans={Array.isArray(value) ? value as ScanAttachment[] : []}
-              onChange={(scans) => update(definition.id, scans)}
-            />
+            <div className="custom-field-entry field-wide" key={definition.id}>
+              <div className="custom-field-heading">
+                <span>{definition.label}</span>
+                {removeButton}
+              </div>
+              <ScanAttachmentsEditor
+                title=""
+                scans={Array.isArray(value) ? value as ScanAttachment[] : []}
+                onChange={(scans) => update(definition.id, scans)}
+              />
+            </div>
           );
         }
         if (definition.type === "relation") {
           return (
-            <fieldset className="field-wide relation-picker" key={definition.id}>
-              <legend>{definition.label}</legend>
-              <RecordRelationPicker
-                db={db}
-                target={definition.relationTarget ?? "all"}
-                selected={Array.isArray(value) ? value as string[] : []}
-                onChange={(ids) => update(definition.id, ids)}
-              />
-            </fieldset>
+            <div className="custom-field-entry field-wide" key={definition.id}>
+              <div className="custom-field-heading">
+                <span>{definition.label}</span>
+                {removeButton}
+              </div>
+              <fieldset className="relation-picker">
+                <RecordRelationPicker
+                  db={db}
+                  target={definition.relationTarget ?? "all"}
+                  selected={Array.isArray(value) ? value as string[] : []}
+                  onChange={(ids) => update(definition.id, ids)}
+                />
+              </fieldset>
+            </div>
           );
         }
         if (definition.type === "multiselect") {
           const selected = Array.isArray(value) ? value as string[] : [];
           return (
-            <fieldset className="field-wide relation-picker" key={definition.id}>
-              <legend>{definition.label}</legend>
-              <div className="relation-options">
-                {definition.options.map((option) => (
-                  <label key={option}>
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(option)}
-                      onChange={(event) => update(
-                        definition.id,
-                        event.target.checked
-                          ? [...selected, option]
-                          : selected.filter((item) => item !== option),
-                      )}
-                    />
-                    <span>{option}</span>
-                  </label>
-                ))}
+            <div className="custom-field-entry field-wide" key={definition.id}>
+              <div className="custom-field-heading">
+                <span>{definition.label}</span>
+                {removeButton}
               </div>
-            </fieldset>
+              <fieldset className="relation-picker">
+                <div className="relation-options">
+                  {definition.options.map((option) => (
+                    <label key={option}>
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(option)}
+                        onChange={(event) => update(
+                          definition.id,
+                          event.target.checked
+                            ? [...selected, option]
+                            : selected.filter((item) => item !== option),
+                        )}
+                      />
+                      <span>{option}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            </div>
           );
         }
         if (definition.type === "boolean") {
           return (
-            <label className="checkbox-field field-wide" key={definition.id}>
-              <input
-                type="checkbox"
-                checked={Boolean(value)}
-                onChange={(event) => update(definition.id, event.target.checked)}
-              />
-              <span>{definition.label}</span>
-            </label>
+            <div className="custom-field-entry field-wide" key={definition.id}>
+              <div className="custom-field-heading">
+                <span>{definition.label}</span>
+                {removeButton}
+              </div>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={Boolean(value)}
+                  onChange={(event) => update(definition.id, event.target.checked)}
+                />
+                <span>Так</span>
+              </label>
+            </div>
           );
         }
         return (
-          <label
+          <div
             className={["textarea", "approximate-date"].includes(definition.type) ? "field-wide" : ""}
             key={definition.id}
           >
-            <span>{definition.label}</span>
+            <div className="custom-field-heading">
+              <span>{definition.label}</span>
+              {removeButton}
+            </div>
             {definition.type === "textarea" ? (
               <textarea
                 rows={4}
@@ -119,7 +156,7 @@ export function CustomFieldsEditor({
                 onChange={(event) => update(definition.id, event.target.value)}
               />
             )}
-          </label>
+          </div>
         );
       })}
     </>

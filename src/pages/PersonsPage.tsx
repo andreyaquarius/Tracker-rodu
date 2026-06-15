@@ -45,6 +45,7 @@ export function PersonsPage({
   archiveRequests,
   customFieldDefinitions = [],
   onAddCustomField,
+  onDeleteCustomField,
   initialSearch = "",
   initialOpenPersonId = "",
   onSavePerson,
@@ -66,6 +67,7 @@ export function PersonsPage({
   archiveRequests: ArchiveRequest[];
   customFieldDefinitions?: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
+  onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
   initialSearch?: string;
   initialOpenPersonId?: string;
   onSavePerson: (person: Person) => void;
@@ -276,6 +278,7 @@ export function PersonsPage({
           researches={researches}
           customFieldDefinitions={customFieldDefinitions}
           onAddCustomField={onAddCustomField}
+          onDeleteCustomField={onDeleteCustomField}
           onClose={() => setEditing(null)}
           onSave={(person) => {
             onSavePerson(person);

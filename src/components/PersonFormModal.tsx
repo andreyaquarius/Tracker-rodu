@@ -67,6 +67,7 @@ export function PersonFormModal({
   initialResearchId = "",
   customFieldDefinitions = [],
   onAddCustomField,
+  onDeleteCustomField,
   onClose,
   onSave,
 }: {
@@ -77,6 +78,7 @@ export function PersonFormModal({
   initialResearchId?: string;
   customFieldDefinitions?: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
+  onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
   onClose: () => void;
   onSave: (person: Person) => void;
 }) {
@@ -257,6 +259,15 @@ export function PersonFormModal({
             definitions={customFieldDefinitions}
             values={form.customFields}
             onChange={(values) => update("customFields", values)}
+            onDeleteDefinition={onDeleteCustomField ? (definition) => {
+              if (!window.confirm(
+                `Видалити поле «${definition.label}»? Значення цього поля більше не відображатимуться в картках осіб.`,
+              )) return;
+              const next = { ...form.customFields };
+              delete next[definition.id];
+              update("customFields", next);
+              onDeleteCustomField(definition);
+            } : undefined}
           />
           {onAddCustomField ? (
             <InlineCustomFieldCreator

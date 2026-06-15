@@ -52,6 +52,7 @@ interface CrudPageProps {
   persons?: Person[];
   customFieldDefinitions?: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
+  onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
   initialSearch?: string;
   initialOpenEntityId?: string;
   initialCreateRequest?: {
@@ -81,6 +82,7 @@ export function CrudPage({
   persons = [],
   customFieldDefinitions = [],
   onAddCustomField,
+  onDeleteCustomField,
   initialSearch = "",
   initialOpenEntityId = "",
   initialCreateRequest,
@@ -384,6 +386,7 @@ export function CrudPage({
           persons={persons}
           customFieldDefinitions={customFieldDefinitions}
           onAddCustomField={onAddCustomField}
+          onDeleteCustomField={onDeleteCustomField}
           onSavePerson={onSavePerson}
           onClose={() => {
             setEditing(null);
@@ -700,6 +703,7 @@ function EntityModal({
   persons,
   customFieldDefinitions,
   onAddCustomField,
+  onDeleteCustomField,
   onSavePerson,
   onClose,
   onSave,
@@ -714,6 +718,7 @@ function EntityModal({
   persons: Person[];
   customFieldDefinitions: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
+  onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
   onSavePerson?: (person: Person) => void;
   onClose: () => void;
   onSave: (entity: AppEntity) => void;
@@ -796,6 +801,13 @@ function EntityModal({
             definitions={customDefinitions}
             values={customValues}
             onChange={setCustomValues}
+            onDeleteDefinition={onDeleteCustomField ? (definition) => {
+              if (!window.confirm(
+                `Видалити поле «${definition.label}»? Значення цього поля більше не відображатимуться в записах розділу.`,
+              )) return;
+              setCustomValues((current) => omitCustomField(current, definition.id));
+              onDeleteCustomField(definition);
+            } : undefined}
           />
           {supportsCustomFields(config.collection) && onAddCustomField ? (
             <InlineCustomFieldCreator
@@ -819,6 +831,7 @@ function EntityModal({
           initialResearchId={String(form.researchId ?? "")}
           customFieldDefinitions={definitionsForModule(customFieldDefinitions, "persons")}
           onAddCustomField={onAddCustomField}
+          onDeleteCustomField={onDeleteCustomField}
           onClose={() => setPersonSeed(null)}
           onSave={(person) => {
             onSavePerson(person);
@@ -830,6 +843,15 @@ function EntityModal({
       ) : null}
     </Modal>
   );
+}
+
+function omitCustomField(
+  values: CustomFieldValues,
+  fieldId: string,
+): CustomFieldValues {
+  const next = { ...values };
+  delete next[fieldId];
+  return next;
 }
 
 function FormField({

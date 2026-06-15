@@ -2,11 +2,15 @@ import type {
   AppDatabase,
   CustomFieldDefinition,
   CustomFieldModule,
+  CustomFieldValue,
+  CustomFieldValues,
   CustomFieldType,
   CustomSectionDefinition,
   CustomSectionField,
   CustomSectionRecord,
+  CustomSectionRecordValue,
   FindingParticipant,
+  ScanAttachment,
 } from "../types";
 import { nowIso } from "./dateHelpers";
 import { createId } from "./id";
@@ -141,6 +145,231 @@ export function normalizeDatabase(value: unknown): AppDatabase {
   };
 }
 
+export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase {
+  const createMap = (items: Array<{ id: string }>) =>
+    new Map(items.map((item) => [item.id, createId()]));
+  const researches = createMap(source.researches);
+  const documents = createMap(source.documents);
+  const yearMatrix = createMap(source.yearMatrix);
+  const tasks = createMap(source.tasks);
+  const findings = createMap(source.findings);
+  const hypotheses = createMap(source.hypotheses);
+  const archiveRequests = createMap(source.archiveRequests);
+  const persons = createMap(source.persons);
+  const personRelations = createMap(source.personRelations);
+  const customSections = createMap(source.customSections);
+  const customRecords = createMap(source.customSectionRecords);
+  const customFieldDefinitions = createMap(source.settings.customFields);
+  const sectionFieldIds = new Map<string, string>();
+
+  for (const section of source.customSections) {
+    for (const field of section.fields) {
+      sectionFieldIds.set(field.id, createId());
+    }
+  }
+
+  const recordIds = new Map<string, string>([
+    ...researches,
+    ...documents,
+    ...yearMatrix,
+    ...tasks,
+    ...findings,
+    ...hypotheses,
+    ...archiveRequests,
+    ...persons,
+    ...customRecords,
+  ]);
+  const mapRequired = (map: Map<string, string>, id: string) => {
+    const mapped = map.get(id);
+    if (!mapped) {
+      throw new Error("Резервна копія містить пошкоджене посилання на запис.");
+    }
+    return mapped;
+  };
+  const mapReference = (map: Map<string, string>, id: string) =>
+    id ? map.get(id) ?? "" : "";
+  const mapReferences = (map: Map<string, string>, ids: string[]) =>
+    ids.map((id) => map.get(id)).filter((id): id is string => Boolean(id));
+  const mapRelationTarget = <T extends string | undefined>(target: T): T => {
+    if (!target?.startsWith("custom:")) return target;
+    const sectionId = target.slice("custom:".length);
+    const mapped = customSections.get(sectionId);
+    return (mapped ? `custom:${mapped}` : target) as T;
+  };
+  const mapScan = (scan: ScanAttachment): ScanAttachment => ({
+    ...scan,
+    id: createId(),
+  });
+  const mapScans = (scans: ScanAttachment[]) => scans.map(mapScan);
+  const mapFieldValue = (
+    type: CustomFieldType,
+    value: CustomFieldValue | CustomSectionRecordValue,
+  ): CustomFieldValue | CustomSectionRecordValue => {
+    if (type === "attachments" && Array.isArray(value)) {
+      return value
+        .filter((item): item is ScanAttachment =>
+          Boolean(item && typeof item === "object" && "storagePath" in item),
+        )
+        .map(mapScan);
+    }
+    if (type === "relation" && Array.isArray(value)) {
+      return value
+        .filter((item): item is string => typeof item === "string")
+        .map((id) => recordIds.get(id))
+        .filter((id): id is string => Boolean(id));
+    }
+    return Array.isArray(value)
+      ? value.slice() as string[] | ScanAttachment[]
+      : value;
+  };
+  const standardDefinitions = new Map<CustomFieldModule, CustomFieldDefinition[]>();
+  for (const definition of source.settings.customFields) {
+    const definitions = standardDefinitions.get(definition.module) ?? [];
+    definitions.push(definition);
+    standardDefinitions.set(definition.module, definitions);
+  }
+  const mapCustomFields = (
+    module: CustomFieldModule,
+    values: CustomFieldValues,
+  ): CustomFieldValues => {
+    const result: CustomFieldValues = {};
+    for (const definition of standardDefinitions.get(module) ?? []) {
+      if (!(definition.id in values)) continue;
+      const id = customFieldDefinitions.get(definition.id);
+      if (!id) continue;
+      result[id] = mapFieldValue(definition.type, values[definition.id]) as CustomFieldValue;
+    }
+    return result;
+  };
+  const mapSectionValues = (
+    record: CustomSectionRecord,
+  ): CustomSectionRecord["values"] => {
+    const section = source.customSections.find((item) => item.id === record.sectionId);
+    const result: CustomSectionRecord["values"] = {};
+    for (const field of section?.fields ?? []) {
+      if (!(field.id in record.values)) continue;
+      const id = sectionFieldIds.get(field.id);
+      if (!id) continue;
+      result[id] = mapFieldValue(field.type, record.values[field.id]) as CustomSectionRecordValue;
+    }
+    return result;
+  };
+
+  return {
+    ...source,
+    updatedAt: nowIso(),
+    researches: source.researches.map((item) => ({
+      ...item,
+      id: mapRequired(researches, item.id),
+      customFields: mapCustomFields("researches", item.customFields),
+    })),
+    documents: source.documents.map((item) => ({
+      ...item,
+      id: mapRequired(documents, item.id),
+      researchId: mapReference(researches, item.researchId),
+      scans: mapScans(item.scans),
+      customFields: mapCustomFields("documents", item.customFields),
+    })),
+    yearMatrix: source.yearMatrix.map((item) => ({
+      ...item,
+      id: mapRequired(yearMatrix, item.id),
+      researchId: mapReference(researches, item.researchId),
+      documentId: mapReference(documents, item.documentId),
+      customFields: mapCustomFields("yearMatrix", item.customFields),
+    })),
+    tasks: source.tasks.map((item) => ({
+      ...item,
+      id: mapRequired(tasks, item.id),
+      researchId: mapReference(researches, item.researchId),
+      documentId: mapReference(documents, item.documentId),
+      personIds: mapReferences(persons, item.personIds),
+      customFields: mapCustomFields("tasks", item.customFields),
+    })),
+    findings: source.findings.map((item) => ({
+      ...item,
+      id: mapRequired(findings, item.id),
+      researchId: mapReference(researches, item.researchId),
+      documentId: mapReference(documents, item.documentId),
+      personIds: mapReferences(persons, item.personIds),
+      participants: item.participants.map((participant) => ({
+        ...participant,
+        id: createId(),
+      })),
+      scans: mapScans(item.scans),
+      customFields: mapCustomFields("findings", item.customFields),
+    })),
+    hypotheses: source.hypotheses.map((item) => ({
+      ...item,
+      id: mapRequired(hypotheses, item.id),
+      researchId: mapReference(researches, item.researchId),
+      personIds: mapReferences(persons, item.personIds),
+      documentIds: mapReferences(documents, item.documentIds),
+      findingIds: mapReferences(findings, item.findingIds),
+      customFields: mapCustomFields("hypotheses", item.customFields),
+    })),
+    archiveRequests: source.archiveRequests.map((item) => ({
+      ...item,
+      id: mapRequired(archiveRequests, item.id),
+      researchId: mapReference(researches, item.researchId),
+      personIds: mapReferences(persons, item.personIds),
+      requestScans: mapScans(item.requestScans),
+      responseScans: mapScans(item.responseScans),
+      customFields: mapCustomFields("archiveRequests", item.customFields),
+    })),
+    persons: source.persons.map((item) => ({
+      ...item,
+      id: mapRequired(persons, item.id),
+      researchId: mapReference(researches, item.researchId),
+      birthScans: mapScans(item.birthScans),
+      marriageScans: mapScans(item.marriageScans),
+      deathScans: mapScans(item.deathScans),
+      mentionScans: mapScans(item.mentionScans),
+      customFields: mapCustomFields("persons", item.customFields),
+    })),
+    personRelations: source.personRelations
+      .filter(
+        (item) => persons.has(item.personId) && persons.has(item.relatedPersonId),
+      )
+      .map((item) => ({
+        ...item,
+        id: mapRequired(personRelations, item.id),
+        personId: mapRequired(persons, item.personId),
+        relatedPersonId: mapRequired(persons, item.relatedPersonId),
+      })),
+    customSections: source.customSections.map((section) => ({
+      ...section,
+      id: mapRequired(customSections, section.id),
+      parentKey: section.parentKey?.startsWith("custom:")
+        ? `custom:${mapReference(customSections, section.parentKey.slice("custom:".length))}`
+        : section.parentKey,
+      titleFieldId: mapReference(sectionFieldIds, section.titleFieldId),
+      fields: section.fields.map((field) => ({
+        ...field,
+        id: mapRequired(sectionFieldIds, field.id),
+        relationTarget: mapRelationTarget(field.relationTarget),
+      })),
+    })),
+    customSectionRecords: source.customSectionRecords
+      .filter((record) => customSections.has(record.sectionId))
+      .map((record) => ({
+        ...record,
+        id: mapRequired(customRecords, record.id),
+        sectionId: mapRequired(customSections, record.sectionId),
+        values: mapSectionValues(record),
+      })),
+    activityLog: [],
+    settings: {
+      ...source.settings,
+      lastAutomaticBackupAt: null,
+      customFields: source.settings.customFields.map((definition) => ({
+        ...definition,
+        id: mapRequired(customFieldDefinitions, definition.id),
+        relationTarget: mapRelationTarget(definition.relationTarget),
+      })),
+    },
+  };
+}
+
 function normalizeCustomSections(value: unknown): CustomSectionDefinition[] {
   if (!Array.isArray(value)) return [];
   const types = new Set([
@@ -266,9 +495,19 @@ function normalizeCustomFieldDefinitions(value: unknown): CustomFieldDefinition[
     "text",
     "textarea",
     "number",
+    "year",
     "date",
+    "time",
+    "approximate-date",
+    "place",
     "select",
+    "multiselect",
     "boolean",
+    "url",
+    "email",
+    "tel",
+    "attachments",
+    "relation",
   ]);
   return value
     .filter((item): item is Partial<CustomFieldDefinition> => Boolean(item && typeof item === "object"))

@@ -20,6 +20,17 @@
 }
 
 * { box-sizing: border-box; }
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--cream); }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
@@ -292,6 +303,38 @@ p { color: var(--muted); line-height: 1.7; }
 }
 .excel-export-options button:hover { background: var(--cream); }
 .excel-export-options small { color: var(--muted); }
+.custom-field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+  color: var(--green-950);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.custom-field-delete {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid rgba(184, 78, 73, 0.32);
+  border-radius: 8px;
+  color: var(--red);
+  background: var(--paper);
+  font-size: 19px;
+  line-height: 1;
+}
+.custom-field-delete:hover {
+  color: white;
+  background: var(--red);
+}
+.custom-field-entry > input,
+.custom-field-entry > select,
+.custom-field-entry > textarea { width: 100%; }
 .hero { padding: 34px; color: white; background:
   linear-gradient(105deg, rgba(16,47,42,.98), rgba(34,87,77,.9)),
   repeating-linear-gradient(45deg, transparent, transparent 18px, rgba(255,255,255,.02) 18px, rgba(255,255,255,.02) 19px);

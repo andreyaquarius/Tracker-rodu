@@ -116,6 +116,7 @@ import {
 } from "./services/projectAnalysisRecords";
 import {
   clearProjectCustomStructureCache,
+  deleteProjectCustomFieldDefinition,
   deleteProjectCustomRecord,
   deleteProjectCustomSection,
   importProjectCustomStructure,
@@ -207,6 +208,30 @@ function chooseWorkspace(
     items.find((item) => item.projectId === fallbackProjectId) ??
     items[0]
   );
+}
+
+function removeCustomFieldFromDatabase(
+  db: AppDatabase,
+  definition: CustomFieldDefinition,
+): AppDatabase {
+  const records = db[definition.module] as Array<AppEntity & {
+    customFields?: Record<string, unknown>;
+  }>;
+  const cleaned = records.map((record) => {
+    const customFields = { ...(record.customFields ?? {}) };
+    delete customFields[definition.id];
+    return { ...record, customFields };
+  });
+  return {
+    ...db,
+    [definition.module]: cleaned,
+    settings: {
+      ...db.settings,
+      customFields: db.settings.customFields.filter(
+        (field) => field.id !== definition.id,
+      ),
+    },
+  } as AppDatabase;
 }
 
 function scanList(value: unknown): ScanAttachment[] {
@@ -2931,6 +2956,44 @@ export default function App() {
     });
   };
 
+  const deleteCustomField = (definition: CustomFieldDefinition) => {
+    if (!workspace) {
+      app.setDatabase((current) => removeCustomFieldFromDatabase(current, definition));
+      return;
+    }
+    if (workspace.role !== "owner") {
+      notify("Видаляти додаткові поля може лише власник проєкту.", true);
+      return;
+    }
+    const projectId = workspace.projectId;
+    const previous = projectCustomFields;
+    const optimistic = previous.filter((field) => field.id !== definition.id);
+    setProjectCustomFields(optimistic);
+    saveProjectCustomStructureCache(
+      projectId,
+      optimistic,
+      projectCustomSections,
+      projectCustomRecords,
+    );
+    void deleteProjectCustomFieldDefinition(projectId, definition.id).then(() => {
+      recordProjectActivity(
+        definition.module,
+        definition.id,
+        `Видалено поле «${definition.label}» із розділу «${activityModuleLabel(definition.module)}».`,
+        "field_deleted",
+      );
+    }).catch((error: unknown) => {
+      setProjectCustomFields(previous);
+      saveProjectCustomStructureCache(
+        projectId,
+        previous,
+        projectCustomSections,
+        projectCustomRecords,
+      );
+      notify(describeError(error, "Не вдалося видалити власне поле."), true);
+    });
+  };
+
   const changeSettings = (next: AppDatabase) => {
     if (!workspace) {
       app.setDatabase(next);
@@ -3044,6 +3107,9 @@ export default function App() {
     }
 
     const projectId = workspace.projectId;
+    if (activeWorkspaceIdRef.current !== projectId) {
+      throw new Error("Активний проєкт змінився. Повторіть імпорт у потрібному проєкті.");
+    }
     const researchIds = new Set(next.researches.map((item) => item.id));
     const documentIds = new Set(next.documents.map((item) => item.id));
     const personIds = new Set(next.persons.map((item) => item.id));
@@ -3132,19 +3198,6 @@ export default function App() {
       );
     }
 
-    setProjectResearches(next.researches);
-    setProjectPersons(next.persons);
-    setProjectPersonRelations(next.personRelations);
-    setProjectDocuments(next.documents);
-    setProjectYearMatrix(next.yearMatrix);
-    setProjectTasks(next.tasks);
-    setProjectFindings(next.findings);
-    setProjectHypotheses(next.hypotheses);
-    setProjectArchiveRequests(next.archiveRequests);
-    setProjectCustomFields(next.settings.customFields);
-    setProjectCustomSections(next.customSections);
-    setProjectCustomRecords(next.customSectionRecords);
-    setProjectPreferences(preferences);
     saveProjectResearchCache(projectId, next.researches);
     saveProjectPeopleCache(projectId, next.persons, next.personRelations);
     saveProjectDocumentsCache(projectId, next.documents, next.yearMatrix);
@@ -3160,6 +3213,21 @@ export default function App() {
       next.customSections,
       next.customSectionRecords,
     );
+    if (activeWorkspaceIdRef.current !== projectId) return;
+
+    setProjectResearches(next.researches);
+    setProjectPersons(next.persons);
+    setProjectPersonRelations(next.personRelations);
+    setProjectDocuments(next.documents);
+    setProjectYearMatrix(next.yearMatrix);
+    setProjectTasks(next.tasks);
+    setProjectFindings(next.findings);
+    setProjectHypotheses(next.hypotheses);
+    setProjectArchiveRequests(next.archiveRequests);
+    setProjectCustomFields(next.settings.customFields);
+    setProjectCustomSections(next.customSections);
+    setProjectCustomRecords(next.customSectionRecords);
+    setProjectPreferences(preferences);
   };
 
   const content = (() => {
@@ -3237,6 +3305,7 @@ export default function App() {
             persons={activeDb.persons}
             customFieldDefinitions={activeDb.settings.customFields}
             onAddCustomField={canManageStructure ? addCustomField : undefined}
+            onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
             onSavePerson={savePerson}
             initialSearch={moduleSearch}
             initialOpenEntityId={openEntityId}
@@ -3269,6 +3338,7 @@ export default function App() {
               (field) => field.module === "persons",
             )}
             onAddCustomField={canManageStructure ? addCustomField : undefined}
+            onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
             initialSearch={moduleSearch}
             initialOpenPersonId={openEntityId}
             onSavePerson={savePerson}
@@ -3291,6 +3361,7 @@ export default function App() {
             findings={activeDb.findings}
             customFieldDefinitions={activeDb.settings.customFields}
             onAddCustomField={canManageStructure ? addCustomField : undefined}
+            onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
             initialSearch={moduleSearch}
             onOpenRelated={openRelatedRecord}
             onSave={saveFor("yearMatrix")}

@@ -61,6 +61,7 @@ interface Props {
   initialSearch?: string;
   customFieldDefinitions?: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
+  onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onSave: (entity: AppEntity) => void;
   onDelete: (id: string) => void;
@@ -77,6 +78,7 @@ export function YearMatrixPage({
   initialSearch = "",
   customFieldDefinitions = [],
   onAddCustomField,
+  onDeleteCustomField,
   onOpenRelated,
   onSave,
   onDelete,
@@ -166,6 +168,7 @@ export function YearMatrixPage({
         findings={findings}
         customFieldDefinitions={customFieldDefinitions}
         onAddCustomField={onAddCustomField}
+        onDeleteCustomField={onDeleteCustomField}
         initialSearch={initialSearch}
         onOpenRelated={onOpenRelated}
         onSave={onSave}

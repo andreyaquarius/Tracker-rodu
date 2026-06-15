@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActivityActionType, AppDatabase, BackupFile } from "../types";
 import type { SupabaseWorkspace } from "../services/supabaseAuth";
-import { downloadDatabase } from "../utils/exportImport";
+import { downloadDatabase, readDatabaseBackup } from "../utils/exportImport";
 import {
   createProjectBackup,
   deleteProjectBackup,
@@ -10,6 +10,7 @@ import {
 } from "../services/projectBackups";
 import { formatDateTime } from "../utils/dateHelpers";
 import { exportProjectToExcel } from "../utils/excelExport";
+import { cloneDatabaseForProjectImport } from "../utils/database";
 
 interface Props {
   db: AppDatabase;
@@ -33,6 +34,7 @@ export function BackupPage({
   const [busy, setBusy] = useState(false);
   const [backups, setBackups] = useState<BackupFile[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const isOwner = workspace?.role === "owner";
 
   const requireOwner = (): SupabaseWorkspace => {
@@ -129,6 +131,27 @@ export function BackupPage({
     }, "Резервну копію видалено.");
   };
 
+  const importLocalBackup = (file: File) => {
+    if (!window.confirm(
+      `Відновити проєкт із файла «${file.name}»? Поточні дані буде замінено, а перед цим застосунок створить страхувальну копію.`,
+    )) return;
+
+    void run(async () => {
+      const activeWorkspace = requireOwner();
+      const imported = cloneDatabaseForProjectImport(
+        await readDatabaseBackup(file),
+      );
+      await createProjectBackup(activeWorkspace.projectId, db, "manual");
+      await onReplace(imported);
+      onActivity?.(
+        activeWorkspace.projectId,
+        `Відновлено проєкт із локальної резервної копії «${file.name}».`,
+        "backup_restored",
+      );
+      await refreshBackups();
+    }, "Проєкт відновлено з локальної резервної копії.");
+  };
+
   return (
     <>
       <div className="page-heading">
@@ -183,6 +206,32 @@ export function BackupPage({
             onClick={() => downloadDatabase(db)}
           >
             Завантажити JSON
+          </button>
+        </article>
+
+        <article className="panel backup-card">
+          <span className="card-icon">↑</span>
+          <h2>Імпортувати копію</h2>
+          <p>
+            Відновіть проєкт із JSON-файла, який раніше було збережено на комп’ютері.
+          </p>
+          <input
+            ref={importInputRef}
+            className="visually-hidden"
+            type="file"
+            accept=".json,application/json"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) importLocalBackup(file);
+            }}
+          />
+          <button
+            className="button button-secondary"
+            disabled={busy || !isOwner}
+            onClick={() => importInputRef.current?.click()}
+          >
+            Вибрати файл JSON
           </button>
         </article>
 

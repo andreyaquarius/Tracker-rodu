@@ -220,6 +220,7 @@ export type ActivityActionType =
   | "section_updated"
   | "section_deleted"
   | "field_created"
+  | "field_deleted"
   | "settings_updated"
   | "invitation_created"
   | "invitation_updated"

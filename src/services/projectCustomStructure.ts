@@ -182,6 +182,18 @@ export async function saveProjectCustomFieldDefinition(
   if (error) throw error;
 }
 
+export async function deleteProjectCustomFieldDefinition(
+  projectId: string,
+  definitionId: string,
+): Promise<void> {
+  const { error } = await getSupabaseClient()
+    .from("custom_field_definitions")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("id", definitionId);
+  if (error) throw error;
+}
+
 export async function saveProjectCustomSection(
   projectId: string,
   section: CustomSectionDefinition,
