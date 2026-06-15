@@ -15,7 +15,10 @@ import { cloneDatabaseForProjectImport } from "../utils/database";
 interface Props {
   db: AppDatabase;
   workspace: SupabaseWorkspace | null;
-  onReplace: (db: AppDatabase) => void | Promise<void>;
+  onReplace: (
+    db: AppDatabase,
+    onProgress?: (message: string, percent: number) => void,
+  ) => void | Promise<void>;
   notify: (message: string, error?: boolean) => void;
   onActivity?: (
     relatedId: string,
@@ -34,6 +37,11 @@ export function BackupPage({
   const [busy, setBusy] = useState(false);
   const [backups, setBackups] = useState<BackupFile[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState<{
+    title: string;
+    message: string;
+    percent: number;
+  } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const isOwner = workspace?.role === "owner";
 
@@ -98,17 +106,46 @@ export function BackupPage({
       "Відновлення замінить поточні дані. Перед цим буде створено страхувальну копію поточного стану.",
     )) return;
 
+    setRestoreProgress({
+      title: "Відновлення проєкту",
+      message: "Завантажуємо резервну копію…",
+      percent: 3,
+    });
     void run(async () => {
       const activeWorkspace = requireOwner();
+      setRestoreProgress({
+        title: "Відновлення проєкту",
+        message: "Створюємо страховочну копію поточних даних…",
+        percent: 7,
+      });
       await createProjectBackup(activeWorkspace.projectId, db, "manual");
-      await onReplace(await downloadProjectBackup(backup.id));
+      setRestoreProgress({
+        title: "Відновлення проєкту",
+        message: "Завантажуємо та перевіряємо резервну копію…",
+        percent: 12,
+      });
+      const restored = await downloadProjectBackup(backup.id);
+      await onReplace(restored, (message, percent) =>
+        setRestoreProgress({
+          title: "Відновлення проєкту",
+          message,
+          percent,
+        }),
+      );
       onActivity?.(
         backup.id,
         `Відновлено проєкт із резервної копії «${backup.name}».`,
         "backup_restored",
       );
       await refreshBackups();
-    }, "Проєкт відновлено з резервної копії.");
+      setRestoreProgress({
+        title: "Відновлення завершено",
+        message: "Дані проєкту успішно оновлено.",
+        percent: 100,
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+    }, "Проєкт відновлено з резервної копії.")
+      .finally(() => setRestoreProgress(null));
   };
 
   const downloadBackup = (backup: BackupFile) =>
@@ -136,24 +173,77 @@ export function BackupPage({
       `Відновити проєкт із файла «${file.name}»? Поточні дані буде замінено, а перед цим застосунок створить страхувальну копію.`,
     )) return;
 
+    setRestoreProgress({
+      title: "Імпорт резервної копії",
+      message: "Читаємо та перевіряємо JSON-файл…",
+      percent: 2,
+    });
     void run(async () => {
       const activeWorkspace = requireOwner();
       const imported = cloneDatabaseForProjectImport(
         await readDatabaseBackup(file),
       );
+      setRestoreProgress({
+        title: "Імпорт резервної копії",
+        message: "Створюємо страховочну копію поточного проєкту…",
+        percent: 7,
+      });
       await createProjectBackup(activeWorkspace.projectId, db, "manual");
-      await onReplace(imported);
+      await onReplace(imported, (message, percent) =>
+        setRestoreProgress({
+          title: "Імпорт резервної копії",
+          message,
+          percent,
+        }),
+      );
       onActivity?.(
         activeWorkspace.projectId,
         `Відновлено проєкт із локальної резервної копії «${file.name}».`,
         "backup_restored",
       );
       await refreshBackups();
-    }, "Проєкт відновлено з локальної резервної копії.");
+      setRestoreProgress({
+        title: "Імпорт завершено",
+        message: "Резервну копію успішно додано до проєкту.",
+        percent: 100,
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+    }, "Проєкт відновлено з локальної резервної копії.")
+      .finally(() => setRestoreProgress(null));
   };
 
   return (
     <>
+      {restoreProgress ? (
+        <div className="restore-progress-backdrop" role="presentation">
+          <section
+            className="restore-progress-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="restore-progress-title"
+            aria-describedby="restore-progress-message"
+          >
+            <span className="restore-progress-spinner" aria-hidden="true" />
+            <div>
+              <span className="eyebrow">Зачекайте, не закривайте сторінку</span>
+              <h2 id="restore-progress-title">{restoreProgress.title}</h2>
+              <p id="restore-progress-message" aria-live="polite">
+                {restoreProgress.message}
+              </p>
+              <div
+                className="restore-progress-track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={restoreProgress.percent}
+              >
+                <span style={{ width: `${restoreProgress.percent}%` }} />
+              </div>
+              <strong>{restoreProgress.percent}%</strong>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <div className="page-heading">
         <div>
           <span className="eyebrow">Захист даних Трекера Роду</span>

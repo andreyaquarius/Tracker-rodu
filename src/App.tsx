@@ -3098,7 +3098,10 @@ export default function App() {
     });
   };
 
-  const replaceProjectDatabase = async (next: AppDatabase) => {
+  const replaceProjectDatabase = async (
+    next: AppDatabase,
+    onProgress?: (message: string, percent: number) => void,
+  ) => {
     if (!workspace) {
       throw new Error("Спочатку виберіть або створіть проєкт.");
     }
@@ -3115,20 +3118,25 @@ export default function App() {
     const personIds = new Set(next.persons.map((item) => item.id));
     const findingIds = new Set(next.findings.map((item) => item.id));
 
+    onProgress?.("Очищаємо попередні записи цільового проєкту…", 15);
     await clearProjectRecords(projectId);
+    onProgress?.("Відновлюємо дослідження…", 24);
     await importProjectResearches(projectId, next.researches);
+    onProgress?.("Відновлюємо осіб та родинні зв’язки…", 34);
     await importProjectPeople(
       projectId,
       next.persons,
       next.personRelations,
       researchIds,
     );
+    onProgress?.("Відновлюємо документи та матрицю років…", 44);
     await importProjectDocuments(
       projectId,
       next.documents,
       next.yearMatrix,
       researchIds,
     );
+    onProgress?.("Відновлюємо завдання та знахідки…", 55);
     await importProjectWorkRecords(
       projectId,
       next.tasks,
@@ -3137,6 +3145,7 @@ export default function App() {
       documentIds,
       personIds,
     );
+    onProgress?.("Відновлюємо гіпотези та запити в архів…", 66);
     await importProjectAnalysisRecords(
       projectId,
       next.hypotheses,
@@ -3146,6 +3155,7 @@ export default function App() {
       documentIds,
       findingIds,
     );
+    onProgress?.("Відновлюємо власні розділи та поля…", 76);
     await importProjectCustomStructure(
       projectId,
       next.settings.customFields,
@@ -3158,8 +3168,14 @@ export default function App() {
       compactTables: next.settings.compactTables,
       lastAutomaticBackupAt: next.settings.lastAutomaticBackupAt,
     };
-    await saveProjectPreferences(projectId, preferences);
+    onProgress?.("Оновлюємо налаштування проєкту…", 82);
+    try {
+      await saveProjectPreferences(projectId, preferences);
+    } catch (error) {
+      console.warn("Project data restored, but preferences were not updated.", error);
+    }
 
+    onProgress?.("Оновлюємо службові дані прикріплених файлів…", 88);
     const collections: Array<[CollectionKey, AppEntity[]]> = [
       ["researches", next.researches],
       ["documents", next.documents],
@@ -3172,12 +3188,16 @@ export default function App() {
     ];
     for (const [collection, records] of collections) {
       for (const record of records) {
-        await syncProjectAttachmentMetadata(
-          projectId,
-          collection,
-          record.id,
-          projectAttachmentFields(collection, record, next),
-        );
+        try {
+          await syncProjectAttachmentMetadata(
+            projectId,
+            collection,
+            record.id,
+            projectAttachmentFields(collection, record, next),
+          );
+        } catch (error) {
+          console.warn("Project data restored, but attachment metadata was not updated.", error);
+        }
       }
     }
     const sections = new Map(
@@ -3190,14 +3210,19 @@ export default function App() {
           .filter((field) => field.type === "attachments")
           .map((field) => [field.id, scanList(record.values[field.id])]),
       );
-      await syncProjectAttachmentMetadata(
-        projectId,
-        `custom:${record.sectionId}`,
-        record.id,
-        fields,
-      );
+      try {
+        await syncProjectAttachmentMetadata(
+          projectId,
+          `custom:${record.sectionId}`,
+          record.id,
+          fields,
+        );
+      } catch (error) {
+        console.warn("Project data restored, but custom attachment metadata was not updated.", error);
+      }
     }
 
+    onProgress?.("Зберігаємо локальний стан та оновлюємо сторінку…", 96);
     saveProjectResearchCache(projectId, next.researches);
     saveProjectPeopleCache(projectId, next.persons, next.personRelations);
     saveProjectDocumentsCache(projectId, next.documents, next.yearMatrix);
@@ -3228,6 +3253,7 @@ export default function App() {
     setProjectCustomSections(next.customSections);
     setProjectCustomRecords(next.customSectionRecords);
     setProjectPreferences(preferences);
+    onProgress?.("Готово.", 100);
   };
 
   const content = (() => {
