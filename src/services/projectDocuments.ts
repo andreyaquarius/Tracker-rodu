@@ -261,6 +261,26 @@ export async function saveProjectYearMatrixRecord(
   return matrixFromRow(data as YearMatrixRow);
 }
 
+export async function saveProjectYearMatrixRecords(
+  projectId: string,
+  records: YearMatrixRecord[],
+  researchIds: Set<string>,
+  documentIds: Set<string>,
+): Promise<YearMatrixRecord[]> {
+  if (!records.length) return [];
+  const { data, error } = await getSupabaseClient()
+    .from("year_matrix")
+    .upsert(
+      records.map((record) =>
+        matrixToRow(projectId, record, researchIds, documentIds),
+      ),
+      { onConflict: "id" },
+    )
+    .select(YEAR_MATRIX_SELECT);
+  if (error) throw error;
+  return (data as YearMatrixRow[]).map(matrixFromRow);
+}
+
 export async function deleteProjectYearMatrixRecord(
   projectId: string,
   recordId: string,

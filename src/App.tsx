@@ -90,6 +90,7 @@ import {
   saveProjectDocument,
   saveProjectDocumentsCache,
   saveProjectYearMatrixRecord,
+  saveProjectYearMatrixRecords,
 } from "./services/projectDocuments";
 import {
   clearProjectWorkRecordsCache,
@@ -2017,6 +2018,61 @@ export default function App() {
       });
   };
 
+  const saveYearMatrixRange = (records: YearMatrixRecord[]) => {
+    if (!records.length) return;
+    if (!workspace) {
+      for (const record of records) app.saveEntity("yearMatrix", record);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      notify("У цьому проєкті у вас є лише право перегляду.", true);
+      return;
+    }
+
+    const projectId = workspace.projectId;
+    const previous = projectYearMatrix;
+    const recordIds = new Set(records.map((record) => record.id));
+    const optimistic = [
+      ...records,
+      ...previous.filter((record) => !recordIds.has(record.id)),
+    ];
+    setProjectYearMatrix(optimistic);
+    saveProjectDocumentsCache(projectId, projectDocuments, optimistic);
+
+    void saveProjectYearMatrixRecords(
+      projectId,
+      records,
+      new Set(projectResearches.map((research) => research.id)),
+      new Set(projectDocuments.map((document) => document.id)),
+    )
+      .then((saved) => {
+        if (activeWorkspaceIdRef.current !== projectId) return;
+        const savedById = new Map(saved.map((record) => [record.id, record]));
+        setProjectYearMatrix((current) => {
+          const next = current.map((record) => savedById.get(record.id) ?? record);
+          saveProjectDocumentsCache(projectId, projectDocuments, next);
+          return next;
+        });
+        recordProjectActivity(
+          "yearMatrix",
+          saved[0]?.id ?? records[0].id,
+          `Додано діапазон із ${saved.length || records.length} років до матриці.`,
+          "record_created",
+        );
+        notify(`Додано ${saved.length || records.length} років до матриці.`);
+      })
+      .catch((error: unknown) => {
+        saveProjectDocumentsCache(projectId, projectDocuments, previous);
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectYearMatrix(previous);
+        }
+        notify(
+          describeError(error, "Не вдалося зберегти діапазон років."),
+          true,
+        );
+      });
+  };
+
   const removeYearMatrixRecord = (id: string) => {
     if (!workspace) {
       app.deleteEntity("yearMatrix", id);
@@ -3391,6 +3447,7 @@ export default function App() {
             initialSearch={moduleSearch}
             onOpenRelated={openRelatedRecord}
             onSave={saveFor("yearMatrix")}
+            onSaveRange={saveYearMatrixRange}
             onDelete={deleteFor("yearMatrix")}
             readOnly={readOnly}
             projectName={workspace?.projectName}

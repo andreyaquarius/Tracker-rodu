@@ -99,6 +99,7 @@ export function CrudPage({
   const [researchFilter, setResearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [archiveFilter, setArchiveFilter] = useState("");
+  const [placeFilter, setPlaceFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("");
   const [documentTypeFilter, setDocumentTypeFilter] = useState("");
   const [editing, setEditing] = useState<AppEntity | null | "new">(null);
@@ -129,9 +130,9 @@ export function CrudPage({
     setEditing("new");
   };
 
-  const documentFilterOptions = useMemo(() => {
-    if (config.collection !== "documents") {
-      return { archives: [], documentTypes: [] };
+  const structuredFilterOptions = useMemo(() => {
+    if (config.collection !== "documents" && config.collection !== "yearMatrix") {
+      return { archives: [], places: [], documentTypes: [] };
     }
     const values = (key: string) => Array.from(new Set(
       items
@@ -140,6 +141,7 @@ export function CrudPage({
     )).sort((left, right) => left.localeCompare(right, "uk"));
     return {
       archives: values("archive"),
+      places: values("place"),
       documentTypes: values("documentType"),
     };
   }, [config.collection, items]);
@@ -157,15 +159,24 @@ export function CrudPage({
       const matchesArchive = config.collection !== "documents"
         || !archiveFilter
         || row.archive === archiveFilter;
-      const matchesDocumentType = config.collection !== "documents"
+      const matchesPlace = config.collection !== "yearMatrix"
+        || !placeFilter
+        || row.place === placeFilter;
+      const matchesDocumentType = (
+        config.collection !== "documents" && config.collection !== "yearMatrix"
+      )
         || !documentTypeFilter
         || row.documentType === documentTypeFilter;
-      const matchesYear = config.collection !== "documents"
-        || documentMatchesYear(row, yearFilter);
+      const matchesYear = config.collection === "documents"
+        ? documentMatchesYear(row, yearFilter)
+        : config.collection === "yearMatrix"
+          ? !yearFilter || String(row.year ?? "").trim() === yearFilter.trim()
+          : true;
       return matchesSearch
         && matchesResearch
         && matchesStatus
         && matchesArchive
+        && matchesPlace
         && matchesDocumentType
         && matchesYear;
     });
@@ -174,6 +185,7 @@ export function CrudPage({
     config.collection,
     documentTypeFilter,
     items,
+    placeFilter,
     researchFilter,
     search,
     statusFilter,
@@ -184,7 +196,9 @@ export function CrudPage({
       || researchFilter
       || statusFilter
       || (config.collection === "documents"
-        && (archiveFilter || yearFilter || documentTypeFilter)),
+        && (archiveFilter || yearFilter || documentTypeFilter))
+      || (config.collection === "yearMatrix"
+        && (placeFilter || yearFilter || documentTypeFilter)),
   );
 
   const confirmDelete = async (entity: AppEntity) => {
@@ -276,7 +290,7 @@ export function CrudPage({
                 <span>Архів</span>
                 <select value={archiveFilter} onChange={(event) => setArchiveFilter(event.target.value)}>
                   <option value="">Усі архіви</option>
-                  {documentFilterOptions.archives.map((archive) => (
+                  {structuredFilterOptions.archives.map((archive) => (
                     <option key={archive} value={archive}>{archive}</option>
                   ))}
                 </select>
@@ -294,7 +308,38 @@ export function CrudPage({
                 <span>Тип документа</span>
                 <select value={documentTypeFilter} onChange={(event) => setDocumentTypeFilter(event.target.value)}>
                   <option value="">Усі типи</option>
-                  {documentFilterOptions.documentTypes.map((documentType) => (
+                  {structuredFilterOptions.documentTypes.map((documentType) => (
+                    <option key={documentType} value={documentType}>{documentType}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : null}
+          {config.collection === "yearMatrix" ? (
+            <>
+              <label>
+                <span>Рік</span>
+                <input
+                  type="number"
+                  value={yearFilter}
+                  onChange={(event) => setYearFilter(event.target.value)}
+                  placeholder="Будь-який"
+                />
+              </label>
+              <label>
+                <span>Населений пункт</span>
+                <select value={placeFilter} onChange={(event) => setPlaceFilter(event.target.value)}>
+                  <option value="">Усі населені пункти</option>
+                  {structuredFilterOptions.places.map((place) => (
+                    <option key={place} value={place}>{place}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Тип документа</span>
+                <select value={documentTypeFilter} onChange={(event) => setDocumentTypeFilter(event.target.value)}>
+                  <option value="">Усі типи</option>
+                  {structuredFilterOptions.documentTypes.map((documentType) => (
                     <option key={documentType} value={documentType}>{documentType}</option>
                   ))}
                 </select>
