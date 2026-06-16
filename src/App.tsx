@@ -151,6 +151,7 @@ import {
 import { assertProjectRecordUnchanged } from "./services/projectConflicts";
 import { setProjectAttachmentTarget } from "./services/scanStorage";
 import { clearGoogleDriveSession } from "./services/googleDriveStorage";
+import { clearAllProjectCaches } from "./utils/projectCache";
 import { createActivityEntries } from "./utils/activityLog";
 import {
   emptyProjectDashboardStats,
@@ -1531,6 +1532,9 @@ export default function App() {
       setWorkspaces([]);
       lastPreparedUserRef.current = null;
       workspaceSetupRef.current = null;
+      // Wipe cached personal project data so it cannot be read by the next
+      // user of a shared browser after sign-out.
+      clearAllProjectCaches();
       localStorage.removeItem(ACCOUNT_ONBOARDING_KEY);
       localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
       setOnboarded(false);
