@@ -26,6 +26,7 @@ import { InlineCustomSectionFieldCreator } from "../components/InlineCustomSecti
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
 import { exportCustomSectionToExcel } from "../utils/excelExport";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
+import { sanitizeWebUrl } from "../utils/safeUrl";
 
 export function CustomSectionPage({
   db,
@@ -543,7 +544,10 @@ function CustomRecordValue({
     return <div className="detail-text">{values.join(", ") || "—"}</div>;
   }
   if (field.type === "url" && typeof value === "string" && value) {
-    return <a href={value} target="_blank" rel="noreferrer">Відкрити посилання ↗</a>;
+    const safeHref = sanitizeWebUrl(value);
+    return safeHref
+      ? <a href={safeHref} target="_blank" rel="noreferrer noopener">Відкрити посилання ↗</a>
+      : <div className="detail-text">{value}</div>;
   }
   if (field.type === "email" && typeof value === "string" && value) {
     return <a href={`mailto:${value}`}>{value}</a>;

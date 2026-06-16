@@ -1,5 +1,6 @@
 import type { ScanAttachment } from "../types";
 import { createId } from "../utils/id";
+import { sanitizeWebUrl } from "../utils/safeUrl";
 import { nowIso } from "../utils/dateHelpers";
 import {
   deleteFileFromGoogleDrive,
@@ -68,10 +69,11 @@ export async function openScan(scan: ScanAttachment): Promise<void> {
   if (!scan.storagePath) {
     throw new Error("У файлу відсутній ідентифікатор Google Drive.");
   }
-  const opened = window.open(
-    scan.webViewLink || googleDriveViewUrl(scan.storagePath),
-    "_blank",
-  );
+  // scan.webViewLink can originate from an imported backup, so it must be
+  // scheme-checked before window.open() to avoid "javascript:" execution or an
+  // open redirect. Fall back to the canonical Drive view URL we build ourselves.
+  const target = sanitizeWebUrl(scan.webViewLink) ?? googleDriveViewUrl(scan.storagePath);
+  const opened = window.open(target, "_blank", "noopener,noreferrer");
   if (!opened) {
     throw new Error("Браузер заблокував відкриття файлу. Дозвольте спливні вікна.");
   }

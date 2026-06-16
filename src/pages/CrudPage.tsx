@@ -41,6 +41,7 @@ import {
 } from "../utils/customFields";
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
 import { exportEntityRecordsToExcel } from "../utils/excelExport";
+import { sanitizeWebUrl } from "../utils/safeUrl";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -690,10 +691,13 @@ function DetailValue({
     );
   }
   if (field.type === "url" && typeof value === "string") {
-    return (
-      <a href={value} target="_blank" rel="noreferrer">
+    const safeHref = sanitizeWebUrl(value);
+    return safeHref ? (
+      <a href={safeHref} target="_blank" rel="noreferrer noopener">
         Відкрити посилання ↗
       </a>
+    ) : (
+      <div className="detail-text">{value}</div>
     );
   }
   const text = String(value ?? "");

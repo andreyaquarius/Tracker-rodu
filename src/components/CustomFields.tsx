@@ -8,6 +8,7 @@ import type {
 import { ScanAttachmentsEditor, ScanAttachmentsView } from "./ScanAttachments";
 import { RecordRelationPicker } from "./RecordRelationPicker";
 import { relatedRecordLabel } from "../utils/customSections";
+import { sanitizeWebUrl } from "../utils/safeUrl";
 
 export function CustomFieldsEditor({
   db,
@@ -219,7 +220,10 @@ function CustomFieldDisplay({
   }
   const text = String(value ?? "") || "—";
   if (definition.type === "url" && text !== "—") {
-    return <a href={text} target="_blank" rel="noreferrer">Відкрити посилання ↗</a>;
+    const safeHref = sanitizeWebUrl(text);
+    return safeHref
+      ? <a href={safeHref} target="_blank" rel="noreferrer noopener">Відкрити посилання ↗</a>
+      : <div className="detail-text">{text}</div>;
   }
   if (definition.type === "email" && text !== "—") {
     return <a href={`mailto:${text}`}>{text}</a>;
