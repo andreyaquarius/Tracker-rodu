@@ -1,8 +1,16 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+// Bind CORS to the deployed app origin instead of "*" (see _shared/ai.ts).
+const allowedOrigin =
+  Deno.env.get("ALLOWED_ORIGIN")?.trim() ||
+  Deno.env.get("APP_URL")?.trim() ||
+  "*";
+
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": allowedOrigin,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Vary": "Origin",
 };
 
 type InvitationRow = {

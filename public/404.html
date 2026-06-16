@@ -3,11 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="robots" content="noindex" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <title>Трекер Роду</title>
-    <script>
-      sessionStorage.setItem("tracker-rodu-redirect", window.location.href);
-      window.location.replace("/");
-    </script>
+    <script src="/spa-redirect.js"></script>
   </head>
   <body></body>
 </html>

@@ -124,25 +124,33 @@ Deno.serve(async (request) => {
     const documentIds = typedLinks.filter((link) => link.target_type === "document").map((link) => link.target_id);
     const findingIds = typedLinks.filter((link) => link.target_type === "finding").map((link) => link.target_id);
 
+    // SECURITY: this function runs with the service role, so RLS is bypassed.
+    // hypothesis_links.target_id is unconstrained and editor-controlled, so every
+    // related-entity fetch must be scoped to the hypothesis's own project_id to
+    // prevent cross-project (BOLA) data exposure via crafted links.
     const [peopleResult, documentsResult, findingsResult, researchResult] = await Promise.all([
       personIds.length
         ? admin.from("persons")
             .select("id, full_name, surname, given_name, patronymic, birth_date, birth_year_from, birth_year_to, birth_place, marriage_date, marriage_place, death_date, death_year_from, death_year_to, death_place, residence_places, social_status, religion, occupation, status, notes, custom_fields")
+            .eq("project_id", hypothesis.project_id)
             .in("id", personIds)
         : Promise.resolve({ data: [], error: null }),
       documentIds.length
         ? admin.from("documents")
             .select("id, title, document_type, archive, fund, description, file_reference, year_from, year_to, place, url, review_status, notes, custom_fields")
+            .eq("project_id", hypothesis.project_id)
             .in("id", documentIds)
         : Promise.resolve({ data: [], error: null }),
       findingIds.length
         ? admin.from("findings")
             .select("id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields")
+            .eq("project_id", hypothesis.project_id)
             .in("id", findingIds)
         : Promise.resolve({ data: [], error: null }),
       hypothesis.research_id
         ? admin.from("researches")
             .select("id, title, goal, surnames, places, period_from, period_to, archives, status, notes, custom_fields")
+            .eq("project_id", hypothesis.project_id)
             .eq("id", hypothesis.research_id)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
@@ -184,6 +192,7 @@ Deno.serve(async (request) => {
       const { data, error } = await admin
         .from("tasks")
         .select("id, research_id, person_name, title, description, place, year_from, year_to, document_type, document_id, status, priority, deadline, notes, custom_fields")
+        .eq("project_id", hypothesis.project_id)
         .in("id", personTaskIds);
       if (error) throw error;
       personTasks = data ?? [];

@@ -1,8 +1,22 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+// Bind CORS to the deployed app origin instead of "*". Computed once from the
+// stable per-deployment env (APP_URL / ALLOWED_ORIGIN). Falls back to "*" only
+// when neither is configured so existing deployments keep working until the
+// secret is set (see SECURITY_OPERATIONS.md).
+function allowedOrigin(): string {
+  return (
+    Deno.env.get("ALLOWED_ORIGIN")?.trim() ||
+    Deno.env.get("APP_URL")?.trim() ||
+    "*"
+  );
+}
+
 export const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": allowedOrigin(),
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Vary": "Origin",
 };
 
 export type AiMode = "fast" | "detailed";

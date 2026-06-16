@@ -14,6 +14,7 @@ import type {
 } from "../types";
 import type { FieldConfig } from "../pages/entityConfigs";
 import { customRecordTitle, relatedRecordLabel } from "./customSections";
+import { neutralizeSpreadsheetValue } from "./spreadsheetSafe";
 
 interface WorkbookColumn {
   key: string;
@@ -769,8 +770,9 @@ function isWebUrl(value: unknown): value is string {
 }
 
 function inlineCell(reference: string, value: string, style: number): string {
-  const preserved = /^\s|\s$|\n/.test(value) ? ' xml:space="preserve"' : "";
-  return `<c r="${reference}" t="inlineStr" s="${style}"><is><t${preserved}>${escapeXml(value)}</t></is></c>`;
+  const safe = neutralizeSpreadsheetValue(value);
+  const preserved = /^\s|\s$|\n/.test(safe) ? ' xml:space="preserve"' : "";
+  return `<c r="${reference}" t="inlineStr" s="${style}"><is><t${preserved}>${escapeXml(safe)}</t></is></c>`;
 }
 
 function cellReference(columnIndex: number, row: number): string {

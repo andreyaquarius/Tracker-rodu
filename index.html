@@ -10,19 +10,6 @@
     <link rel="icon" type="image/png" href="/tracker-rodu-logo.png" />
     <meta property="og:title" content="Трекер Роду — Не губи сліди свого роду" />
     <meta property="og:description" content="Керуйте родовим дослідженням: від першої зачіпки до підтвердженого факту." />
-    <script>
-      (function () {
-        var redirect = sessionStorage.getItem("tracker-rodu-redirect");
-        if (!redirect) return;
-        sessionStorage.removeItem("tracker-rodu-redirect");
-        var target = new URL(redirect);
-        window.history.replaceState(
-          null,
-          "",
-          target.pathname + target.search + target.hash
-        );
-      })();
-    </script>
     <title>Трекер Роду — Не губи сліди свого роду</title>
   </head>
   <body lang="uk" spellcheck="false">
