@@ -1,0 +1,25 @@
+# Supabase CLI configuration.
+#
+# project_id is the (public) project ref — it is already exposed in the client
+# bundle and is not a secret.
+project_id = "ppiymmsurabwxnzpdasl"
+
+# All Edge Functions require an authenticated user: each one calls
+# auth.getUser() in code, and the gateway also rejects unauthenticated requests
+# before the function runs. verify_jwt = true is the Supabase default; it is set
+# explicitly here so the security expectation is visible and version-controlled
+# (audit finding F-16).
+[functions.save-ai-key]
+verify_jwt = true
+
+[functions.delete-ai-key]
+verify_jwt = true
+
+[functions.test-ai-key]
+verify_jwt = true
+
+[functions.review-hypothesis]
+verify_jwt = true
+
+[functions.send-project-invitation]
+verify_jwt = true
