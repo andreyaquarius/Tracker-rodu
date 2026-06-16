@@ -123,5 +123,5 @@
 - `npx tsc --noEmit` — **OK** (0 помилок).
 - `node --test "test/**/*.test.ts"` — **11/11 pass**.
 - `npm run build` — **OK** (лише попередження про розмір чанку).
-- `npm audit --omit=dev` — лишилися лише dev-only esbuild/vite (F-13).
+- `npm audit --omit=dev` — **0 vulnerabilities** (build-only `vite`/`@vitejs/plugin-react`/`typescript` перенесено в `devDependencies`; esbuild/vite-радник F-13 лишається лише у dev-залежностях і не впливає на shipped-код).
 - Скан `dist/` на секрети — **чисто** (немає `service_role`/`sb_secret`/`AIza`/JWT-anon).
