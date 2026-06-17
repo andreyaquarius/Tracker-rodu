@@ -4,11 +4,21 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 // stable per-deployment env (APP_URL / ALLOWED_ORIGIN). Falls back to "*" only
 // when neither is configured so existing deployments keep working until the
 // secret is set (see SECURITY_OPERATIONS.md).
+function normalizedOrigin(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "*") return trimmed || "*";
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
+}
+
 function allowedOrigin(): string {
-  return (
+  return normalizedOrigin(
     Deno.env.get("ALLOWED_ORIGIN")?.trim() ||
     Deno.env.get("APP_URL")?.trim() ||
-    "*"
+    "*",
   );
 }
 
@@ -152,12 +162,8 @@ export async function callGemini(
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: responseJsonSchema
           ? {
-              responseFormat: {
-                text: {
-                  mimeType: "application/json",
-                  schema: responseJsonSchema,
-                },
-              },
+              responseMimeType: "application/json",
+              responseSchema: responseJsonSchema,
               temperature: 0.15,
             }
           : {
