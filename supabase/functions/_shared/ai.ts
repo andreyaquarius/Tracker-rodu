@@ -162,12 +162,8 @@ export async function callGemini(
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: responseJsonSchema
           ? {
-              responseFormat: {
-                text: {
-                  mimeType: "application/json",
-                  schema: responseJsonSchema,
-                },
-              },
+              responseMimeType: "application/json",
+              responseSchema: responseJsonSchema,
               temperature: 0.15,
             }
           : {
