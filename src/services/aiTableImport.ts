@@ -42,7 +42,7 @@ export async function analyzeTableImportWithAi(
         }
       }
     }
-    throw error;
+    throw new Error(readableAiImportFunctionError(error));
   }
   if (data?.error) throw new Error(String(data.error));
   return {
@@ -50,4 +50,12 @@ export async function analyzeTableImportWithAi(
     warnings: Array.isArray(data?.warnings) ? data.warnings.map(String) : [],
     summary: String(data?.summary ?? ""),
   };
+}
+
+function readableAiImportFunctionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (message.includes("Failed to send a request to the Edge Function")) {
+    return "Не вдалося під’єднатися до Edge Function analyze-table-import. Перевірте, що вона задеплоєна в Supabase, а в GitHub Actions задані SUPABASE_ACCESS_TOKEN і SUPABASE_PROJECT_REF. Після деплою оновіть сторінку та спробуйте ще раз.";
+  }
+  return message || "Не вдалося викликати Edge Function analyze-table-import.";
 }
