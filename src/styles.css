@@ -1361,3 +1361,55 @@ tbody tr:hover { background: #fbfaf5; }
   .row-actions { display: flex; justify-content: flex-start; padding-top: 10px; }
   .row-actions::before { display: none; }
 }
+
+.ai-import-panel {
+  grid-column: 1 / -1;
+  margin-top: 12px;
+  padding: 16px;
+  background: #f7f3e8;
+  border: 1px solid #e1d4b8;
+  border-radius: 16px;
+}
+.ai-import-heading,
+.ai-import-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ai-import-heading p,
+.ai-import-summary {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.ai-import-panel textarea {
+  width: 100%;
+  margin-top: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.ai-import-actions {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ai-import-warnings {
+  margin: 10px 0 0;
+  color: #8a5a00;
+  font-size: 13px;
+}
+.ai-import-preview {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+.ai-import-preview pre {
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  background: #22352f;
+  color: #f8f5ed;
+  border-radius: 12px;
+  font-size: 12px;
+}
