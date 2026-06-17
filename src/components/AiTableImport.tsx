@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { AppEntity, CollectionKey, FindingParticipant } from "../types";
 import type { EntityConfig, FieldConfig } from "../pages/entityConfigs";
 import { analyzeTableImportWithAi } from "../services/aiTableImport";
@@ -14,11 +14,13 @@ interface AiTableImportProps {
 export function AiTableImport({ config, projectId, onImport }: AiTableImportProps) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
+  const [fileName, setFileName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [summary, setSummary] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [records, setRecords] = useState<AppEntity[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const parsedRows = useMemo(() => parseTableText(text), [text]);
 
@@ -28,7 +30,7 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
     setWarnings([]);
     setRecords([]);
     if (!parsedRows.length) {
-      setError("Вставте CSV/TSV або JSON-таблицю з заголовками колонок.");
+      setError("Прикріпіть CSV/TSV/TXT або JSON-таблицю з заголовками колонок.");
       return;
     }
     setBusy(true);
@@ -60,6 +62,7 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
     onImport(records);
     setOpen(false);
     setText("");
+    setFileName("");
     setRecords([]);
     setSummary("");
     setWarnings([]);
@@ -67,8 +70,8 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
 
   if (!open) {
     return (
-      <button type="button" className="button button-ghost" onClick={() => setOpen(true)}>
-        Імпорт ШІ
+      <button type="button" className="button button-secondary ai-import-open-button" onClick={() => setOpen(true)}>
+        📎 Прикріпити таблицю ШІ
       </button>
     );
   }
@@ -78,19 +81,48 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
       <div className="ai-import-heading">
         <div>
           <strong>Імпорт таблиці через ШІ</strong>
-          <p>Вставте CSV/TSV або JSON. ШІ зіставить колонки з полями розділу «{config.title}».</p>
+          <p>Прикріпіть файл CSV, TSV, TXT або JSON. ШІ зіставить колонки з полями розділу «{config.title}».</p>
         </div>
-        <button type="button" className="button button-ghost" onClick={() => setOpen(false)}>Закрити</button>
+        <button type="button" className="button button-secondary" onClick={() => setOpen(false)}>Закрити</button>
       </div>
-      <textarea
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        placeholder="Наприклад: Назва,Архів,Фонд,Рік від,Рік до..."
-        rows={8}
-      />
+      <div className="ai-import-file-box">
+        <input
+          ref={fileInputRef}
+          className="visually-hidden"
+          type="file"
+          accept=".csv,.tsv,.txt,.json,text/csv,text/tab-separated-values,text/plain,application/json"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            setError("");
+            setSummary("");
+            setWarnings([]);
+            setRecords([]);
+            setFileName(file.name);
+            void file.text().then(setText).catch(() => {
+              setText("");
+              setFileName("");
+              setError("Не вдалося прочитати файл таблиці.");
+            });
+          }}
+        />
+        <button
+          type="button"
+          className="button button-primary ai-import-attach-button"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          📎 Прикріпити таблицю
+        </button>
+        <div>
+          <strong>{fileName || "Файл ще не вибрано"}</strong>
+          <span>{parsedRows.length ? `Розпізнано рядків: ${parsedRows.length}` : "Підтримуються CSV, TSV, TXT або JSON з заголовками колонок."}</span>
+        </div>
+      </div>
       <div className="ai-import-actions">
-        <span>{parsedRows.length ? `Розпізнано рядків: ${parsedRows.length}` : "Очікується таблиця з заголовками"}</span>
-        <button type="button" className="button button-primary" onClick={() => void analyze()} disabled={busy}>
+        <button type="button" className="button button-secondary" onClick={() => { setText(""); setFileName(""); setRecords([]); setWarnings([]); setSummary(""); }}>
+          Очистити
+        </button>
+        <button type="button" className="button button-primary" onClick={() => void analyze()} disabled={busy || !text.trim()}>
           {busy ? "Аналіз…" : "Проаналізувати"}
         </button>
       </div>
