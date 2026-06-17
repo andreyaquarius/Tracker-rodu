@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build --configLoader runner",
     "preview": "vite preview --configLoader runner",
     "lint": "tsc --noEmit --pretty false",
-    "test": "node --test \"test/**/*.test.ts\""
+    "test": "node --test \"test/**/*.test.ts\"",
+    "deploy:ai-functions": "bash scripts/deploy-ai-functions.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.0",
