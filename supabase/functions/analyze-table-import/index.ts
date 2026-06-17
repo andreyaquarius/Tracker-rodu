@@ -87,7 +87,7 @@ ${JSON.stringify(fields, null, 2)}
 ${JSON.stringify(rows.slice(0, maxRows), null, 2)}
 `.trim();
 
-    const result = await callGemini(apiKey, settings.model, prompt, responseSchema) as Record<string, unknown>;
+    const result = await callGemini(apiKey, settings.model, prompt, null) as Record<string, unknown>;
     return json({
       records: Array.isArray(result.records) ? result.records : [],
       warnings: Array.isArray(result.warnings) ? result.warnings : [],

@@ -148,8 +148,9 @@ export async function callGemini(
   apiKey: string,
   model: string,
   prompt: string,
-  responseJsonSchema?: Record<string, unknown>,
+  responseJsonSchema?: Record<string, unknown> | null,
 ): Promise<unknown> {
+  const expectsJson = responseJsonSchema !== undefined;
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
@@ -160,10 +161,10 @@ export async function callGemini(
       },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: responseJsonSchema
+        generationConfig: expectsJson
           ? {
               responseMimeType: "application/json",
-              responseSchema: responseJsonSchema,
+              ...(responseJsonSchema ? { responseSchema: toGeminiSchema(responseJsonSchema) } : {}),
               temperature: 0.15,
             }
           : {
@@ -189,10 +190,24 @@ export async function callGemini(
     .join("")
     .trim();
   if (!text) throw new Error("Google Gemini повернув порожню відповідь.");
-  if (!responseJsonSchema) return text;
+  if (!expectsJson) return text;
   try {
     return JSON.parse(text);
   } catch {
     throw new Error("Google Gemini повернув відповідь у неправильному форматі.");
   }
+}
+
+function toGeminiSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  return stripUnsupportedSchemaFields(schema) as Record<string, unknown>;
+}
+
+function stripUnsupportedSchemaFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripUnsupportedSchemaFields);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "additionalProperties")
+      .map(([key, nested]) => [key, stripUnsupportedSchemaFields(nested)]),
+  );
 }
