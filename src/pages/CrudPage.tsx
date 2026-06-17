@@ -40,6 +40,7 @@ import {
   supportsCustomFields,
 } from "../utils/customFields";
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
+import { AiTableImport } from "../components/AiTableImport";
 import { exportEntityRecordsToExcel } from "../utils/excelExport";
 import { sanitizeWebUrl } from "../utils/safeUrl";
 
@@ -261,9 +262,18 @@ export function CrudPage({
             })}
           />
           {!readOnly ? (
-            <button className="button button-primary" onClick={startNew}>
-              + Додати {config.singular}
-            </button>
+            <>
+              <AiTableImport
+                config={config}
+                projectId={projectId}
+                onImport={(records) => {
+                  for (const record of records) onSave(record);
+                }}
+              />
+              <button className="button button-primary" onClick={startNew}>
+                + Додати {config.singular}
+              </button>
+            </>
           ) : null}
         </div>
       </div>
