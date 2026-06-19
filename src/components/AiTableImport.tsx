@@ -399,6 +399,8 @@ function buildEntity(collection: CollectionKey, fields: FieldConfig[], source: R
     entity.people = participants.map((participant) => participant.name).filter(Boolean).join(", ");
   }
   if (collection === "persons") {
+    entity.nameVariants = sanitizeVariantText(entity.nameVariants);
+    entity.surnameVariants = sanitizeVariantText(entity.surnameVariants);
     const fullName = String(entity.fullName ?? "").trim();
     const nameParts = [entity.surname, entity.givenName, entity.patronymic]
       .map((value) => String(value ?? "").trim())
@@ -412,6 +414,14 @@ function buildEntity(collection: CollectionKey, fields: FieldConfig[], source: R
     entity.mentionScans = [];
   }
   return entity as unknown as AppEntity;
+}
+
+function sanitizeVariantText(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const variants = text.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+  if (text.length > 300 || variants.length > 8) return "";
+  return text;
 }
 
 function findModelCommentary(value: unknown, fieldPath = ""): string | null {

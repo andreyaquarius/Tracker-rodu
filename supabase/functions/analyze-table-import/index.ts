@@ -125,6 +125,8 @@ function sectionGuidanceFor(collection: string, sourceHeaders: string[], fileNam
 - Якщо прізвище дитини не вказане окремо, але у полі "Батько" є повне ім’я з прізвищем, можна взяти останню частину імені батька як імовірне surname дитини, але обов’язково додай warning.
 - "номер попорядку", "№", "No" не є полем особи; перенеси його в notes як "Номер у джерелі: ...".
 - Не використовуй текст імен батьків або хрещених як варіанти прізвища дитини.
+- Поля nameVariants і surnameVariants заповнюй лише тоді, коли у вихідній таблиці є окремі колонки з варіантами. Не генеруй відмінки, жіночі/чоловічі форми, множину, історичні правописи або альтернативні написання самостійно.
+- Якщо окремої колонки з варіантами немає, поверни nameVariants і surnameVariants порожніми рядками.
 - Для gender використовуй "невідомо", якщо стать не очевидна або не вказана.
 - Для status використовуй "гіпотетична", якщо джерело не містить підтвердження статусу в термінах застосунку.
 ${looksLikeBirthRegister ? "- Ця таблиця за заголовками схожа на записи народження: особою для імпорту має бути саме дитина з кожного рядка." : ""}
@@ -144,6 +146,19 @@ function trustedFields(collection: string, fields: unknown): FieldSchema[] {
       options: Array.isArray(field.options) ? field.options.map(String).slice(0, 40) : undefined,
       required: Boolean(field.required),
     }));
+}
+
+function restrictFieldsForSource(collection: string, fields: FieldSchema[], sourceHeaders: string[]): FieldSchema[] {
+  if (collection !== "persons") return fields;
+  return fields.filter((field) => {
+    if (field.key === "surnameVariants") return hasVariantHeader(sourceHeaders, "surname");
+    if (field.key === "nameVariants") return hasVariantHeader(sourceHeaders, "name");
+    return true;
+  });
+}
+
+function hasVariantHeader(headers: string[], kind: "name" | "surname"): boolean {
+  return headers.some((header) => isVariantHeader(header, kind));
 }
 
 function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema[], sourceRows: SourceRow[], fileName = "") {
@@ -263,14 +278,7 @@ function applyPersonBirthRegisterMapping(record: Record<string, unknown>, source
     if (nameParts.length) record.fullName = nameParts.join(" ");
   }
 
-  if (!hasSourceHeader(sourceRow.values, ["варіанти імені", "варіант імені", "name variants"]) && textValue(record.nameVariants)) {
-    record.nameVariants = "";
-    warnings.push("Варіанти імені очищено, бо у вихідній таблиці немає такої колонки.");
-  }
-  if (!hasSourceHeader(sourceRow.values, ["варіанти прізвища", "варіант прізвища", "surname variants"]) && textValue(record.surnameVariants)) {
-    record.surnameVariants = "";
-    warnings.push("Варіанти прізвища очищено, бо у вихідній таблиці немає такої колонки.");
-  }
+  warnings.push(...applyExactVariantFields(record, sourceRow.values));
 
   const notes = [
     sequenceNumber ? `Номер у джерелі: ${sequenceNumber}` : "",
@@ -284,6 +292,53 @@ function applyPersonBirthRegisterMapping(record: Record<string, unknown>, source
   return warnings;
 }
 
+function applyExactVariantFields(record: Record<string, unknown>, values: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  const sourceNameVariants = sourceVariantValue(values, "name");
+  const sourceSurnameVariants = sourceVariantValue(values, "surname");
+
+  if (sourceNameVariants) {
+    if (textValue(record.nameVariants) !== sourceNameVariants) {
+      record.nameVariants = sourceNameVariants;
+      warnings.push("Варіанти імені взято лише з відповідної колонки вихідної таблиці.");
+    }
+  } else if (textValue(record.nameVariants)) {
+    record.nameVariants = "";
+    warnings.push("Варіанти імені очищено: у вихідній таблиці немає окремої колонки з варіантами.");
+  }
+
+  if (sourceSurnameVariants) {
+    if (textValue(record.surnameVariants) !== sourceSurnameVariants) {
+      record.surnameVariants = sourceSurnameVariants;
+      warnings.push("Варіанти прізвища взято лише з відповідної колонки вихідної таблиці.");
+    }
+  } else if (textValue(record.surnameVariants)) {
+    record.surnameVariants = "";
+    warnings.push("Варіанти прізвища очищено: у вихідній таблиці немає окремої колонки з варіантами.");
+  }
+
+  return warnings;
+}
+
+function sourceVariantValue(values: Record<string, unknown>, kind: "name" | "surname"): string {
+  for (const [key, value] of Object.entries(values)) {
+    if (!isVariantHeader(key, kind)) continue;
+    const text = textValue(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function isVariantHeader(header: string, kind: "name" | "surname"): boolean {
+  const normalized = normalizeLookupText(header);
+  const mentionsVariant = normalized.includes("варіант") || normalized.includes("variant");
+  if (!mentionsVariant) return false;
+  if (kind === "surname") {
+    return normalized.includes("прізв") || normalized.includes("фамил") || normalized.includes("surname");
+  }
+  return normalized.includes("імен") || normalized.includes("імя") || normalized.includes("імʼя") || normalized.includes("name");
+}
+
 function sourceValue(values: Record<string, unknown>, aliases: string[]): string {
   const normalizedAliases = aliases.map(normalizeLookupText);
   for (const [key, value] of Object.entries(values)) {
@@ -293,14 +348,6 @@ function sourceValue(values: Record<string, unknown>, aliases: string[]): string
     if (text) return text;
   }
   return "";
-}
-
-function hasSourceHeader(values: Record<string, unknown>, aliases: string[]): boolean {
-  const normalizedAliases = aliases.map(normalizeLookupText);
-  return Object.keys(values).some((key) => {
-    const normalizedKey = normalizeLookupText(key);
-    return normalizedAliases.some((alias) => normalizedKey === alias || normalizedKey.includes(alias));
-  });
 }
 
 function normalizeLookupText(value: string): string {
@@ -431,9 +478,10 @@ Deno.serve(async (request) => {
     const projectId = String(input.projectId ?? "").trim();
     const fileName = String(input.fileName ?? "").trim().slice(0, 200);
     const rows = trimRows(input.rows);
-    const fields = trustedFields(collection, input.fields);
+    const requestedFields = trustedFields(collection, input.fields);
     const providedSourceHeaders = Array.isArray(input.sourceHeaders) ? input.sourceHeaders.map(String).slice(0, 80) : [];
     const sourceHeaders = providedSourceHeaders.length ? providedSourceHeaders : sourceHeadersFromRows(rows);
+    const fields = restrictFieldsForSource(collection, requestedFields, sourceHeaders);
 
     if (!collection || !fields.length) return json({ error: "Не вказано підтримуваний розділ або схему колонок." }, 400);
     if (!rows.length) return json({ error: "Не знайдено рядків для аналізу." }, 400);
