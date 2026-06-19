@@ -24,6 +24,8 @@ import { CustomFieldsView } from "../components/CustomFields";
 import { normalizeCustomFieldValues } from "../utils/customFields";
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
 import { exportPersonsToExcel } from "../utils/excelExport";
+import { AiTableImport } from "../components/AiTableImport";
+import type { EntityConfig } from "./entityConfigs";
 
 type PersonTab =
   | "overview"
@@ -33,6 +35,53 @@ type PersonTab =
   | "archiveRequests"
   | "relations"
   | "notes";
+
+const personImportConfig: EntityConfig = {
+  collection: "persons",
+  title: "Особи",
+  singular: "особу",
+  description: "Імпорт карток осіб із користувацьких таблиць.",
+  emptyText: "",
+  searchPlaceholder: "",
+  fields: [
+    { key: "researchId", label: "Дослідження", type: "research" },
+    { key: "surname", label: "Прізвище" },
+    { key: "givenName", label: "Ім’я" },
+    { key: "patronymic", label: "По батькові" },
+    { key: "fullName", label: "Повне ім’я", wide: true },
+    { key: "gender", label: "Стать", type: "select", options: ["невідомо", "чоловік", "жінка"] },
+    { key: "nameVariants", label: "Варіанти імені" },
+    { key: "surnameVariants", label: "Варіанти прізвища" },
+    { key: "birthDate", label: "Дата народження", type: "date" },
+    { key: "birthYearFrom", label: "Рік народження від", type: "number" },
+    { key: "birthYearTo", label: "Рік народження до", type: "number" },
+    { key: "birthPlace", label: "Місце народження" },
+    { key: "marriageDate", label: "Дата шлюбу", type: "date" },
+    { key: "marriagePlace", label: "Місце шлюбу" },
+    { key: "deathDate", label: "Дата смерті", type: "date" },
+    { key: "deathYearFrom", label: "Рік смерті від", type: "number" },
+    { key: "deathYearTo", label: "Рік смерті до", type: "number" },
+    { key: "deathPlace", label: "Місце смерті" },
+    { key: "residencePlaces", label: "Місця проживання", type: "textarea", wide: true },
+    { key: "socialStatus", label: "Соціальний статус" },
+    { key: "religion", label: "Віросповідання" },
+    { key: "occupation", label: "Професія або заняття" },
+    {
+      key: "status",
+      label: "Статус",
+      type: "select",
+      options: ["гіпотетична", "частково доведена", "доведена", "сумнівна", "спростована"],
+    },
+    { key: "notes", label: "Нотатки", type: "textarea", wide: true },
+    { key: "birthScans", label: "Файли народження", type: "scans", wide: true },
+    { key: "marriageScans", label: "Файли шлюбу", type: "scans", wide: true },
+    { key: "deathScans", label: "Файли смерті", type: "scans", wide: true },
+    { key: "mentionScans", label: "Файли згадок", type: "scans", wide: true },
+  ],
+  columns: [],
+  statusKey: "status",
+  statusOptions: ["гіпотетична", "частково доведена", "доведена", "сумнівна", "спростована"],
+};
 
 export function PersonsPage({
   db,
@@ -56,6 +105,7 @@ export function PersonsPage({
   onCreateRelated,
   readOnly = false,
   projectName = "Трекер Роду",
+  projectId,
 }: {
   db: AppDatabase;
   persons: Person[];
@@ -78,6 +128,7 @@ export function PersonsPage({
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly?: boolean;
   projectName?: string;
+  projectId?: string;
 }) {
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
@@ -174,7 +225,16 @@ export function PersonsPage({
             )}
           />
           {!readOnly ? (
-            <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
+            <>
+              <AiTableImport
+                config={personImportConfig}
+                projectId={projectId}
+                onImport={(records) => {
+                  for (const record of records) onSavePerson(record as Person);
+                }}
+              />
+              <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
+            </>
           ) : null}
         </div>
       </div>

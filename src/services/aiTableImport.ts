@@ -46,17 +46,8 @@ export async function analyzeTableImportWithAi(
     body: input,
   });
   if (error) {
-    const context = "context" in error ? error.context : null;
-    if (context instanceof Response) {
-      try {
-        const payload = await context.clone().json() as { error?: string };
-        if (payload.error) throw new Error(payload.error);
-      } catch (contextError) {
-        if (contextError instanceof Error && contextError.message !== "Unexpected end of JSON input") {
-          throw contextError;
-        }
-      }
-    }
+    const functionMessage = await readFunctionError(error);
+    if (functionMessage) throw new Error(functionMessage);
     throw new Error(readableAiImportFunctionError(error));
   }
   if (data?.error) throw new Error(String(data.error));
@@ -88,6 +79,27 @@ function normalizeImportRow(value: unknown): AiImportRowResult {
     warnings: Array.isArray(record.warnings) ? record.warnings.map(String) : [],
     confidence: typeof record.confidence === "number" ? record.confidence : undefined,
   };
+}
+
+async function readFunctionError(error: unknown): Promise<string | null> {
+  const context = error && typeof error === "object" && "context" in error
+    ? (error as { context?: unknown }).context
+    : null;
+  if (!context || typeof context !== "object") return null;
+  const response = context as Response;
+  if (typeof response.clone !== "function") return null;
+  try {
+    const payload = await response.clone().json() as { error?: unknown; message?: unknown };
+    const message = payload.error ?? payload.message;
+    return message ? String(message) : null;
+  } catch {
+    try {
+      const text = await response.clone().text();
+      return text.trim() || null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 function readableAiImportFunctionError(error: unknown): string {

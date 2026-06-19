@@ -295,6 +295,21 @@ function baseUpdatedAt(entity: object): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function upsertProjectItem<T extends { id: string }>(items: T[], item: T): T[] {
+  return items.some((current) => current.id === item.id)
+    ? items.map((current) => (current.id === item.id ? item : current))
+    : [item, ...items];
+}
+
+function rollbackProjectItem<T extends { id: string }>(
+  items: T[],
+  failedId: string,
+  previous?: T,
+): T[] {
+  if (previous) return upsertProjectItem(items, previous);
+  return items.filter((item) => item.id !== failedId);
+}
+
 export default function App() {
   const app = useAppDatabase();
   const location = useLocation();
@@ -1716,11 +1731,11 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectResearches;
     const previousEntity = previous.find((item) => item.id === research.id);
-    const optimistic = previous.some((item) => item.id === research.id)
-      ? previous.map((item) => (item.id === research.id ? research : item))
-      : [research, ...previous];
-    setProjectResearches(optimistic);
-    saveProjectResearchCache(projectId, optimistic);
+    setProjectResearches((current) => {
+      const optimistic = upsertProjectItem(current, research);
+      saveProjectResearchCache(projectId, optimistic);
+      return optimistic;
+    });
 
     void assertProjectRecordUnchanged(
       "researches",
@@ -1734,20 +1749,21 @@ export default function App() {
         syncEntityAttachmentMetadata("researches", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectResearchCache(projectId);
-          const next = cached.map((item) => (item.id === saved.id ? saved : item));
+          const next = upsertProjectItem(cached, saved);
           saveProjectResearchCache(projectId, next);
           return;
         }
         setProjectResearches((current) => {
-          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          const next = upsertProjectItem(current, saved);
           saveProjectResearchCache(projectId, next);
           return next;
         });
       })
       .catch((error: unknown) => {
-        saveProjectResearchCache(projectId, previous);
+        const cached = rollbackProjectItem(loadProjectResearchCache(projectId), research.id, previousEntity);
+        saveProjectResearchCache(projectId, cached);
         if (activeWorkspaceIdRef.current === projectId) {
-          setProjectResearches(previous);
+          setProjectResearches((current) => rollbackProjectItem(current, research.id, previousEntity));
         }
         notify(describeError(error, "Не вдалося зберегти дослідження."), true);
       });
@@ -1855,11 +1871,11 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectDocuments;
     const previousEntity = previous.find((item) => item.id === document.id);
-    const optimistic = previous.some((item) => item.id === document.id)
-      ? previous.map((item) => (item.id === document.id ? document : item))
-      : [document, ...previous];
-    setProjectDocuments(optimistic);
-    saveProjectDocumentsCache(projectId, optimistic, projectYearMatrix);
+    setProjectDocuments((current) => {
+      const optimistic = upsertProjectItem(current, document);
+      saveProjectDocumentsCache(projectId, optimistic, projectYearMatrix);
+      return optimistic;
+    });
 
     void assertProjectRecordUnchanged(
       "documents",
@@ -1877,22 +1893,23 @@ export default function App() {
         syncEntityAttachmentMetadata("documents", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectDocumentsCache(projectId);
-          const documents = cached.documents.map((item) =>
-            item.id === saved.id ? saved : item,
-          );
+          const documents = upsertProjectItem(cached.documents, saved);
           saveProjectDocumentsCache(projectId, documents, cached.yearMatrix);
           return;
         }
         setProjectDocuments((current) => {
-          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          const next = upsertProjectItem(current, saved);
           saveProjectDocumentsCache(projectId, next, projectYearMatrix);
           return next;
         });
       })
       .catch((error: unknown) => {
         const cached = loadProjectDocumentsCache(projectId);
-        saveProjectDocumentsCache(projectId, previous, cached.yearMatrix);
-        if (activeWorkspaceIdRef.current === projectId) setProjectDocuments(previous);
+        const documents = rollbackProjectItem(cached.documents, document.id, previousEntity);
+        saveProjectDocumentsCache(projectId, documents, cached.yearMatrix);
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectDocuments((current) => rollbackProjectItem(current, document.id, previousEntity));
+        }
         notify(describeError(error, "Не вдалося зберегти документ."), true);
       });
   };
@@ -2117,11 +2134,11 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectTasks;
     const previousEntity = previous.find((item) => item.id === task.id);
-    const optimistic = previous.some((item) => item.id === task.id)
-      ? previous.map((item) => (item.id === task.id ? task : item))
-      : [task, ...previous];
-    setProjectTasks(optimistic);
-    saveProjectWorkRecordsCache(projectId, optimistic, projectFindings);
+    setProjectTasks((current) => {
+      const optimistic = upsertProjectItem(current, task);
+      saveProjectWorkRecordsCache(projectId, optimistic, projectFindings);
+      return optimistic;
+    });
 
     void assertProjectRecordUnchanged(
       "tasks",
@@ -2141,20 +2158,23 @@ export default function App() {
         syncEntityAttachmentMetadata("tasks", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectWorkRecordsCache(projectId);
-          const tasks = cached.tasks.map((item) => (item.id === saved.id ? saved : item));
+          const tasks = upsertProjectItem(cached.tasks, saved);
           saveProjectWorkRecordsCache(projectId, tasks, cached.findings);
           return;
         }
         setProjectTasks((current) => {
-          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          const next = upsertProjectItem(current, saved);
           saveProjectWorkRecordsCache(projectId, next, projectFindings);
           return next;
         });
       })
       .catch((error: unknown) => {
         const cached = loadProjectWorkRecordsCache(projectId);
-        saveProjectWorkRecordsCache(projectId, previous, cached.findings);
-        if (activeWorkspaceIdRef.current === projectId) setProjectTasks(previous);
+        const tasks = rollbackProjectItem(cached.tasks, task.id, previousEntity);
+        saveProjectWorkRecordsCache(projectId, tasks, cached.findings);
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectTasks((current) => rollbackProjectItem(current, task.id, previousEntity));
+        }
         notify(describeError(error, "Не вдалося зберегти завдання."), true);
       });
   };
@@ -2241,8 +2261,11 @@ export default function App() {
       })
       .catch((error: unknown) => {
         const cached = loadProjectWorkRecordsCache(projectId);
-        saveProjectWorkRecordsCache(projectId, cached.tasks, previous);
-        if (activeWorkspaceIdRef.current === projectId) setProjectFindings(previous);
+        const findings = rollbackProjectItem(cached.findings, finding.id, previousEntity);
+        saveProjectWorkRecordsCache(projectId, cached.tasks, findings);
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectFindings((current) => rollbackProjectItem(current, finding.id, previousEntity));
+        }
         notify(describeError(error, "Не вдалося зберегти знахідку."), true);
       });
   };
@@ -2597,11 +2620,11 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectPersons;
     const previousEntity = previous.find((item) => item.id === person.id);
-    const optimistic = previous.some((item) => item.id === person.id)
-      ? previous.map((item) => (item.id === person.id ? person : item))
-      : [person, ...previous];
-    setProjectPersons(optimistic);
-    saveProjectPeopleCache(projectId, optimistic, projectPersonRelations);
+    setProjectPersons((current) => {
+      const optimistic = upsertProjectItem(current, person);
+      saveProjectPeopleCache(projectId, optimistic, projectPersonRelations);
+      return optimistic;
+    });
 
     void assertProjectRecordUnchanged(
       "persons",
@@ -2619,20 +2642,23 @@ export default function App() {
         syncEntityAttachmentMetadata("persons", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectPeopleCache(projectId);
-          const persons = cached.persons.map((item) => (item.id === saved.id ? saved : item));
+          const persons = upsertProjectItem(cached.persons, saved);
           saveProjectPeopleCache(projectId, persons, cached.relations);
           return;
         }
         setProjectPersons((current) => {
-          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          const next = upsertProjectItem(current, saved);
           saveProjectPeopleCache(projectId, next, projectPersonRelations);
           return next;
         });
       })
       .catch((error: unknown) => {
         const cached = loadProjectPeopleCache(projectId);
-        saveProjectPeopleCache(projectId, previous, cached.relations);
-        if (activeWorkspaceIdRef.current === projectId) setProjectPersons(previous);
+        const persons = rollbackProjectItem(cached.persons, person.id, previousEntity);
+        saveProjectPeopleCache(projectId, persons, cached.relations);
+        if (activeWorkspaceIdRef.current === projectId) {
+          setProjectPersons((current) => rollbackProjectItem(current, person.id, previousEntity));
+        }
         notify(describeError(error, "Не вдалося зберегти особу."), true);
       });
   };
@@ -3439,6 +3465,7 @@ export default function App() {
             onCreateRelated={createRelatedRecord}
             readOnly={readOnly}
             projectName={workspace?.projectName}
+            projectId={workspace?.projectId}
           />
         );
       case "yearMatrix":

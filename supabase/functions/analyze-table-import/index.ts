@@ -19,6 +19,7 @@ const sectionFieldKeys: Record<string, Set<string>> = {
   tasks: new Set(["researchId", "personName", "personIds", "title", "description", "place", "yearFrom", "yearTo", "documentType", "documentId", "status", "priority", "deadline", "notes"]),
   findings: new Set(["researchId", "documentId", "findingType", "eventDate", "personsText", "personIds", "participants", "place", "archive", "fund", "description", "file", "page", "scans", "summary", "transcription", "conclusion", "reliability", "needsReview", "notes"]),
   hypotheses: new Set(["researchId", "title", "description", "argumentsFor", "argumentsAgainst", "toVerify", "relatedPeople", "personIds", "documentIds", "findingIds", "status", "probability", "notes"]),
+  persons: new Set(["researchId", "surname", "givenName", "patronymic", "fullName", "gender", "nameVariants", "surnameVariants", "birthDate", "birthYearFrom", "birthYearTo", "birthPlace", "marriageDate", "marriagePlace", "deathDate", "deathYearFrom", "deathYearTo", "deathPlace", "residencePlaces", "socialStatus", "religion", "occupation", "status", "notes", "birthScans", "marriageScans", "deathScans", "mentionScans"]),
 };
 
 function trimRows(rows: unknown): SourceRow[] {
@@ -262,7 +263,14 @@ ${JSON.stringify(fields, null, 2)}
 ${JSON.stringify(rows.slice(0, maxRows), null, 2)}
 `.trim();
 
-    const result = await callGemini(apiKey, settings.model, prompt, responseSchemaFor(fields));
+    let result: unknown;
+    try {
+      result = await callGemini(apiKey, settings.model, prompt, responseSchemaFor(fields));
+    } catch (schemaError) {
+      result = await callGemini(apiKey, settings.model, prompt, null).catch(() => {
+        throw schemaError;
+      });
+    }
     return json(sanitizeAiRows(result, collection, fields, rows.slice(0, maxRows)));
   } catch (error) {
     return json({ error: errorMessage(error, "Не вдалося проаналізувати таблицю.") }, 400);
