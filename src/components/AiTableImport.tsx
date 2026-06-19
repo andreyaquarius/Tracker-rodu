@@ -83,7 +83,7 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
   if (!open) {
     return (
       <button type="button" className="button button-secondary ai-import-open-button" onClick={() => setOpen(true)}>
-        📎 Прикріпити таблицю ШІ
+        📎 Імпорт даних ШІ
       </button>
     );
   }
@@ -255,6 +255,19 @@ function buildEntity(collection: CollectionKey, fields: FieldConfig[], source: R
   if (collection === "findings") {
     const participants = Array.isArray(entity.participants) ? entity.participants as FindingParticipant[] : [];
     entity.people = participants.map((participant) => participant.name).filter(Boolean).join(", ");
+  }
+  if (collection === "persons") {
+    const fullName = String(entity.fullName ?? "").trim();
+    const nameParts = [entity.surname, entity.givenName, entity.patronymic]
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean);
+    if (!fullName && nameParts.length) entity.fullName = nameParts.join(" ");
+    if (!String(entity.gender ?? "").trim()) entity.gender = "невідомо";
+    if (!String(entity.status ?? "").trim()) entity.status = "гіпотетична";
+    entity.birthScans = [];
+    entity.marriageScans = [];
+    entity.deathScans = [];
+    entity.mentionScans = [];
   }
   return entity as unknown as AppEntity;
 }
