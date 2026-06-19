@@ -1,21 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 // Bind CORS to the deployed app origin instead of "*" (see _shared/ai.ts).
-function normalizedOrigin(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === "*") return trimmed || "*";
-  try {
-    return new URL(trimmed).origin;
-  } catch {
-    return trimmed.replace(/\/+$/, "");
-  }
-}
-
-const allowedOrigin = normalizedOrigin(
+const allowedOrigin =
   Deno.env.get("ALLOWED_ORIGIN")?.trim() ||
   Deno.env.get("APP_URL")?.trim() ||
-  "*",
-);
+  "*";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": allowedOrigin,

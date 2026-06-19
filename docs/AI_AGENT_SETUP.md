@@ -40,7 +40,6 @@ save-ai-key
 test-ai-key
 delete-ai-key
 review-hypothesis
-analyze-table-import
 ```
 
 Через Supabase CLI:
@@ -52,7 +51,6 @@ npx supabase functions deploy save-ai-key
 npx supabase functions deploy test-ai-key
 npx supabase functions deploy delete-ai-key
 npx supabase functions deploy review-hypothesis
-npx supabase functions deploy analyze-table-import
 ```
 
 Перевірка JWT для цих функцій має залишатися увімкненою.
