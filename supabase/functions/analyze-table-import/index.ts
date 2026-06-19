@@ -21,33 +21,6 @@ const sectionFieldKeys: Record<string, Set<string>> = {
   hypotheses: new Set(["researchId", "title", "description", "argumentsFor", "argumentsAgainst", "toVerify", "relatedPeople", "personIds", "documentIds", "findingIds", "status", "probability", "notes"]),
 };
 
-const responseSchema = {
-  type: "object",
-  properties: {
-    sectionKey: { type: "string" },
-    rows: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          sourceRowNumber: { type: "number" },
-          data: { type: "object", additionalProperties: true },
-          warnings: { type: "array", items: { type: "string" } },
-          confidence: { type: "number" },
-        },
-        required: ["sourceRowNumber", "data", "warnings"],
-        additionalProperties: false,
-      },
-    },
-    unmappedSourceColumns: { type: "array", items: { type: "string" } },
-    generalWarnings: { type: "array", items: { type: "string" } },
-    warnings: { type: "array", items: { type: "string" } },
-    summary: { type: "string" },
-  },
-  required: ["sectionKey", "rows", "unmappedSourceColumns", "generalWarnings", "summary"],
-  additionalProperties: false,
-};
-
 function trimRows(rows: unknown): SourceRow[] {
   if (!Array.isArray(rows)) return [];
   return rows
@@ -69,6 +42,68 @@ function trimRows(rows: unknown): SourceRow[] {
         ),
       };
     });
+}
+
+function sourceHeadersFromRows(rows: SourceRow[]): string[] {
+  return Array.from(new Set(rows.flatMap((row) => Object.keys(row.values)))).slice(0, 80);
+}
+
+function responseSchemaFor(fields: FieldSchema[]) {
+  const dataProperties = Object.fromEntries(fields.map((field) => [field.key, fieldValueSchema(field)]));
+  return {
+    type: "object",
+    properties: {
+      sectionKey: { type: "string" },
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            sourceRowNumber: { type: "number" },
+            data: {
+              type: "object",
+              properties: dataProperties,
+              additionalProperties: false,
+            },
+            warnings: { type: "array", items: { type: "string" } },
+            confidence: { type: "number" },
+          },
+          required: ["sourceRowNumber", "data", "warnings"],
+          additionalProperties: false,
+        },
+      },
+      unmappedSourceColumns: { type: "array", items: { type: "string" } },
+      generalWarnings: { type: "array", items: { type: "string" } },
+      warnings: { type: "array", items: { type: "string" } },
+      summary: { type: "string" },
+    },
+    required: ["sectionKey", "rows", "unmappedSourceColumns", "generalWarnings", "summary"],
+    additionalProperties: false,
+  };
+}
+
+function fieldValueSchema(field: FieldSchema): Record<string, unknown> {
+  if (field.type === "checkbox") return { type: "boolean" };
+  if (field.type === "participants") {
+    return {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          role: { type: "string" },
+          name: { type: "string" },
+          notes: { type: "string" },
+        },
+        required: ["id", "role", "name", "notes"],
+        additionalProperties: false,
+      },
+    };
+  }
+  if (["persons", "documents", "findings", "scans"].includes(field.type ?? "")) {
+    return { type: "array", items: { type: "string" } };
+  }
+  return { type: "string" };
 }
 
 function trustedFields(collection: string, fields: unknown): FieldSchema[] {
@@ -131,9 +166,21 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
 
 function normalizeFieldValue(field: FieldSchema | undefined, value: unknown): unknown {
   if (!field) return undefined;
-  if (field.type === "checkbox") return Boolean(value);
+  if (field.type === "checkbox") {
+    if (typeof value === "boolean") return value;
+    const text = String(value ?? "").trim().toLowerCase();
+    return ["true", "1", "yes", "так", "истина"].includes(text);
+  }
   if (["persons", "documents", "findings", "scans"].includes(field.type ?? "")) return Array.isArray(value) ? value : [];
   if (field.type === "participants") {
+    if (typeof value === "string") {
+      return value.split(/[;,]/).map((name) => name.trim()).filter(Boolean).map((name) => ({
+        id: "",
+        role: "основна особа",
+        name,
+        notes: "",
+      }));
+    }
     return Array.isArray(value) ? value
       .filter((item) => item && typeof item === "object" && !Array.isArray(item))
       .map((item) => {
@@ -165,7 +212,8 @@ Deno.serve(async (request) => {
     const projectId = String(input.projectId ?? "").trim();
     const rows = trimRows(input.rows);
     const fields = trustedFields(collection, input.fields);
-    const sourceHeaders = Array.isArray(input.sourceHeaders) ? input.sourceHeaders.map(String).slice(0, 80) : [];
+    const providedSourceHeaders = Array.isArray(input.sourceHeaders) ? input.sourceHeaders.map(String).slice(0, 80) : [];
+    const sourceHeaders = providedSourceHeaders.length ? providedSourceHeaders : sourceHeadersFromRows(rows);
 
     if (!collection || !fields.length) return json({ error: "Не вказано підтримуваний розділ або схему колонок." }, 400);
     if (!rows.length) return json({ error: "Не знайдено рядків для аналізу." }, 400);
@@ -214,7 +262,7 @@ ${JSON.stringify(fields, null, 2)}
 ${JSON.stringify(rows.slice(0, maxRows), null, 2)}
 `.trim();
 
-    const result = await callGemini(apiKey, settings.model, prompt, responseSchema);
+    const result = await callGemini(apiKey, settings.model, prompt, responseSchemaFor(fields));
     return json(sanitizeAiRows(result, collection, fields, rows.slice(0, maxRows)));
   } catch (error) {
     return json({ error: errorMessage(error, "Не вдалося проаналізувати таблицю.") }, 400);
