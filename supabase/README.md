@@ -50,7 +50,8 @@
 - `save-ai-key`;
 - `test-ai-key`;
 - `delete-ai-key`;
-- `review-hypothesis`.
+- `review-hypothesis`;
+- `analyze-table-import`.
 
 `ENCRYPTION_KEY` не можна змінювати після збереження користувацьких API-ключів:
 після зміни старі ключі неможливо буде розшифрувати. Ключі Google AI Studio
