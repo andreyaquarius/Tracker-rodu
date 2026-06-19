@@ -252,6 +252,10 @@ function buildEntity(collection: CollectionKey, fields: FieldConfig[], source: R
   };
   for (const field of fields) entity[field.key] = normalizeFieldValue(field, source[field.key]);
   entity.__sourceRowNumber = source.__sourceRowNumber;
+  const contaminated = findModelCommentary(entity);
+  if (contaminated) {
+    throw new Error(`ШІ повернув службовий текст у полі "${contaminated}". Повторіть аналіз таблиці.`);
+  }
   if (collection === "findings") {
     const participants = Array.isArray(entity.participants) ? entity.participants as FindingParticipant[] : [];
     entity.people = participants.map((participant) => participant.name).filter(Boolean).join(", ");
@@ -270,6 +274,33 @@ function buildEntity(collection: CollectionKey, fields: FieldConfig[], source: R
     entity.mentionScans = [];
   }
   return entity as unknown as AppEntity;
+}
+
+function findModelCommentary(value: unknown, fieldPath = ""): string | null {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (/\b(wait,\s*i\s*must|valid json|final json|json generation|let'?s restart|i will just output|without comments)\b/i.test(text)) {
+      return fieldPath || "data";
+    }
+    if (/(службов|коментар|пояснен|фінальн)\s+(текст|json|відповід)/i.test(text)) {
+      return fieldPath || "data";
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      const nested = findModelCommentary(item, `${fieldPath}[${index}]`);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      const nested = findModelCommentary(nestedValue, fieldPath ? `${fieldPath}.${key}` : key);
+      if (nested) return nested;
+    }
+  }
+  return null;
 }
 
 function normalizeFieldValue(field: FieldConfig, value: unknown): unknown {

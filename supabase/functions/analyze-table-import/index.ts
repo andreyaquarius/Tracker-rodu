@@ -125,14 +125,32 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
   const allowed = new Set(fields.map((field) => field.key));
   const bySource = new Map(sourceRows.map((row) => [row.sourceRowNumber, row]));
   const record = result && typeof result === "object" && !Array.isArray(result) ? result as Record<string, unknown> : {};
+  const sectionKey = String(record.sectionKey ?? collection);
+  if (sectionKey !== collection) {
+    throw new Error("ШІ повернув відповідь для іншого розділу. Повторіть аналіз таблиці.");
+  }
   const rawRows = Array.isArray(record.rows)
     ? record.rows
     : Array.isArray(record.records)
       ? record.records.map((data, index) => ({ sourceRowNumber: sourceRows[index]?.sourceRowNumber ?? index + 1, data, warnings: [] }))
       : [];
+  if (!rawRows.length) {
+    throw new Error("ШІ не повернув жодного рядка для імпорту.");
+  }
+  if (rawRows.length !== sourceRows.length) {
+    throw new Error(`ШІ повернув ${rawRows.length} з ${sourceRows.length} рядків. Дані не збережено, щоб не створити неповний імпорт.`);
+  }
+  const seenSourceRows = new Set<number>();
   const rows = rawRows.slice(0, sourceRows.length).map((raw, index) => {
     const rowRecord = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
     const sourceRowNumber = Number(rowRecord.sourceRowNumber) || sourceRows[index]?.sourceRowNumber || index + 1;
+    if (!bySource.has(sourceRowNumber)) {
+      throw new Error(`ШІ повернув невідомий номер рядка ${sourceRowNumber}. Повторіть аналіз таблиці.`);
+    }
+    if (seenSourceRows.has(sourceRowNumber)) {
+      throw new Error(`ШІ двічі повернув рядок ${sourceRowNumber}. Повторіть аналіз таблиці.`);
+    }
+    seenSourceRows.add(sourceRowNumber);
     const data = rowRecord.data && typeof rowRecord.data === "object" && !Array.isArray(rowRecord.data)
       ? rowRecord.data as Record<string, unknown>
       : rowRecord;
@@ -142,6 +160,13 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
         .map(([key, value]) => [key, normalizeFieldValue(fields.find((field) => field.key === key), value)]),
     );
     clean.__sourceRowNumber = sourceRowNumber;
+    const contaminated = findModelCommentary(clean);
+    if (contaminated) {
+      throw new Error(`ШІ повернув службовий текст у полі "${contaminated.field}" для рядка ${sourceRowNumber}. Дані не збережено.`);
+    }
+    if (isEmptyImportedRecord(clean, fields)) {
+      throw new Error(`ШІ повернув порожній запис для рядка ${sourceRowNumber}. Дані не збережено.`);
+    }
     if (collection === "findings" && Array.isArray(clean.participants)) {
       clean.people = clean.participants.map((participant) => String((participant as Record<string, unknown>).name ?? "")).filter(Boolean).join(", ");
     }
@@ -155,6 +180,10 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
       confidence: typeof rowRecord.confidence === "number" ? rowRecord.confidence : undefined,
     };
   });
+  const missingRows = sourceRows.filter((row) => !seenSourceRows.has(row.sourceRowNumber));
+  if (missingRows.length) {
+    throw new Error(`ШІ не повернув рядки: ${missingRows.map((row) => row.sourceRowNumber).join(", ")}.`);
+  }
   return {
     rows,
     records: rows.map((row) => row.data),
@@ -163,6 +192,45 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
       : Array.isArray(record.warnings) ? record.warnings.map(String) : [],
     summary: String(record.summary ?? `Підготовлено ${rows.length} записів.`),
   };
+}
+
+function findModelCommentary(value: unknown, fieldPath = ""): { field: string } | null {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (/\b(wait,\s*i\s*must|valid json|final json|json generation|let'?s restart|i will just output|without comments)\b/i.test(text)) {
+      return { field: fieldPath || "data" };
+    }
+    if (/(службов|коментар|пояснен|фінальн)\s+(текст|json|відповід)/i.test(text)) {
+      return { field: fieldPath || "data" };
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      const nested = findModelCommentary(item, `${fieldPath}[${index}]`);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      const nested = findModelCommentary(nestedValue, fieldPath ? `${fieldPath}.${key}` : key);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+function isEmptyImportedRecord(record: Record<string, unknown>, fields: FieldSchema[]): boolean {
+  return fields.every((field) => isEmptyFieldValue(record[field.key]));
+}
+
+function isEmptyFieldValue(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "boolean") return false;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") return Object.values(value as Record<string, unknown>).every(isEmptyFieldValue);
+  return !String(value).trim();
 }
 
 function normalizeFieldValue(field: FieldSchema | undefined, value: unknown): unknown {
@@ -250,6 +318,8 @@ Deno.serve(async (request) => {
 - Для participants створи масив об’єктів {id:"", role:"основна особа", name:"...", notes:""}; id залишай порожнім.
 - Для зв’язків research/document/persons/findings/documents/scans поверни порожній рядок або порожній масив: ти не маєш права підбирати ID.
 - Кожен результат повинен містити sourceRowNumber з вихідного рядка. Не створюй записів, яких немає у вихідній таблиці.
+- Поверни рівно один rows[] для кожного вхідного рядка у тому самому порядку. Не об’єднуй усю таблицю в один запис.
+- Не пиши свої міркування, коментарі про JSON або службові пояснення у поля data. Усі сумніви пиши тільки у warnings.
 - Додай warnings для неоднозначних колонок, пропущених обов’язкових полів або рядків із низькою впевненістю.
 - Збережи порядок рядків. Максимум ${maxRows} записів.
 

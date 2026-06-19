@@ -23,6 +23,17 @@ test("parses semicolon CSV and quoted delimiters", () => {
   assert.equal(parsed.rows[0].values.Note, "born; parish");
 });
 
+test("keeps cells aligned when a header cell is blank", () => {
+  const parsed = parseTableText(
+    ",Birth date,Name,Father\n1,1852-02-08,Feodor,Andrii Khmaruk",
+    "births.csv",
+  );
+  assert.deepEqual(parsed.headers, ["Колонка 1", "Birth date", "Name", "Father"]);
+  assert.equal(parsed.rows[0].values["Колонка 1"], "1");
+  assert.equal(parsed.rows[0].values["Birth date"], "1852-02-08");
+  assert.equal(parsed.rows[0].values.Name, "Feodor");
+});
+
 test("parses JSON array tables", () => {
   const parsed = parseTableText(JSON.stringify([{ name: "Anna", year: 1901 }, { name: "Petro" }]), "rows.json");
   assert.deepEqual(parsed.headers, ["name", "year"]);
