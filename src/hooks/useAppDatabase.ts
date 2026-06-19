@@ -39,6 +39,26 @@ export function useAppDatabase() {
     [setDatabase],
   );
 
+  const saveEntities = useCallback(
+    (collection: CollectionKey, entities: AppEntity[]) => {
+      setDatabase((current) => {
+        const importedIds = new Set(entities.map((entity) => entity.id));
+        const existing = (current[collection] as AppEntity[]).filter(
+          (entity) => !importedIds.has(entity.id),
+        );
+        const activityEntries = entities.flatMap((entity) =>
+          createActivityEntries(collection, undefined, entity)
+        );
+        return {
+          ...current,
+          [collection]: [...entities, ...existing],
+          activityLog: [...activityEntries, ...current.activityLog],
+        } as AppDatabase;
+      });
+    },
+    [setDatabase],
+  );
+
   const deleteEntity = useCallback(
     (collection: CollectionKey, id: string) => {
       setDatabase((current) => ({
@@ -61,6 +81,7 @@ export function useAppDatabase() {
   return {
     db,
     saveEntity,
+    saveEntities,
     deleteEntity,
     setDatabase,
     replaceDatabase,

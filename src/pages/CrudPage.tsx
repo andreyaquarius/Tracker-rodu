@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type {
   AppEntity,
   AppDatabase,
+  CollectionKey,
   CustomFieldDefinition,
   CustomFieldValues,
   DocumentRecord,
@@ -41,6 +42,8 @@ import {
 } from "../utils/customFields";
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
 import { exportEntityRecordsToExcel } from "../utils/excelExport";
+import { TableDataImportButton } from "../components/TableDataImportButton";
+import { canImportCollection } from "../utils/tableDataImport";
 import { sanitizeWebUrl } from "../utils/safeUrl";
 
 interface CrudPageProps {
@@ -63,6 +66,7 @@ interface CrudPageProps {
   onOpenRelated?: (page: PageKey, entityId: string) => void;
   onSavePerson?: (person: Person) => void;
   onSave: (entity: AppEntity) => void;
+  onImportRecords?: (collection: CollectionKey, records: AppEntity[]) => Promise<void>;
   onDelete: (id: string) => void;
   projectId?: string;
   onCreateTask?: (task: TaskRecord) => void;
@@ -90,6 +94,7 @@ export function CrudPage({
   onOpenRelated,
   onSavePerson,
   onSave,
+  onImportRecords,
   onDelete,
   projectId = "",
   onCreateTask,
@@ -260,6 +265,15 @@ export function CrudPage({
               customFieldDefinitions,
             })}
           />
+          {!readOnly && onImportRecords && canImportCollection(config.collection) ? (
+            <TableDataImportButton
+              collection={config.collection}
+              db={db}
+              fields={config.fields}
+              customFieldDefinitions={customFieldDefinitions}
+              onImport={(records) => onImportRecords(config.collection, records)}
+            />
+          ) : null}
           {!readOnly ? (
             <button className="button button-primary" onClick={startNew}>
               + Додати {config.singular}
