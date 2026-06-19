@@ -262,7 +262,14 @@ ${JSON.stringify(fields, null, 2)}
 ${JSON.stringify(rows.slice(0, maxRows), null, 2)}
 `.trim();
 
-    const result = await callGemini(apiKey, settings.model, prompt, responseSchemaFor(fields));
+    let result: unknown;
+    try {
+      result = await callGemini(apiKey, settings.model, prompt, responseSchemaFor(fields));
+    } catch (schemaError) {
+      result = await callGemini(apiKey, settings.model, prompt, null).catch(() => {
+        throw schemaError;
+      });
+    }
     return json(sanitizeAiRows(result, collection, fields, rows.slice(0, maxRows)));
   } catch (error) {
     return json({ error: errorMessage(error, "Не вдалося проаналізувати таблицю.") }, 400);
