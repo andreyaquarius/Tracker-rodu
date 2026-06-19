@@ -68,9 +68,7 @@ function parseDelimitedTable(text: string, delimiter: string): ParsedTable {
   }
   const headerLineIndex = findHeaderLineIndex(nonEmptyLines.map(({ line }) => line), delimiter);
   const headerSourceRow = nonEmptyLines[headerLineIndex];
-  const headers = splitDelimitedLine(headerSourceRow.line, delimiter)
-    .map((header) => header.trim())
-    .filter(Boolean);
+  const { headers, warnings: headerWarnings } = normalizeHeaders(splitDelimitedLine(headerSourceRow.line, delimiter));
   if (!headers.length) return { headers: [], rows: [], warnings: ["Не знайдено заголовки колонок."] };
 
   const rows = nonEmptyLines.slice(headerLineIndex + 1)
@@ -86,8 +84,26 @@ function parseDelimitedTable(text: string, delimiter: string): ParsedTable {
   return {
     headers,
     rows,
-    warnings: rows.length ? [] : ["Після заголовків немає заповнених рядків."],
+    warnings: [
+      ...headerWarnings,
+      ...(rows.length ? [] : ["Після заголовків немає заповнених рядків."]),
+    ],
   };
+}
+
+function normalizeHeaders(rawHeaders: string[]): { headers: string[]; warnings: string[] } {
+  const warnings: string[] = [];
+  if (!rawHeaders.some((header) => header.trim())) return { headers: [], warnings };
+  const seen = new Map<string, number>();
+  const headers = rawHeaders.map((header, index) => {
+    const trimmed = header.trim();
+    const base = trimmed || `Колонка ${index + 1}`;
+    if (!trimmed) warnings.push(`Колонка ${index + 1} не має заголовка, її збережено як «${base}».`);
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    return count ? `${base} ${count + 1}` : base;
+  });
+  return { headers, warnings };
 }
 
 function findHeaderLineIndex(lines: string[], delimiter: string): number {
