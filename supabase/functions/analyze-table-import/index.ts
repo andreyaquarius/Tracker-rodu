@@ -107,6 +107,31 @@ function fieldValueSchema(field: FieldSchema): Record<string, unknown> {
   return { type: "string" };
 }
 
+function sectionGuidanceFor(collection: string, sourceHeaders: string[], fileName: string): string {
+  if (collection !== "persons") return "";
+  const normalizedHeaders = sourceHeaders.map(normalizeLookupText);
+  const looksLikeBirthRegister =
+    normalizedHeaders.some((header) => header.includes("народжен") || header.includes("birth")) &&
+    normalizedHeaders.some((header) => ["імя", "імя дитини", "імя", "name"].includes(header) || header.includes("дитин")) &&
+    normalizedHeaders.some((header) => header.includes("батько") || header.includes("father"));
+
+  return `
+
+Додаткові правила для розділу "Особи":
+- Для таблиць народжень/метричних книг створюй одну картку особи на один рядок таблиці: основна особа — дитина/новонароджений, а не батько, мати чи хрещені.
+- Колонки на кшталт "Імя", "Ім’я", "Дитина", "Новонароджений", "Name" заповнюють givenName дитини. Якщо у цій колонці лише одне ім’я — не перетворюй його на прізвище.
+- Колонки "Дата народження", "Дата нродження", "Birth date" заповнюють birthDate у форматі YYYY-MM-DD, якщо дата точна.
+- Колонки "Батько", "Мати", "Хрещені"/"Хрищені" не є полями самої дитини. Не записуй їх у surnameVariants/nameVariants/fullName. Перенеси їх у notes як окремі рядки "Батько: ...", "Мати: ...", "Хрещені: ...".
+- Якщо прізвище дитини не вказане окремо, але у полі "Батько" є повне ім’я з прізвищем, можна взяти останню частину імені батька як імовірне surname дитини, але обов’язково додай warning.
+- "номер попорядку", "№", "No" не є полем особи; перенеси його в notes як "Номер у джерелі: ...".
+- Не використовуй текст імен батьків або хрещених як варіанти прізвища дитини.
+- Для gender використовуй "невідомо", якщо стать не очевидна або не вказана.
+- Для status використовуй "гіпотетична", якщо джерело не містить підтвердження статусу в термінах застосунку.
+${looksLikeBirthRegister ? "- Ця таблиця за заголовками схожа на записи народження: особою для імпорту має бути саме дитина з кожного рядка." : ""}
+${fileName ? "- Назву файлу можна згадати у notes як джерело імпорту, але не вигадуй з неї факти, яких немає у таблиці." : ""}
+`.trim();
+}
+
 function trustedFields(collection: string, fields: unknown): FieldSchema[] {
   const allowed = sectionFieldKeys[collection];
   if (!allowed || !Array.isArray(fields)) return [];
@@ -121,7 +146,7 @@ function trustedFields(collection: string, fields: unknown): FieldSchema[] {
     }));
 }
 
-function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema[], sourceRows: SourceRow[]) {
+function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema[], sourceRows: SourceRow[], fileName = "") {
   const allowed = new Set(fields.map((field) => field.key));
   const bySource = new Map(sourceRows.map((row) => [row.sourceRowNumber, row]));
   const record = result && typeof result === "object" && !Array.isArray(result) ? result as Record<string, unknown> : {};
@@ -160,6 +185,7 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
         .map(([key, value]) => [key, normalizeFieldValue(fields.find((field) => field.key === key), value)]),
     );
     clean.__sourceRowNumber = sourceRowNumber;
+    const postWarnings = applySectionPostProcessing(collection, clean, bySource.get(sourceRowNumber), fileName);
     const contaminated = findModelCommentary(clean);
     if (contaminated) {
       throw new Error(`ШІ повернув службовий текст у полі "${contaminated.field}" для рядка ${sourceRowNumber}. Дані не збережено.`);
@@ -175,6 +201,7 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
       data: clean,
       warnings: [
         ...(Array.isArray(rowRecord.warnings) ? rowRecord.warnings.map(String) : []),
+        ...postWarnings,
         ...(bySource.has(sourceRowNumber) ? [] : ["Номер рядка не знайдено у вихідній таблиці."]),
       ],
       confidence: typeof rowRecord.confidence === "number" ? rowRecord.confidence : undefined,
@@ -192,6 +219,129 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
       : Array.isArray(record.warnings) ? record.warnings.map(String) : [],
     summary: String(record.summary ?? `Підготовлено ${rows.length} записів.`),
   };
+}
+
+function applySectionPostProcessing(collection: string, record: Record<string, unknown>, sourceRow: SourceRow | undefined, fileName: string): string[] {
+  if (collection !== "persons" || !sourceRow) return [];
+  return applyPersonBirthRegisterMapping(record, sourceRow, fileName);
+}
+
+function applyPersonBirthRegisterMapping(record: Record<string, unknown>, sourceRow: SourceRow, fileName: string): string[] {
+  const warnings: string[] = [];
+  const childName = sourceValue(sourceRow.values, ["імя", "ім'я", "ім’я", "имя", "дитина", "новонароджений", "name"]);
+  const birthDate = sourceValue(sourceRow.values, ["дата народження", "дата нродження", "народження", "birth date", "birthdate"]);
+  const father = sourceValue(sourceRow.values, ["батько", "отець", "father"]);
+  const mother = sourceValue(sourceRow.values, ["мати", "mother"]);
+  const godparents = sourceValue(sourceRow.values, ["хрищені", "хрещені", "хрещені батьки", "godparents"]);
+  const sequenceNumber = sourceValue(sourceRow.values, ["номер попорядку", "номер", "№", "no"]);
+
+  if (childName) {
+    const childParts = splitPersonName(childName);
+    record.givenName = childParts.givenName || childName;
+    if (!textValue(record.fullName) && childParts.fullName) record.fullName = childParts.fullName;
+    if (!textValue(record.surname) && childParts.surname) record.surname = childParts.surname;
+  }
+
+  const normalizedBirthDate = normalizeSourceDate(birthDate);
+  if (normalizedBirthDate) record.birthDate = normalizedBirthDate;
+
+  if (!textValue(record.surname) && father) {
+    const fatherParts = splitPersonName(father);
+    if (fatherParts.surname) {
+      record.surname = fatherParts.surname;
+      warnings.push("Прізвище дитини взято з останньої частини імені батька; перевірте у попередньому перегляді.");
+    }
+  }
+
+  const relationTexts = [father, mother, godparents].filter(Boolean);
+  if (relationTexts.some((text) => textValue(record.fullName).includes(text))) {
+    record.fullName = "";
+    warnings.push("Повне ім’я очищено від тексту про батьків або хрещених.");
+  }
+  if (!textValue(record.fullName)) {
+    const nameParts = [record.surname, record.givenName, record.patronymic].map(textValue).filter(Boolean);
+    if (nameParts.length) record.fullName = nameParts.join(" ");
+  }
+
+  if (!hasSourceHeader(sourceRow.values, ["варіанти імені", "варіант імені", "name variants"]) && textValue(record.nameVariants)) {
+    record.nameVariants = "";
+    warnings.push("Варіанти імені очищено, бо у вихідній таблиці немає такої колонки.");
+  }
+  if (!hasSourceHeader(sourceRow.values, ["варіанти прізвища", "варіант прізвища", "surname variants"]) && textValue(record.surnameVariants)) {
+    record.surnameVariants = "";
+    warnings.push("Варіанти прізвища очищено, бо у вихідній таблиці немає такої колонки.");
+  }
+
+  const notes = [
+    sequenceNumber ? `Номер у джерелі: ${sequenceNumber}` : "",
+    father ? `Батько: ${father}` : "",
+    mother ? `Мати: ${mother}` : "",
+    godparents ? `Хрещені: ${godparents}` : "",
+    fileName ? `Файл імпорту: ${fileName}` : "",
+  ].filter(Boolean);
+  if (notes.length) record.notes = appendNotes(record.notes, notes);
+
+  return warnings;
+}
+
+function sourceValue(values: Record<string, unknown>, aliases: string[]): string {
+  const normalizedAliases = aliases.map(normalizeLookupText);
+  for (const [key, value] of Object.entries(values)) {
+    const normalizedKey = normalizeLookupText(key);
+    if (!normalizedAliases.some((alias) => normalizedKey === alias || normalizedKey.includes(alias))) continue;
+    const text = textValue(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function hasSourceHeader(values: Record<string, unknown>, aliases: string[]): boolean {
+  const normalizedAliases = aliases.map(normalizeLookupText);
+  return Object.keys(values).some((key) => {
+    const normalizedKey = normalizeLookupText(key);
+    return normalizedAliases.some((alias) => normalizedKey === alias || normalizedKey.includes(alias));
+  });
+}
+
+function normalizeLookupText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[’'`ʼ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitPersonName(value: string): { fullName: string; surname: string; givenName: string; patronymic: string } {
+  const parts = value.split(/\s+/).map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return { fullName: "", surname: "", givenName: "", patronymic: "" };
+  if (parts.length === 1) return { fullName: parts[0], surname: "", givenName: parts[0], patronymic: "" };
+  return {
+    fullName: parts.join(" "),
+    surname: parts.length >= 3 ? parts[parts.length - 1] : "",
+    givenName: parts[0],
+    patronymic: parts.length >= 3 ? parts.slice(1, -1).join(" ") : parts[1] ?? "",
+  };
+}
+
+function normalizeSourceDate(value: string): string {
+  const text = value.trim();
+  const match = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (!match) return "";
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31) return "";
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function appendNotes(current: unknown, lines: string[]): string {
+  const existing = textValue(current);
+  const uniqueLines = lines.filter((line) => !existing.includes(line));
+  return [existing, ...uniqueLines].filter(Boolean).join("\n");
+}
+
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
 }
 
 function findModelCommentary(value: unknown, fieldPath = ""): { field: string } | null {
@@ -279,6 +429,7 @@ Deno.serve(async (request) => {
     const collection = String(input.collection ?? "").trim();
     const title = String(input.title ?? collection).trim();
     const projectId = String(input.projectId ?? "").trim();
+    const fileName = String(input.fileName ?? "").trim().slice(0, 200);
     const rows = trimRows(input.rows);
     const fields = trustedFields(collection, input.fields);
     const providedSourceHeaders = Array.isArray(input.sourceHeaders) ? input.sourceHeaders.map(String).slice(0, 80) : [];
@@ -301,7 +452,7 @@ Deno.serve(async (request) => {
     const settings = await readAiSettings(admin, user.id);
     const apiKey = await decryptApiKey(settings.encrypted_api_key, encryptionKey);
     const mode = input.mode ? normalizeMode(input.mode) : settings.mode;
-    const maxRows = mode === "detailed" ? 80 : 40;
+    const maxRows = mode === "detailed" ? 100 : 80;
 
     const prompt = `
 Ти — помічник імпорту даних у генеалогічний вебзастосунок «Трекер Роду».
@@ -322,6 +473,10 @@ Deno.serve(async (request) => {
 - Не пиши свої міркування, коментарі про JSON або службові пояснення у поля data. Усі сумніви пиши тільки у warnings.
 - Додай warnings для неоднозначних колонок, пропущених обов’язкових полів або рядків із низькою впевненістю.
 - Збережи порядок рядків. Максимум ${maxRows} записів.
+${sectionGuidanceFor(collection, sourceHeaders, fileName)}
+
+Назва файлу:
+${JSON.stringify(fileName)}
 
 Колонки вихідної таблиці:
 ${JSON.stringify(sourceHeaders, null, 2)}
@@ -341,7 +496,7 @@ ${JSON.stringify(rows.slice(0, maxRows), null, 2)}
         throw schemaError;
       });
     }
-    return json(sanitizeAiRows(result, collection, fields, rows.slice(0, maxRows)));
+    return json(sanitizeAiRows(result, collection, fields, rows.slice(0, maxRows), fileName));
   } catch (error) {
     return json({ error: errorMessage(error, "Не вдалося проаналізувати таблицю.") }, 400);
   }
