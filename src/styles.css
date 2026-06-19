@@ -1422,6 +1422,43 @@ tbody tr:hover { background: #fbfaf5; }
   color: #8a5a00;
   font-size: 13px;
 }
+.ai-import-progress {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fffefb;
+  border: 1px solid #ddd5c4;
+  border-radius: 12px;
+}
+.ai-import-progress-heading,
+.ai-import-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+.ai-import-progress-heading strong {
+  color: var(--green-950);
+}
+.ai-import-progress-heading span,
+.ai-import-progress-meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ai-import-progress-bar {
+  height: 9px;
+  margin: 10px 0;
+  overflow: hidden;
+  background: #e5dfd0;
+  border-radius: 999px;
+}
+.ai-import-progress-bar span {
+  display: block;
+  height: 100%;
+  background: var(--green-800);
+  border-radius: inherit;
+  transition: width 180ms ease;
+}
 .ai-import-preview {
   margin-top: 12px;
   display: grid;

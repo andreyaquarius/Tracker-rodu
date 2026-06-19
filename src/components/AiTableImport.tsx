@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { AppEntity, CollectionKey, FindingParticipant } from "../types";
 import type { EntityConfig, FieldConfig } from "../pages/entityConfigs";
-import { analyzeTableImportWithAi } from "../services/aiTableImport";
+import { analyzeTableImportWithAi, type AiSourceRow } from "../services/aiTableImport";
 import { nowIso } from "../utils/dateHelpers";
 import { createId } from "../utils/id";
 import {
@@ -17,6 +17,10 @@ interface AiTableImportProps {
   onImport: (records: AppEntity[]) => void;
 }
 
+const AI_IMPORT_BATCH_SIZE = 10;
+
+type ImportBatchPhase = "idle" | "analyzing" | "review" | "complete" | "error";
+
 export function AiTableImport({ config, projectId, onImport }: AiTableImportProps) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -27,21 +31,48 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
   const [warnings, setWarnings] = useState<string[]>([]);
   const [rowWarnings, setRowWarnings] = useState<Record<number, string[]>>({});
   const [records, setRecords] = useState<AppEntity[]>([]);
+  const [confirmedRecords, setConfirmedRecords] = useState<AppEntity[]>([]);
+  const [batchIndex, setBatchIndex] = useState(0);
+  const [totalBatches, setTotalBatches] = useState(0);
+  const [currentBatchRows, setCurrentBatchRows] = useState<AiSourceRow[]>([]);
+  const [phase, setPhase] = useState<ImportBatchPhase>("idle");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const parsedTable = useMemo<ParsedTable>(() => parseTableText(text, fileName), [fileName, text]);
+  const totalRows = parsedTable.rows.length;
+  const confirmedRows = confirmedRecords.length;
+  const reviewedRows = phase === "review" ? records.length : 0;
+  const analyzedRows = Math.min(totalRows, confirmedRows + reviewedRows);
+  const progressPercent = totalRows ? Math.round((analyzedRows / totalRows) * 100) : 0;
 
-  const analyze = async () => {
+  const resetBatchImport = () => {
     setError("");
     setSummary("");
     setWarnings([]);
     setRowWarnings({});
     setRecords([]);
-    if (!parsedTable.rows.length) {
-      setError("Прикріпіть CSV/TSV/TXT або JSON-таблицю з заголовками колонок.");
-      return;
-    }
+    setConfirmedRecords([]);
+    setBatchIndex(0);
+    setTotalBatches(0);
+    setCurrentBatchRows([]);
+    setPhase("idle");
+  };
+
+  const analyzeImportBatch = async (nextBatchIndex: number) => {
+    const start = nextBatchIndex * AI_IMPORT_BATCH_SIZE;
+    const batchRows = parsedTable.rows.slice(start, start + AI_IMPORT_BATCH_SIZE);
+    if (!batchRows.length) return;
+
+    setError("");
+    setSummary("");
+    setWarnings([]);
+    setRowWarnings({});
+    setRecords([]);
+    setCurrentBatchRows(batchRows);
+    setBatchIndex(nextBatchIndex);
+    setPhase("analyzing");
     setBusy(true);
+
     try {
       const result = await analyzeTableImportWithAi({
         projectId,
@@ -56,28 +87,56 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
         })),
         fileName,
         sourceHeaders: parsedTable.headers,
-        rows: parsedTable.rows,
+        rows: batchRows,
       });
-      setSummary(result.summary);
+      setSummary(result.summary || `Партію ${nextBatchIndex + 1} підготовлено до перевірки.`);
       setWarnings(result.warnings);
       setRowWarnings(Object.fromEntries(result.rows.map((row) => [row.sourceRowNumber, row.warnings])));
       setRecords(result.records.map((record) => buildEntity(config.collection, config.fields, record)));
+      setPhase("review");
     } catch (analysisError) {
-      setError(analysisError instanceof Error ? analysisError.message : "Не вдалося проаналізувати таблицю.");
+      setPhase("error");
+      setError(analysisError instanceof Error ? analysisError.message : "Не вдалося проаналізувати партію таблиці.");
     } finally {
       setBusy(false);
     }
   };
 
-  const importRecords = () => {
-    onImport(records.map(stripImportMetadata));
+  const startBatchAnalysis = async () => {
+    resetBatchImport();
+    if (!parsedTable.rows.length) {
+      setError("Прикріпіть CSV/TSV/TXT або JSON-таблицю з заголовками колонок.");
+      return;
+    }
+    setTotalBatches(Math.ceil(parsedTable.rows.length / AI_IMPORT_BATCH_SIZE));
+    await analyzeImportBatch(0);
+  };
+
+  const confirmBatchAndContinue = async () => {
+    if (!records.length) return;
+    const nextConfirmedRecords = [...confirmedRecords, ...records];
+    setConfirmedRecords(nextConfirmedRecords);
+    setRecords([]);
+    setRowWarnings({});
+    setWarnings([]);
+    setSummary("");
+
+    const nextBatchIndex = batchIndex + 1;
+    if (nextBatchIndex >= totalBatches) {
+      setCurrentBatchRows([]);
+      setPhase("complete");
+      setSummary(`Підтверджено ${nextConfirmedRecords.length} записів. Можна завантажити їх на сайт.`);
+      return;
+    }
+    await analyzeImportBatch(nextBatchIndex);
+  };
+
+  const importConfirmedRecords = () => {
+    onImport(confirmedRecords.map(stripImportMetadata));
     setOpen(false);
     setText("");
     setFileName("");
-    setRecords([]);
-    setSummary("");
-    setRowWarnings({});
-    setWarnings([]);
+    resetBatchImport();
   };
 
   if (!open) {
@@ -111,6 +170,11 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
             setWarnings([]);
             setRowWarnings({});
             setRecords([]);
+            setConfirmedRecords([]);
+            setBatchIndex(0);
+            setTotalBatches(0);
+            setCurrentBatchRows([]);
+            setPhase("idle");
             if (!isSupportedTableFileName(file.name)) {
               setText("");
               setFileName("");
@@ -138,28 +202,102 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
         </div>
       </div>
       <div className="ai-import-actions">
-        <button type="button" className="button button-secondary" onClick={() => { setText(""); setFileName(""); setRecords([]); setRowWarnings({}); setWarnings([]); setSummary(""); }}>
+        <button type="button" className="button button-secondary" onClick={() => { setText(""); setFileName(""); resetBatchImport(); }}>
           Очистити
         </button>
-        <button type="button" className="button button-primary" onClick={() => void analyze()} disabled={busy || !text.trim()}>
+        <button type="button" className="button button-primary" onClick={() => void startBatchAnalysis()} disabled={busy || !text.trim()}>
           {busy ? "Аналіз…" : "Проаналізувати"}
         </button>
       </div>
+      {totalBatches ? (
+        <BatchProgress
+          batchIndex={batchIndex}
+          totalBatches={totalBatches}
+          totalRows={totalRows}
+          confirmedRows={confirmedRows}
+          analyzedRows={analyzedRows}
+          progressPercent={progressPercent}
+          batchRows={currentBatchRows.length}
+          phase={phase}
+        />
+      ) : null}
       {error ? <div className="form-error">{error}</div> : null}
+      {phase === "error" && currentBatchRows.length ? (
+        <div className="ai-import-actions">
+          <button type="button" className="button button-secondary" onClick={() => void analyzeImportBatch(batchIndex)} disabled={busy}>
+            Повторити поточну партію
+          </button>
+        </div>
+      ) : null}
       {summary ? <p className="ai-import-summary">{summary}</p> : null}
       {[...parsedTable.warnings, ...warnings].length ? <ul className="ai-import-warnings">{[...parsedTable.warnings, ...warnings].map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
       {records.length ? (
         <div className="ai-import-preview">
-          <strong>Готово до імпорту: {records.length}</strong>
+          <strong>Перевірте партію {batchIndex + 1}: {records.length} записів</strong>
           <EditableImportPreview
             fields={config.fields}
             records={records}
             rowWarnings={rowWarnings}
             onChange={setRecords}
           />
-          <button type="button" className="button button-primary" onClick={importRecords}>Завантажити записи на сайт</button>
+          <button type="button" className="button button-primary" onClick={() => void confirmBatchAndContinue()} disabled={busy}>
+            {batchIndex + 1 >= totalBatches ? "Підтвердити останню партію" : "Підтвердити партію та продовжити"}
+          </button>
         </div>
       ) : null}
+      {phase === "complete" && confirmedRecords.length ? (
+        <div className="ai-import-preview">
+          <strong>Усі партії підтверджено: {confirmedRecords.length}</strong>
+          <button type="button" className="button button-primary" onClick={importConfirmedRecords}>
+            Завантажити підтверджені записи на сайт
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BatchProgress({
+  batchIndex,
+  totalBatches,
+  totalRows,
+  confirmedRows,
+  analyzedRows,
+  progressPercent,
+  batchRows,
+  phase,
+}: {
+  batchIndex: number;
+  totalBatches: number;
+  totalRows: number;
+  confirmedRows: number;
+  analyzedRows: number;
+  progressPercent: number;
+  batchRows: number;
+  phase: ImportBatchPhase;
+}) {
+  const statusText = {
+    idle: "Очікує запуску",
+    analyzing: "Gemini аналізує поточну партію",
+    review: "Партія готова до перевірки",
+    complete: "Усі партії підтверджено",
+    error: "Потрібна повторна спроба",
+  }[phase];
+
+  return (
+    <div className="ai-import-progress" role="status" aria-live="polite">
+      <div className="ai-import-progress-heading">
+        <strong>Партія {Math.min(batchIndex + 1, totalBatches)} з {totalBatches}</strong>
+        <span>{statusText}</span>
+      </div>
+      <div className="ai-import-progress-bar" aria-label={`Прогрес ${progressPercent}%`}>
+        <span style={{ width: `${progressPercent}%` }} />
+      </div>
+      <div className="ai-import-progress-meta">
+        <span>Опрацьовано: {analyzedRows} з {totalRows}</span>
+        <span>Підтверджено: {confirmedRows}</span>
+        <span>У поточній партії: {batchRows || "—"}</span>
+      </div>
     </div>
   );
 }
