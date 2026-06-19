@@ -177,13 +177,22 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
   if (!rawRows.length) {
     throw new Error("ШІ не повернув жодного рядка для імпорту.");
   }
-  if (rawRows.length !== sourceRows.length) {
+  if (rawRows.length !== sourceRows.length && collection !== "persons") {
     throw new Error(`ШІ повернув ${rawRows.length} з ${sourceRows.length} рядків. Дані не збережено, щоб не створити неповний імпорт.`);
   }
   const seenSourceRows = new Set<number>();
-  const rows = rawRows.slice(0, sourceRows.length).map((raw, index) => {
+  const rowsBySourceNumber = new Map<number, Record<string, unknown>>();
+  for (const raw of rawRows) {
     const rowRecord = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
-    const sourceRowNumber = Number(rowRecord.sourceRowNumber) || sourceRows[index]?.sourceRowNumber || index + 1;
+    const sourceRowNumber = Number(rowRecord.sourceRowNumber);
+    if (Number.isFinite(sourceRowNumber) && bySource.has(sourceRowNumber) && !rowsBySourceNumber.has(sourceRowNumber)) {
+      rowsBySourceNumber.set(sourceRowNumber, rowRecord);
+    }
+  }
+  const rows = sourceRows.map((sourceRow, index) => {
+    const raw = rowsBySourceNumber.get(sourceRow.sourceRowNumber) ?? rawRows[index];
+    const rowRecord = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+    const sourceRowNumber = Number(rowRecord.sourceRowNumber) || sourceRow.sourceRowNumber || index + 1;
     if (!bySource.has(sourceRowNumber)) {
       throw new Error(`ШІ повернув невідомий номер рядка ${sourceRowNumber}. Повторіть аналіз таблиці.`);
     }
@@ -193,7 +202,7 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
     seenSourceRows.add(sourceRowNumber);
     const data = rowRecord.data && typeof rowRecord.data === "object" && !Array.isArray(rowRecord.data)
       ? rowRecord.data as Record<string, unknown>
-      : rowRecord;
+      : rowsBySourceNumber.has(sourceRowNumber) ? rowRecord : {};
     const clean = Object.fromEntries(
       Object.entries(data)
         .filter(([key]) => allowed.has(key))
@@ -216,6 +225,7 @@ function sanitizeAiRows(result: unknown, collection: string, fields: FieldSchema
       data: clean,
       warnings: [
         ...(Array.isArray(rowRecord.warnings) ? rowRecord.warnings.map(String) : []),
+        ...(rowsBySourceNumber.has(sourceRowNumber) ? [] : ["ШІ не повернув цей рядок; запис заповнено з вихідної таблиці без домислювань."]),
         ...postWarnings,
         ...(bySource.has(sourceRowNumber) ? [] : ["Номер рядка не знайдено у вихідній таблиці."]),
       ],
@@ -501,6 +511,8 @@ Deno.serve(async (request) => {
     const apiKey = await decryptApiKey(settings.encrypted_api_key, encryptionKey);
     const mode = input.mode ? normalizeMode(input.mode) : settings.mode;
     const maxRows = mode === "detailed" ? 100 : 80;
+    const rowsForPrompt = rows.slice(0, maxRows);
+    const expectedSourceRowNumbers = rowsForPrompt.map((row) => row.sourceRowNumber);
 
     const prompt = `
 Ти — помічник імпорту даних у генеалогічний вебзастосунок «Трекер Роду».
@@ -518,6 +530,9 @@ Deno.serve(async (request) => {
 - Для зв’язків research/document/persons/findings/documents/scans поверни порожній рядок або порожній масив: ти не маєш права підбирати ID.
 - Кожен результат повинен містити sourceRowNumber з вихідного рядка. Не створюй записів, яких немає у вихідній таблиці.
 - Поверни рівно один rows[] для кожного вхідного рядка у тому самому порядку. Не об’єднуй усю таблицю в один запис.
+- У цій партії ${rowsForPrompt.length} вхідних рядків. Масив rows у відповіді повинен мати рівно ${rowsForPrompt.length} об’єктів.
+- sourceRowNumber у відповіді має бути рівно таким списком і в такому порядку: ${JSON.stringify(expectedSourceRowNumbers)}.
+- Якщо для рядка бракує даних, усе одно поверни окремий об’єкт rows[] для цього sourceRowNumber з порожніми полями та warning, але не пропускай рядок.
 - Не пиши свої міркування, коментарі про JSON або службові пояснення у поля data. Усі сумніви пиши тільки у warnings.
 - Додай warnings для неоднозначних колонок, пропущених обов’язкових полів або рядків із низькою впевненістю.
 - Збережи порядок рядків. Максимум ${maxRows} записів.
@@ -533,7 +548,7 @@ ${JSON.stringify(sourceHeaders, null, 2)}
 ${JSON.stringify(fields, null, 2)}
 
 Рядки користувацької таблиці:
-${JSON.stringify(rows.slice(0, maxRows), null, 2)}
+${JSON.stringify(rowsForPrompt, null, 2)}
 `.trim();
 
     let result: unknown;
@@ -544,7 +559,7 @@ ${JSON.stringify(rows.slice(0, maxRows), null, 2)}
         throw schemaError;
       });
     }
-    return json(sanitizeAiRows(result, collection, fields, rows.slice(0, maxRows), fileName));
+    return json(sanitizeAiRows(result, collection, fields, rowsForPrompt, fileName));
   } catch (error) {
     return json({ error: errorMessage(error, "Не вдалося проаналізувати таблицю.") }, 400);
   }
