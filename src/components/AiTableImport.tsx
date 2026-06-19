@@ -164,7 +164,6 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
   );
 }
 
-
 function EditableImportPreview({
   fields,
   records,

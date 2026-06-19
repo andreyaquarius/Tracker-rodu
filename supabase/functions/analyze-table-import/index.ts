@@ -21,6 +21,33 @@ const sectionFieldKeys: Record<string, Set<string>> = {
   hypotheses: new Set(["researchId", "title", "description", "argumentsFor", "argumentsAgainst", "toVerify", "relatedPeople", "personIds", "documentIds", "findingIds", "status", "probability", "notes"]),
 };
 
+const responseSchema = {
+  type: "object",
+  properties: {
+    sectionKey: { type: "string" },
+    rows: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          sourceRowNumber: { type: "number" },
+          data: { type: "object", additionalProperties: true },
+          warnings: { type: "array", items: { type: "string" } },
+          confidence: { type: "number" },
+        },
+        required: ["sourceRowNumber", "data", "warnings"],
+        additionalProperties: false,
+      },
+    },
+    unmappedSourceColumns: { type: "array", items: { type: "string" } },
+    generalWarnings: { type: "array", items: { type: "string" } },
+    warnings: { type: "array", items: { type: "string" } },
+    summary: { type: "string" },
+  },
+  required: ["sectionKey", "rows", "unmappedSourceColumns", "generalWarnings", "summary"],
+  additionalProperties: false,
+};
+
 function trimRows(rows: unknown): SourceRow[] {
   if (!Array.isArray(rows)) return [];
   return rows
@@ -187,7 +214,7 @@ ${JSON.stringify(fields, null, 2)}
 ${JSON.stringify(rows.slice(0, maxRows), null, 2)}
 `.trim();
 
-    const result = await callGemini(apiKey, settings.model, prompt, null);
+    const result = await callGemini(apiKey, settings.model, prompt, responseSchema);
     return json(sanitizeAiRows(result, collection, fields, rows.slice(0, maxRows)));
   } catch (error) {
     return json({ error: errorMessage(error, "Не вдалося проаналізувати таблицю.") }, 400);
