@@ -4,6 +4,12 @@ import type { EntityConfig, FieldConfig } from "../pages/entityConfigs";
 import { analyzeTableImportWithAi } from "../services/aiTableImport";
 import { nowIso } from "../utils/dateHelpers";
 import { createId } from "../utils/id";
+import {
+  isSupportedTableFileName,
+  parseTableText,
+  unsupportedTableFormatMessage,
+  type ParsedTable,
+} from "../utils/tableImport";
 
 interface AiTableImportProps {
   config: EntityConfig;
@@ -19,17 +25,19 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
   const [error, setError] = useState("");
   const [summary, setSummary] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [rowWarnings, setRowWarnings] = useState<Record<number, string[]>>({});
   const [records, setRecords] = useState<AppEntity[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const parsedRows = useMemo(() => parseTableText(text), [text]);
+  const parsedTable = useMemo<ParsedTable>(() => parseTableText(text, fileName), [fileName, text]);
 
   const analyze = async () => {
     setError("");
     setSummary("");
     setWarnings([]);
+    setRowWarnings({});
     setRecords([]);
-    if (!parsedRows.length) {
+    if (!parsedTable.rows.length) {
       setError("Прикріпіть CSV/TSV/TXT або JSON-таблицю з заголовками колонок.");
       return;
     }
@@ -46,10 +54,13 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
           options: field.options,
           required: field.required,
         })),
-        rows: parsedRows,
+        fileName,
+        sourceHeaders: parsedTable.headers,
+        rows: parsedTable.rows,
       });
       setSummary(result.summary);
       setWarnings(result.warnings);
+      setRowWarnings(Object.fromEntries(result.rows.map((row) => [row.sourceRowNumber, row.warnings])));
       setRecords(result.records.map((record) => buildEntity(config.collection, config.fields, record)));
     } catch (analysisError) {
       setError(analysisError instanceof Error ? analysisError.message : "Не вдалося проаналізувати таблицю.");
@@ -59,12 +70,13 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
   };
 
   const importRecords = () => {
-    onImport(records);
+    onImport(records.map(stripImportMetadata));
     setOpen(false);
     setText("");
     setFileName("");
     setRecords([]);
     setSummary("");
+    setRowWarnings({});
     setWarnings([]);
   };
 
@@ -97,7 +109,14 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
             setError("");
             setSummary("");
             setWarnings([]);
+            setRowWarnings({});
             setRecords([]);
+            if (!isSupportedTableFileName(file.name)) {
+              setText("");
+              setFileName("");
+              setError(unsupportedTableFormatMessage(file.name));
+              return;
+            }
             setFileName(file.name);
             void file.text().then(setText).catch(() => {
               setText("");
@@ -115,11 +134,11 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
         </button>
         <div>
           <strong>{fileName || "Файл ще не вибрано"}</strong>
-          <span>{parsedRows.length ? `Розпізнано рядків: ${parsedRows.length}` : "Підтримуються CSV, TSV, TXT або JSON з заголовками колонок."}</span>
+          <span>{parsedTable.rows.length ? `Розпізнано рядків: ${parsedTable.rows.length}` : "Підтримуються CSV, TSV, TXT або JSON з заголовками колонок."}</span>
         </div>
       </div>
       <div className="ai-import-actions">
-        <button type="button" className="button button-secondary" onClick={() => { setText(""); setFileName(""); setRecords([]); setWarnings([]); setSummary(""); }}>
+        <button type="button" className="button button-secondary" onClick={() => { setText(""); setFileName(""); setRecords([]); setRowWarnings({}); setWarnings([]); setSummary(""); }}>
           Очистити
         </button>
         <button type="button" className="button button-primary" onClick={() => void analyze()} disabled={busy || !text.trim()}>
@@ -128,11 +147,16 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
       </div>
       {error ? <div className="form-error">{error}</div> : null}
       {summary ? <p className="ai-import-summary">{summary}</p> : null}
-      {warnings.length ? <ul className="ai-import-warnings">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
+      {[...parsedTable.warnings, ...warnings].length ? <ul className="ai-import-warnings">{[...parsedTable.warnings, ...warnings].map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
       {records.length ? (
         <div className="ai-import-preview">
           <strong>Готово до імпорту: {records.length}</strong>
-          <pre>{JSON.stringify(records.slice(0, 3), null, 2)}</pre>
+          <EditableImportPreview
+            fields={config.fields}
+            records={records}
+            rowWarnings={rowWarnings}
+            onChange={setRecords}
+          />
           <button type="button" className="button button-primary" onClick={importRecords}>Завантажити записи на сайт</button>
         </div>
       ) : null}
@@ -140,48 +164,82 @@ export function AiTableImport({ config, projectId, onImport }: AiTableImportProp
   );
 }
 
-function parseTableText(value: string): Record<string, unknown>[] {
-  const text = value.trim();
-  if (!text) return [];
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (Array.isArray(parsed)) return parsed.filter(isRecord).map((row) => ({ ...row }));
-  } catch {
-    // Fall back to delimited text.
-  }
-  const lines = text.split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) return [];
-  const delimiter = lines[0].includes("\t") ? "\t" : lines[0].includes(";") ? ";" : ",";
-  const headers = splitDelimitedLine(lines[0], delimiter).map((header) => header.trim()).filter(Boolean);
-  if (!headers.length) return [];
-  return lines.slice(1).map((line) => {
-    const cells = splitDelimitedLine(line, delimiter);
-    return Object.fromEntries(headers.map((header, index) => [header, cells[index]?.trim() ?? ""]));
-  });
+function EditableImportPreview({
+  fields,
+  records,
+  rowWarnings,
+  onChange,
+}: {
+  fields: FieldConfig[];
+  records: AppEntity[];
+  rowWarnings: Record<number, string[]>;
+  onChange: (records: AppEntity[]) => void;
+}) {
+  const visibleFields = fields.filter((field) => !["scans", "documents", "findings", "persons"].includes(field.type ?? ""));
+  return (
+    <div className="ai-import-preview-table-wrap">
+      <table className="ai-import-preview-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            {visibleFields.map((field) => <th key={field.key}>{field.label}</th>)}
+            <th>Попередження</th>
+          </tr>
+        </thead>
+        <tbody>
+          {records.map((record, recordIndex) => {
+            const row = record as unknown as Record<string, unknown>;
+            return (
+              <tr key={String(row.id ?? recordIndex)}>
+                <td>{recordIndex + 1}</td>
+                {visibleFields.map((field) => (
+                  <td key={field.key}>
+                    <input
+                      value={displayEditableValue(row[field.key])}
+                      onChange={(event) => {
+                        const nextRecords = records.map((item, index) => index === recordIndex
+                          ? ({
+                              ...(item as unknown as Record<string, unknown>),
+                              [field.key]: coerceEditableValue(field, event.target.value),
+                            } as unknown as AppEntity)
+                          : item);
+                        onChange(nextRecords);
+                      }}
+                    />
+                  </td>
+                ))}
+                <td>{(rowWarnings[Number(row.__sourceRowNumber)] ?? []).join("; ") || "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
-function splitDelimitedLine(line: string, delimiter: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
-    if (character === '"') {
-      if (quoted && line[index + 1] === '"') {
-        current += '"';
-        index += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (character === delimiter && !quoted) {
-      result.push(current);
-      current = "";
-    } else {
-      current += character;
-    }
+function displayEditableValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => typeof item === "object" ? JSON.stringify(item) : String(item)).join("; ");
+  return value == null ? "" : String(value);
+}
+
+function coerceEditableValue(field: FieldConfig, value: string): unknown {
+  if (field.type === "checkbox") return value === "true" || value === "так" || value === "1";
+  if (field.type === "participants") {
+    return value.split(";").map((name) => name.trim()).filter(Boolean).map((name) => ({
+      id: createId(),
+      role: "основна особа",
+      name,
+      notes: "",
+    }));
   }
-  result.push(current);
-  return result;
+  return value;
+}
+
+function stripImportMetadata(record: AppEntity): AppEntity {
+  const cleaned = { ...(record as unknown as Record<string, unknown>) };
+  delete cleaned.__sourceRowNumber;
+  return cleaned as unknown as AppEntity;
 }
 
 function buildEntity(collection: CollectionKey, fields: FieldConfig[], source: Record<string, unknown>): AppEntity {
@@ -193,6 +251,7 @@ function buildEntity(collection: CollectionKey, fields: FieldConfig[], source: R
     customFields: {},
   };
   for (const field of fields) entity[field.key] = normalizeFieldValue(field, source[field.key]);
+  entity.__sourceRowNumber = source.__sourceRowNumber;
   if (collection === "findings") {
     const participants = Array.isArray(entity.participants) ? entity.participants as FindingParticipant[] : [];
     entity.people = participants.map((participant) => participant.name).filter(Boolean).join(", ");

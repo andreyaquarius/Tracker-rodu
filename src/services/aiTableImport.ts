@@ -9,16 +9,31 @@ export interface AiImportFieldSchema {
   required?: boolean;
 }
 
+export interface AiSourceRow {
+  sourceRowNumber: number;
+  values: Record<string, unknown>;
+}
+
 export interface AiTableImportRequest {
   projectId?: string;
   collection: CollectionKey;
   title: string;
+  fileName?: string;
+  sourceHeaders: string[];
   fields: AiImportFieldSchema[];
-  rows: Record<string, unknown>[];
+  rows: AiSourceRow[];
   mode?: "fast" | "detailed";
 }
 
+export interface AiImportRowResult {
+  sourceRowNumber: number;
+  data: Record<string, unknown>;
+  warnings: string[];
+  confidence?: number;
+}
+
 export interface AiTableImportResult {
+  rows: AiImportRowResult[];
   records: Record<string, unknown>[];
   warnings: string[];
   summary: string;
@@ -45,10 +60,33 @@ export async function analyzeTableImportWithAi(
     throw new Error(readableAiImportFunctionError(error));
   }
   if (data?.error) throw new Error(String(data.error));
+  const rows: AiImportRowResult[] = Array.isArray(data?.rows)
+    ? data.rows.map((row: unknown) => normalizeImportRow(row))
+    : [];
+  const records = rows.length
+    ? rows.map((row) => row.data)
+    : Array.isArray(data?.records) ? data.records : [];
   return {
-    records: Array.isArray(data?.records) ? data.records : [],
+    rows,
+    records,
     warnings: Array.isArray(data?.warnings) ? data.warnings.map(String) : [],
     summary: String(data?.summary ?? ""),
+  };
+}
+
+function normalizeImportRow(value: unknown): AiImportRowResult {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const data = record.data && typeof record.data === "object" && !Array.isArray(record.data)
+    ? record.data as Record<string, unknown>
+    : {};
+  const sourceRowNumber = Number(record.sourceRowNumber);
+  return {
+    sourceRowNumber: Number.isFinite(sourceRowNumber) ? sourceRowNumber : 0,
+    data,
+    warnings: Array.isArray(record.warnings) ? record.warnings.map(String) : [],
+    confidence: typeof record.confidence === "number" ? record.confidence : undefined,
   };
 }
 
