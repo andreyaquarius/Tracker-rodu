@@ -260,10 +260,22 @@ function buildEntity(collection: CollectionKey, fields: FieldConfig[], source: R
 }
 
 function normalizeFieldValue(field: FieldConfig, value: unknown): unknown {
-  if (field.type === "checkbox") return Boolean(value);
+  if (field.type === "checkbox") {
+    if (typeof value === "boolean") return value;
+    const text = String(value ?? "").trim().toLowerCase();
+    return ["true", "1", "yes", "так", "истина"].includes(text);
+  }
   if (field.type === "scans") return [];
   if (["documents", "findings", "persons"].includes(field.type ?? "")) return Array.isArray(value) ? value.map(String) : [];
   if (field.type === "participants") {
+    if (typeof value === "string") {
+      return value.split(/[;,]/).map((name) => name.trim()).filter(Boolean).map((name) => ({
+        id: createId(),
+        role: "основна особа",
+        name,
+        notes: "",
+      }));
+    }
     const participants = Array.isArray(value) ? value.filter(isRecord) : [];
     return participants.map((participant) => ({
       id: createId(),

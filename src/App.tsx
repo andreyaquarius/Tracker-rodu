@@ -2199,11 +2199,13 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectFindings;
     const previousEntity = previous.find((item) => item.id === finding.id);
-    const optimistic = previous.some((item) => item.id === finding.id)
-      ? previous.map((item) => (item.id === finding.id ? finding : item))
-      : [finding, ...previous];
-    setProjectFindings(optimistic);
-    saveProjectWorkRecordsCache(projectId, projectTasks, optimistic);
+    setProjectFindings((current) => {
+      const optimistic = current.some((item) => item.id === finding.id)
+        ? current.map((item) => (item.id === finding.id ? finding : item))
+        : [finding, ...current];
+      saveProjectWorkRecordsCache(projectId, projectTasks, optimistic);
+      return optimistic;
+    });
 
     void assertProjectRecordUnchanged(
       "findings",
@@ -2223,14 +2225,16 @@ export default function App() {
         syncEntityAttachmentMetadata("findings", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectWorkRecordsCache(projectId);
-          const findings = cached.findings.map((item) =>
-            item.id === saved.id ? saved : item,
-          );
+          const findings = cached.findings.some((item) => item.id === saved.id)
+            ? cached.findings.map((item) => (item.id === saved.id ? saved : item))
+            : [saved, ...cached.findings];
           saveProjectWorkRecordsCache(projectId, cached.tasks, findings);
           return;
         }
         setProjectFindings((current) => {
-          const next = current.map((item) => (item.id === saved.id ? saved : item));
+          const next = current.some((item) => item.id === saved.id)
+            ? current.map((item) => (item.id === saved.id ? saved : item))
+            : [saved, ...current];
           saveProjectWorkRecordsCache(projectId, projectTasks, next);
           return next;
         });
