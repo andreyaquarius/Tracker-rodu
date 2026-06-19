@@ -2,10 +2,23 @@ begin;
 
 create extension if not exists pgcrypto;
 
-create type public.project_role as enum ('owner', 'editor', 'viewer');
-create type public.invitation_status as enum ('pending', 'accepted', 'revoked', 'expired');
+do $$
+begin
+  create type public.project_role as enum ('owner', 'editor', 'viewer');
+exception
+  when duplicate_object then null;
+end;
+$$;
 
-create table public.profiles (
+do $$
+begin
+  create type public.invitation_status as enum ('pending', 'accepted', 'revoked', 'expired');
+exception
+  when duplicate_object then null;
+end;
+$$;
+
+create table if not exists public.profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
   display_name text,
@@ -14,9 +27,9 @@ create table public.profiles (
   updated_at timestamptz not null default now()
 );
 
-create unique index profiles_email_unique on public.profiles (lower(email));
+create unique index if not exists profiles_email_unique on public.profiles (lower(email));
 
-create table public.projects (
+create table if not exists public.projects (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references public.profiles(user_id),
   name text not null,
@@ -27,7 +40,7 @@ create table public.projects (
   updated_at timestamptz not null default now()
 );
 
-create table public.project_members (
+create table if not exists public.project_members (
   project_id uuid not null references public.projects(id) on delete cascade,
   user_id uuid not null references public.profiles(user_id) on delete cascade,
   role public.project_role not null,
@@ -36,9 +49,9 @@ create table public.project_members (
   primary key (project_id, user_id)
 );
 
-create index project_members_user_id_idx on public.project_members (user_id);
+create index if not exists project_members_user_id_idx on public.project_members (user_id);
 
-create table public.project_invitations (
+create table if not exists public.project_invitations (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   email text not null,
@@ -51,11 +64,11 @@ create table public.project_invitations (
   accepted_at timestamptz
 );
 
-create unique index project_invitations_pending_unique
+create unique index if not exists project_invitations_pending_unique
   on public.project_invitations (project_id, lower(email))
   where status = 'pending';
 
-create table public.researches (
+create table if not exists public.researches (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   title text not null,
@@ -73,7 +86,7 @@ create table public.researches (
   updated_at timestamptz not null default now()
 );
 
-create table public.persons (
+create table if not exists public.persons (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   research_id uuid references public.researches(id) on delete set null,
@@ -106,7 +119,7 @@ create table public.persons (
   updated_at timestamptz not null default now()
 );
 
-create table public.person_relations (
+create table if not exists public.person_relations (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   person_id uuid not null references public.persons(id) on delete cascade,
@@ -121,7 +134,7 @@ create table public.person_relations (
   check (person_id <> related_person_id)
 );
 
-create table public.documents (
+create table if not exists public.documents (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   research_id uuid references public.researches(id) on delete set null,
@@ -145,7 +158,7 @@ create table public.documents (
   updated_at timestamptz not null default now()
 );
 
-create table public.year_matrix (
+create table if not exists public.year_matrix (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   research_id uuid references public.researches(id) on delete set null,
@@ -161,7 +174,7 @@ create table public.year_matrix (
   updated_at timestamptz not null default now()
 );
 
-create table public.tasks (
+create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   research_id uuid references public.researches(id) on delete set null,
@@ -184,14 +197,14 @@ create table public.tasks (
   updated_at timestamptz not null default now()
 );
 
-create table public.task_persons (
+create table if not exists public.task_persons (
   project_id uuid not null references public.projects(id) on delete cascade,
   task_id uuid not null references public.tasks(id) on delete cascade,
   person_id uuid not null references public.persons(id) on delete cascade,
   primary key (task_id, person_id)
 );
 
-create table public.findings (
+create table if not exists public.findings (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   research_id uuid references public.researches(id) on delete set null,
@@ -218,7 +231,7 @@ create table public.findings (
   updated_at timestamptz not null default now()
 );
 
-create table public.finding_participants (
+create table if not exists public.finding_participants (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   finding_id uuid not null references public.findings(id) on delete cascade,
@@ -229,7 +242,7 @@ create table public.finding_participants (
   created_at timestamptz not null default now()
 );
 
-create table public.hypotheses (
+create table if not exists public.hypotheses (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   research_id uuid references public.researches(id) on delete set null,
@@ -248,7 +261,7 @@ create table public.hypotheses (
   updated_at timestamptz not null default now()
 );
 
-create table public.hypothesis_links (
+create table if not exists public.hypothesis_links (
   project_id uuid not null references public.projects(id) on delete cascade,
   hypothesis_id uuid not null references public.hypotheses(id) on delete cascade,
   target_type text not null check (target_type in ('person', 'document', 'finding')),
@@ -256,7 +269,7 @@ create table public.hypothesis_links (
   primary key (hypothesis_id, target_type, target_id)
 );
 
-create table public.archive_requests (
+create table if not exists public.archive_requests (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   research_id uuid references public.researches(id) on delete set null,
@@ -273,14 +286,14 @@ create table public.archive_requests (
   updated_at timestamptz not null default now()
 );
 
-create table public.archive_request_persons (
+create table if not exists public.archive_request_persons (
   project_id uuid not null references public.projects(id) on delete cascade,
   archive_request_id uuid not null references public.archive_requests(id) on delete cascade,
   person_id uuid not null references public.persons(id) on delete cascade,
   primary key (archive_request_id, person_id)
 );
 
-create table public.custom_field_definitions (
+create table if not exists public.custom_field_definitions (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   module_key text not null,
@@ -295,7 +308,7 @@ create table public.custom_field_definitions (
   updated_at timestamptz not null default now()
 );
 
-create table public.custom_sections (
+create table if not exists public.custom_sections (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   parent_key text,
@@ -310,7 +323,7 @@ create table public.custom_sections (
   updated_at timestamptz not null default now()
 );
 
-create table public.custom_section_fields (
+create table if not exists public.custom_section_fields (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   section_id uuid not null references public.custom_sections(id) on delete cascade,
@@ -324,7 +337,7 @@ create table public.custom_section_fields (
   updated_at timestamptz not null default now()
 );
 
-create table public.custom_records (
+create table if not exists public.custom_records (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   section_id uuid not null references public.custom_sections(id) on delete cascade,
@@ -335,7 +348,7 @@ create table public.custom_records (
   updated_at timestamptz not null default now()
 );
 
-create table public.record_links (
+create table if not exists public.record_links (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   source_type text not null,
@@ -347,7 +360,7 @@ create table public.record_links (
   created_at timestamptz not null default now()
 );
 
-create table public.attachments (
+create table if not exists public.attachments (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   owner_type text not null,
@@ -363,7 +376,7 @@ create table public.attachments (
   unique (storage_bucket, storage_path)
 );
 
-create table public.activity_log (
+create table if not exists public.activity_log (
   id bigint generated always as identity primary key,
   project_id uuid not null references public.projects(id) on delete cascade,
   actor_id uuid references public.profiles(user_id) on delete set null,
@@ -374,19 +387,19 @@ create table public.activity_log (
   created_at timestamptz not null default now()
 );
 
-create index researches_project_idx on public.researches (project_id);
-create index persons_project_idx on public.persons (project_id);
-create index persons_research_idx on public.persons (research_id);
-create index documents_project_idx on public.documents (project_id);
-create index documents_research_idx on public.documents (research_id);
-create index year_matrix_project_idx on public.year_matrix (project_id);
-create index tasks_project_idx on public.tasks (project_id);
-create index findings_project_idx on public.findings (project_id);
-create index hypotheses_project_idx on public.hypotheses (project_id);
-create index archive_requests_project_idx on public.archive_requests (project_id);
-create index custom_records_project_section_idx on public.custom_records (project_id, section_id);
-create index attachments_project_owner_idx on public.attachments (project_id, owner_type, owner_id);
-create index activity_log_project_created_idx on public.activity_log (project_id, created_at desc);
+create index if not exists researches_project_idx on public.researches (project_id);
+create index if not exists persons_project_idx on public.persons (project_id);
+create index if not exists persons_research_idx on public.persons (research_id);
+create index if not exists documents_project_idx on public.documents (project_id);
+create index if not exists documents_research_idx on public.documents (research_id);
+create index if not exists year_matrix_project_idx on public.year_matrix (project_id);
+create index if not exists tasks_project_idx on public.tasks (project_id);
+create index if not exists findings_project_idx on public.findings (project_id);
+create index if not exists hypotheses_project_idx on public.hypotheses (project_id);
+create index if not exists archive_requests_project_idx on public.archive_requests (project_id);
+create index if not exists custom_records_project_section_idx on public.custom_records (project_id, section_id);
+create index if not exists attachments_project_owner_idx on public.attachments (project_id, owner_type, owner_id);
+create index if not exists activity_log_project_created_idx on public.activity_log (project_id, created_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -409,6 +422,7 @@ begin
     'custom_section_fields', 'custom_records'
   ]
   loop
+    execute format('drop trigger if exists %I on public.%I', table_name || '_set_updated_at', table_name);
     execute format(
       'create trigger %I_set_updated_at before update on public.%I
        for each row execute function public.set_updated_at()',
@@ -442,6 +456,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert or update of email, raw_user_meta_data on auth.users
   for each row execute function public.handle_new_user();
@@ -460,6 +475,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_project_created on public.projects;
 create trigger on_project_created
   after insert on public.projects
   for each row execute function public.add_project_owner();
@@ -525,6 +541,7 @@ alter table public.projects enable row level security;
 alter table public.project_members enable row level security;
 alter table public.project_invitations enable row level security;
 
+drop policy if exists profiles_select_related on public.profiles;
 create policy profiles_select_related
 on public.profiles for select to authenticated
 using (
@@ -538,32 +555,39 @@ using (
   )
 );
 
+drop policy if exists profiles_update_self on public.profiles;
 create policy profiles_update_self
 on public.profiles for update to authenticated
 using (user_id = auth.uid())
 with check (user_id = auth.uid());
 
+drop policy if exists projects_select_members on public.projects;
 create policy projects_select_members
 on public.projects for select to authenticated
 using (public.is_project_member(id));
 
+drop policy if exists projects_insert_owner on public.projects;
 create policy projects_insert_owner
 on public.projects for insert to authenticated
 with check (owner_id = auth.uid());
 
+drop policy if exists projects_update_owner on public.projects;
 create policy projects_update_owner
 on public.projects for update to authenticated
 using (public.is_project_owner(id))
 with check (owner_id = auth.uid());
 
+drop policy if exists projects_delete_owner on public.projects;
 create policy projects_delete_owner
 on public.projects for delete to authenticated
 using (public.is_project_owner(id));
 
+drop policy if exists project_members_select_members on public.project_members;
 create policy project_members_select_members
 on public.project_members for select to authenticated
 using (public.is_project_member(project_id));
 
+drop policy if exists project_members_insert_owner on public.project_members;
 create policy project_members_insert_owner
 on public.project_members for insert to authenticated
 with check (
@@ -571,6 +595,7 @@ with check (
   and role <> 'owner'
 );
 
+drop policy if exists project_members_update_owner on public.project_members;
 create policy project_members_update_owner
 on public.project_members for update to authenticated
 using (
@@ -582,6 +607,7 @@ with check (
   and role <> 'owner'
 );
 
+drop policy if exists project_members_delete_owner on public.project_members;
 create policy project_members_delete_owner
 on public.project_members for delete to authenticated
 using (
@@ -589,6 +615,7 @@ using (
   and user_id <> auth.uid()
 );
 
+drop policy if exists invitations_select_owner_or_recipient on public.project_invitations;
 create policy invitations_select_owner_or_recipient
 on public.project_invitations for select to authenticated
 using (
@@ -596,6 +623,7 @@ using (
   or lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
 );
 
+drop policy if exists invitations_manage_owner on public.project_invitations;
 create policy invitations_manage_owner
 on public.project_invitations for all to authenticated
 using (public.is_project_owner(project_id))
@@ -669,18 +697,21 @@ begin
   ]
   loop
     execute format('alter table public.%I enable row level security', table_name);
+    execute format('drop policy if exists %I on public.%I', table_name || '_select', table_name);
     execute format(
       'create policy %I_select on public.%I for select to authenticated
        using (public.is_project_member(project_id))',
       table_name,
       table_name
     );
+    execute format('drop policy if exists %I on public.%I', table_name || '_insert', table_name);
     execute format(
       'create policy %I_insert on public.%I for insert to authenticated
        with check (public.can_edit_project(project_id))',
       table_name,
       table_name
     );
+    execute format('drop policy if exists %I on public.%I', table_name || '_update', table_name);
     execute format(
       'create policy %I_update on public.%I for update to authenticated
        using (public.can_edit_project(project_id))
@@ -688,6 +719,7 @@ begin
       table_name,
       table_name
     );
+    execute format('drop policy if exists %I on public.%I', table_name || '_delete', table_name);
     execute format(
       'create policy %I_delete on public.%I for delete to authenticated
        using (public.can_edit_project(project_id))',
@@ -707,18 +739,21 @@ begin
   ]
   loop
     execute format('alter table public.%I enable row level security', table_name);
+    execute format('drop policy if exists %I on public.%I', table_name || '_select', table_name);
     execute format(
       'create policy %I_select on public.%I for select to authenticated
        using (public.is_project_member(project_id))',
       table_name,
       table_name
     );
+    execute format('drop policy if exists %I on public.%I', table_name || '_insert', table_name);
     execute format(
       'create policy %I_insert on public.%I for insert to authenticated
        with check (public.is_project_owner(project_id))',
       table_name,
       table_name
     );
+    execute format('drop policy if exists %I on public.%I', table_name || '_update', table_name);
     execute format(
       'create policy %I_update on public.%I for update to authenticated
        using (public.is_project_owner(project_id))
@@ -726,6 +761,7 @@ begin
       table_name,
       table_name
     );
+    execute format('drop policy if exists %I on public.%I', table_name || '_delete', table_name);
     execute format(
       'create policy %I_delete on public.%I for delete to authenticated
        using (public.is_project_owner(project_id))',
@@ -738,10 +774,12 @@ $$;
 
 alter table public.activity_log enable row level security;
 
+drop policy if exists activity_log_select_members on public.activity_log;
 create policy activity_log_select_members
 on public.activity_log for select to authenticated
 using (public.is_project_member(project_id));
 
+drop policy if exists activity_log_insert_editors on public.activity_log;
 create policy activity_log_insert_editors
 on public.activity_log for insert to authenticated
 with check (
