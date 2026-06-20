@@ -189,11 +189,30 @@ function AdminSubscriptions({ rows, onChanged }: {
 }) {
   const [busyId, setBusyId] = useState("");
   const [adminError, setAdminError] = useState("");
+  const [query, setQuery] = useState("");
+  const [planFilter, setPlanFilter] = useState<PlanCode | "admin" | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<SubscriptionStatus | "all">("all");
   const [drafts, setDrafts] = useState<Record<string, {
     planCode: PlanCode;
     status: SubscriptionStatus;
     periodEnd: string;
   }>>({});
+  const filteredRows = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("uk");
+    return rows.filter((row) => {
+      const matchesQuery = !normalizedQuery || [
+        row.displayName,
+        row.email,
+        row.planCode,
+        row.status,
+        row.isAdmin ? "адміністратор admin" : "",
+      ].join(" ").toLocaleLowerCase("uk").includes(normalizedQuery);
+      const matchesPlan = planFilter === "all" ||
+        (planFilter === "admin" ? row.isAdmin : !row.isAdmin && row.planCode === planFilter);
+      const matchesStatus = statusFilter === "all" || row.status === statusFilter;
+      return matchesQuery && matchesPlan && matchesStatus;
+    });
+  }, [rows, query, planFilter, statusFilter]);
   const draftFor = (row: AdminSubscriptionRow) => drafts[row.userId] ?? {
     planCode: row.planCode,
     status: row.status,
@@ -230,11 +249,43 @@ function AdminSubscriptions({ rows, onChanged }: {
     <section className="subscription-admin-section">
       <div className="section-heading"><h2>Адміністрування підписок</h2></div>
       {adminError ? <div className="alert alert-error">{adminError}</div> : null}
+      <div className="subscription-admin-filters">
+        <label className="search-field">
+          <span>Пошук</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Ім'я або email користувача"
+          />
+        </label>
+        <label>
+          <span>Тариф</span>
+          <select value={planFilter} onChange={(event) => setPlanFilter(event.target.value as PlanCode | "admin" | "all")}>
+            <option value="all">Усі тарифи</option>
+            <option value="admin">Адміністратори</option>
+            <option value="free">Безкоштовний</option>
+            <option value="researcher">Дослідник</option>
+            <option value="professional">Професійний</option>
+          </select>
+        </label>
+        <label>
+          <span>Статус</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as SubscriptionStatus | "all")}>
+            <option value="all">Усі статуси</option>
+            <option value="active">Активна</option>
+            <option value="trialing">Пробний період</option>
+            <option value="past_due">Очікує оплати</option>
+            <option value="cancelled">Скасована</option>
+            <option value="expired">Завершена</option>
+          </select>
+        </label>
+        <div className="result-count">{filteredRows.length} з {rows.length}</div>
+      </div>
       <div className="table-wrap">
         <table>
           <thead><tr><th>Користувач</th><th>Тариф</th><th>Статус</th><th>Завершення</th><th>Дії</th></tr></thead>
           <tbody>
-            {rows.map((row) => (
+            {filteredRows.map((row) => (
               <tr key={row.userId}>
                 <td><strong>{row.displayName || row.email}</strong><small>{row.email}</small></td>
                 <td>{row.isAdmin ? <span className="status-pill">Адміністратор</span> : row.planCode}</td>
@@ -294,6 +345,13 @@ function AdminSubscriptions({ rows, onChanged }: {
                 </td>
               </tr>
             ))}
+            {!filteredRows.length ? (
+              <tr>
+                <td colSpan={5}>
+                  <div className="empty-inline">Немає підписок за вибраними фільтрами.</div>
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
