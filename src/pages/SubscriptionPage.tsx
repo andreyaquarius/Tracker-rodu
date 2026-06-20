@@ -63,6 +63,7 @@ export function SubscriptionPage({
   }, [context?.isAdmin]);
 
   const trialExpired = context?.subscription.status === "expired";
+  const isPermanentAdmin = Boolean(context?.isAdmin);
   const statusText = context?.subscription.status === "trialing"
     ? "Пробний доступ"
     : context?.subscription.status === "active"
@@ -98,7 +99,18 @@ export function SubscriptionPage({
       </div>
 
       {error || pageError ? <div className="alert alert-error">{pageError || error}</div> : null}
-      {context?.subscription.status === "trialing" ? (
+      {isPermanentAdmin ? (
+        <section className="subscription-status-band">
+          <div>
+            <span className="eyebrow">Адміністратор</span>
+            <h2>Безстроковий доступ адміністратора</h2>
+          </div>
+          <div className="subscription-status-value compact">
+            <strong>Назавжди</strong>
+          </div>
+          <p>Цей акаунт має повний доступ без вибору тарифу, trial-періоду або дати завершення.</p>
+        </section>
+      ) : context?.subscription.status === "trialing" ? (
         <section className="subscription-status-band">
           <div>
             <span className="eyebrow">Пробний період: повний доступ</span>
@@ -135,32 +147,34 @@ export function SubscriptionPage({
         </div>
       </section>
 
-      <section className="subscription-plans-section">
-        <div className="section-heading"><h2>Тарифні плани</h2></div>
-        <div className="plan-grid">
-          {plans.map(({ plan, limits }) => (
-            <article className={`plan-card ${plan.code === context?.effectivePlanCode ? "active" : ""}`} key={plan.id}>
-              <div className="plan-card-heading">
-                <h3>{plan.name}</h3>
-                {plan.code === context?.effectivePlanCode ? <span className="status-pill">Поточний</span> : null}
-              </div>
-              <p>{plan.description}</p>
-              <div className="plan-price">{priceLabel(plan)}</div>
-              <ul>
-                {limits.filter((limit) => isVisibleLimit(plan.code, limit)).map((limit) => (
-                  <li key={limit.key}>
-                    <span>{limitLabels[limit.key]}</span>
-                    <strong>{planLimitValue(plan.code, limit)}</strong>
-                  </li>
-                ))}
-              </ul>
-              <button type="button" className="button button-secondary" disabled>
-                {plan.code === context?.effectivePlanCode ? "Активний тариф" : "Оплата готується"}
-              </button>
-            </article>
-          ))}
-        </div>
-      </section>
+      {!isPermanentAdmin ? (
+        <section className="subscription-plans-section">
+          <div className="section-heading"><h2>Тарифні плани</h2></div>
+          <div className="plan-grid">
+            {plans.map(({ plan, limits }) => (
+              <article className={`plan-card ${plan.code === context?.effectivePlanCode ? "active" : ""}`} key={plan.id}>
+                <div className="plan-card-heading">
+                  <h3>{plan.name}</h3>
+                  {plan.code === context?.effectivePlanCode ? <span className="status-pill">Поточний</span> : null}
+                </div>
+                <p>{plan.description}</p>
+                <div className="plan-price">{priceLabel(plan)}</div>
+                <ul>
+                  {limits.filter((limit) => isVisibleLimit(plan.code, limit)).map((limit) => (
+                    <li key={limit.key}>
+                      <span>{limitLabels[limit.key]}</span>
+                      <strong>{planLimitValue(plan.code, limit)}</strong>
+                    </li>
+                  ))}
+                </ul>
+                <button type="button" className="button button-secondary" disabled>
+                  {plan.code === context?.effectivePlanCode ? "Активний тариф" : "Оплата готується"}
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {context?.isAdmin ? (
         <AdminSubscriptions rows={adminRows} onChanged={refreshPage} />
@@ -223,54 +237,60 @@ function AdminSubscriptions({ rows, onChanged }: {
             {rows.map((row) => (
               <tr key={row.userId}>
                 <td><strong>{row.displayName || row.email}</strong><small>{row.email}</small></td>
-                <td>{row.planCode}</td>
-                <td>{row.status}</td>
-                <td>{formatDate(row.trialEndsAt || row.currentPeriodEnd)}</td>
+                <td>{row.isAdmin ? <span className="status-pill">Адміністратор</span> : row.planCode}</td>
+                <td>{row.isAdmin ? "Безстроковий доступ" : row.status}</td>
+                <td>{row.isAdmin ? "Назавжди" : formatDate(row.trialEndsAt || row.currentPeriodEnd)}</td>
                 <td className="row-actions">
-                  <select
-                    aria-label="Призначити тариф"
-                    disabled={busyId === row.userId}
-                    value={draftFor(row).planCode}
-                    onChange={(event) => updateDraft(row, { planCode: event.target.value as PlanCode })}
-                  >
-                    <option value="free">Безкоштовний</option>
-                    <option value="researcher">Дослідник</option>
-                    <option value="professional">Професійний</option>
-                  </select>
-                  <select
-                    aria-label="Статус підписки"
-                    disabled={busyId === row.userId}
-                    value={draftFor(row).status}
-                    onChange={(event) => updateDraft(row, { status: event.target.value as SubscriptionStatus })}
-                  >
-                    <option value="active">Активна</option>
-                    <option value="past_due">Очікує оплати</option>
-                    <option value="cancelled">Скасована</option>
-                    <option value="expired">Завершена</option>
-                  </select>
-                  <input
-                    type="date"
-                    aria-label="Дата завершення підписки"
-                    disabled={busyId === row.userId}
-                    value={draftFor(row).periodEnd}
-                    onChange={(event) => updateDraft(row, { periodEnd: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    disabled={busyId === row.userId}
-                    onClick={() => void change(row)}
-                  >
-                    Зберегти
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    disabled={busyId === row.userId}
-                    onClick={() => void change(row, true)}
-                  >
-                    +30 днів trial
-                  </button>
+                  {row.isAdmin ? (
+                    <span className="subscription-admin-note">Керується через список адміністраторів</span>
+                  ) : (
+                    <>
+                      <select
+                        aria-label="Призначити тариф"
+                        disabled={busyId === row.userId}
+                        value={draftFor(row).planCode}
+                        onChange={(event) => updateDraft(row, { planCode: event.target.value as PlanCode })}
+                      >
+                        <option value="free">Безкоштовний</option>
+                        <option value="researcher">Дослідник</option>
+                        <option value="professional">Професійний</option>
+                      </select>
+                      <select
+                        aria-label="Статус підписки"
+                        disabled={busyId === row.userId}
+                        value={draftFor(row).status}
+                        onChange={(event) => updateDraft(row, { status: event.target.value as SubscriptionStatus })}
+                      >
+                        <option value="active">Активна</option>
+                        <option value="past_due">Очікує оплати</option>
+                        <option value="cancelled">Скасована</option>
+                        <option value="expired">Завершена</option>
+                      </select>
+                      <input
+                        type="date"
+                        aria-label="Дата завершення підписки"
+                        disabled={busyId === row.userId}
+                        value={draftFor(row).periodEnd}
+                        onChange={(event) => updateDraft(row, { periodEnd: event.target.value })}
+                      />
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        disabled={busyId === row.userId}
+                        onClick={() => void change(row)}
+                      >
+                        Зберегти
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={busyId === row.userId}
+                        onClick={() => void change(row, true)}
+                      >
+                        +30 днів trial
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

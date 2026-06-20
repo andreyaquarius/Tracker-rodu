@@ -95,6 +95,7 @@ export interface AdminSubscriptionRow {
   status: SubscriptionStatus;
   trialEndsAt: string | null;
   currentPeriodEnd: string | null;
+  isAdmin: boolean;
 }
 
 export async function loadAdminSubscriptions(): Promise<AdminSubscriptionRow[]> {
@@ -108,6 +109,7 @@ export async function loadAdminSubscriptions(): Promise<AdminSubscriptionRow[]> 
     status: String(row.status) as SubscriptionStatus,
     trialEndsAt: nullableString(row.trial_ends_at),
     currentPeriodEnd: nullableString(row.current_period_end),
+    isAdmin: Boolean(row.is_admin),
   }));
 }
 

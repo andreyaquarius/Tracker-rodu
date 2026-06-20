@@ -1295,6 +1295,7 @@ tbody tr:hover { background: #fbfaf5; }
 .subscription-admin-section td small { display: block; margin-top: 3px; color: var(--muted); }
 .subscription-admin-section .row-actions { display: flex; gap: 8px; align-items: center; }
 .subscription-admin-section .button { min-height: 36px; padding: 7px 10px; }
+.subscription-admin-note { color: var(--muted); font-size: 12px; font-weight: 700; }
 .upgrade-required { min-width: 0; padding: 24px; }
 .upgrade-required > .status-pill { display: inline-flex; margin-bottom: 12px; }
 .upgrade-required p,
