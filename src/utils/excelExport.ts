@@ -47,7 +47,7 @@ interface EntityExportOptions {
   customFieldDefinitions?: CustomFieldDefinition[];
 }
 
-const standardLabels: Record<CollectionKey, Record<string, string>> = {
+export const standardLabels: Record<CollectionKey, Record<string, string>> = {
   researches: {
     title: "Назва дослідження",
     goal: "Головна мета",
@@ -370,16 +370,18 @@ function entityColumns(
   records: Array<Record<string, unknown>> = [],
 ): WorkbookColumn[] {
   const uniqueFields = new Map(fields.map((field) => [field.key, field]));
-  const columns: WorkbookColumn[] = Array.from(uniqueFields.values()).flatMap((field) => {
+  const columns: WorkbookColumn[] = [{ key: "id", label: "ID запису" }];
+  columns.push(...Array.from(uniqueFields.values()).flatMap((field) => {
     if (collection === "findings" && field.key === "participants") {
       return findingParticipantColumns(records);
     }
     return [{
       key: field.key,
       label: field.label,
-      value: (record) => formatEntityValue(db, field.key, record[field.key]),
+      value: (record: Record<string, unknown>) =>
+        formatEntityValue(db, field.key, record[field.key]),
     }];
-  });
+  }));
 
   for (const definition of customFieldDefinitions.filter((field) => field.module === collection)) {
     columns.push({

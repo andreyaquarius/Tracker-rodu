@@ -217,6 +217,11 @@ function chooseWorkspace(
   );
 }
 
+function mergeImportedRecords<T extends { id: string }>(imported: T[], current: T[]): T[] {
+  const importedIds = new Set(imported.map((record) => record.id));
+  return [...imported, ...current.filter((record) => !importedIds.has(record.id))];
+}
+
 function removeCustomFieldFromDatabase(
   db: AppDatabase,
   definition: CustomFieldDefinition,
@@ -2554,6 +2559,108 @@ export default function App() {
     else if (collection === "archiveRequests") saveArchiveRequest(entity);
     else app.saveEntity(collection, entity);
   };
+  const importTableRecords = async (collection: CollectionKey, records: AppEntity[]) => {
+    if (!records.length) return;
+    if (!workspace) {
+      app.saveEntities(collection, records);
+      notify(`Імпортовано записів: ${records.length}.`);
+      return;
+    }
+    if (workspace.role === "viewer") {
+      throw new Error("У цьому проєкті у вас є лише право перегляду.");
+    }
+
+    const projectId = workspace.projectId;
+    const researchIds = new Set(projectResearches.map((research) => research.id));
+    const documentIds = new Set(projectDocuments.map((document) => document.id));
+    const personIds = new Set(projectPersons.map((person) => person.id));
+    const findingIds = new Set(projectFindings.map((finding) => finding.id));
+
+    try {
+      if (collection === "tasks") {
+        const imported = records as TaskRecord[];
+        await importProjectWorkRecords(
+          projectId,
+          imported,
+          [],
+          researchIds,
+          documentIds,
+          personIds,
+        );
+        setProjectTasks((current) => {
+          const next = mergeImportedRecords(imported, current);
+          saveProjectWorkRecordsCache(projectId, next, projectFindings);
+          return next;
+        });
+      } else if (collection === "findings") {
+        const imported = records as Finding[];
+        await importProjectWorkRecords(
+          projectId,
+          [],
+          imported,
+          researchIds,
+          documentIds,
+          personIds,
+        );
+        setProjectFindings((current) => {
+          const next = mergeImportedRecords(imported, current);
+          saveProjectWorkRecordsCache(projectId, projectTasks, next);
+          return next;
+        });
+      } else if (collection === "hypotheses") {
+        const imported = records as Hypothesis[];
+        await importProjectAnalysisRecords(
+          projectId,
+          imported,
+          [],
+          researchIds,
+          personIds,
+          documentIds,
+          findingIds,
+        );
+        setProjectHypotheses((current) => {
+          const next = mergeImportedRecords(imported, current);
+          saveProjectAnalysisRecordsCache(projectId, next, projectArchiveRequests);
+          return next;
+        });
+      } else if (collection === "archiveRequests") {
+        const imported = records as ArchiveRequest[];
+        await importProjectAnalysisRecords(
+          projectId,
+          [],
+          imported,
+          researchIds,
+          personIds,
+          documentIds,
+          findingIds,
+        );
+        setProjectArchiveRequests((current) => {
+          const next = mergeImportedRecords(imported, current);
+          saveProjectAnalysisRecordsCache(projectId, projectHypotheses, next);
+          return next;
+        });
+      } else if (collection === "persons") {
+        const imported = records as Person[];
+        await importProjectPeople(projectId, imported, [], researchIds);
+        setProjectPersons((current) => {
+          const next = mergeImportedRecords(imported, current);
+          saveProjectPeopleCache(projectId, next, projectPersonRelations);
+          return next;
+        });
+      } else {
+        throw new Error("Імпорт для цього розділу не підтримується.");
+      }
+
+      const previousRecords = activeDb[collection] as AppEntity[];
+      records.forEach((record) => {
+        const previous = previousRecords.find((item) => item.id === record.id);
+        recordEntityActivity(collection, previous, record);
+      });
+      notify(`Імпортовано записів: ${records.length}.`);
+    } catch (error) {
+      throw new Error(describeError(error, "Не вдалося зберегти імпортовані записи."));
+    }
+  };
   const deleteFor = (collection: CollectionKey) => (id: string) => {
     if (collection === "researches") removeResearch(id);
     else if (collection === "documents") removeDocument(id);
@@ -3472,6 +3579,7 @@ export default function App() {
             }
             onOpenRelated={openRelatedRecord}
             onSave={saveFor(page)}
+            onImportRecords={importTableRecords}
             onDelete={deleteFor(page)}
             projectId={workspace?.projectId}
             onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
@@ -3498,6 +3606,7 @@ export default function App() {
             initialSearch={moduleSearch}
             initialOpenPersonId={openEntityId}
             onSavePerson={savePerson}
+            onImportRecords={importTableRecords}
             onDeletePerson={deletePerson}
             onSaveRelation={saveRelation}
             onDeleteRelation={deleteRelation}

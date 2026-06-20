@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type {
   AppDatabase,
+  AppEntity,
   ArchiveRequest,
   CustomFieldDefinition,
   Finding,
@@ -24,6 +25,7 @@ import { CustomFieldsView } from "../components/CustomFields";
 import { normalizeCustomFieldValues } from "../utils/customFields";
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
 import { exportPersonsToExcel } from "../utils/excelExport";
+import { TableDataImportButton } from "../components/TableDataImportButton";
 
 type PersonTab =
   | "overview"
@@ -49,6 +51,7 @@ export function PersonsPage({
   initialSearch = "",
   initialOpenPersonId = "",
   onSavePerson,
+  onImportRecords,
   onDeletePerson,
   onSaveRelation,
   onDeleteRelation,
@@ -71,6 +74,7 @@ export function PersonsPage({
   initialSearch?: string;
   initialOpenPersonId?: string;
   onSavePerson: (person: Person) => void;
+  onImportRecords: (collection: "persons", records: AppEntity[]) => Promise<void>;
   onDeletePerson: (id: string) => void;
   onSaveRelation: (relation: PersonRelation) => void;
   onDeleteRelation: (id: string) => void;
@@ -173,6 +177,15 @@ export function PersonsPage({
               customFieldDefinitions,
             )}
           />
+          {!readOnly ? (
+            <TableDataImportButton
+              collection="persons"
+              db={db}
+              fields={[]}
+              customFieldDefinitions={customFieldDefinitions}
+              onImport={(records) => onImportRecords("persons", records)}
+            />
+          ) : null}
           {!readOnly ? (
             <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
           ) : null}
