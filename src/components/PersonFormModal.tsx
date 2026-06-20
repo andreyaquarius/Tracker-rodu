@@ -2,7 +2,9 @@ import { useState, type FormEvent } from "react";
 import type {
   AppDatabase,
   CustomFieldDefinition,
+  GeoPoint,
   Person,
+  PersonEventType,
   PersonGender,
   PersonStatus,
   Research,
@@ -13,6 +15,8 @@ import { Modal } from "./Modal";
 import { CustomFieldsEditor } from "./CustomFields";
 import { normalizeCustomFieldValues } from "../utils/customFields";
 import { InlineCustomFieldCreator } from "./InlineCustomFieldCreator";
+import { GeoPlaceField } from "./GeoPlaceField";
+import { normalizePersonEvents, personEventLabel } from "../utils/geo";
 
 const genders: PersonGender[] = ["невідомо", "чоловік", "жінка"];
 const statuses: PersonStatus[] = [
@@ -55,6 +59,7 @@ function emptyPerson(initialFullName = "", researchId = ""): PersonDraft {
     marriageScans: [],
     deathScans: [],
     mentionScans: [],
+    events: [],
     customFields: {},
   };
 }
@@ -113,6 +118,7 @@ export function PersonFormModal({
           marriageScans: person.marriageScans ?? [],
           deathScans: person.deathScans ?? [],
           mentionScans: person.mentionScans ?? [],
+          events: person.events ?? [],
           customFields: normalizeCustomFieldValues(person.customFields),
         }
       : emptyPerson(initialFullName, initialResearchId),
@@ -127,18 +133,47 @@ export function PersonFormModal({
     .filter(Boolean)
     .join(" ");
   const displayedFullName = composedFullName || form.fullName.trim();
+  const eventPerson = {
+    id: person?.id ?? "draft",
+    birthDate: form.birthDate,
+    birthPlace: form.birthPlace,
+    marriageDate: form.marriageDate,
+    marriagePlace: form.marriagePlace,
+    deathDate: form.deathDate,
+    deathPlace: form.deathPlace,
+    residencePlaces: form.residencePlaces,
+  };
+  const personEvents = normalizePersonEvents(form.events, eventPerson);
+
+  const updateEventGeo = (type: PersonEventType, geo: GeoPoint | null) => {
+    update("events", personEvents.map((item) =>
+      item.type === type ? { ...item, geo } : item,
+    ));
+  };
+
+  const updateEventPlace = (type: PersonEventType, place: string) => {
+    if (type === "birth") update("birthPlace", place);
+    if (type === "marriage") update("marriagePlace", place);
+    if (type === "death") update("deathPlace", place);
+    if (type === "residence") update("residencePlaces", place);
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const timestamp = nowIso();
-    onSave({
+    const personId = person?.id ?? createId();
+    const finalPerson = {
       ...form,
       fullName: displayedFullName,
-      id: person?.id ?? createId(),
+      id: personId,
       createdAt: person?.createdAt ?? timestamp,
       __baseUpdatedAt: person?.updatedAt,
       updatedAt: timestamp,
-    } as Person);
+    } as Person;
+    onSave({
+      ...finalPerson,
+      events: normalizePersonEvents(form.events, finalPerson),
+    });
   };
 
   return (
@@ -238,6 +273,23 @@ export function PersonFormModal({
             <span>Місця проживання</span>
             <textarea rows={3} value={form.residencePlaces} onChange={(event) => update("residencePlaces", event.target.value)} />
           </label>
+          <fieldset className="geo-events field-wide">
+            <legend>Місця подій на карті</legend>
+            <p>Додайте позначки для тих подій, які потрібно показувати на географічній карті.</p>
+            {(["birth", "marriage", "death", "residence"] as PersonEventType[]).map((type) => {
+              const personEvent = personEvents.find((item) => item.type === type);
+              return (
+                <GeoPlaceField
+                  key={type}
+                  label={personEventLabel(type)}
+                  value={personEvent?.geo ?? null}
+                  placeName={personEvent?.placeName ?? ""}
+                  onChange={(geo) => updateEventGeo(type, geo)}
+                  onPlaceNameChange={(place) => updateEventPlace(type, place)}
+                />
+              );
+            })}
+          </fieldset>
           <label>
             <span>Соціальний статус</span>
             <input value={form.socialStatus} onChange={(event) => update("socialStatus", event.target.value)} />

@@ -17,6 +17,41 @@ export interface ScanAttachment {
   webViewLink?: string;
 }
 
+export type GeoSource = "search" | "map_click" | "import" | "unknown";
+export type GeoPrecision = "exact" | "approximate" | "settlement" | "unknown";
+
+export interface GeoPoint {
+  displayName: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  source: GeoSource;
+  precision?: GeoPrecision;
+  provider?: string | null;
+  externalId?: string | null;
+  markerColor?: string | null;
+}
+
+export type PersonEventType =
+  | "birth"
+  | "baptism"
+  | "marriage"
+  | "residence"
+  | "military"
+  | "death"
+  | "burial"
+  | "other";
+
+export interface PersonEvent {
+  id: EntityId;
+  personId: EntityId;
+  type: PersonEventType;
+  title?: string;
+  date?: string | null;
+  placeName?: string | null;
+  geo?: GeoPoint | null;
+  notes?: string | null;
+}
+
 export type CustomFieldModule =
   | "researches"
   | "documents"
@@ -185,6 +220,7 @@ export interface Finding extends BaseEntity {
   needsReview: boolean;
   notes: string;
   scans: ScanAttachment[];
+  geo: GeoPoint | null;
   customFields: CustomFieldValues;
 }
 
@@ -316,6 +352,7 @@ export interface Person extends BaseEntity {
   marriageScans: ScanAttachment[];
   deathScans: ScanAttachment[];
   mentionScans: ScanAttachment[];
+  events: PersonEvent[];
   customFields: CustomFieldValues;
 }
 

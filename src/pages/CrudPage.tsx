@@ -8,6 +8,7 @@ import type {
   DocumentRecord,
   Finding,
   FindingParticipant,
+  GeoPoint,
   Hypothesis,
   Person,
   Research,
@@ -45,6 +46,7 @@ import { exportEntityRecordsToExcel } from "../utils/excelExport";
 import { TableDataImportButton } from "../components/TableDataImportButton";
 import { canImportCollection } from "../utils/tableDataImport";
 import { sanitizeWebUrl } from "../utils/safeUrl";
+import { GeoPlaceField } from "../components/GeoPlaceField";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -74,7 +76,7 @@ interface CrudPageProps {
   projectName?: string;
 }
 
-type FormValue = string | boolean | string[] | FindingParticipant[] | ScanAttachment[];
+type FormValue = string | boolean | string[] | FindingParticipant[] | ScanAttachment[] | GeoPoint | null;
 type FormRecord = Record<string, FormValue>;
 
 export function CrudPage({
@@ -537,6 +539,7 @@ function EntityDetailsModal({
 }) {
   const record = entity as unknown as Record<string, unknown>;
   const customDefinitions = definitionsForModule(customFieldDefinitions, config.collection);
+  const geo = config.collection === "findings" ? record.geo as GeoPoint | null | undefined : null;
   const visibleFields = config.fields.filter((field) => {
     const value = record[field.key];
     return value === true || (
@@ -550,7 +553,7 @@ function EntityDetailsModal({
   return (
     <Modal title={getEntityTitle(config, record)} onClose={onClose}>
       <div className="details-body">
-        {visibleFields.length || customDefinitions.length ? (
+        {visibleFields.length || customDefinitions.length || geo?.displayName ? (
           <div className="details-grid">
             {visibleFields.map((field) => (
               <div
@@ -574,6 +577,12 @@ function EntityDetailsModal({
               definitions={customDefinitions}
               values={normalizeCustomFieldValues(record.customFields)}
             />
+            {geo?.displayName ? (
+              <div className="detail-item detail-wide">
+                <span>Місце на карті</span>
+                <div className="detail-text">{geo.displayName}</div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="empty-inline">У цьому записі ще немає заповнених даних.</div>
@@ -792,6 +801,9 @@ function EntityModal({
     for (const field of config.fields) {
       defaults[field.key] = initial[field.key] ?? defaultFieldValue(field);
     }
+    if (config.collection === "findings") {
+      defaults.geo = (initial.geo as GeoPoint | null | undefined) ?? null;
+    }
     return defaults;
   });
   const [personSeed, setPersonSeed] = useState<string | null>(null);
@@ -859,6 +871,15 @@ function EntityModal({
               onChange={(value) => setForm((current) => ({ ...current, [field.key]: value }))}
             />
           ))}
+          {config.collection === "findings" ? (
+            <GeoPlaceField
+              label="Місце на карті"
+              value={(form.geo as GeoPoint | null) ?? null}
+              placeName={String(form.place ?? "")}
+              onChange={(geo) => setForm((current) => ({ ...current, geo }))}
+              onPlaceNameChange={(place) => setForm((current) => ({ ...current, place }))}
+            />
+          ) : null}
           <CustomFieldsEditor
             db={db}
             definitions={customDefinitions}

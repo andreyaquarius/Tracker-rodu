@@ -33,6 +33,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PersonsPage } from "./pages/PersonsPage";
+import { MapPage } from "./pages/MapPage";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
 import { ProjectsPage } from "./pages/ProjectsPage";
@@ -184,6 +185,7 @@ const ALL_PROJECT_DATA_GROUPS: ProjectDataGroup[] = [
 ];
 
 function dataGroupsForPage(page: PageKey): Set<ProjectDataGroup> {
+  if (page === "map") return new Set(["researches", "people", "documents", "work"]);
   if (page === "researches") return new Set(["researches"]);
   if (page === "documents") return new Set(["researches", "documents"]);
   if (page === "archiveRequests") {
@@ -3549,6 +3551,13 @@ export default function App() {
             onNavigate={navigate}
             onOpenSearchResult={openSearchResult}
             onRequestSearchData={requestDashboardSearchData}
+          />
+        );
+      case "map":
+        return (
+          <MapPage
+            db={activeDb}
+            onOpenRelated={openRelatedRecord}
           />
         );
       case "researches":

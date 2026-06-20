@@ -275,6 +275,7 @@ function moduleLabel(module: PageKey): string {
   if (module.startsWith("custom:")) return "Власний розділ";
   const labels: Record<Exclude<PageKey, `custom:${string}`>, string> = {
     dashboard: "Панель огляду",
+    map: "Карта",
     researches: "Дослідження",
     documents: "Документи",
     yearMatrix: "Матриця років",
@@ -294,6 +295,7 @@ function activityIcon(module: PageKey): string {
   if (module.startsWith("custom:")) return "Р";
   const icons: Record<Exclude<PageKey, `custom:${string}`>, string> = {
     dashboard: "О",
+    map: "К",
     researches: "Д",
     documents: "Ф",
     yearMatrix: "Р",

@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import "leaflet/dist/leaflet.css";
 import "./styles.css";
 
 // Restore the deep link captured by the GitHub Pages 404.html SPA fallback

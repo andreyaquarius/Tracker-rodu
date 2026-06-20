@@ -5,6 +5,12 @@ import type {
   ScanAttachment,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import {
+  PERSON_EVENTS_META_KEY,
+  normalizePersonEvents,
+  stripInternalGeoFields,
+  syncPersonEventsFromFields,
+} from "../utils/geo";
 
 type PersonRow = {
   id: string;
@@ -75,25 +81,29 @@ function asScans(value: unknown): ScanAttachment[] {
 function splitCustomFields(value: unknown): {
   customFields: CustomFieldValues;
   scans: PersonScanGroups;
+  eventsRaw: unknown;
 } {
   const record = asRecord(value);
   const scanRecord = asRecord(record[SCANS_KEY]);
+  const eventsRaw = record[PERSON_EVENTS_META_KEY];
   const customFields = { ...record };
   delete customFields[SCANS_KEY];
+  delete customFields[PERSON_EVENTS_META_KEY];
   return {
-    customFields: customFields as CustomFieldValues,
+    customFields: stripInternalGeoFields(customFields as CustomFieldValues),
     scans: {
       birthScans: asScans(scanRecord.birthScans),
       marriageScans: asScans(scanRecord.marriageScans),
       deathScans: asScans(scanRecord.deathScans),
       mentionScans: asScans(scanRecord.mentionScans),
     },
+    eventsRaw,
   };
 }
 
 function personFromRow(row: PersonRow): Person {
-  const { customFields, scans } = splitCustomFields(row.custom_fields);
-  return {
+  const { customFields, scans, eventsRaw } = splitCustomFields(row.custom_fields);
+  const person = {
     id: row.id,
     researchId: row.research_id ?? "",
     status: row.status as Person["status"],
@@ -123,6 +133,10 @@ function personFromRow(row: PersonRow): Person {
     customFields,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+  return {
+    ...person,
+    events: normalizePersonEvents(eventsRaw, person),
   };
 }
 
@@ -159,13 +173,14 @@ function personToRow(projectId: string, person: Person, researchIds: Set<string>
     occupation: person.occupation,
     notes: person.notes,
     custom_fields: {
-      ...(person.customFields ?? {}),
+      ...stripInternalGeoFields(person.customFields ?? {}),
       [SCANS_KEY]: {
         birthScans: person.birthScans ?? [],
         marriageScans: person.marriageScans ?? [],
         deathScans: person.deathScans ?? [],
         mentionScans: person.mentionScans ?? [],
       },
+      [PERSON_EVENTS_META_KEY]: syncPersonEventsFromFields(person),
     },
     created_at: person.createdAt,
     updated_at: person.updatedAt,

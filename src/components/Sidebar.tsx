@@ -13,6 +13,7 @@ import { SectionIcon } from "./SectionIcon";
 
 export type StandardPageKey =
   | "dashboard"
+  | "map"
   | CustomFieldModule
   | "backup"
   | "subscription"
@@ -21,11 +22,12 @@ export type StandardPageKey =
 export type PageKey = StandardPageKey | `custom:${string}`;
 
 const mainItems: Array<{
-  key: "dashboard" | CustomFieldModule;
+  key: "dashboard" | "map" | CustomFieldModule;
   label: string;
   icon: NavigationIconName;
 }> = [
   { key: "dashboard", label: "Панель огляду", icon: "dashboard" },
+  { key: "map", label: "Карта", icon: "map" },
   { key: "researches", label: "Дослідження", icon: "compass" },
   { key: "documents", label: "Документи", icon: "file-text" },
   { key: "archiveRequests", label: "Запити в архів", icon: "archive" },
@@ -44,6 +46,7 @@ const systemItems: Array<{ key: StandardPageKey; label: string; icon: Navigation
 
 type NavigationIconName =
   | "dashboard"
+  | "map"
   | "compass"
   | "file-text"
   | "archive"
@@ -64,6 +67,12 @@ function NavigationIcon({ icon }: { icon: NavigationIconName }) {
         <rect x="14" y="3" width="7" height="5" rx="1.5" />
         <rect x="14" y="12" width="7" height="9" rx="1.5" />
         <rect x="3" y="15" width="7" height="6" rx="1.5" />
+      </>
+    ),
+    map: (
+      <>
+        <path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3z" />
+        <path d="M9 3v15M15 6v15" />
       </>
     ),
     compass: (
@@ -259,7 +268,7 @@ export function Sidebar({
         </div>
         <nav>
           {mainItems.map((item) => {
-            if (item.key === "dashboard") {
+            if (item.key === "dashboard" || item.key === "map") {
               return (
                 <button
                   type="button"

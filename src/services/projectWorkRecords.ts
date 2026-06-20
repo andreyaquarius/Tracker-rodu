@@ -6,6 +6,7 @@ import type {
   TaskRecord,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import { FINDING_GEO_META_KEY, normalizeGeo, stripInternalGeoFields } from "../utils/geo";
 
 type TaskRow = {
   id: string;
@@ -137,6 +138,7 @@ function findingFromRow(
   const meta = asRecord(customRecord[FINDING_META_KEY]);
   const customFields = { ...customRecord };
   delete customFields[FINDING_META_KEY];
+  delete customFields[FINDING_GEO_META_KEY];
   return {
     id: row.id,
     researchId: row.research_id ?? "",
@@ -160,7 +162,8 @@ function findingFromRow(
     needsReview: row.needs_review,
     notes: row.notes,
     scans: Array.isArray(meta.scans) ? (meta.scans as ScanAttachment[]) : [],
-    customFields: customFields as CustomFieldValues,
+    geo: normalizeGeo(meta[FINDING_GEO_META_KEY] ?? customRecord[FINDING_GEO_META_KEY]),
+    customFields: stripInternalGeoFields(customFields as CustomFieldValues),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -195,10 +198,11 @@ function findingToRow(
     needs_review: finding.needsReview,
     notes: finding.notes,
     custom_fields: {
-      ...(finding.customFields ?? {}),
+      ...stripInternalGeoFields(finding.customFields ?? {}),
       [FINDING_META_KEY]: {
         personIds: finding.personIds.filter((id) => personIds.has(id)),
         scans: finding.scans ?? [],
+        [FINDING_GEO_META_KEY]: finding.geo ?? null,
       },
     },
     created_at: finding.createdAt,
