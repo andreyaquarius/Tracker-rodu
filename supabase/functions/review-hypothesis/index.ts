@@ -82,6 +82,23 @@ function limitText(value: unknown, max = 6000): string {
   return String(value ?? "").slice(0, max);
 }
 
+function isHypothesisAiLimitReached(error: unknown): boolean {
+  return errorMessage(error).includes("PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month");
+}
+
+async function readUserGeminiAccess(
+  admin: Awaited<ReturnType<typeof authenticatedContext>>["admin"],
+  userId: string,
+  encryptionKey: string,
+): Promise<{ apiKey: string; model: string; mode: "fast" | "detailed" }> {
+  const settings = await readAiSettings(admin, userId);
+  return {
+    apiKey: await decryptApiKey(settings.encrypted_api_key, encryptionKey),
+    model: normalizeSelectableGeminiModel(settings.model),
+    mode: settings.mode,
+  };
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -123,22 +140,46 @@ Deno.serve(async (request) => {
     let keySource: "user" | "platform" = "user";
 
     if (planCode === "free") {
-      const settings = await readAiSettings(admin, user.id);
-      mode = input.mode ? normalizeMode(input.mode) : settings.mode;
-      apiKey = await decryptApiKey(settings.encrypted_api_key, encryptionKey);
-      model = normalizeSelectableGeminiModel(settings.model);
+      const userAccess = await readUserGeminiAccess(admin, user.id, encryptionKey);
+      mode = input.mode ? normalizeMode(input.mode) : userAccess.mode;
+      apiKey = userAccess.apiKey;
+      model = userAccess.model;
     } else {
-      keySource = "platform";
-      apiKey = (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "").trim();
-      if (!apiKey) {
-        throw new Error("Серверний API-ключ Gemini не налаштовано для платних тарифів.");
+      const platformApiKey = (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "").trim();
+      if (!platformApiKey) {
+        try {
+          const userAccess = await readUserGeminiAccess(admin, user.id, encryptionKey);
+          keySource = "user";
+          mode = input.mode ? normalizeMode(input.mode) : userAccess.mode;
+          apiKey = userAccess.apiKey;
+          model = userAccess.model;
+        } catch {
+          throw new Error("Серверний API-ключ Gemini не налаштовано для платних тарифів.");
+        }
+      } else {
+        const { error: usageError } = await userClient.rpc(
+          "begin_hypothesis_ai_review",
+          { target_project_id: hypothesis.project_id },
+        );
+        if (usageError) {
+          if (!isHypothesisAiLimitReached(usageError)) throw usageError;
+          try {
+            const userAccess = await readUserGeminiAccess(admin, user.id, encryptionKey);
+            keySource = "user";
+            mode = input.mode ? normalizeMode(input.mode) : userAccess.mode;
+            apiKey = userAccess.apiKey;
+            model = userAccess.model;
+          } catch {
+            throw new Error(
+              "Використано всі включені AI-аналізи гіпотез цього місяця. Додайте власний API-ключ Google AI Studio в налаштуваннях ШІ-агента, щоб продовжити аналіз.",
+            );
+          }
+        } else {
+          keySource = "platform";
+          apiKey = platformApiKey;
+          model = platformModel;
+        }
       }
-      model = platformModel;
-      const { error: usageError } = await userClient.rpc(
-        "begin_hypothesis_ai_review",
-        { target_project_id: hypothesis.project_id },
-      );
-      if (usageError) throw usageError;
     }
 
     const { data: links, error: linksError } = await admin
