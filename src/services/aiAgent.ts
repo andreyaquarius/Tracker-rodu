@@ -143,6 +143,11 @@ async function invokeAiFunction<T = unknown>(
         }
       }
     }
+    if (error instanceof Error && error.message.includes("Failed to send a request to the Edge Function")) {
+      throw new Error(
+        "Не вдалося підключитися до серверної функції ШІ. Перевірте, що функцію review-hypothesis передеплоєно, а домен сайту дозволений у налаштуваннях CORS.",
+      );
+    }
     throw error;
   }
   if (data?.error) throw new Error(String(data.error));
