@@ -39,6 +39,19 @@ export type AiSettingsRow = {
   mode: AiMode;
 };
 
+type GeminiResponseBody = {
+  error?: {
+    message?: string;
+  };
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+      }>;
+    };
+  }>;
+};
+
 export const defaultGeminiModel = "gemini-3.5-flash";
 
 const selectableGeminiModels = new Set([
@@ -55,7 +68,16 @@ export function json(body: unknown, status = 200): Response {
 }
 
 export function errorMessage(error: unknown, fallback = "Unexpected error"): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const message = record.message ?? record.error_description ?? record.error;
+    if (typeof message === "string" && message.trim()) return message;
+    const details = record.details;
+    if (typeof details === "string" && details.trim()) return details;
+  }
+  if (typeof error === "string" && error.trim()) return error;
+  return fallback;
 }
 
 export function requireEnvironment() {
@@ -175,12 +197,8 @@ export async function callGemini(
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: responseJsonSchema
           ? {
-              responseFormat: {
-                text: {
-                  mimeType: "application/json",
-                  schema: responseJsonSchema,
-                },
-              },
+              responseMimeType: "application/json",
+              responseSchema: responseJsonSchema,
               temperature: 0.15,
             }
           : {
@@ -190,9 +208,15 @@ export async function callGemini(
       }),
     },
   );
-  const body = await response.json();
+  const rawBody = await response.text();
+  let body: GeminiResponseBody = {};
+  try {
+    body = rawBody ? JSON.parse(rawBody) as GeminiResponseBody : {};
+  } catch {
+    body = {};
+  }
   if (!response.ok) {
-    const providerMessage = String(body?.error?.message ?? "");
+    const providerMessage = String(body.error?.message ?? rawBody ?? "");
     if (response.status === 400 || response.status === 401 || response.status === 403) {
       throw new Error(`Google відхилив API-ключ або налаштування моделі. ${providerMessage}`.trim());
     }
@@ -201,7 +225,7 @@ export async function callGemini(
     }
     throw new Error(providerMessage || "Google Gemini не зміг виконати запит.");
   }
-  const text = body?.candidates?.[0]?.content?.parts
+  const text = body.candidates?.[0]?.content?.parts
     ?.map((part: { text?: string }) => part.text ?? "")
     .join("")
     .trim();

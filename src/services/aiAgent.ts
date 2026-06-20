@@ -136,7 +136,7 @@ async function invokeAiFunction<T = unknown>(
     if (context instanceof Response) {
       try {
         const payload = await context.clone().json() as { error?: string };
-        if (payload.error) throw new Error(payload.error);
+        if (payload.error) throw new Error(readableAiError(payload.error));
       } catch (contextError) {
         if (contextError instanceof Error && contextError.message !== "Unexpected end of JSON input") {
           throw contextError;
@@ -150,8 +150,21 @@ async function invokeAiFunction<T = unknown>(
     }
     throw error;
   }
-  if (data?.error) throw new Error(String(data.error));
+  if (data?.error) throw new Error(readableAiError(String(data.error)));
   return data as T;
+}
+
+function readableAiError(message: string): string {
+  if (message.includes("PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month")) {
+    return "Використано всі включені AI-аналізи гіпотез цього місяця.";
+  }
+  if (message.includes("Access denied") || message.includes("permission denied")) {
+    return "У вас немає доступу до цього проєкту або до цієї дії.";
+  }
+  if (message.includes("Could not find the function") || message.includes("schema cache")) {
+    return "Серверна функція бази для ліміту AI-аналізу ще не застосована або не оновилась у Supabase.";
+  }
+  return message;
 }
 
 function normalizeInputSummary(
