@@ -39,6 +39,14 @@ export type AiSettingsRow = {
   mode: AiMode;
 };
 
+export const defaultGeminiModel = "gemini-3.5-flash";
+
+const selectableGeminiModels = new Set([
+  "gemini-3.1-pro-preview",
+  defaultGeminiModel,
+  "gemini-3.1-flash-lite",
+]);
+
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -124,6 +132,11 @@ export function normalizeModel(value: unknown): string {
     throw new Error("Вкажіть коректну модель Google Gemini.");
   }
   return model;
+}
+
+export function normalizeSelectableGeminiModel(value: unknown): string {
+  const model = String(value ?? defaultGeminiModel).trim();
+  return selectableGeminiModels.has(model) ? model : defaultGeminiModel;
 }
 
 export function normalizeMode(value: unknown): AiMode {

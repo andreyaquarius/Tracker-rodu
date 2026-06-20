@@ -6,9 +6,11 @@ import {
   errorMessage,
   json,
   normalizeMode,
-  normalizeModel,
+  normalizeSelectableGeminiModel,
   readAiSettings,
 } from "../_shared/ai.ts";
+
+const platformModel = "gemini-3.5-flash";
 
 const systemPrompt = `
 Ти — асистент генеалогічного та краєзнавчого дослідника.
@@ -117,21 +119,21 @@ Deno.serve(async (request) => {
     const planCode = String(activePlan ?? "free");
     let mode = input.mode ? normalizeMode(input.mode) : "fast";
     let apiKey = "";
-    let model = "gemini-3.5-flash";
+    let model = platformModel;
     let keySource: "user" | "platform" = "user";
 
     if (planCode === "free") {
       const settings = await readAiSettings(admin, user.id);
       mode = input.mode ? normalizeMode(input.mode) : settings.mode;
       apiKey = await decryptApiKey(settings.encrypted_api_key, encryptionKey);
-      model = settings.model;
+      model = normalizeSelectableGeminiModel(settings.model);
     } else {
       keySource = "platform";
       apiKey = (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "").trim();
       if (!apiKey) {
         throw new Error("Серверний API-ключ Gemini не налаштовано для платних тарифів.");
       }
-      model = normalizeModel(Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash");
+      model = platformModel;
       const { error: usageError } = await userClient.rpc(
         "begin_hypothesis_ai_review",
         { target_project_id: hypothesis.project_id },

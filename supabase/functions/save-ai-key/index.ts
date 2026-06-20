@@ -5,7 +5,7 @@ import {
   errorMessage,
   json,
   normalizeMode,
-  normalizeModel,
+  normalizeSelectableGeminiModel,
 } from "../_shared/ai.ts";
 
 Deno.serve(async (request) => {
@@ -20,7 +20,7 @@ Deno.serve(async (request) => {
     };
     const apiKey = String(input.apiKey ?? "").trim();
     if (apiKey.length < 12) return json({ error: "Введіть повний API-ключ Google AI Studio." }, 400);
-    const model = normalizeModel(input.model ?? "gemini-3.5-flash");
+    const model = normalizeSelectableGeminiModel(input.model);
     const mode = normalizeMode(input.mode);
     const encryptedApiKey = await encryptApiKey(apiKey, encryptionKey);
     const last4 = apiKey.slice(-4);

@@ -11,10 +11,22 @@ import {
 const costWarning =
   "Ви використовуєте власний API-ключ Google AI Studio. Запити до ШІ можуть витрачати вашу квоту або кошти згідно з тарифами Google. Трекер Роду не оплачує ці запити й не контролює тарифи Google.";
 
+const defaultModel = "gemini-3.5-flash";
+
+const modelOptions = [
+  { value: "gemini-3.1-pro-preview", label: "Потужна — gemini-3.1-pro-preview" },
+  { value: defaultModel, label: "Стандартна — gemini-3.5-flash" },
+  { value: "gemini-3.1-flash-lite", label: "Легка — gemini-3.1-flash-lite" },
+] as const;
+
+function normalizeModelChoice(value: string): string {
+  return modelOptions.some((option) => option.value === value) ? value : defaultModel;
+}
+
 export function AiAgentSettings() {
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState("gemini-3.5-flash");
+  const [model, setModel] = useState(defaultModel);
   const [mode, setMode] = useState<AiAgentMode>("fast");
   const [busy, setBusy] = useState<"load" | "save" | "test" | "delete" | null>("load");
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
@@ -23,7 +35,7 @@ export function AiAgentSettings() {
     void getAiAgentSettings()
       .then((value) => {
         setSettings(value);
-        setModel(value.model);
+        setModel(normalizeModelChoice(value.model));
         setMode(value.mode);
       })
       .catch((error: unknown) => setMessage({
@@ -42,7 +54,7 @@ export function AiAgentSettings() {
     setBusy("save");
     setMessage(null);
     try {
-      const saved = await saveAiAgentKey({ apiKey: apiKey.trim(), model: model.trim(), mode });
+      const saved = await saveAiAgentKey({ apiKey: apiKey.trim(), model, mode });
       setSettings(saved);
       setApiKey("");
       setMessage({ text: "API-ключ зашифровано та збережено." });
@@ -127,7 +139,13 @@ export function AiAgentSettings() {
         </label>
         <label>
           <span>Модель</span>
-          <input value={model} onChange={(event) => setModel(event.target.value)} />
+          <select value={model} onChange={(event) => setModel(normalizeModelChoice(event.target.value))}>
+            {modelOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           <span>Режим за замовчуванням</span>
