@@ -88,6 +88,7 @@ interface Props {
   onDelete: (id: string) => void;
   readOnly?: boolean;
   projectName?: string;
+  researchRequired?: boolean;
 }
 
 export function YearMatrixPage({
@@ -105,6 +106,7 @@ export function YearMatrixPage({
   onSaveRange,
   onDelete,
   readOnly = false,
+  researchRequired = false,
   projectName = "Трекер Роду",
 }: Props) {
   const currentYear = new Date().getFullYear();
@@ -174,6 +176,10 @@ export function YearMatrixPage({
 
   const addRange = () => {
     if (readOnly) return;
+    if (researchRequired && !researchId.trim()) {
+      window.alert("Оберіть дослідження для записів матриці років.");
+      return;
+    }
     const start = Number(from);
     const end = Number(to);
     if (!Number.isInteger(start) || !Number.isInteger(end) || start > end || end - start > 500) {
@@ -236,7 +242,7 @@ export function YearMatrixPage({
           </div>
         </div>
         <div className="range-grid">
-          <label><span>Дослідження</span><select value={researchId} onChange={(event) => setResearchId(event.target.value)}><option value="">Без прив’язки</option>{researches.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+          <label><span>Дослідження{researchRequired ? " *" : ""}</span><select required={researchRequired} value={researchId} onChange={(event) => setResearchId(event.target.value)}><option value="">{researchRequired ? "Оберіть дослідження" : "Без прив’язки"}</option>{researches.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
           <label><span>Рік від</span><input type="number" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
           <label><span>Рік до</span><input type="number" value={to} onChange={(event) => setTo(event.target.value)} /></label>
           <label><span>Населений пункт</span><input value={rangePlace} onChange={(event) => setRangePlace(event.target.value)} placeholder="Наприклад: Трубіївка" /></label>
@@ -366,6 +372,7 @@ export function YearMatrixPage({
         onDelete={onDelete}
         readOnly={readOnly}
         projectName={projectName}
+        researchRequired={researchRequired}
       />
     </>
   );

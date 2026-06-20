@@ -137,7 +137,7 @@ export function subscriptionErrorCode(error: unknown): string {
     : typeof error === "object" && error && "message" in error
       ? String(error.message)
       : String(error ?? "");
-  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE):[a-z_]+/i);
+  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE):[a-z_]+|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
   return match?.[0] ?? "";
 }
 
@@ -152,6 +152,8 @@ export function subscriptionErrorMessage(error: unknown): string {
     "PLAN_LIMIT_REACHED:custom_fields_per_project": "Досягнуто ліміт власних полів.",
     "PLAN_LIMIT_REACHED:table_imports_per_month": "Використано всі імпорти цього календарного місяця.",
     "PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month": "Використано всі включені AI-аналізи гіпотез цього місяця.",
+    RESEARCH_REQUIRED_BY_PLAN: "На вашому тарифі запис має бути прив’язаний до дослідження.",
+    INVALID_RESEARCH_REFERENCE: "Вибране дослідження недоступне для поточного проєкту.",
   };
   return messages[code] ?? (error instanceof Error ? error.message : "Дія недоступна для поточного тарифу.");
 }

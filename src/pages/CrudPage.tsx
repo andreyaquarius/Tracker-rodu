@@ -74,6 +74,7 @@ interface CrudPageProps {
   onCreateTask?: (task: TaskRecord) => void;
   readOnly?: boolean;
   projectName?: string;
+  researchRequired?: boolean;
 }
 
 type FormValue = string | boolean | string[] | FindingParticipant[] | ScanAttachment[] | GeoPoint | null;
@@ -101,6 +102,7 @@ export function CrudPage({
   projectId = "",
   onCreateTask,
   readOnly = false,
+  researchRequired = false,
   projectName = "Трекер Роду",
 }: CrudPageProps) {
   const [search, setSearch] = useState(initialSearch);
@@ -450,6 +452,7 @@ export function CrudPage({
           onAddCustomField={onAddCustomField}
           onDeleteCustomField={onDeleteCustomField}
           onSavePerson={onSavePerson}
+          researchRequired={researchRequired}
           onClose={() => {
             setEditing(null);
             setCreateInitialValues(undefined);
@@ -777,6 +780,7 @@ function EntityModal({
   onAddCustomField,
   onDeleteCustomField,
   onSavePerson,
+  researchRequired,
   onClose,
   onSave,
 }: {
@@ -792,6 +796,7 @@ function EntityModal({
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
   onSavePerson?: (person: Person) => void;
+  researchRequired: boolean;
   onClose: () => void;
   onSave: (entity: AppEntity) => void;
 }) {
@@ -825,6 +830,14 @@ function EntityModal({
       window.alert("Додайте принаймні одну особу, згадану в записі.");
       return;
     }
+    if (
+      researchRequired &&
+      config.fields.some((field) => field.type === "research") &&
+      !String(form.researchId ?? "").trim()
+    ) {
+      window.alert("Оберіть дослідження для цього запису.");
+      return;
+    }
     onSave({
       ...(entity ?? {}),
       ...form,
@@ -853,6 +866,7 @@ function EntityModal({
               findings={findings}
               persons={persons}
               researchId={String(form.researchId ?? "")}
+              researchRequired={researchRequired}
               matrixYear={config.collection === "yearMatrix" ? String(form.year ?? "") : ""}
               matrixDocumentType={
                 config.collection === "yearMatrix" ? String(form.documentType ?? "") : ""
@@ -913,6 +927,7 @@ function EntityModal({
           db={db}
           initialFullName={personSeed}
           initialResearchId={String(form.researchId ?? "")}
+          researchRequired={researchRequired}
           customFieldDefinitions={definitionsForModule(customFieldDefinitions, "persons")}
           onAddCustomField={onAddCustomField}
           onDeleteCustomField={onDeleteCustomField}
@@ -946,6 +961,7 @@ function FormField({
   findings,
   persons,
   researchId,
+  researchRequired,
   matrixYear,
   matrixDocumentType,
   findingType,
@@ -959,6 +975,7 @@ function FormField({
   findings: Finding[];
   persons: Person[];
   researchId: string;
+  researchRequired: boolean;
   matrixYear: string;
   matrixDocumentType: string;
   findingType: string;
@@ -1048,20 +1065,20 @@ function FormField({
   }
   const common = {
     value: Array.isArray(value) ? "" : String(value ?? ""),
-    required: field.required,
+    required: field.required || (field.type === "research" && researchRequired),
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       onChange(event.target.value),
   };
   return (
     <label className={field.wide ? "field-wide" : ""}>
-      <span>{field.label}{field.required ? " *" : ""}</span>
+      <span>{field.label}{common.required ? " *" : ""}</span>
       {field.type === "textarea" ? (
         <textarea {...common} rows={4} />
       ) : field.type === "select" ? (
         <select {...common}>{field.options?.map((option) => <option key={option}>{option}</option>)}</select>
       ) : field.type === "research" ? (
         <select {...common}>
-          <option value="">Без прив’язки</option>
+          <option value="">{researchRequired ? "Оберіть дослідження" : "Без прив’язки"}</option>
           {researches.map((research) => <option key={research.id} value={research.id}>{research.title}</option>)}
         </select>
       ) : field.type === "document" ? (

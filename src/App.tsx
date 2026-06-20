@@ -184,6 +184,16 @@ const ALL_PROJECT_DATA_GROUPS: ProjectDataGroup[] = [
   "analysis",
 ];
 
+const researchScopedCollections: ReadonlySet<CollectionKey> = new Set([
+  "documents",
+  "yearMatrix",
+  "tasks",
+  "findings",
+  "hypotheses",
+  "archiveRequests",
+  "persons",
+]);
+
 function dataGroupsForPage(page: PageKey): Set<ProjectDataGroup> {
   if (page === "map") return new Set(["researches", "people", "documents", "work"]);
   if (page === "researches") return new Set(["researches"]);
@@ -395,6 +405,7 @@ export default function App() {
     value: string;
   } | null>(null);
   const subscriptionAccess = useSubscription(workspace?.projectId, Boolean(account));
+  const researchRequiredByPlan = subscriptionAccess.effectivePlan !== "professional";
   const requestedDataGroups = useMemo(() => {
     if (workspace && searchDataProjectId === workspace.projectId) {
       return new Set(ALL_PROJECT_DATA_GROUPS);
@@ -2552,6 +2563,12 @@ export default function App() {
   };
 
   const saveFor = (collection: CollectionKey) => (entity: AppEntity) => {
+    try {
+      validateResearchScope(collection, [entity]);
+    } catch (error) {
+      notify(describeError(error, "Оберіть дослідження для цього запису."), true);
+      return;
+    }
     if (collection === "researches") saveResearch(entity);
     else if (collection === "documents") saveDocument(entity);
     else if (collection === "yearMatrix") saveYearMatrixRecord(entity);
@@ -2561,8 +2578,18 @@ export default function App() {
     else if (collection === "archiveRequests") saveArchiveRequest(entity);
     else app.saveEntity(collection, entity);
   };
+  const validateResearchScope = (collection: CollectionKey, records: AppEntity[]) => {
+    if (!researchRequiredByPlan || !researchScopedCollections.has(collection)) return;
+    const missingCount = records.filter((record) =>
+      !String((record as unknown as { researchId?: unknown }).researchId ?? "").trim(),
+    ).length;
+    if (missingCount > 0) {
+      throw new Error(`На вашому тарифі кожен запис має бути прив’язаний до дослідження. Записів без дослідження: ${missingCount}.`);
+    }
+  };
   const importTableRecords = async (collection: CollectionKey, records: AppEntity[]) => {
     if (!records.length) return;
+    validateResearchScope(collection, records);
     if (!workspace) {
       app.saveEntities(collection, records);
       notify(`Імпортовано записів: ${records.length}.`);
@@ -2731,6 +2758,12 @@ export default function App() {
     navigate("settings");
   };
   const savePerson = (person: Person) => {
+    try {
+      validateResearchScope("persons", [person as unknown as AppEntity]);
+    } catch (error) {
+      notify(describeError(error, "Оберіть дослідження для цієї особи."), true);
+      return;
+    }
     if (!workspace) {
       app.saveEntity("persons", person);
       return;
@@ -3594,6 +3627,7 @@ export default function App() {
             onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
             readOnly={readOnly}
             projectName={workspace?.projectName}
+            researchRequired={researchRequiredByPlan}
           />
         );
       case "persons":
@@ -3623,6 +3657,7 @@ export default function App() {
             onCreateRelated={createRelatedRecord}
             readOnly={readOnly}
             projectName={workspace?.projectName}
+            researchRequired={researchRequiredByPlan}
           />
         );
       case "yearMatrix":
@@ -3643,6 +3678,7 @@ export default function App() {
             onDelete={deleteFor("yearMatrix")}
             readOnly={readOnly}
             projectName={workspace?.projectName}
+            researchRequired={researchRequiredByPlan}
           />
         );
       case "backup":

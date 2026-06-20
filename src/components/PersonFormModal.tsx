@@ -71,6 +71,7 @@ export function PersonFormModal({
   initialFullName = "",
   initialResearchId = "",
   customFieldDefinitions = [],
+  researchRequired = false,
   onAddCustomField,
   onDeleteCustomField,
   onClose,
@@ -82,6 +83,7 @@ export function PersonFormModal({
   initialFullName?: string;
   initialResearchId?: string;
   customFieldDefinitions?: CustomFieldDefinition[];
+  researchRequired?: boolean;
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
   onClose: () => void;
@@ -160,6 +162,10 @@ export function PersonFormModal({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (researchRequired && !form.researchId.trim()) {
+      window.alert("Оберіть дослідження для цієї особи.");
+      return;
+    }
     const timestamp = nowIso();
     const personId = person?.id ?? createId();
     const finalPerson = {
@@ -181,9 +187,13 @@ export function PersonFormModal({
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>
-            <span>Дослідження</span>
-            <select value={form.researchId} onChange={(event) => update("researchId", event.target.value)}>
-              <option value="">Без прив’язки</option>
+            <span>Дослідження{researchRequired ? " *" : ""}</span>
+            <select
+              required={researchRequired}
+              value={form.researchId}
+              onChange={(event) => update("researchId", event.target.value)}
+            >
+              <option value="">{researchRequired ? "Оберіть дослідження" : "Без прив’язки"}</option>
               {researches.map((research) => (
                 <option key={research.id} value={research.id}>{research.title}</option>
               ))}

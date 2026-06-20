@@ -58,6 +58,7 @@ export function PersonsPage({
   onOpenRelated,
   onCreateRelated,
   readOnly = false,
+  researchRequired = false,
   projectName = "Трекер Роду",
 }: {
   db: AppDatabase;
@@ -82,6 +83,7 @@ export function PersonsPage({
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly?: boolean;
   projectName?: string;
+  researchRequired?: boolean;
 }) {
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
@@ -289,6 +291,7 @@ export function PersonsPage({
           db={db}
           person={editing === "new" ? null : editing}
           researches={researches}
+          researchRequired={researchRequired}
           customFieldDefinitions={customFieldDefinitions}
           onAddCustomField={onAddCustomField}
           onDeleteCustomField={onDeleteCustomField}
