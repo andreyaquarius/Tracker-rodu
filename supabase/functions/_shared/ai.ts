@@ -179,12 +179,20 @@ export async function readAiSettings(
   return data as AiSettingsRow;
 }
 
-function toGeminiResponseSchema(schema: unknown): unknown {
+function toGeminiResponseSchema(schema: unknown, parentKey?: string): unknown {
   if (Array.isArray(schema)) {
-    return schema.map(toGeminiResponseSchema);
+    return schema.map((item) => toGeminiResponseSchema(item, parentKey));
   }
   if (!schema || typeof schema !== "object") {
     return schema;
+  }
+
+  if (parentKey === "properties") {
+    const properties: Record<string, unknown> = {};
+    for (const [propertyName, propertySchema] of Object.entries(schema as Record<string, unknown>)) {
+      properties[propertyName] = toGeminiResponseSchema(propertySchema);
+    }
+    return properties;
   }
 
   const allowedKeys = new Set([
@@ -205,7 +213,7 @@ function toGeminiResponseSchema(schema: unknown): unknown {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
     if (!allowedKeys.has(key)) continue;
-    result[key] = toGeminiResponseSchema(value);
+    result[key] = toGeminiResponseSchema(value, key);
   }
   return result;
 }
