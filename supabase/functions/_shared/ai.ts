@@ -179,6 +179,37 @@ export async function readAiSettings(
   return data as AiSettingsRow;
 }
 
+function toGeminiResponseSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    return schema.map(toGeminiResponseSchema);
+  }
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+
+  const allowedKeys = new Set([
+    "type",
+    "format",
+    "description",
+    "nullable",
+    "enum",
+    "maxItems",
+    "minItems",
+    "properties",
+    "required",
+    "propertyOrdering",
+    "items",
+    "minimum",
+    "maximum",
+  ]);
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (!allowedKeys.has(key)) continue;
+    result[key] = toGeminiResponseSchema(value);
+  }
+  return result;
+}
+
 export async function callGemini(
   apiKey: string,
   model: string,
@@ -198,7 +229,7 @@ export async function callGemini(
         generationConfig: responseJsonSchema
           ? {
               responseMimeType: "application/json",
-              responseSchema: responseJsonSchema,
+              responseSchema: toGeminiResponseSchema(responseJsonSchema),
               temperature: 0.15,
             }
           : {
