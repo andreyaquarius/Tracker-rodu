@@ -6,7 +6,7 @@ import { createEmptyDatabase } from "../utils/database";
 
 /**
  * Keeps the assembled project view in memory.
- * Persistent records are read from and written to Supabase in App.tsx.
+ * Persistent records are read from and written to the remote store in App.tsx.
  */
 export function useAppDatabase() {
   const [db, setDbState] = useState<AppDatabase>(() => createEmptyDatabase());

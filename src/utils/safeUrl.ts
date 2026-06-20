@@ -4,7 +4,7 @@
 // imported attachment links are rendered as <a href> / passed to
 // window.open(). React does NOT sanitise href, so a value such as
 // "javascript:…" executes script in the application origin when clicked.
-// Because the Supabase session lives in localStorage, that is a full account
+// Because the auth session lives in localStorage, that is a full account
 // takeover vector across shared projects. These helpers enforce a scheme
 // allowlist so only navigable web/contact links survive.
 

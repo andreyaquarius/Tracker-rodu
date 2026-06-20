@@ -60,14 +60,14 @@ export async function saveScan(
 
 export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
   if (!scan.storagePath) {
-    throw new Error("У файлу відсутній ідентифікатор Google Drive.");
+    throw new Error("У файлу відсутній ідентифікатор хмарного сховища.");
   }
   return downloadFileFromGoogleDrive(scan.storagePath);
 }
 
 export async function openScan(scan: ScanAttachment): Promise<void> {
   if (!scan.storagePath) {
-    throw new Error("У файлу відсутній ідентифікатор Google Drive.");
+    throw new Error("У файлу відсутній ідентифікатор хмарного сховища.");
   }
   // scan.webViewLink can originate from an imported backup, so it must be
   // scheme-checked before window.open() to avoid "javascript:" execution or an
@@ -94,8 +94,8 @@ export async function deleteScanFile(scan: ScanAttachment): Promise<void> {
   if (!scan.storagePath) return;
   const storage = String(scan.storage ?? "");
 
-  // Legacy attachments may still point to the former Supabase Storage.
-  // Their physical object can no longer be managed by the Google Drive provider,
+  // Legacy attachments may still point to the former storage provider.
+  // Their physical object can no longer be managed by the current provider,
   // but the attachment reference must still be removable from the record.
   if (storage !== "google-drive") return;
 

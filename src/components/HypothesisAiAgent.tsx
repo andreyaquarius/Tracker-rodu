@@ -12,7 +12,7 @@ import { nowIso } from "../utils/dateHelpers";
 import { formatDateTime } from "../utils/dateHelpers";
 
 const costWarning =
-  "Запит використовує ваш API-ключ Google AI Studio та може витрачати квоту або кошти згідно з тарифами Google.";
+  "На безкоштовному тарифі запит використовує ваш API-ключ Google AI Studio. На платних тарифах використовується включений місячний ліміт аналізів.";
 
 export function HypothesisAiAgent({
   hypothesis,

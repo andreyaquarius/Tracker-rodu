@@ -32,7 +32,7 @@ function describeAuthError(error: unknown): string {
     return "Пароль має містити щонайменше 6 символів.";
   }
   if (message.includes("Email address not authorized")) {
-    return "Supabase поки не дозволяє надсилати листи на цю адресу. Потрібно налаштувати власну SMTP-пошту.";
+    return "Надсилання листів на цю адресу поки недоступне. Потрібно налаштувати поштову відправку.";
   }
   if (message.toLocaleLowerCase().includes("rate limit")) {
     return "Перевищено обмеження на надсилання листів. Спробуйте пізніше або перевірте SMTP-налаштування.";
@@ -124,7 +124,7 @@ export function LoginPage({
 
   const description =
     mode === "signUp"
-      ? "Зареєструйтеся за допомогою електронної пошти."
+      ? "Зареєструйтеся та отримайте 30 днів тестового доступу."
       : mode === "forgotPassword"
         ? "Введіть електронну адресу, і ми надішлемо посилання для зміни пароля."
         : mode === "resetPassword"

@@ -6,12 +6,16 @@ export function SettingsPage({
   db,
   onChange,
   readOnly = false,
+  canCreateCustomSection = true,
+  onUpgradeRequired,
   sectionCreateRequest,
   onSectionCreateRequestHandled,
 }: {
   db: AppDatabase;
   onChange: (db: AppDatabase) => void;
   readOnly?: boolean;
+  canCreateCustomSection?: boolean;
+  onUpgradeRequired?: () => void;
   sectionCreateRequest?: { id: number; parentKey: SectionParentKey };
   onSectionCreateRequestHandled?: () => void;
 }) {
@@ -81,6 +85,8 @@ export function SettingsPage({
         db={db}
         onChange={onChange}
         readOnly={readOnly}
+        canCreate={canCreateCustomSection}
+        onCreateBlocked={onUpgradeRequired}
         createRequest={sectionCreateRequest}
         onCreateRequestHandled={onSectionCreateRequestHandled}
       />

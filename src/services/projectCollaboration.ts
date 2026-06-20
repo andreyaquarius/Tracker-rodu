@@ -201,7 +201,7 @@ export async function createProjectInvitation(
       emailSent: false,
       warning: `Запрошення створено, але лист не надіслано: ${await functionErrorMessage(
         emailResult.error,
-        "перевірте налаштування поштової функції Supabase",
+        "перевірте налаштування поштової відправки",
       )}.`,
     };
   }
@@ -218,7 +218,7 @@ export async function sendProjectInvitationEmail(
   if (error) {
     throw new Error(await functionErrorMessage(
       error,
-      "Не вдалося надіслати лист. Перевірте Edge Function і поштові секрети Supabase.",
+      "Не вдалося надіслати лист. Перевірте налаштування поштової відправки.",
     ));
   }
 }

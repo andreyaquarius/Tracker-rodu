@@ -29,12 +29,16 @@ export function CustomSectionBuilder({
   db,
   onChange,
   readOnly = false,
+  canCreate = true,
+  onCreateBlocked,
   createRequest,
   onCreateRequestHandled,
 }: {
   db: AppDatabase;
   onChange: (db: AppDatabase) => void;
   readOnly?: boolean;
+  canCreate?: boolean;
+  onCreateBlocked?: () => void;
   createRequest?: { id: number; parentKey: SectionParentKey };
   onCreateRequestHandled?: () => void;
 }) {
@@ -44,10 +48,15 @@ export function CustomSectionBuilder({
 
   useEffect(() => {
     if (!createRequest || readOnly) return;
+    if (!canCreate) {
+      onCreateBlocked?.();
+      onCreateRequestHandled?.();
+      return;
+    }
     setPendingParentKey(createRequest.parentKey);
     setTemplateOpen(true);
     onCreateRequestHandled?.();
-  }, [createRequest?.id, readOnly]);
+  }, [createRequest?.id, readOnly, canCreate]);
 
   const startTemplate = (templateId: string) => {
     const template = customSectionTemplates.find((item) => item.id === templateId);
@@ -131,11 +140,15 @@ export function CustomSectionBuilder({
           className="button button-primary"
           disabled={readOnly}
           onClick={() => {
+            if (!canCreate) {
+              onCreateBlocked?.();
+              return;
+            }
             setPendingParentKey(null);
             setTemplateOpen(true);
           }}
         >
-          + Створити розділ
+          {canCreate ? "+ Створити розділ" : "🔒 Створити розділ · PRO"}
         </button>
       </div>
 

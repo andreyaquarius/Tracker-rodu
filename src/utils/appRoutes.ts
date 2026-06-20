@@ -26,7 +26,7 @@ const segmentPages = new Map(
 export type AppRoute =
   | { kind: "root" }
   | { kind: "projects" }
-  | { kind: "settings"; page: "settings" }
+  | { kind: "settings"; page: "settings" | "subscription" }
   | {
       kind: "project";
       projectRef: string;
@@ -123,6 +123,9 @@ export function parseAppRoute(
   if (parts.length === 1 && parts[0] === "settings") {
     return { kind: "settings", page: "settings" };
   }
+  if (parts.length === 2 && parts[0] === "settings" && parts[1] === "subscription") {
+    return { kind: "settings", page: "subscription" };
+  }
   if (parts[0] !== "projects" || !parts[1]) return { kind: "unknown" };
 
   const projectRef = parts[1];
@@ -174,6 +177,7 @@ export function pagePath(
   sections: CustomSectionDefinition[] = [],
 ): string {
   if (page === "settings") return "/settings";
+  if (page === "subscription") return "/settings/subscription";
   if (page.startsWith("custom:")) {
     const sectionId = page.slice("custom:".length);
     const section = sections.find((item) => item.id === sectionId);

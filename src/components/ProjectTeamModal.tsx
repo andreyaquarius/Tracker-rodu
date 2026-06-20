@@ -18,12 +18,16 @@ import {
 } from "../services/projectCollaboration";
 import { Modal } from "./Modal";
 import type { ActivityActionType } from "../types";
+import { subscriptionErrorMessage } from "../services/subscriptionService";
 
 interface ProjectTeamModalProps {
   account: SupabaseAccount;
   workspace: SupabaseWorkspace | null;
   onClose: () => void;
   onInvitationAccepted: (projectId: string) => Promise<void>;
+  canInviteMember?: boolean;
+  onUpgradeRequired?: () => void;
+  onSubscriptionChanged?: () => void;
   onActivity?: (
     relatedId: string,
     text: string,
@@ -54,6 +58,9 @@ export function ProjectTeamModal({
   workspace,
   onClose,
   onInvitationAccepted,
+  canInviteMember = true,
+  onUpgradeRequired,
+  onSubscriptionChanged,
   onActivity,
 }: ProjectTeamModalProps) {
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -95,6 +102,10 @@ export function ProjectTeamModal({
   const invite = async (event: FormEvent) => {
     event.preventDefault();
     if (!workspace) return;
+    if (!canInviteMember) {
+      onUpgradeRequired?.();
+      return;
+    }
     setBusyId("invite");
     setError("");
     setNotice("");
@@ -112,8 +123,9 @@ export function ProjectTeamModal({
           ? "Запрошення створено, лист надіслано."
           : result.warning ?? "Запрошення створено без надсилання листа.",
       );
+      onSubscriptionChanged?.();
     } catch (inviteError) {
-      setError(describeError(inviteError, "Не вдалося створити запрошення."));
+      setError(subscriptionErrorMessage(inviteError) || describeError(inviteError, "Не вдалося створити запрошення."));
     } finally {
       setBusyId("");
     }
@@ -322,7 +334,7 @@ export function ProjectTeamModal({
                   className="button button-primary"
                   disabled={Boolean(busyId)}
                 >
-                  {busyId === "invite" ? "Створення…" : "Запросити"}
+                  {busyId === "invite" ? "Створення…" : canInviteMember ? "Запросити" : "🔒 Запросити · PRO"}
                 </button>
               </form>
             ) : null}

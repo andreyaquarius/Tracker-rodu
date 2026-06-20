@@ -110,7 +110,7 @@ export async function uploadFileToGoogleDrive(
   );
   const uploaded = await response.json() as DriveFile;
   if (!uploaded.id) {
-    throw new Error("Google Drive не повернув ідентифікатор завантаженого файла.");
+    throw new Error("Хмарне сховище не повернуло ідентифікатор завантаженого файла.");
   }
   return {
     id: uploaded.id,
@@ -196,7 +196,7 @@ async function findOrCreateProjectFolder(target: GoogleDriveProjectTarget): Prom
   );
   const created = await createResponse.json() as DriveFile;
   if (!created.id) {
-    throw new Error("Не вдалося створити папку проєкту на Google Drive.");
+    throw new Error("Не вдалося створити папку проєкту в хмарному сховищі.");
   }
   return created.id;
 }
@@ -213,7 +213,7 @@ async function driveFetch(url: string, init: RequestInit = {}): Promise<Response
     const message = await googleApiError(response);
     if (response.status === 403) {
       throw new Error(
-        `${message} Перевірте, що Google Drive API увімкнено у вашому Google Cloud проєкті.`,
+        `${message} Перевірте налаштування хмарного сховища.`,
       );
     }
     throw new Error(message);
@@ -256,7 +256,7 @@ async function requestGoogleDriveAccessToken(): Promise<string> {
 
   return new Promise<string>((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
-      reject(new Error("Підключення Google Drive не було завершено."));
+      reject(new Error("Підключення хмарного сховища не було завершено."));
     }, 90_000);
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
@@ -266,7 +266,7 @@ async function requestGoogleDriveAccessToken(): Promise<string> {
         if (response.error || !response.access_token) {
           reject(new Error(
             response.error_description
-              || "Google Drive не надав доступ до файлів застосунку.",
+              || "Хмарне сховище не надало доступ до файлів застосунку.",
           ));
           return;
         }
@@ -279,10 +279,10 @@ async function requestGoogleDriveAccessToken(): Promise<string> {
       error_callback: (error) => {
         window.clearTimeout(timeoutId);
         const message = error.type === "popup_failed_to_open"
-          ? "Браузер заблокував вікно Google Drive. Дозвольте спливні вікна для цього сайту й спробуйте ще раз."
+          ? "Браузер заблокував вікно підключення сховища. Дозвольте спливні вікна для цього сайту й спробуйте ще раз."
           : error.type === "popup_closed"
-            ? "Вікно Google Drive було закрито до завершення підключення."
-            : "Не вдалося відкрити вікно підключення Google Drive.";
+            ? "Вікно підключення сховища було закрито до завершення."
+            : "Не вдалося відкрити вікно підключення сховища.";
         reject(new Error(message));
       },
     });
@@ -320,8 +320,8 @@ async function googleApiError(response: Response): Promise<string> {
         message?: string;
       };
     };
-    return body.error?.message || `Помилка Google Drive (${response.status}).`;
+    return body.error?.message || `Помилка хмарного сховища (${response.status}).`;
   } catch {
-    return `Помилка Google Drive (${response.status}).`;
+    return `Помилка хмарного сховища (${response.status}).`;
   }
 }

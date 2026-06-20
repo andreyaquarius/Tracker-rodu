@@ -63,7 +63,7 @@ export function TopBar({
       <div className="connection-summary">
         <span className="sync-badge sync-synced">
           <span className="sync-dot" />
-          Збережено в Supabase
+          Збережено
         </span>
         <span className="online-state">{navigator.onLine ? "Онлайн" : "Офлайн"}</span>
         <small>Дані активного проєкту зберігаються автоматично</small>

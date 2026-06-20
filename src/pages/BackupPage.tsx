@@ -99,7 +99,7 @@ export function BackupPage({
         "backup_created",
       );
       await refreshBackups();
-    }, "Резервну копію проєкту створено у Supabase.");
+    }, "Резервну копію проєкту створено.");
 
   const restoreBackup = (backup: BackupFile) => {
     if (!window.confirm(
@@ -249,8 +249,8 @@ export function BackupPage({
           <span className="eyebrow">Захист даних Трекера Роду</span>
           <h1>Резервні копії проєкту</h1>
           <p>
-            Робочі дані та резервні копії зберігаються у приватному сховищі
-            Supabase. Файл JSON можна завантажити лише як додаткову копію.
+            Робочі дані та резервні копії зберігаються у приватному захищеному сховищі.
+            Файл JSON можна завантажити як додаткову копію.
           </p>
         </div>
       </div>
@@ -261,12 +261,12 @@ export function BackupPage({
           <span className="eyebrow">Поточний стан</span>
           <h2>
             {workspace
-              ? `Проєкт «${workspace.projectName}» у PostgreSQL`
+              ? `Проєкт «${workspace.projectName}»`
               : "Проєкт не вибрано"}
           </h2>
           <p>
             {workspace
-              ? "Зміни зберігаються у Supabase автоматично."
+              ? "Зміни зберігаються автоматично."
               : "Прийміть запрошення або створіть проєкт, щоб працювати з даними."}
           </p>
         </div>
@@ -345,7 +345,7 @@ export function BackupPage({
       <section className="panel backup-list-panel">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">Supabase Storage</span>
+            <span className="eyebrow">Хмарне сховище</span>
             <h2>Доступні резервні копії</h2>
           </div>
           <button

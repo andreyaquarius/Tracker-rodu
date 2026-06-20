@@ -284,6 +284,7 @@ function moduleLabel(module: PageKey): string {
     archiveRequests: "Запити в архів",
     persons: "Особи",
     backup: "Резервні копії",
+    subscription: "Тариф і підписка",
     settings: "Налаштування",
   };
   return labels[module as Exclude<PageKey, `custom:${string}`>];
@@ -302,6 +303,7 @@ function activityIcon(module: PageKey): string {
     archiveRequests: "А",
     persons: "О",
     backup: "↻",
+    subscription: "₴",
     settings: "Н",
   };
   return icons[module as Exclude<PageKey, `custom:${string}`>];

@@ -6,6 +6,7 @@ import {
   errorMessage,
   json,
   normalizeMode,
+  normalizeModel,
   readAiSettings,
 } from "../_shared/ai.ts";
 
@@ -84,7 +85,7 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const { user, admin, encryptionKey } = await authenticatedContext(request);
+    const { user, userClient, admin, encryptionKey } = await authenticatedContext(request);
     const input = await request.json() as { hypothesisId?: string; mode?: string };
     const hypothesisId = String(input.hypothesisId ?? "").trim();
     if (!hypothesisId) return json({ error: "Не вказано гіпотезу." }, 400);
@@ -108,9 +109,35 @@ Deno.serve(async (request) => {
     if (membershipError) throw membershipError;
     if (!membership) return json({ error: "У вас немає доступу до цього проєкту." }, 403);
 
-    const settings = await readAiSettings(admin, user.id);
-    const mode = input.mode ? normalizeMode(input.mode) : settings.mode;
-    const apiKey = await decryptApiKey(settings.encrypted_api_key, encryptionKey);
+    const { data: activePlan, error: planError } = await admin.rpc(
+      "get_user_active_plan",
+      { user_uuid: user.id },
+    );
+    if (planError) throw planError;
+    const planCode = String(activePlan ?? "free");
+    let mode = input.mode ? normalizeMode(input.mode) : "fast";
+    let apiKey = "";
+    let model = "gemini-3.5-flash";
+    let keySource: "user" | "platform" = "user";
+
+    if (planCode === "free") {
+      const settings = await readAiSettings(admin, user.id);
+      mode = input.mode ? normalizeMode(input.mode) : settings.mode;
+      apiKey = await decryptApiKey(settings.encrypted_api_key, encryptionKey);
+      model = settings.model;
+    } else {
+      keySource = "platform";
+      apiKey = (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "").trim();
+      if (!apiKey) {
+        throw new Error("Серверний API-ключ Gemini не налаштовано для платних тарифів.");
+      }
+      model = normalizeModel(Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash");
+      const { error: usageError } = await userClient.rpc(
+        "begin_hypothesis_ai_review",
+        { target_project_id: hypothesis.project_id },
+      );
+      if (usageError) throw usageError;
+    }
 
     const { data: links, error: linksError } = await admin
       .from("hypothesis_links")
@@ -234,7 +261,7 @@ ${limitText(JSON.stringify(context), mode === "detailed" ? 50000 : 22000)}`;
 
     const result = await callGemini(
       apiKey,
-      settings.model,
+      model,
       prompt,
       responseSchema,
     ) as Record<string, unknown>;
@@ -255,7 +282,7 @@ ${limitText(JSON.stringify(context), mode === "detailed" ? 50000 : 22000)}`;
         hypothesis_id: hypothesisId,
         user_id: user.id,
         provider: "google_gemini",
-        model: settings.model,
+        model,
         mode,
         input_summary: inputSummary,
         result_json: result,
@@ -268,9 +295,10 @@ ${limitText(JSON.stringify(context), mode === "detailed" ? 50000 : 22000)}`;
     return json({
       reviewId: savedReview.id,
       createdAt: savedReview.created_at,
-      model: settings.model,
+      model,
       mode,
       inputSummary,
+      keySource,
       result,
     });
   } catch (error) {

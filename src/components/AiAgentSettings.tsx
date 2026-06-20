@@ -123,7 +123,7 @@ export function AiAgentSettings() {
             placeholder={settings?.configured ? "Введіть лише для заміни ключа" : "Вставте ключ із Google AI Studio"}
             onChange={(event) => setApiKey(event.target.value)}
           />
-          <small className="field-hint">Ключ передається тільки Edge Function і зберігається зашифрованим.</small>
+          <small className="field-hint">Ключ передається тільки захищеному серверному обробнику і зберігається зашифрованим.</small>
         </label>
         <label>
           <span>Модель</span>

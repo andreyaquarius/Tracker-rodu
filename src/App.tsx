@@ -22,6 +22,7 @@ import type {
 } from "./types";
 import { useAppDatabase } from "./hooks/useAppDatabase";
 import { Layout } from "./components/Layout";
+import { UpgradeRequiredModal } from "./components/UpgradeRequiredModal";
 import type { PageKey } from "./components/Sidebar";
 import { DashboardPage } from "./pages/DashboardPage";
 import { CrudPage } from "./pages/CrudPage";
@@ -29,6 +30,7 @@ import { configs } from "./pages/entityConfigs";
 import { YearMatrixPage } from "./pages/YearMatrixPage";
 import { BackupPage } from "./pages/BackupPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PersonsPage } from "./pages/PersonsPage";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
@@ -60,6 +62,9 @@ import {
   type SupabaseAccount,
   type SupabaseWorkspace,
 } from "./services/supabaseAuth";
+import { useSubscription } from "./hooks/useSubscription";
+import { subscriptionErrorCode, subscriptionErrorMessage } from "./services/subscriptionService";
+import type { UpgradeReason } from "./types/subscription";
 import {
   clearProjectResearchCache,
   deleteProjectResearch,
@@ -371,6 +376,7 @@ export default function App() {
   const [projectPreferencesReadyFor, setProjectPreferencesReadyFor] =
     useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
+  const [upgradeReason, setUpgradeReason] = useState<UpgradeReason | null>(null);
   const workspaceSetupRef = useRef<Promise<void> | null>(null);
   const passwordRecoveryRef = useRef(false);
   const lastPreparedUserRef = useRef<string | null>(null);
@@ -381,6 +387,7 @@ export default function App() {
     projectId: string;
     value: string;
   } | null>(null);
+  const subscriptionAccess = useSubscription(workspace?.projectId, Boolean(account));
   const requestedDataGroups = useMemo(() => {
     if (workspace && searchDataProjectId === workspace.projectId) {
       return new Set(ALL_PROJECT_DATA_GROUPS);
@@ -389,6 +396,7 @@ export default function App() {
   }, [page, searchDataProjectId, workspace]);
 
   const describeError = useCallback((error: unknown, fallback: string) => {
+    if (subscriptionErrorCode(error)) return subscriptionErrorMessage(error);
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === "object" && error !== null) {
       const message = "message" in error ? String(error.message ?? "") : "";
@@ -481,7 +489,7 @@ export default function App() {
         return;
       }
 
-      // Supabase re-emits auth events on token refresh and on every tab focus.
+      // Auth events can repeat on token refresh and on every tab focus.
       // Once a user is prepared, ignore the repeats: otherwise each event rebuilds
       // `account`/`workspace`, which re-fires every data-load effect and floods
       // PostgREST with duplicate full-table reads — the request storm behind the
@@ -496,8 +504,8 @@ export default function App() {
       }
 
       const currentAccount = getAccountFromSession(session);
-      setAccount(currentAccount);
       if (!currentAccount) {
+        setAccount(null);
         setWorkspace(null);
         setWorkspaces([]);
         setIsAccountSigningIn(false);
@@ -506,6 +514,7 @@ export default function App() {
 
       setIsAccountSigningIn(true);
       workspaceSetupRef.current = (async () => {
+        setAccount(currentAccount);
         const fetchedWorkspaces = await listSupabaseWorkspaces(
           undefined,
           session.user.id,
@@ -1563,6 +1572,16 @@ export default function App() {
       notify("Спочатку увійдіть до облікового запису.", true);
       return;
     }
+    if (!subscriptionAccess.canCreateProject) {
+      setUpgradeReason({
+        featureName: "Створення проєкту",
+        reason: "Ви використали доступну кількість проєктів для поточного тарифу.",
+        recommendedPlan: "researcher",
+        used: subscriptionAccess.getUsage("projects"),
+        limit: subscriptionAccess.getLimit("projects")?.value ?? undefined,
+      });
+      return;
+    }
 
     const proposedName = window.prompt("Назва нового проєкту", `Проєкт ${account.name}`);
     if (proposedName === null) return;
@@ -1580,6 +1599,7 @@ export default function App() {
       localStorage.setItem(ACTIVE_WORKSPACE_KEY, activeWorkspace.projectId);
       routerNavigate(projectDashboardPath(activeWorkspace.projectSlug));
       notify(`Створено проєкт «${activeWorkspace.projectName}».`);
+      void subscriptionAccess.refreshSubscription();
     } catch (error) {
       notify(describeError(error, "Не вдалося створити новий проєкт."), true);
     } finally {
@@ -1716,6 +1736,16 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectResearches;
     const previousEntity = previous.find((item) => item.id === research.id);
+    if (!previousEntity && !subscriptionAccess.canCreateResearch) {
+      setUpgradeReason({
+        featureName: "Нове дослідження",
+        reason: "Досягнуто ліміт досліджень для поточного тарифу.",
+        recommendedPlan: "researcher",
+        used: subscriptionAccess.getUsage("researches_per_project"),
+        limit: subscriptionAccess.getLimit("researches_per_project")?.value ?? undefined,
+      });
+      return;
+    }
     const optimistic = previous.some((item) => item.id === research.id)
       ? previous.map((item) => (item.id === research.id ? research : item))
       : [research, ...previous];
@@ -1730,6 +1760,7 @@ export default function App() {
     )
       .then(() => saveProjectResearch(projectId, research))
       .then((saved) => {
+        if (!previousEntity) void subscriptionAccess.refreshSubscription();
         recordEntityActivity("researches", previousEntity, saved);
         syncEntityAttachmentMetadata("researches", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
@@ -2537,8 +2568,8 @@ export default function App() {
     setModuleSearch("");
     setOpenEntityId("");
     setCreateRequest(null);
-    if (nextPage === "settings") {
-      routerNavigate("/settings");
+    if (nextPage === "settings" || nextPage === "subscription") {
+      routerNavigate(nextPage === "settings" ? "/settings" : "/settings/subscription");
       return;
     }
     if (workspace) {
@@ -2574,6 +2605,16 @@ export default function App() {
   };
 
   const createSubsection = (parentKey: SectionParentKey) => {
+    if (!subscriptionAccess.canCreateCustomSection) {
+      setUpgradeReason({
+        featureName: "Власні розділи",
+        reason: "Створення нового власного розділу недоступне або ліміт уже використано.",
+        recommendedPlan: "researcher",
+        used: subscriptionAccess.getUsage("custom_sections_per_project"),
+        limit: subscriptionAccess.getLimit("custom_sections_per_project")?.value ?? undefined,
+      });
+      return;
+    }
     setSectionCreateRequest({
       id: Date.now(),
       parentKey,
@@ -2979,6 +3020,16 @@ export default function App() {
       }));
       return;
     }
+    if (!subscriptionAccess.canCreateCustomField) {
+      setUpgradeReason({
+        featureName: "Власні поля",
+        reason: "Створення нового власного поля недоступне або ліміт уже використано.",
+        recommendedPlan: "researcher",
+        used: subscriptionAccess.getUsage("custom_fields_per_project"),
+        limit: subscriptionAccess.getLimit("custom_fields_per_project")?.value ?? undefined,
+      });
+      return;
+    }
     if (workspace.role !== "owner") {
       notify("Додаткові поля може змінювати лише власник проєкту.", true);
       return;
@@ -2998,6 +3049,7 @@ export default function App() {
       definition,
       optimistic.length - 1,
     ).then(() => {
+      void subscriptionAccess.refreshSubscription();
       recordProjectActivity(
         definition.module,
         definition.id,
@@ -3064,6 +3116,21 @@ export default function App() {
       return;
     }
 
+    const addedSections = next.customSections.filter(
+      (section) => !projectCustomSections.some((item) => item.id === section.id),
+    );
+    const remainingSections = subscriptionAccess.getRemaining("custom_sections_per_project");
+    if (remainingSections !== null && addedSections.length > remainingSections) {
+      setUpgradeReason({
+        featureName: "Власні розділи",
+        reason: "Для створення цих розділів недостатньо доступного ліміту.",
+        recommendedPlan: "researcher",
+        used: subscriptionAccess.getUsage("custom_sections_per_project"),
+        limit: subscriptionAccess.getLimit("custom_sections_per_project")?.value ?? undefined,
+      });
+      return;
+    }
+
     const projectId = workspace.projectId;
     setProjectPreferences({
       researcherName: next.settings.researcherName,
@@ -3105,6 +3172,9 @@ export default function App() {
         ),
       ),
     ]).then(() => {
+      if (changed.some((section) => !previousSections.some((item) => item.id === section.id))) {
+        void subscriptionAccess.refreshSubscription();
+      }
       for (const section of removed) {
         recordProjectActivity(
           "settings",
@@ -3475,8 +3545,24 @@ export default function App() {
             db={activeDb}
             onChange={changeSettings}
             readOnly={Boolean(workspace && workspace.role !== "owner")}
+            canCreateCustomSection={subscriptionAccess.canCreateCustomSection}
+            onUpgradeRequired={() => setUpgradeReason({
+              featureName: "Власні розділи",
+              reason: "Створення власних розділів недоступне або тарифний ліміт уже використано.",
+              recommendedPlan: "researcher",
+            })}
             sectionCreateRequest={sectionCreateRequest ?? undefined}
             onSectionCreateRequestHandled={() => setSectionCreateRequest(null)}
+          />
+        );
+      case "subscription":
+        return (
+          <SubscriptionPage
+            context={subscriptionAccess.context}
+            trialDaysRemaining={subscriptionAccess.trialDaysRemaining}
+            loading={subscriptionAccess.loading}
+            error={subscriptionAccess.error}
+            onRefresh={subscriptionAccess.refreshSubscription}
           />
         );
     }
@@ -3502,7 +3588,7 @@ export default function App() {
       onCreate={() => void createWorkspace()}
       creating={isCreatingWorkspace}
     />
-  ) : workspace ? structuredContent : (
+  ) : route.kind === "settings" ? structuredContent : workspace ? structuredContent : (
     <section className="panel">
       <span className="eyebrow">Робочий простір</span>
       <h1>Проєкт ще не вибрано</h1>
@@ -3539,6 +3625,21 @@ export default function App() {
         isAccountSigningIn={isAccountSigningIn}
         isCreatingWorkspace={isCreatingWorkspace}
       >
+        {subscriptionAccess.isTrial && subscriptionAccess.trialDaysRemaining <= 7 ? (
+          <div className="subscription-notice">
+            <span>
+              До завершення повного пробного доступу залишилося {subscriptionAccess.trialDaysRemaining} дн.
+              Після цього діятиме безкоштовний тариф, а дані буде збережено.
+            </span>
+            <button type="button" onClick={() => navigate("subscription")}>Обрати тариф</button>
+          </div>
+        ) : null}
+        {subscriptionAccess.subscription?.status === "expired" ? (
+          <div className="subscription-notice expired">
+            <span>Пробний період завершився. Дані збережено, частина нових дій обмежена безкоштовним тарифом.</span>
+            <button type="button" onClick={() => navigate("subscription")}>Переглянути тарифи</button>
+          </div>
+        ) : null}
         {displayedContent}
       </Layout>
       {teamOpen && account ? (
@@ -3547,9 +3648,30 @@ export default function App() {
           workspace={workspace}
           onClose={() => setTeamOpen(false)}
           onInvitationAccepted={acceptWorkspaceInvitation}
+          canInviteMember={subscriptionAccess.canInviteMember}
+          onUpgradeRequired={() => setUpgradeReason({
+            featureName: "Запрошення учасників",
+            reason: "Запрошення учасників недоступне або ліміт поточного тарифу вже використано.",
+            recommendedPlan: "researcher",
+            used: subscriptionAccess.getUsage("project_members"),
+            limit: subscriptionAccess.getLimit("project_members")?.value ?? undefined,
+          })}
+          onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
           onActivity={(relatedId, text, actionType) =>
             recordProjectActivity("settings", relatedId, text, actionType)
           }
+        />
+      ) : null}
+      {upgradeReason ? (
+        <UpgradeRequiredModal
+          {...upgradeReason}
+          currentPlan={subscriptionAccess.effectivePlan ?? "free"}
+          trialExpired={subscriptionAccess.subscription?.status === "expired"}
+          onClose={() => setUpgradeReason(null)}
+          onOpenPlans={() => {
+            setUpgradeReason(null);
+            navigate("subscription");
+          }}
         />
       ) : null}
       {toast ? <div className={`toast ${toast.error ? "toast-error" : ""}`}>{toast.message}</div> : null}

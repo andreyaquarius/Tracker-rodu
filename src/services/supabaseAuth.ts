@@ -83,7 +83,7 @@ const supabase = isSupabaseConfigured
 
 function requireSupabase() {
   if (!supabase) {
-    throw new Error("На сайті не налаштовано підключення до Supabase.");
+    throw new Error("На сайті не налаштовано підключення до сервера.");
   }
   return supabase;
 }

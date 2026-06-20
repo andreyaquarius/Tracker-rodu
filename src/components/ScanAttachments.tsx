@@ -16,7 +16,7 @@ import {
 
 export function ScanAttachmentsEditor({
   title = "Файли та вкладення",
-  description = `Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB. Максимальний розмір одного файлу — ${MAX_ATTACHMENT_SIZE_MB} МБ. Файли зберігаються у папці активного проєкту на вашому Google Drive.`,
+  description = `Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB. Максимальний розмір одного файлу — ${MAX_ATTACHMENT_SIZE_MB} МБ. Файли зберігаються у папці активного проєкту в хмарному сховищі.`,
   accept = "image/*,audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.wma,.webm,.pdf,.djvu,.djv,.xps,.doc,.docx,.rtf,.odt,.xls,.xlsx,.ods,.csv,.ppt,.pptx,.odp,.txt,.md,.xml,.html,.htm,.epub",
   maxFiles,
   limitMessage,
@@ -50,7 +50,7 @@ export function ScanAttachmentsEditor({
         setError(
           loadError instanceof Error
             ? loadError.message
-            : "Не вдалося підготувати підключення Google Drive.",
+            : "Не вдалося підготувати підключення хмарного сховища.",
         );
       });
     return () => {
@@ -68,7 +68,7 @@ export function ScanAttachmentsEditor({
       setError(
         authorizationError instanceof Error
           ? authorizationError.message
-          : "Не вдалося підключити Google Drive.",
+          : "Не вдалося підключити хмарне сховище.",
       );
     }
   };
@@ -76,7 +76,7 @@ export function ScanAttachmentsEditor({
   const chooseFiles = () => {
     if (!isGoogleDriveAuthorized()) {
       setDriveConnected(false);
-      setError("Термін доступу до Google Drive завершився. Підключіть диск повторно.");
+      setError("Термін доступу до хмарного сховища завершився. Підключіть сховище повторно.");
       return;
     }
     fileInputRef.current?.click();
@@ -136,9 +136,9 @@ export function ScanAttachmentsEditor({
           onClick={driveConnected ? chooseFiles : () => void connectDrive()}
         >
           {!driveReady
-            ? "Підготовка Google Drive…"
+            ? "Підготовка сховища…"
             : !driveConnected
-              ? "Підключити Google Drive"
+              ? "Підключити сховище"
               : uploading
                 ? "Завантаження…"
                 : limitReached
@@ -233,7 +233,7 @@ function formatFileSize(size: number): string {
 }
 
 function storageLabel(scan: ScanAttachment): string {
-  return scan.storage === "google-drive" ? "Google Drive" : "";
+  return scan.storage === "google-drive" ? "Хмарне сховище" : "";
 }
 
 function attachmentIcon(scan: ScanAttachment): string {
