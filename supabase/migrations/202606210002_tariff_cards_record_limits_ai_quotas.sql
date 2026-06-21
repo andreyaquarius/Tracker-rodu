@@ -22,7 +22,7 @@ with configured(code, limit_key, limit_value, is_unlimited) as (
     ('free', 'projects', 1, false),
     ('free', 'researches_total', 1, false),
     ('free', 'researches_per_project', 1, false),
-    ('free', 'records_per_standard_section', 500, false),
+    ('free', 'records_per_standard_section', 1000, false),
     ('free', 'project_members', 0, false),
     ('free', 'custom_sections_per_project', 0, false),
     ('free', 'custom_fields_per_project', 0, false),
