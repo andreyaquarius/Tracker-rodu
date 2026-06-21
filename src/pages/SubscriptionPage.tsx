@@ -26,14 +26,25 @@ const limitLabels: Record<PlanLimitKey, string> = {
   projects: "Проєкти",
   researches_total: "Дослідження загалом",
   researches_per_project: "Дослідження у проєкті",
+  records_per_standard_section: "Записи в розділах",
   project_members: "Запрошені учасники",
   custom_sections_per_project: "Власні розділи",
-  custom_fields_per_project: "Власні поля у стандартних розділах",
-  table_imports_per_month: "Імпорти цього місяця",
-  hypothesis_ai_reviews_per_month: "AI-аналіз гіпотез",
+  custom_fields_per_project: "Власні поля",
+  table_imports_per_month: "Імпорти за місяць",
+  hypothesis_ai_reviews_per_month: "ШІ-аналізи гіпотез",
 };
 
 const hiddenPlanLimitKeys = new Set<PlanLimitKey>(["researches_total"]);
+const planCardLimitOrder: PlanLimitKey[] = [
+  "projects",
+  "researches_per_project",
+  "records_per_standard_section",
+  "table_imports_per_month",
+  "custom_fields_per_project",
+  "custom_sections_per_project",
+  "project_members",
+  "hypothesis_ai_reviews_per_month",
+];
 
 export function SubscriptionPage({
   context,
@@ -75,7 +86,8 @@ export function SubscriptionPage({
           : "Пробний період завершено";
   const usageRows = useMemo(() => {
     if (!context) return [];
-    return Object.values(context.limits)
+    return planCardLimitOrder
+      .map((key) => context.limits[key])
       .filter((limit) => isVisibleLimit(context.effectivePlanCode, limit))
       .map((limit) => ({
         ...limit,
@@ -126,12 +138,12 @@ export function SubscriptionPage({
         <section className="subscription-status-band">
           <div>
             <span className="eyebrow">Поточна підписка</span>
-            <h2>{context?.plan.name ?? "Безкоштовний"}</h2>
+            <h2>{context?.plan.name ?? "Старт"}</h2>
           </div>
           <div className="subscription-status-value compact">
             <strong>{statusText}</strong>
           </div>
-          {trialExpired ? <p>Пробний період завершився. Дані збережено, нові дії перевіряються за free-лімітами.</p> : null}
+          {trialExpired ? <p>Пробний період завершився. Дані збережено, нові дії перевіряються за лімітами тарифу «Старт».</p> : null}
         </section>
       )}
 
@@ -160,7 +172,7 @@ export function SubscriptionPage({
                 <p>{plan.description}</p>
                 <div className="plan-price">{priceLabel(plan)}</div>
                 <ul>
-                  {limits.filter((limit) => isVisibleLimit(plan.code, limit)).map((limit) => (
+                  {orderedVisibleLimits(plan.code, limits).map((limit) => (
                     <li key={limit.key}>
                       <span>{limitLabels[limit.key]}</span>
                       <strong>{planLimitValue(plan.code, limit)}</strong>
@@ -263,7 +275,7 @@ function AdminSubscriptions({ rows, onChanged }: {
           <select value={planFilter} onChange={(event) => setPlanFilter(event.target.value as PlanCode | "admin" | "all")}>
             <option value="all">Усі тарифи</option>
             <option value="admin">Адміністратори</option>
-            <option value="free">Безкоштовний</option>
+            <option value="free">Старт</option>
             <option value="researcher">Дослідник</option>
             <option value="professional">Професійний</option>
           </select>
@@ -288,7 +300,7 @@ function AdminSubscriptions({ rows, onChanged }: {
             {filteredRows.map((row) => (
               <tr key={row.userId}>
                 <td><strong>{row.displayName || row.email}</strong><small>{row.email}</small></td>
-                <td>{row.isAdmin ? <span className="status-pill">Адміністратор</span> : row.planCode}</td>
+                <td>{row.isAdmin ? <span className="status-pill">Адміністратор</span> : planDisplayName(row.planCode)}</td>
                 <td>{row.isAdmin ? "Безстроковий доступ" : row.status}</td>
                 <td>{row.isAdmin ? "Назавжди" : formatDate(row.trialEndsAt || row.currentPeriodEnd)}</td>
                 <td className="row-actions">
@@ -302,7 +314,7 @@ function AdminSubscriptions({ rows, onChanged }: {
                         value={draftFor(row).planCode}
                         onChange={(event) => updateDraft(row, { planCode: event.target.value as PlanCode })}
                       >
-                        <option value="free">Безкоштовний</option>
+                        <option value="free">Старт</option>
                         <option value="researcher">Дослідник</option>
                         <option value="professional">Професійний</option>
                       </select>
@@ -375,6 +387,12 @@ function planLimitValue(planCode: PlanCode, limit: PlanLimit): string | number |
   if (limit.key === "hypothesis_ai_reviews_per_month" && planCode === "free") {
     return "Власний API-ключ";
   }
+  if (limit.key === "records_per_standard_section" && !limit.isUnlimited && limit.value !== null) {
+    return `До ${limit.value}`;
+  }
+  if (limit.key === "hypothesis_ai_reviews_per_month" && !limit.isUnlimited && limit.value !== null) {
+    return `${limit.value} на місяць`;
+  }
   if (limit.isUnlimited) return "Без обмежень";
   return limit.value;
 }
@@ -394,6 +412,23 @@ function isVisibleLimit(planCode: PlanCode, limit: PlanLimit): boolean {
   if (hiddenPlanLimitKeys.has(limit.key)) return false;
   if (limit.key === "hypothesis_ai_reviews_per_month" && planCode === "free") return true;
   return limit.isUnlimited || limit.value !== 0;
+}
+
+function orderedVisibleLimits(planCode: PlanCode, limits: PlanLimit[]): PlanLimit[] {
+  const byKey = new Map(limits.map((limit) => [limit.key, limit]));
+  return planCardLimitOrder
+    .map((key) => byKey.get(key))
+    .filter((limit): limit is PlanLimit => Boolean(limit))
+    .filter((limit) => isVisibleLimit(planCode, limit));
+}
+
+function planDisplayName(planCode: PlanCode): string {
+  const names: Record<PlanCode, string> = {
+    free: "Старт",
+    researcher: "Дослідник",
+    professional: "Професійний",
+  };
+  return names[planCode];
 }
 
 function formatDate(value: string | null): string {

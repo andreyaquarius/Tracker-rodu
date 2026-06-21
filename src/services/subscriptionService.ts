@@ -3,6 +3,7 @@ import type {
   PlanCode,
   PlanLimit,
   PlanLimitKey,
+  SectionQuota,
   SubscriptionAccessMode,
   SubscriptionContext,
   SubscriptionPlan,
@@ -15,6 +16,7 @@ const limitKeys: PlanLimitKey[] = [
   "projects",
   "researches_total",
   "researches_per_project",
+  "records_per_standard_section",
   "project_members",
   "custom_sections_per_project",
   "custom_fields_per_project",
@@ -26,6 +28,7 @@ const usageProperty: Record<PlanLimitKey, string> = {
   projects: "projects",
   researches_total: "researchesTotal",
   researches_per_project: "researchesPerProject",
+  records_per_standard_section: "recordsPerStandardSection",
   project_members: "projectMembers",
   custom_sections_per_project: "customSectionsPerProject",
   custom_fields_per_project: "customFieldsPerProject",
@@ -138,7 +141,7 @@ export function subscriptionErrorCode(error: unknown): string {
     : typeof error === "object" && error && "message" in error
       ? String(error.message)
       : String(error ?? "");
-  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE|PLAN_SCOPE_CREATE_BLOCKED):[a-z_]+|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
+  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE|PLAN_SCOPE_CREATE_BLOCKED|PLAN_SECTION_RECORD_LIMIT_REACHED):[a-z_]+|AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
   return match?.[0] ?? "";
 }
 
@@ -148,11 +151,20 @@ export function subscriptionErrorMessage(error: unknown): string {
     "PLAN_LIMIT_REACHED:projects": "Ви використали доступну кількість проєктів.",
     "PLAN_LIMIT_REACHED:researches_total": "Ви використали доступну кількість досліджень.",
     "PLAN_LIMIT_REACHED:researches_per_project": "У цьому проєкті досягнуто ліміт досліджень.",
+    "PLAN_LIMIT_REACHED:records_per_standard_section": "Досягнуто ліміт записів у цьому розділі.",
     "PLAN_LIMIT_REACHED:project_members": "У цьому проєкті досягнуто ліміт учасників.",
     "PLAN_LIMIT_REACHED:custom_sections_per_project": "Досягнуто ліміт власних розділів.",
     "PLAN_LIMIT_REACHED:custom_fields_per_project": "Досягнуто ліміт власних полів.",
     "PLAN_LIMIT_REACHED:table_imports_per_month": "Використано всі імпорти цього календарного місяця.",
-    "PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month": "Використано всі включені AI-аналізи гіпотез цього місяця.",
+    "PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month": "Використано всі включені ШІ-аналізи гіпотез цього місяця.",
+    AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED: "Використано всі включені ШІ-аналізи гіпотез цього місяця.",
+    "PLAN_SECTION_RECORD_LIMIT_REACHED:persons": "Досягнуто ліміт записів у розділі «Особи». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+    "PLAN_SECTION_RECORD_LIMIT_REACHED:documents": "Досягнуто ліміт записів у розділі «Документи». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+    "PLAN_SECTION_RECORD_LIMIT_REACHED:year_matrix": "Досягнуто ліміт записів у розділі «Матриця років». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+    "PLAN_SECTION_RECORD_LIMIT_REACHED:tasks": "Досягнуто ліміт записів у розділі «Завдання». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+    "PLAN_SECTION_RECORD_LIMIT_REACHED:findings": "Досягнуто ліміт записів у розділі «Знахідки». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+    "PLAN_SECTION_RECORD_LIMIT_REACHED:hypotheses": "Досягнуто ліміт записів у розділі «Гіпотези». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+    "PLAN_SECTION_RECORD_LIMIT_REACHED:archive_requests": "Досягнуто ліміт записів у розділі «Запити в архів». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
     "PLAN_SCOPE_CREATE_BLOCKED:projects": "У цьому проєкті можна редагувати й видаляти наявні дані, але створення нових записів заблоковане поточним тарифом.",
     "PLAN_SCOPE_CREATE_BLOCKED:researches": "У цьому дослідженні можна редагувати й видаляти наявні дані, але створення нових записів заблоковане поточним тарифом.",
     RESEARCH_REQUIRED_BY_PLAN: "На вашому тарифі запис має бути прив’язаний до дослідження.",
@@ -166,15 +178,19 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
   const rawPlan = asRecord(raw.plan);
   const rawLimits = asRecord(raw.limits);
   const rawUsage = asRecord(raw.usage);
+  const rawSectionQuotas = asRecord(raw.sectionQuotas);
   const projectAccessMode = nullableString(raw.projectAccessMode) as SubscriptionAccessMode | null;
   const limits = {} as Record<PlanLimitKey, PlanLimit>;
   const usage = {} as SubscriptionUsage;
   for (const key of limitKeys) {
-    const limit = asRecord(rawLimits[key]);
+    const hasLimit = Object.prototype.hasOwnProperty.call(rawLimits, key);
+    const limit = hasLimit ? asRecord(rawLimits[key]) : {};
     limits[key] = {
       key,
-      value: limit.value === null || limit.value === undefined ? null : Number(limit.value),
-      isUnlimited: Boolean(limit.isUnlimited),
+      value: hasLimit
+        ? limit.value === null || limit.value === undefined ? null : Number(limit.value)
+        : 0,
+      isUnlimited: hasLimit ? Boolean(limit.isUnlimited) : false,
     };
     usage[key] = Number(rawUsage[usageProperty[key]] ?? 0);
   }
@@ -191,7 +207,7 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
   const plan: SubscriptionPlan = {
     id: String(rawPlan.id ?? ""),
     code: String(rawPlan.code ?? raw.effectivePlanCode ?? "free") as PlanCode,
-    name: String(rawPlan.name ?? "Безкоштовний"),
+    name: String(rawPlan.name ?? "Старт"),
     description: nullableString(rawPlan.description),
     priceMonthly: nullableNumber(rawPlan.price_monthly),
     priceYearly: nullableNumber(rawPlan.price_yearly),
@@ -204,11 +220,26 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
     plan,
     limits,
     usage,
+    sectionQuotas: mapSectionQuotas(rawSectionQuotas),
     isAdmin: Boolean(raw.isAdmin),
     projectAccessMode,
     canCreateProjectRecords: Boolean(raw.canCreateProjectRecords ?? true),
     serverNow: String(raw.serverNow ?? new Date().toISOString()),
   };
+}
+
+function mapSectionQuotas(raw: Record<string, unknown>): Record<string, SectionQuota> {
+  return Object.fromEntries(Object.entries(raw).map(([key, value]) => {
+    const record = asRecord(value);
+    return [key, {
+      sectionKey: String(record.sectionKey ?? key),
+      used: Number(record.used ?? 0),
+      limit: nullableNumber(record.limit),
+      remaining: nullableNumber(record.remaining),
+      canCreate: Boolean(record.canCreate ?? true),
+      reason: nullableString(record.reason),
+    }];
+  }));
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

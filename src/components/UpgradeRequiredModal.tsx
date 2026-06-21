@@ -20,7 +20,7 @@ export function UpgradeRequiredModal({
   onOpenPlans,
 }: UpgradeRequiredModalProps) {
   const planNames: Record<PlanCode, string> = {
-    free: "Безкоштовний",
+    free: "Старт",
     researcher: "Дослідник",
     professional: "Професійний",
   };
@@ -34,7 +34,7 @@ export function UpgradeRequiredModal({
         ) : null}
         {trialExpired ? (
           <div className="alert alert-notice">
-            Пробний період завершився. Ваші дані збережено, а обліковий запис перейшов на безкоштовний тариф.
+            Пробний період завершився. Ваші дані збережено, а обліковий запис перейшов на тариф «Старт».
           </div>
         ) : null}
         <p className="muted-text">

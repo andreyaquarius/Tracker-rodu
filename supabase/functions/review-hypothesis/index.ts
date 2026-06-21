@@ -83,7 +83,9 @@ function limitText(value: unknown, max = 6000): string {
 }
 
 function isHypothesisAiLimitReached(error: unknown): boolean {
-  return errorMessage(error).includes("PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month");
+  const message = errorMessage(error);
+  return message.includes("PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month") ||
+    message.includes("AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED");
 }
 
 async function readUserGeminiAccess(
@@ -171,7 +173,7 @@ Deno.serve(async (request) => {
             model = userAccess.model;
           } catch {
             throw new Error(
-              "Використано всі включені AI-аналізи гіпотез цього місяця. Додайте власний API-ключ Google AI Studio в налаштуваннях ШІ-агента, щоб продовжити аналіз.",
+              "Використано всі включені ШІ-аналізи гіпотез цього місяця. Додайте власний API-ключ Google AI Studio в налаштуваннях ШІ-агента, щоб продовжити аналіз.",
             );
           }
         } else {

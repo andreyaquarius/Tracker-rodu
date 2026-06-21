@@ -11,6 +11,7 @@ export type PlanLimitKey =
   | "projects"
   | "researches_total"
   | "researches_per_project"
+  | "records_per_standard_section"
   | "project_members"
   | "custom_sections_per_project"
   | "custom_fields_per_project"
@@ -60,12 +61,22 @@ export interface UserSubscription {
 
 export type SubscriptionUsage = Record<PlanLimitKey, number>;
 
+export interface SectionQuota {
+  sectionKey: string;
+  used: number;
+  limit: number | null;
+  remaining: number | null;
+  canCreate: boolean;
+  reason?: string | null;
+}
+
 export interface SubscriptionContext {
   subscription: UserSubscription;
   effectivePlanCode: PlanCode;
   plan: SubscriptionPlan;
   limits: Record<PlanLimitKey, PlanLimit>;
   usage: SubscriptionUsage;
+  sectionQuotas: Record<string, SectionQuota>;
   isAdmin: boolean;
   projectAccessMode: SubscriptionAccessMode | null;
   canCreateProjectRecords: boolean;

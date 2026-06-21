@@ -194,6 +194,16 @@ const researchScopedCollections: ReadonlySet<CollectionKey> = new Set([
   "persons",
 ]);
 
+const standardSectionQuotaKeys: Record<string, string> = {
+  persons: "persons",
+  documents: "documents",
+  yearMatrix: "year_matrix",
+  archiveRequests: "archive_requests",
+  tasks: "tasks",
+  findings: "findings",
+  hypotheses: "hypotheses",
+};
+
 function dataGroupsForPage(page: PageKey): Set<ProjectDataGroup> {
   if (page === "map") return new Set(["researches", "people", "documents", "work"]);
   if (page === "researches") return new Set(["researches"]);
@@ -406,6 +416,11 @@ export default function App() {
   } | null>(null);
   const subscriptionAccess = useSubscription(workspace?.projectId, Boolean(account));
   const canCreateProjectRecords = !workspace || subscriptionAccess.canCreateProjectRecords;
+  const canCreateStandardSection = useCallback((sectionKey?: string) => {
+    if (!canCreateProjectRecords) return false;
+    if (!sectionKey) return true;
+    return subscriptionAccess.context?.sectionQuotas[sectionKey]?.canCreate ?? true;
+  }, [canCreateProjectRecords, subscriptionAccess.context]);
   const researchRequiredByPlan = subscriptionAccess.effectivePlan !== "professional";
   const requestedDataGroups = useMemo(() => {
     if (workspace && searchDataProjectId === workspace.projectId) {
@@ -436,6 +451,9 @@ export default function App() {
     });
     return false;
   }, [canCreateProjectRecords]);
+  const refreshSubscriptionAfterCreate = useCallback((previousEntity: unknown) => {
+    if (!previousEntity) void subscriptionAccess.refreshSubscription();
+  }, [subscriptionAccess.refreshSubscription]);
 
   useEffect(() => {
     if (!account) return;
@@ -1935,6 +1953,7 @@ export default function App() {
         new Set(projectResearches.map((research) => research.id)),
       ))
       .then((saved) => {
+        refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("documents", previousEntity, saved);
         syncEntityAttachmentMetadata("documents", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
@@ -2061,6 +2080,7 @@ export default function App() {
         new Set(projectDocuments.map((document) => document.id)),
       ))
       .then((saved) => {
+        refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("yearMatrix", previousEntity, saved);
         syncEntityAttachmentMetadata("yearMatrix", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
@@ -2128,6 +2148,7 @@ export default function App() {
           `Додано діапазон із ${saved.length || records.length} років до матриці.`,
           "record_created",
         );
+        void subscriptionAccess.refreshSubscription();
         notify(`Додано ${saved.length || records.length} років до матриці.`);
       })
       .catch((error: unknown) => {
@@ -2203,6 +2224,7 @@ export default function App() {
         new Set(projectPersons.map((person) => person.id)),
       ))
       .then((saved) => {
+        refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("tasks", previousEntity, saved);
         syncEntityAttachmentMetadata("tasks", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
@@ -2286,6 +2308,7 @@ export default function App() {
         new Set(projectPersons.map((person) => person.id)),
       ))
       .then((saved) => {
+        refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("findings", previousEntity, saved);
         syncEntityAttachmentMetadata("findings", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
@@ -2398,6 +2421,7 @@ export default function App() {
         new Set(projectFindings.map((finding) => finding.id)),
       ))
       .then((saved) => {
+        refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("hypotheses", previousEntity, saved);
         syncEntityAttachmentMetadata("hypotheses", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
@@ -2508,6 +2532,7 @@ export default function App() {
         new Set(projectPersons.map((person) => person.id)),
       ))
       .then((saved) => {
+        refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("archiveRequests", previousEntity, saved);
         syncEntityAttachmentMetadata("archiveRequests", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
@@ -2622,6 +2647,10 @@ export default function App() {
     if (!canCreateProjectRecords) {
       throw new Error("У цьому проєкті можна редагувати й видаляти наявні дані, але імпорт нових записів заблокований поточним тарифом.");
     }
+    const sectionQuotaKey = standardSectionQuotaKeys[collection];
+    if (sectionQuotaKey && !canCreateStandardSection(sectionQuotaKey)) {
+      throw new Error("Досягнуто ліміт записів у цьому розділі. Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.");
+    }
 
     const projectId = workspace.projectId;
     const researchIds = new Set(projectResearches.map((research) => research.id));
@@ -2709,6 +2738,7 @@ export default function App() {
         const previous = previousRecords.find((item) => item.id === record.id);
         recordEntityActivity(collection, previous, record);
       });
+      void subscriptionAccess.refreshSubscription();
       notify(`Імпортовано записів: ${records.length}.`);
     } catch (error) {
       throw new Error(describeError(error, "Не вдалося зберегти імпортовані записи."));
@@ -2753,6 +2783,14 @@ export default function App() {
   };
   const createRelatedRecord = (nextPage: PageKey, initialValues: Record<string, unknown>) => {
     if (!ensureCanCreateProjectRecord("Новий пов’язаний запис")) return;
+    if (!canCreateStandardSection(standardSectionQuotaKeys[nextPage])) {
+      setUpgradeReason({
+        featureName: "Новий пов’язаний запис",
+        reason: "Досягнуто ліміт записів у цьому розділі. Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+        recommendedPlan: "researcher",
+      });
+      return;
+    }
     setModuleSearch("");
     setOpenEntityId("");
     setCreateRequest({
@@ -2820,6 +2858,7 @@ export default function App() {
         new Set(projectResearches.map((research) => research.id)),
       ))
       .then((saved) => {
+        refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("persons", previousEntity, saved);
         syncEntityAttachmentMetadata("persons", saved);
         if (activeWorkspaceIdRef.current !== projectId) {
@@ -3436,6 +3475,22 @@ export default function App() {
     const documentIds = new Set(next.documents.map((item) => item.id));
     const personIds = new Set(next.persons.map((item) => item.id));
     const findingIds = new Set(next.findings.map((item) => item.id));
+    const recordLimit = subscriptionAccess.getLimit("records_per_standard_section");
+    if (recordLimit && !recordLimit.isUnlimited && recordLimit.value !== null) {
+      const counts: Array<[string, number]> = [
+        ["Особи", next.persons.length],
+        ["Документи", next.documents.length],
+        ["Матриця років", next.yearMatrix.length],
+        ["Завдання", next.tasks.length],
+        ["Знахідки", next.findings.length],
+        ["Гіпотези", next.hypotheses.length],
+        ["Запити в архів", next.archiveRequests.length],
+      ];
+      const exceeded = counts.find(([, count]) => count > recordLimit.value!);
+      if (exceeded) {
+        throw new Error(`Резервна копія містить ${exceeded[1]} записів у розділі «${exceeded[0]}», а поточний тариф дозволяє до ${recordLimit.value} записів у розділі.`);
+      }
+    }
 
     onProgress?.("Очищаємо попередні записи цільового проєкту…", 15);
     await clearProjectRecords(projectId);
@@ -3674,7 +3729,7 @@ export default function App() {
             projectId={workspace?.projectId}
             onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
             readOnly={readOnly}
-            canCreate={canCreateProjectRecords}
+            canCreate={canCreateStandardSection(standardSectionQuotaKeys[page])}
             projectName={workspace?.projectName}
             researchRequired={researchRequiredByPlan}
           />
@@ -3705,7 +3760,7 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
             onCreateRelated={createRelatedRecord}
             readOnly={readOnly}
-            canCreate={canCreateProjectRecords}
+            canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
             projectName={workspace?.projectName}
             researchRequired={researchRequiredByPlan}
           />
@@ -3727,7 +3782,7 @@ export default function App() {
             onSaveRange={saveYearMatrixRange}
             onDelete={deleteFor("yearMatrix")}
             readOnly={readOnly}
-            canCreate={canCreateProjectRecords}
+            canCreate={canCreateStandardSection(standardSectionQuotaKeys.yearMatrix)}
             projectName={workspace?.projectName}
             researchRequired={researchRequiredByPlan}
           />
@@ -3834,14 +3889,14 @@ export default function App() {
           <div className="subscription-notice">
             <span>
               До завершення повного пробного доступу залишилося {subscriptionAccess.trialDaysRemaining} дн.
-              Після цього діятиме безкоштовний тариф, а дані буде збережено.
+              Після цього діятиме тариф «Старт», а дані буде збережено.
             </span>
             <button type="button" onClick={() => navigate("subscription")}>Обрати тариф</button>
           </div>
         ) : null}
         {subscriptionAccess.subscription?.status === "expired" ? (
           <div className="subscription-notice expired">
-            <span>Пробний період завершився. Дані збережено, частина нових дій обмежена безкоштовним тарифом.</span>
+            <span>Пробний період завершився. Дані збережено, частина нових дій обмежена тарифом «Старт».</span>
             <button type="button" onClick={() => navigate("subscription")}>Переглянути тарифи</button>
           </div>
         ) : null}
