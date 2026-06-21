@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   adminSetSubscription,
+  cancelMySubscription,
   loadAdminSubscriptions,
   loadSubscriptionPlans,
+  subscriptionErrorMessage,
   type AdminSubscriptionRow,
 } from "../services/subscriptionService";
 import type {
@@ -56,6 +58,8 @@ export function SubscriptionPage({
   const [plans, setPlans] = useState<Array<{ plan: SubscriptionPlan; limits: PlanLimit[] }>>([]);
   const [adminRows, setAdminRows] = useState<AdminSubscriptionRow[]>([]);
   const [pageError, setPageError] = useState("");
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState("");
 
   const refreshPage = async () => {
     setPageError("");
@@ -75,6 +79,7 @@ export function SubscriptionPage({
 
   const trialExpired = context?.subscription.status === "expired";
   const isPermanentAdmin = Boolean(context?.isAdmin);
+  const canCancelSubscription = Boolean(context && !isPermanentAdmin && context.effectivePlanCode !== "free");
   const statusText = context?.subscription.status === "trialing"
     ? "Пробний доступ"
     : context?.subscription.status === "active"
@@ -95,6 +100,24 @@ export function SubscriptionPage({
       }));
   }, [context]);
 
+  const cancelSubscription = async () => {
+    if (!window.confirm("Скасувати поточну підписку і перейти на тариф «Старт»? Дані залишаться у вашому акаунті.")) {
+      return;
+    }
+    setCancelBusy(true);
+    setCancelMessage("");
+    setPageError("");
+    try {
+      await cancelMySubscription();
+      setCancelMessage("Підписку скасовано. Акаунт переведено на тариф «Старт».");
+      await refreshPage();
+    } catch (cancelError) {
+      setPageError(subscriptionErrorMessage(cancelError));
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
   if (loading && !context) return <section className="panel"><p>Завантажуємо тариф…</p></section>;
 
   return (
@@ -111,6 +134,7 @@ export function SubscriptionPage({
       </div>
 
       {error || pageError ? <div className="alert alert-error">{pageError || error}</div> : null}
+      {cancelMessage ? <div className="alert alert-notice">{cancelMessage}</div> : null}
       {isPermanentAdmin ? (
         <section className="subscription-status-band">
           <div>
@@ -146,6 +170,23 @@ export function SubscriptionPage({
           {trialExpired ? <p>Пробний період завершився. Дані збережено, нові дії перевіряються за лімітами тарифу «Старт».</p> : null}
         </section>
       )}
+
+      {canCancelSubscription ? (
+        <section className="subscription-cancel-panel">
+          <div>
+            <h2>Керування підпискою</h2>
+            <p>Скасування переведе акаунт на тариф «Старт». Дані залишаться доступними за умовами тарифу «Старт».</p>
+          </div>
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={cancelBusy}
+            onClick={() => void cancelSubscription()}
+          >
+            {cancelBusy ? "Скасовуємо…" : "Скасувати підписку"}
+          </button>
+        </section>
+      ) : null}
 
       <section className="subscription-usage-section">
         <div className="section-heading"><h2>Використання</h2></div>

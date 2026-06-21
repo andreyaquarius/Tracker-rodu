@@ -135,13 +135,18 @@ export async function adminSetSubscription(input: {
   return String(data);
 }
 
+export async function cancelMySubscription(): Promise<void> {
+  const { error } = await getSupabaseClient().rpc("cancel_my_subscription");
+  if (error) throw error;
+}
+
 export function subscriptionErrorCode(error: unknown): string {
   const message = error instanceof Error
     ? error.message
     : typeof error === "object" && error && "message" in error
       ? String(error.message)
       : String(error ?? "");
-  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE|PLAN_SCOPE_CREATE_BLOCKED|PLAN_SECTION_RECORD_LIMIT_REACHED):[a-z_]+|AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
+  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE|PLAN_SCOPE_CREATE_BLOCKED|PLAN_SECTION_RECORD_LIMIT_REACHED):[a-z_]+|AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED|ADMIN_SUBSCRIPTION_MANAGED_EXTERNALLY|START_PLAN_NOT_CONFIGURED|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
   return match?.[0] ?? "";
 }
 
@@ -167,6 +172,8 @@ export function subscriptionErrorMessage(error: unknown): string {
     "PLAN_SECTION_RECORD_LIMIT_REACHED:archive_requests": "Досягнуто ліміт записів у розділі «Запити в архів». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
     "PLAN_SCOPE_CREATE_BLOCKED:projects": "У цьому проєкті можна редагувати й видаляти наявні дані, але створення нових записів заблоковане поточним тарифом.",
     "PLAN_SCOPE_CREATE_BLOCKED:researches": "У цьому дослідженні можна редагувати й видаляти наявні дані, але створення нових записів заблоковане поточним тарифом.",
+    ADMIN_SUBSCRIPTION_MANAGED_EXTERNALLY: "Безстроковий доступ адміністратора керується через список адміністраторів.",
+    START_PLAN_NOT_CONFIGURED: "Тариф «Старт» ще не налаштований у базі.",
     RESEARCH_REQUIRED_BY_PLAN: "На вашому тарифі запис має бути прив’язаний до дослідження.",
     INVALID_RESEARCH_REFERENCE: "Вибране дослідження недоступне для поточного проєкту.",
   };
