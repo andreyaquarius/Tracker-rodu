@@ -292,16 +292,31 @@ async function replaceTaskPersons(
   validPersonIds: Set<string>,
 ): Promise<void> {
   const client = getSupabaseClient();
-  const { error: deleteError } = await client
+  const existing = await client
     .from("task_persons")
-    .delete()
+    .select("person_id")
     .eq("project_id", projectId)
     .eq("task_id", task.id);
-  if (deleteError) throw deleteError;
+  if (existing.error) throw existing.error;
+
   const personIds = [...new Set(task.personIds)].filter((id) => validPersonIds.has(id));
-  if (!personIds.length) return;
+  const nextIds = new Set(personIds);
+  const existingIds = new Set((existing.data as Array<{ person_id: string }>).map((row) => row.person_id));
+  const removedIds = [...existingIds].filter((id) => !nextIds.has(id));
+  const addedIds = personIds.filter((id) => !existingIds.has(id));
+
+  if (removedIds.length) {
+    const { error: deleteError } = await client
+      .from("task_persons")
+      .delete()
+      .eq("project_id", projectId)
+      .eq("task_id", task.id)
+      .in("person_id", removedIds);
+    if (deleteError) throw deleteError;
+  }
+  if (!addedIds.length) return;
   const { error } = await client.from("task_persons").insert(
-    personIds.map((personId) => ({
+    addedIds.map((personId) => ({
       project_id: projectId,
       task_id: task.id,
       person_id: personId,
@@ -315,19 +330,34 @@ async function replaceFindingParticipants(
   finding: Finding,
 ): Promise<void> {
   const client = getSupabaseClient();
-  const { error: deleteError } = await client
+  const existing = await client
     .from("finding_participants")
-    .delete()
+    .select("id")
     .eq("project_id", projectId)
     .eq("finding_id", finding.id);
-  if (deleteError) throw deleteError;
+  if (existing.error) throw existing.error;
+
+  const nextIds = new Set(finding.participants.map((participant) => participant.id));
+  const removedIds = (existing.data as Array<{ id: string }>)
+    .map((row) => row.id)
+    .filter((id) => !nextIds.has(id));
+  if (removedIds.length) {
+    const { error: deleteError } = await client
+      .from("finding_participants")
+      .delete()
+      .eq("project_id", projectId)
+      .in("id", removedIds);
+    if (deleteError) throw deleteError;
+  }
+
   if (!finding.participants.length) return;
   const { error } = await client
     .from("finding_participants")
-    .insert(
+    .upsert(
       finding.participants.map((participant) =>
         participantToRow(projectId, finding.id, participant),
       ),
+      { onConflict: "id" },
     );
   if (error) throw error;
 }

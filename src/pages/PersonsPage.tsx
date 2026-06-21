@@ -58,6 +58,7 @@ export function PersonsPage({
   onOpenRelated,
   onCreateRelated,
   readOnly = false,
+  canCreate = true,
   researchRequired = false,
   projectName = "Трекер Роду",
 }: {
@@ -82,9 +83,11 @@ export function PersonsPage({
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly?: boolean;
+  canCreate?: boolean;
   projectName?: string;
   researchRequired?: boolean;
 }) {
+  const canCreateRecords = !readOnly && canCreate;
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -179,7 +182,7 @@ export function PersonsPage({
               customFieldDefinitions,
             )}
           />
-          {!readOnly ? (
+          {canCreateRecords ? (
             <TableDataImportButton
               collection="persons"
               db={db}
@@ -188,7 +191,7 @@ export function PersonsPage({
               onImport={(records) => onImportRecords("persons", records)}
             />
           ) : null}
-          {!readOnly ? (
+          {canCreateRecords ? (
             <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
           ) : null}
         </div>
@@ -277,7 +280,7 @@ export function PersonsPage({
           </div>
         ) : (
           <div className="empty-state">
-            {!readOnly ? (
+            {canCreateRecords ? (
               <button className="empty-mark" onClick={() => setEditing("new")}>+</button>
             ) : null}
             <h2>Осіб не знайдено</h2>
@@ -286,7 +289,7 @@ export function PersonsPage({
         )}
       </section>
 
-      {editing && !readOnly ? (
+      {editing && !readOnly && (editing !== "new" || canCreateRecords) ? (
         <PersonFormModal
           db={db}
           person={editing === "new" ? null : editing}
@@ -325,6 +328,7 @@ export function PersonsPage({
           onOpenRelated={onOpenRelated}
           onCreateRelated={onCreateRelated}
           readOnly={readOnly}
+          canCreate={canCreateRecords}
         />
       ) : null}
     </>
@@ -364,6 +368,7 @@ function PersonCardModal({
   onOpenRelated,
   onCreateRelated,
   readOnly,
+  canCreate,
 }: {
   db: AppDatabase;
   person: Person;
@@ -382,6 +387,7 @@ function PersonCardModal({
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly: boolean;
+  canCreate: boolean;
 }) {
   const [tab, setTab] = useState<PersonTab>("overview");
   const [relationFormOpen, setRelationFormOpen] = useState(false);
@@ -429,7 +435,7 @@ function PersonCardModal({
               type="finding"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("findings", findingDraftFor(person))}
-              readOnly={readOnly}
+              readOnly={!canCreate}
             />
           ) : null}
           {tab === "tasks" ? (
@@ -438,7 +444,7 @@ function PersonCardModal({
               type="task"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("tasks", taskDraftFor(person))}
-              readOnly={readOnly}
+              readOnly={!canCreate}
             />
           ) : null}
           {tab === "hypotheses" ? (
@@ -447,7 +453,7 @@ function PersonCardModal({
               type="hypothesis"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("hypotheses", hypothesisDraftFor(person))}
-              readOnly={readOnly}
+              readOnly={!canCreate}
             />
           ) : null}
           {tab === "archiveRequests" ? (
@@ -456,7 +462,7 @@ function PersonCardModal({
               type="archiveRequest"
               onOpen={onOpenRelated}
               onAdd={() => onCreateRelated("archiveRequests", archiveRequestDraftFor(person))}
-              readOnly={readOnly}
+              readOnly={!canCreate}
             />
           ) : null}
           {tab === "notes" ? (
@@ -469,7 +475,7 @@ function PersonCardModal({
                   <h3>Зв’язки особи</h3>
                   <p>Прості спискові зв’язки з оцінкою доказовості.</p>
                 </div>
-                {!readOnly ? (
+                {canCreate ? (
                   <button className="button button-secondary" onClick={() => setRelationFormOpen(true)}>+ Додати зв’язок</button>
                 ) : null}
               </div>
@@ -520,7 +526,7 @@ function PersonCardModal({
           ) : null}
         </div>
       </div>
-      {relationFormOpen && !readOnly ? (
+      {relationFormOpen && canCreate ? (
         <RelationFormModal
           person={person}
           persons={persons}

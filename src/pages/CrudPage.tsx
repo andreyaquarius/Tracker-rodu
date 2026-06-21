@@ -73,6 +73,7 @@ interface CrudPageProps {
   projectId?: string;
   onCreateTask?: (task: TaskRecord) => void;
   readOnly?: boolean;
+  canCreate?: boolean;
   projectName?: string;
   researchRequired?: boolean;
 }
@@ -102,9 +103,11 @@ export function CrudPage({
   projectId = "",
   onCreateTask,
   readOnly = false,
+  canCreate = true,
   researchRequired = false,
   projectName = "Трекер Роду",
 }: CrudPageProps) {
+  const canCreateRecords = !readOnly && canCreate;
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -129,13 +132,13 @@ export function CrudPage({
     setViewing(items.find((item) => item.id === viewing.id) ?? null);
   }, [items, viewing?.id]);
   useEffect(() => {
-    if (!initialCreateRequest || readOnly) return;
+    if (!initialCreateRequest || !canCreateRecords) return;
     setViewing(null);
     setCreateInitialValues(initialCreateRequest.initialValues);
     setEditing("new");
-  }, [initialCreateRequest?.id]);
+  }, [canCreateRecords, initialCreateRequest?.id]);
   const startNew = () => {
-    if (readOnly) return;
+    if (!canCreateRecords) return;
     setCreateInitialValues(undefined);
     setEditing("new");
   };
@@ -269,7 +272,7 @@ export function CrudPage({
               customFieldDefinitions,
             })}
           />
-          {!readOnly && onImportRecords && canImportCollection(config.collection) ? (
+          {canCreateRecords && onImportRecords && canImportCollection(config.collection) ? (
             <TableDataImportButton
               collection={config.collection}
               db={db}
@@ -278,7 +281,7 @@ export function CrudPage({
               onImport={(records) => onImportRecords(config.collection, records)}
             />
           ) : null}
-          {!readOnly ? (
+          {canCreateRecords ? (
             <button className="button button-primary" onClick={startNew}>
               + Додати {config.singular}
             </button>
@@ -393,7 +396,7 @@ export function CrudPage({
           />
         ) : (
           <div className="empty-state">
-            {!readOnly ? (
+            {canCreateRecords ? (
               <button
                 type="button"
                 className="empty-mark"
@@ -428,7 +431,7 @@ export function CrudPage({
           customFieldDefinitions={customFieldDefinitions}
           onOpenRelated={onOpenRelated}
           projectId={projectId}
-          canCreateTasks={!readOnly}
+          canCreateTasks={canCreateRecords}
           onCreateTask={onCreateTask}
           onClose={() => setViewing(null)}
           onEdit={readOnly ? undefined : () => {
@@ -438,7 +441,7 @@ export function CrudPage({
         />
       ) : null}
 
-      {editing && !readOnly ? (
+      {editing && !readOnly && (editing !== "new" || canCreateRecords) ? (
         <EntityModal
           config={config}
           db={db}

@@ -24,6 +24,12 @@ export type SubscriptionFeature =
   | "hypothesis_ai_review"
   | "project_members";
 
+export type SubscriptionAccessMode =
+  | "FULL"
+  | "MANAGE_EXISTING"
+  | "READ_ONLY"
+  | "NONE";
+
 export interface SubscriptionPlan {
   id: string;
   code: PlanCode;
@@ -61,6 +67,8 @@ export interface SubscriptionContext {
   limits: Record<PlanLimitKey, PlanLimit>;
   usage: SubscriptionUsage;
   isAdmin: boolean;
+  projectAccessMode: SubscriptionAccessMode | null;
+  canCreateProjectRecords: boolean;
   serverNow: string;
 }
 

@@ -107,14 +107,6 @@ export async function syncProjectAttachmentMetadata(
   fields: Record<string, ScanAttachment[]>,
 ): Promise<void> {
   const client = getSupabaseClient();
-  const { error: deleteError } = await client
-    .from("attachments")
-    .delete()
-    .eq("project_id", projectId)
-    .eq("owner_type", ownerType)
-    .eq("owner_id", ownerId);
-  if (deleteError) throw deleteError;
-
   const rows = Object.entries(fields).flatMap(([fieldKey, scans]) =>
     scans
       .filter(
@@ -136,6 +128,28 @@ export async function syncProjectAttachmentMetadata(
         created_at: scan.createdAt,
       })),
   );
+
+  const existing = await client
+    .from("attachments")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("owner_type", ownerType)
+    .eq("owner_id", ownerId);
+  if (existing.error) throw existing.error;
+
+  const nextIds = new Set(rows.map((row) => row.id));
+  const removedIds = (existing.data as Array<{ id: string }>)
+    .map((item) => item.id)
+    .filter((id) => !nextIds.has(id));
+  if (removedIds.length) {
+    const { error: deleteError } = await client
+      .from("attachments")
+      .delete()
+      .eq("project_id", projectId)
+      .in("id", removedIds);
+    if (deleteError) throw deleteError;
+  }
+
   if (!rows.length) return;
 
   const { error } = await client

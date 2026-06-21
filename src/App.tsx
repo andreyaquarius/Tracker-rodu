@@ -405,6 +405,7 @@ export default function App() {
     value: string;
   } | null>(null);
   const subscriptionAccess = useSubscription(workspace?.projectId, Boolean(account));
+  const canCreateProjectRecords = !workspace || subscriptionAccess.canCreateProjectRecords;
   const researchRequiredByPlan = subscriptionAccess.effectivePlan !== "professional";
   const requestedDataGroups = useMemo(() => {
     if (workspace && searchDataProjectId === workspace.projectId) {
@@ -425,6 +426,16 @@ export default function App() {
     }
     return fallback;
   }, []);
+
+  const ensureCanCreateProjectRecord = useCallback((featureName: string) => {
+    if (canCreateProjectRecords) return true;
+    setUpgradeReason({
+      featureName,
+      reason: "У цьому проєкті можна редагувати й видаляти наявні дані, але створення нових записів заблоковане поточним тарифом.",
+      recommendedPlan: "researcher",
+    });
+    return false;
+  }, [canCreateProjectRecords]);
 
   useEffect(() => {
     if (!account) return;
@@ -652,8 +663,9 @@ export default function App() {
     setProjectAttachmentTarget(
       workspace?.projectId ?? null,
       workspace?.projectName ?? "",
+      canCreateProjectRecords,
     );
-  }, [workspace?.projectId, workspace?.projectName]);
+  }, [canCreateProjectRecords, workspace?.projectId, workspace?.projectName]);
 
   useEffect(() => {
     if (!workspace || !account) {
@@ -1904,6 +1916,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectDocuments;
     const previousEntity = previous.find((item) => item.id === document.id);
+    if (!previousEntity && !ensureCanCreateProjectRecord("Новий документ")) return;
     const optimistic = previous.some((item) => item.id === document.id)
       ? previous.map((item) => (item.id === document.id ? document : item))
       : [document, ...previous];
@@ -2028,6 +2041,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectYearMatrix;
     const previousEntity = previous.find((item) => item.id === record.id);
+    if (!previousEntity && !ensureCanCreateProjectRecord("Новий запис матриці років")) return;
     const optimistic = previous.some((item) => item.id === record.id)
       ? previous.map((item) => (item.id === record.id ? record : item))
       : [record, ...previous];
@@ -2081,6 +2095,8 @@ export default function App() {
       notify("У цьому проєкті у вас є лише право перегляду.", true);
       return;
     }
+
+    if (!ensureCanCreateProjectRecord("Діапазон матриці років")) return;
 
     const projectId = workspace.projectId;
     const previous = projectYearMatrix;
@@ -2166,6 +2182,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectTasks;
     const previousEntity = previous.find((item) => item.id === task.id);
+    if (!previousEntity && !ensureCanCreateProjectRecord("Нове завдання")) return;
     const optimistic = previous.some((item) => item.id === task.id)
       ? previous.map((item) => (item.id === task.id ? task : item))
       : [task, ...previous];
@@ -2248,6 +2265,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectFindings;
     const previousEntity = previous.find((item) => item.id === finding.id);
+    if (!previousEntity && !ensureCanCreateProjectRecord("Нова знахідка")) return;
     const optimistic = previous.some((item) => item.id === finding.id)
       ? previous.map((item) => (item.id === finding.id ? finding : item))
       : [finding, ...previous];
@@ -2354,6 +2372,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectHypotheses;
     const previousEntity = previous.find((item) => item.id === hypothesis.id);
+    if (!previousEntity && !ensureCanCreateProjectRecord("Нова гіпотеза")) return;
     const optimistic = previous.some((item) => item.id === hypothesis.id)
       ? previous.map((item) => (item.id === hypothesis.id ? hypothesis : item))
       : [hypothesis, ...previous];
@@ -2469,6 +2488,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectArchiveRequests;
     const previousEntity = previous.find((item) => item.id === request.id);
+    if (!previousEntity && !ensureCanCreateProjectRecord("Новий запит в архів")) return;
     const optimistic = previous.some((item) => item.id === request.id)
       ? previous.map((item) => (item.id === request.id ? request : item))
       : [request, ...previous];
@@ -2597,6 +2617,10 @@ export default function App() {
     }
     if (workspace.role === "viewer") {
       throw new Error("У цьому проєкті у вас є лише право перегляду.");
+    }
+
+    if (!canCreateProjectRecords) {
+      throw new Error("У цьому проєкті можна редагувати й видаляти наявні дані, але імпорт нових записів заблокований поточним тарифом.");
     }
 
     const projectId = workspace.projectId;
@@ -2728,6 +2752,7 @@ export default function App() {
     }
   };
   const createRelatedRecord = (nextPage: PageKey, initialValues: Record<string, unknown>) => {
+    if (!ensureCanCreateProjectRecord("Новий пов’язаний запис")) return;
     setModuleSearch("");
     setOpenEntityId("");
     setCreateRequest({
@@ -2776,6 +2801,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectPersons;
     const previousEntity = previous.find((item) => item.id === person.id);
+    if (!previousEntity && !ensureCanCreateProjectRecord("Нова особа")) return;
     const optimistic = previous.some((item) => item.id === person.id)
       ? previous.map((item) => (item.id === person.id ? person : item))
       : [person, ...previous];
@@ -2951,6 +2977,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectPersonRelations;
     const previousRelation = previous.find((item) => item.id === relation.id);
+    if (!previousRelation && !ensureCanCreateProjectRecord("Новий зв’язок між особами")) return;
     const optimistic = previous.some((item) => item.id === relation.id)
       ? previous.map((item) => (item.id === relation.id ? relation : item))
       : [...previous, relation];
@@ -3038,6 +3065,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectCustomRecords;
     const previousRecord = previous.find((item) => item.id === record.id);
+    if (!previousRecord && !ensureCanCreateProjectRecord("Новий запис власного розділу")) return;
     const optimistic = previous.some((item) => item.id === record.id)
       ? previous.map((item) => (item.id === record.id ? record : item))
       : [record, ...previous];
@@ -3261,6 +3289,21 @@ export default function App() {
     const addedSections = next.customSections.filter(
       (section) => !projectCustomSections.some((item) => item.id === section.id),
     );
+    const addedStandardFields = next.settings.customFields.filter(
+      (field) => !projectCustomFields.some((item) => item.id === field.id),
+    ).length;
+    const addedSectionFields = next.customSections.reduce((count, section) => {
+      const previous = projectCustomSections.find((item) => item.id === section.id);
+      return count + section.fields.filter(
+        (field) => !previous?.fields.some((item) => item.id === field.id),
+      ).length;
+    }, 0);
+    if (
+      (addedSections.length || addedStandardFields || addedSectionFields) &&
+      !ensureCanCreateProjectRecord("Власні розділи та поля")
+    ) {
+      return;
+    }
     const remainingSections = subscriptionAccess.getRemaining("custom_sections_per_project");
     if (remainingSections !== null && addedSections.length > remainingSections) {
       setUpgradeReason({
@@ -3379,6 +3422,10 @@ export default function App() {
     }
     if (workspace.role !== "owner") {
       throw new Error("Відновлювати резервні копії може лише власник проєкту.");
+    }
+
+    if (!canCreateProjectRecords) {
+      throw new Error("У цьому проєкті можна редагувати й видаляти наявні дані, але відновлення резервної копії заблоковане поточним тарифом, бо воно створює нові записи.");
     }
 
     const projectId = workspace.projectId;
@@ -3554,7 +3601,7 @@ export default function App() {
           onSave={saveCustomRecord}
           onDelete={deleteCustomRecord}
           onOpenRelated={openRelatedRecord}
-          onAddField={canManageStructure ? (field) => {
+          onAddField={canManageStructure && canCreateProjectRecords ? (field) => {
             changeSettings({
               ...activeDb,
               customSections: activeDb.customSections.map((item) =>
@@ -3570,6 +3617,7 @@ export default function App() {
             });
           } : undefined}
           readOnly={readOnly}
+          canCreate={canCreateProjectRecords}
           projectName={workspace?.projectName}
         />
       );
@@ -3609,7 +3657,7 @@ export default function App() {
             findings={activeDb.findings}
             persons={activeDb.persons}
             customFieldDefinitions={activeDb.settings.customFields}
-            onAddCustomField={canManageStructure ? addCustomField : undefined}
+            onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
             onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
             onSavePerson={savePerson}
             initialSearch={moduleSearch}
@@ -3626,6 +3674,7 @@ export default function App() {
             projectId={workspace?.projectId}
             onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
             readOnly={readOnly}
+            canCreate={canCreateProjectRecords}
             projectName={workspace?.projectName}
             researchRequired={researchRequiredByPlan}
           />
@@ -3644,7 +3693,7 @@ export default function App() {
             customFieldDefinitions={activeDb.settings.customFields.filter(
               (field) => field.module === "persons",
             )}
-            onAddCustomField={canManageStructure ? addCustomField : undefined}
+            onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
             onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
             initialSearch={moduleSearch}
             initialOpenPersonId={openEntityId}
@@ -3656,6 +3705,7 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
             onCreateRelated={createRelatedRecord}
             readOnly={readOnly}
+            canCreate={canCreateProjectRecords}
             projectName={workspace?.projectName}
             researchRequired={researchRequiredByPlan}
           />
@@ -3669,7 +3719,7 @@ export default function App() {
             documents={activeDb.documents}
             findings={activeDb.findings}
             customFieldDefinitions={activeDb.settings.customFields}
-            onAddCustomField={canManageStructure ? addCustomField : undefined}
+            onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
             onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
             initialSearch={moduleSearch}
             onOpenRelated={openRelatedRecord}
@@ -3677,6 +3727,7 @@ export default function App() {
             onSaveRange={saveYearMatrixRange}
             onDelete={deleteFor("yearMatrix")}
             readOnly={readOnly}
+            canCreate={canCreateProjectRecords}
             projectName={workspace?.projectName}
             researchRequired={researchRequiredByPlan}
           />

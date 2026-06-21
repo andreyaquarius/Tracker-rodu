@@ -39,6 +39,7 @@ export function CustomSectionPage({
   onOpenRelated,
   onAddField,
   readOnly = false,
+  canCreate = true,
   projectName = "Трекер Роду",
 }: {
   db: AppDatabase;
@@ -51,8 +52,10 @@ export function CustomSectionPage({
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onAddField?: (field: CustomSectionField) => void;
   readOnly?: boolean;
+  canCreate?: boolean;
   projectName?: string;
 }) {
+  const canCreateRecords = !readOnly && canCreate;
   const [search, setSearch] = useState(initialSearch);
   const [viewing, setViewing] = useState<CustomSectionRecord | null>(null);
   const [editing, setEditing] = useState<CustomSectionRecord | "new" | null>(null);
@@ -120,7 +123,7 @@ export function CustomSectionPage({
               "all",
             )}
           />
-          {!readOnly ? (
+          {canCreateRecords ? (
             <button className="button button-primary" onClick={() => setEditing("new")}>
               + Додати {section.singularName}
             </button>
@@ -214,7 +217,7 @@ export function CustomSectionPage({
         />
       ) : null}
 
-      {editing && !readOnly ? (
+      {editing && !readOnly && (editing !== "new" || canCreateRecords) ? (
         <CustomRecordEditor
           db={db}
           section={section}

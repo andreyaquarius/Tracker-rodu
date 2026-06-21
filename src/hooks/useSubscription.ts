@@ -62,6 +62,7 @@ export function useSubscription(projectId?: string, enabled = true) {
     };
     return withinLimit(key[feature]);
   }, [withinLimit]);
+  const canCreateProjectRecords = context?.canCreateProjectRecords ?? true;
 
   const trialDaysRemaining = useMemo(() => {
     const endsAt = context?.subscription.trialEndsAt;
@@ -77,18 +78,20 @@ export function useSubscription(projectId?: string, enabled = true) {
     limits: context?.limits ?? null,
     usage: context?.usage ?? null,
     isAdmin: context?.isAdmin ?? false,
+    projectAccessMode: context?.projectAccessMode ?? null,
+    canCreateProjectRecords,
     isTrial: context?.subscription.status === "trialing" && trialDaysRemaining > 0,
     trialEndsAt: context?.subscription.trialEndsAt ?? null,
     trialDaysRemaining,
     loading,
     error,
     canCreateProject: withinLimit("projects"),
-    canCreateResearch: withinLimit("researches_total") && withinLimit("researches_per_project"),
-    canCreateCustomSection: canUseFeature("custom_sections"),
-    canCreateCustomField: canUseFeature("custom_fields"),
-    canImportTable: canUseFeature("table_import"),
+    canCreateResearch: canCreateProjectRecords && withinLimit("researches_total") && withinLimit("researches_per_project"),
+    canCreateCustomSection: canCreateProjectRecords && canUseFeature("custom_sections"),
+    canCreateCustomField: canCreateProjectRecords && canUseFeature("custom_fields"),
+    canImportTable: canCreateProjectRecords && canUseFeature("table_import"),
     canUseIncludedHypothesisAiReview: canUseFeature("hypothesis_ai_review"),
-    canInviteMember: canUseFeature("project_members"),
+    canInviteMember: canCreateProjectRecords && canUseFeature("project_members"),
     canUseFeature,
     getLimit,
     getUsage,

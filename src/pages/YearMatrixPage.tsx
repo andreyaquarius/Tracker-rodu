@@ -87,6 +87,7 @@ interface Props {
   onSaveRange?: (records: YearMatrixRecord[]) => void;
   onDelete: (id: string) => void;
   readOnly?: boolean;
+  canCreate?: boolean;
   projectName?: string;
   researchRequired?: boolean;
 }
@@ -106,9 +107,11 @@ export function YearMatrixPage({
   onSaveRange,
   onDelete,
   readOnly = false,
+  canCreate = true,
   researchRequired = false,
   projectName = "Трекер Роду",
 }: Props) {
+  const canCreateRecords = !readOnly && canCreate;
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState("1840");
   const [to, setTo] = useState("1860");
@@ -175,7 +178,7 @@ export function YearMatrixPage({
   );
 
   const addRange = () => {
-    if (readOnly) return;
+    if (!canCreateRecords) return;
     if (researchRequired && !researchId.trim()) {
       window.alert("Оберіть дослідження для записів матриці років.");
       return;
@@ -247,7 +250,7 @@ export function YearMatrixPage({
           <label><span>Рік до</span><input type="number" value={to} onChange={(event) => setTo(event.target.value)} /></label>
           <label><span>Населений пункт</span><input value={rangePlace} onChange={(event) => setRangePlace(event.target.value)} placeholder="Наприклад: Трубіївка" /></label>
           <label><span>Тип документа</span><select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>{["народження", "шлюби", "смерті", "сповідки", "ревізії", "інвентарі", "інше"].map((type) => <option key={type}>{type}</option>)}</select></label>
-          {!readOnly ? (
+          {canCreateRecords ? (
             <button className="button button-secondary" onClick={addRange}>Додати діапазон</button>
           ) : null}
           <button className="button button-primary" onClick={() => setShowGaps(true)}>Знайти прогалини</button>
@@ -371,6 +374,7 @@ export function YearMatrixPage({
         onSave={onSave}
         onDelete={onDelete}
         readOnly={readOnly}
+        canCreate={canCreateRecords}
         projectName={projectName}
         researchRequired={researchRequired}
       />

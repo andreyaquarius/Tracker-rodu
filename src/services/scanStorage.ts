@@ -14,11 +14,14 @@ export type AttachmentPolicy = "all" | "finding" | "archive-request";
 const MAX_FILE_SIZE = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024;
 
 let activeProject: { projectId: string; projectName: string } | null = null;
+let activeProjectCanUpload = true;
 
 export function setProjectAttachmentTarget(
   projectId: string | null,
   projectName = "",
+  canUpload = true,
 ): void {
+  activeProjectCanUpload = canUpload;
   activeProject = projectId
     ? { projectId, projectName: projectName.trim() || "Трекер Роду" }
     : null;
@@ -42,6 +45,10 @@ export async function saveScan(
   }
   if (!activeProject) {
     throw new Error("Спочатку виберіть проєкт.");
+  }
+
+  if (!activeProjectCanUpload) {
+    throw new Error("У цьому проєкті можна редагувати й видаляти наявні файли, але додавання нових файлів заблоковане поточним тарифом.");
   }
 
   const id = createId();

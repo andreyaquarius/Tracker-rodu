@@ -241,12 +241,13 @@ async function replaceHypothesisLinks(
   findingIds: Set<string>,
 ): Promise<void> {
   const client = getSupabaseClient();
-  const { error: deleteError } = await client
+  const existing = await client
     .from("hypothesis_links")
-    .delete()
+    .select("target_type, target_id")
     .eq("project_id", projectId)
     .eq("hypothesis_id", hypothesis.id);
-  if (deleteError) throw deleteError;
+  if (existing.error) throw existing.error;
+
   const links = [
     ...hypothesis.personIds
       .filter((id) => personIds.has(id))
@@ -258,9 +259,31 @@ async function replaceHypothesisLinks(
       .filter((id) => findingIds.has(id))
       .map((targetId) => ({ target_type: "finding", target_id: targetId })),
   ];
-  if (!links.length) return;
+
+  const linkKey = (link: { target_type: string; target_id: string }) =>
+    `${link.target_type}:${link.target_id}`;
+  const existingRows = existing.data as Array<{
+    target_type: "person" | "document" | "finding";
+    target_id: string;
+  }>;
+  const nextKeys = new Set(links.map(linkKey));
+  const existingKeys = new Set(existingRows.map(linkKey));
+
+  for (const link of existingRows.filter((item) => !nextKeys.has(linkKey(item)))) {
+    const { error: deleteError } = await client
+      .from("hypothesis_links")
+      .delete()
+      .eq("project_id", projectId)
+      .eq("hypothesis_id", hypothesis.id)
+      .eq("target_type", link.target_type)
+      .eq("target_id", link.target_id);
+    if (deleteError) throw deleteError;
+  }
+
+  const added = links.filter((link) => !existingKeys.has(linkKey(link)));
+  if (!added.length) return;
   const { error } = await client.from("hypothesis_links").insert(
-    links.map((link) => ({
+    added.map((link) => ({
       project_id: projectId,
       hypothesis_id: hypothesis.id,
       ...link,
@@ -275,16 +298,31 @@ async function replaceArchiveRequestPersons(
   personIds: Set<string>,
 ): Promise<void> {
   const client = getSupabaseClient();
-  const { error: deleteError } = await client
+  const existing = await client
     .from("archive_request_persons")
-    .delete()
+    .select("person_id")
     .eq("project_id", projectId)
     .eq("archive_request_id", request.id);
-  if (deleteError) throw deleteError;
+  if (existing.error) throw existing.error;
+
   const validIds = [...new Set(request.personIds)].filter((id) => personIds.has(id));
-  if (!validIds.length) return;
+  const nextIds = new Set(validIds);
+  const existingIds = new Set((existing.data as Array<{ person_id: string }>).map((row) => row.person_id));
+  const removedIds = [...existingIds].filter((id) => !nextIds.has(id));
+  const addedIds = validIds.filter((id) => !existingIds.has(id));
+
+  if (removedIds.length) {
+    const { error: deleteError } = await client
+      .from("archive_request_persons")
+      .delete()
+      .eq("project_id", projectId)
+      .eq("archive_request_id", request.id)
+      .in("person_id", removedIds);
+    if (deleteError) throw deleteError;
+  }
+  if (!addedIds.length) return;
   const { error } = await client.from("archive_request_persons").insert(
-    validIds.map((personId) => ({
+    addedIds.map((personId) => ({
       project_id: projectId,
       archive_request_id: request.id,
       person_id: personId,
