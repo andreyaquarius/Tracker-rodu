@@ -248,6 +248,10 @@ export function LoginPage({
                 : "Повернутися до входу"}
           </button>
         ) : null}
+        <div className="login-legal-links">
+          <a href="/privacy">Політика конфіденційності</a>
+          <a href="/terms">Умови користування</a>
+        </div>
       </section>
     </main>
   );

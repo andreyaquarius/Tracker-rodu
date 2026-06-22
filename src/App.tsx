@@ -32,6 +32,7 @@ import { BackupPage } from "./pages/BackupPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { LoginPage } from "./pages/LoginPage";
+import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { PersonsPage } from "./pages/PersonsPage";
 import { MapPage } from "./pages/MapPage";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
@@ -1754,6 +1755,10 @@ export default function App() {
     }
     setTeamOpen(false);
   };
+
+  if (route.kind === "public") {
+    return route.page === "privacy" ? <PrivacyPage /> : <TermsPage />;
+  }
 
   if (!account) {
     return (
