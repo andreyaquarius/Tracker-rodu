@@ -468,6 +468,7 @@ export default function App() {
   });
   const [loginError, setLoginError] = useState("");
   const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [isAccountSigningIn, setIsAccountSigningIn] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
@@ -715,6 +716,12 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!authReady || account || passwordRecovery) return;
+    if (route.kind === "root" || route.kind === "public") return;
+    routerNavigate("/", { replace: true });
+  }, [account, authReady, passwordRecovery, route.kind, routerNavigate]);
+
+  useEffect(() => {
     if (!isSupabaseConfigured) return;
 
     let active = true;
@@ -725,6 +732,7 @@ export default function App() {
         setWorkspace(null);
         setWorkspaces([]);
         setIsAccountSigningIn(false);
+        setAuthReady(true);
         lastPreparedUserRef.current = null;
         return;
       }
@@ -735,11 +743,13 @@ export default function App() {
       // PostgREST with duplicate full-table reads — the request storm behind the
       // "Thread killed by timeout manager" timeouts.
       if (lastPreparedUserRef.current === session.user.id) {
+        setAuthReady(true);
         return;
       }
 
       if (workspaceSetupRef.current) {
         await workspaceSetupRef.current;
+        setAuthReady(true);
         return;
       }
 
@@ -749,6 +759,7 @@ export default function App() {
         setWorkspace(null);
         setWorkspaces([]);
         setIsAccountSigningIn(false);
+        setAuthReady(true);
         return;
       }
 
@@ -802,7 +813,10 @@ export default function App() {
         await workspaceSetupRef.current;
       } finally {
         workspaceSetupRef.current = null;
-        if (active) setIsAccountSigningIn(false);
+        if (active) {
+          setIsAccountSigningIn(false);
+          setAuthReady(true);
+        }
       }
     };
 
@@ -814,6 +828,7 @@ export default function App() {
       .catch((error: unknown) => {
         if (!active) return;
         setIsAccountSigningIn(false);
+        setAuthReady(true);
         setLoginError(
           describeError(error, "Не вдалося перевірити вхід до облікового запису."),
         );
@@ -828,12 +843,14 @@ export default function App() {
         setWorkspace(null);
         setWorkspaces([]);
         setIsAccountSigningIn(false);
+        setAuthReady(true);
         return;
       }
       if (passwordRecoveryRef.current) return;
       void prepareWorkspace(session).catch((error: unknown) => {
         if (!active) return;
         setIsAccountSigningIn(false);
+        setAuthReady(true);
         setLoginError(
           describeError(error, "Не вдалося підготувати ваш робочий простір."),
         );
@@ -1780,6 +1797,7 @@ export default function App() {
       setAccount(null);
       setWorkspace(null);
       setWorkspaces([]);
+      setAuthReady(true);
       lastPreparedUserRef.current = null;
       workspaceSetupRef.current = null;
       // Wipe cached personal project data so it cannot be read by the next
