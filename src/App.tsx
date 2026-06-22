@@ -2966,6 +2966,12 @@ export default function App() {
       routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
     }
   };
+  const openProjects = () => {
+    setModuleSearch("");
+    setOpenEntityId("");
+    setCreateRequest(null);
+    routerNavigate("/projects");
+  };
   const openSearchResult = (nextPage: PageKey, query: string, entityId?: string) => {
     setModuleSearch(query);
     setOpenEntityId(entityId ?? "");
@@ -4109,6 +4115,7 @@ export default function App() {
       <Layout
         page={route.kind === "projects" ? null : page}
         onNavigate={navigate}
+        onOpenProjects={openProjects}
         customSections={activeDb.customSections}
         account={account}
         workspace={workspace}

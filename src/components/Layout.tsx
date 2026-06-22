@@ -7,6 +7,7 @@ import { TopBar } from "./TopBar";
 interface LayoutProps {
   page: PageKey | null;
   onNavigate: (page: PageKey) => void;
+  onOpenProjects: () => void;
   customSections: CustomSectionDefinition[];
   account: SupabaseAccount | null;
   workspace: SupabaseWorkspace | null;
@@ -30,6 +31,7 @@ export function Layout(props: LayoutProps) {
       <Sidebar
         page={props.page}
         onNavigate={props.onNavigate}
+        onOpenProjects={props.onOpenProjects}
         customSections={props.customSections}
         open={menuOpen}
         onClose={() => setMenuOpen(false)}

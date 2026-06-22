@@ -171,6 +171,7 @@ function NavigationIcon({ icon }: { icon: NavigationIconName }) {
 interface SidebarProps {
   page: PageKey | null;
   onNavigate: (page: PageKey) => void;
+  onOpenProjects: () => void;
   customSections: CustomSectionDefinition[];
   open: boolean;
   onClose: () => void;
@@ -179,6 +180,7 @@ interface SidebarProps {
 export function Sidebar({
   page,
   onNavigate,
+  onOpenProjects,
   customSections,
   open,
   onClose,
@@ -202,6 +204,10 @@ export function Sidebar({
 
   const navigate = (nextPage: PageKey) => {
     onNavigate(nextPage);
+    onClose();
+  };
+  const openProjects = () => {
+    onOpenProjects();
     onClose();
   };
   const toggle = (key: string) => {
@@ -257,7 +263,12 @@ export function Sidebar({
         <button className="sidebar-scrim" aria-label="Закрити меню" onClick={onClose} />
       ) : null}
       <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
-        <div className="brand">
+        <button
+          type="button"
+          className="brand"
+          onClick={openProjects}
+          aria-label="Відкрити список проєктів"
+        >
           <div className="brand-mark">
             <img src="/tracker-rodu-logo.png" alt="" />
           </div>
@@ -265,7 +276,7 @@ export function Sidebar({
             <strong>Трекер Роду</strong>
             <small>Не губи сліди свого роду</small>
           </div>
-        </div>
+        </button>
         <nav>
           {mainItems.map((item) => {
             if (item.key === "dashboard" || item.key === "map") {
