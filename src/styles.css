@@ -827,6 +827,11 @@ tbody tr:hover { background: #fbfaf5; }
   margin-top: 12px;
 }
 
+.limit-inline-notice {
+  margin-top: 12px;
+  line-height: 1.55;
+}
+
 .inline-custom-field-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

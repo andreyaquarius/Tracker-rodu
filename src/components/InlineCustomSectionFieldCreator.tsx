@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AppDatabase,
   CustomSectionField,
@@ -11,10 +11,16 @@ export function InlineCustomSectionFieldCreator({
   db,
   fields,
   onAdd,
+  canAdd = true,
+  blockedMessage,
+  onBlocked,
 }: {
   db: AppDatabase;
   fields: CustomSectionField[];
   onAdd: (field: CustomSectionField) => void;
+  canAdd?: boolean;
+  blockedMessage?: string;
+  onBlocked?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
@@ -23,7 +29,15 @@ export function InlineCustomSectionFieldCreator({
   const [relationTarget, setRelationTarget] = useState("all");
   const [required, setRequired] = useState(false);
 
+  useEffect(() => {
+    if (!canAdd) setOpen(false);
+  }, [canAdd]);
+
   const add = () => {
+    if (!canAdd) {
+      onBlocked?.();
+      return;
+    }
     if (type === "attachments") {
       window.alert("Створення додаткових файлових полів вимкнено.");
       setType("text");
@@ -70,11 +84,24 @@ export function InlineCustomSectionFieldCreator({
       <button
         type="button"
         className="button button-secondary"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (!canAdd) {
+            onBlocked?.();
+            return;
+          }
+          setOpen((current) => !current);
+        }}
       >
-        {open ? "Скасувати додавання поля" : "+ Додати нове поле"}
+        {canAdd
+          ? open ? "Скасувати додавання поля" : "+ Додати нове поле"
+          : "Ліміт власних полів вичерпано"}
       </button>
-      {open ? (
+      {!canAdd ? (
+        <div className="alert alert-notice limit-inline-notice">
+          {blockedMessage || "Створення власних полів недоступне на поточному тарифі."}
+        </div>
+      ) : null}
+      {open && canAdd ? (
         <div className="inline-custom-field-panel">
           <p className="field-wide">
             Нове поле буде доступне в усіх записах цього підрозділу.

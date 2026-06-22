@@ -74,6 +74,8 @@ export function PersonFormModal({
   researchRequired = false,
   onAddCustomField,
   onDeleteCustomField,
+  canAddCustomField = true,
+  customFieldLimitMessage,
   onClose,
   onSave,
 }: {
@@ -86,6 +88,8 @@ export function PersonFormModal({
   researchRequired?: boolean;
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
+  canAddCustomField?: boolean;
+  customFieldLimitMessage?: string;
   onClose: () => void;
   onSave: (person: Person) => void;
 }) {
@@ -337,6 +341,8 @@ export function PersonFormModal({
               db={db}
               definitions={customFieldDefinitions}
               onAdd={onAddCustomField}
+              canAdd={canAddCustomField}
+              blockedMessage={customFieldLimitMessage}
             />
           ) : null}
         </div>

@@ -59,6 +59,8 @@ interface CrudPageProps {
   customFieldDefinitions?: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
+  canAddCustomField?: boolean;
+  customFieldLimitMessage?: string;
   initialSearch?: string;
   initialOpenEntityId?: string;
   initialCreateRequest?: {
@@ -70,6 +72,7 @@ interface CrudPageProps {
   onSave: (entity: AppEntity) => void;
   onImportRecords?: (collection: CollectionKey, records: AppEntity[]) => Promise<void>;
   onDelete: (id: string) => void;
+  onCreateBlocked?: () => void;
   projectId?: string;
   onCreateTask?: (task: TaskRecord) => void;
   readOnly?: boolean;
@@ -92,6 +95,8 @@ export function CrudPage({
   customFieldDefinitions = [],
   onAddCustomField,
   onDeleteCustomField,
+  canAddCustomField = true,
+  customFieldLimitMessage,
   initialSearch = "",
   initialOpenEntityId = "",
   initialCreateRequest,
@@ -100,6 +105,7 @@ export function CrudPage({
   onSave,
   onImportRecords,
   onDelete,
+  onCreateBlocked,
   projectId = "",
   onCreateTask,
   readOnly = false,
@@ -108,6 +114,7 @@ export function CrudPage({
   projectName = "Трекер Роду",
 }: CrudPageProps) {
   const canCreateRecords = !readOnly && canCreate;
+  const canAttemptCreate = !readOnly;
   const [search, setSearch] = useState(initialSearch);
   const [researchFilter, setResearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -138,7 +145,11 @@ export function CrudPage({
     setEditing("new");
   }, [canCreateRecords, initialCreateRequest?.id]);
   const startNew = () => {
-    if (!canCreateRecords) return;
+    if (readOnly) return;
+    if (!canCreate) {
+      onCreateBlocked?.();
+      return;
+    }
     setCreateInitialValues(undefined);
     setEditing("new");
   };
@@ -281,7 +292,7 @@ export function CrudPage({
               onImport={(records) => onImportRecords(config.collection, records)}
             />
           ) : null}
-          {canCreateRecords ? (
+          {canAttemptCreate ? (
             <button className="button button-primary" onClick={startNew}>
               + Додати {config.singular}
             </button>
@@ -396,7 +407,7 @@ export function CrudPage({
           />
         ) : (
           <div className="empty-state">
-            {canCreateRecords ? (
+            {canAttemptCreate ? (
               <button
                 type="button"
                 className="empty-mark"
@@ -454,6 +465,8 @@ export function CrudPage({
           customFieldDefinitions={customFieldDefinitions}
           onAddCustomField={onAddCustomField}
           onDeleteCustomField={onDeleteCustomField}
+          canAddCustomField={canAddCustomField}
+          customFieldLimitMessage={customFieldLimitMessage}
           onSavePerson={onSavePerson}
           researchRequired={researchRequired}
           onClose={() => {
@@ -782,6 +795,8 @@ function EntityModal({
   customFieldDefinitions,
   onAddCustomField,
   onDeleteCustomField,
+  canAddCustomField,
+  customFieldLimitMessage,
   onSavePerson,
   researchRequired,
   onClose,
@@ -798,6 +813,8 @@ function EntityModal({
   customFieldDefinitions: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
+  canAddCustomField: boolean;
+  customFieldLimitMessage?: string;
   onSavePerson?: (person: Person) => void;
   researchRequired: boolean;
   onClose: () => void;
@@ -916,6 +933,8 @@ function EntityModal({
               db={db}
               definitions={customFieldDefinitions}
               onAdd={onAddCustomField}
+              canAdd={canAddCustomField}
+              blockedMessage={customFieldLimitMessage}
             />
           ) : null}
         </div>
@@ -934,6 +953,8 @@ function EntityModal({
           customFieldDefinitions={definitionsForModule(customFieldDefinitions, "persons")}
           onAddCustomField={onAddCustomField}
           onDeleteCustomField={onDeleteCustomField}
+          canAddCustomField={canAddCustomField}
+          customFieldLimitMessage={customFieldLimitMessage}
           onClose={() => setPersonSeed(null)}
           onSave={(person) => {
             onSavePerson(person);

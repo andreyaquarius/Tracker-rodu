@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AppDatabase,
   CustomFieldDefinition,
@@ -30,11 +30,15 @@ export function InlineCustomFieldCreator({
   db,
   definitions,
   onAdd,
+  canAdd = true,
+  blockedMessage,
 }: {
   module: CustomFieldModule;
   db: AppDatabase;
   definitions: CustomFieldDefinition[];
   onAdd: (definition: CustomFieldDefinition) => void;
+  canAdd?: boolean;
+  blockedMessage?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
@@ -42,7 +46,12 @@ export function InlineCustomFieldCreator({
   const [options, setOptions] = useState("");
   const [relationTarget, setRelationTarget] = useState("all");
 
+  useEffect(() => {
+    if (!canAdd) setOpen(false);
+  }, [canAdd]);
+
   const add = () => {
+    if (!canAdd) return;
     if (type === "attachments") {
       window.alert("Створення додаткових файлових полів вимкнено.");
       setType("text");
@@ -92,11 +101,19 @@ export function InlineCustomFieldCreator({
       <button
         type="button"
         className="button button-secondary"
+        disabled={!canAdd}
         onClick={() => setOpen((current) => !current)}
       >
-        {open ? "Скасувати додавання поля" : "+ Додати власне поле"}
+        {canAdd
+          ? open ? "Скасувати додавання поля" : "+ Додати власне поле"
+          : "Ліміт власних полів вичерпано"}
       </button>
-      {open ? (
+      {!canAdd ? (
+        <div className="alert alert-notice limit-inline-notice">
+          {blockedMessage || "Досягнуто ліміт власних полів для поточного тарифу."}
+        </div>
+      ) : null}
+      {open && canAdd ? (
         <div className="inline-custom-field-panel">
           <p className="field-wide">
             Нове поле буде доступне в усіх записах цього розділу.

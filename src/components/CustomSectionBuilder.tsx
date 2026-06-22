@@ -30,7 +30,11 @@ export function CustomSectionBuilder({
   onChange,
   readOnly = false,
   canCreate = true,
+  createBlockedMessage,
+  canAddFields = true,
+  fieldBlockedMessage,
   onCreateBlocked,
+  onFieldBlocked,
   createRequest,
   onCreateRequestHandled,
 }: {
@@ -38,7 +42,11 @@ export function CustomSectionBuilder({
   onChange: (db: AppDatabase) => void;
   readOnly?: boolean;
   canCreate?: boolean;
+  createBlockedMessage?: string;
+  canAddFields?: boolean;
+  fieldBlockedMessage?: string;
   onCreateBlocked?: () => void;
+  onFieldBlocked?: () => void;
   createRequest?: { id: number; parentKey: SectionParentKey };
   onCreateRequestHandled?: () => void;
 }) {
@@ -148,9 +156,15 @@ export function CustomSectionBuilder({
             setTemplateOpen(true);
           }}
         >
-          {canCreate ? "+ Створити розділ" : "🔒 Створити розділ · PRO"}
+          + Створити розділ
         </button>
       </div>
+
+      {!readOnly && !canCreate ? (
+        <div className="alert alert-notice limit-inline-notice">
+          {createBlockedMessage || "Досягнуто ліміт власних розділів для поточного тарифу."}
+        </div>
+      ) : null}
 
       {db.customSections.length ? (
         <div className="custom-section-list">
@@ -243,6 +257,9 @@ export function CustomSectionBuilder({
         <SectionEditor
           section={editing}
           sections={db.customSections}
+          canAddFields={canAddFields}
+          fieldBlockedMessage={fieldBlockedMessage}
+          onFieldBlocked={onFieldBlocked}
           onClose={() => setEditing(null)}
           onSave={save}
         />
@@ -254,11 +271,17 @@ export function CustomSectionBuilder({
 function SectionEditor({
   section,
   sections,
+  canAddFields,
+  fieldBlockedMessage,
+  onFieldBlocked,
   onClose,
   onSave,
 }: {
   section: CustomSectionDefinition;
   sections: CustomSectionDefinition[];
+  canAddFields: boolean;
+  fieldBlockedMessage?: string;
+  onFieldBlocked?: () => void;
   onClose: () => void;
   onSave: (section: CustomSectionDefinition) => void;
 }) {
@@ -273,6 +296,10 @@ function SectionEditor({
     }));
   };
   const addField = () => {
+    if (!canAddFields) {
+      onFieldBlocked?.();
+      return;
+    }
     const field: CustomSectionField = {
       id: createId(),
       label: "",
@@ -316,6 +343,12 @@ function SectionEditor({
       options: field.options.map((option) => option.trim()).filter(Boolean),
     }));
     if (!form.name.trim()) return;
+    if (!canAddFields && form.fields.some((field) =>
+      !section.fields.some((existing) => existing.id === field.id)
+    )) {
+      onFieldBlocked?.();
+      return;
+    }
     if (!fields.length || fields.some((field) => !field.label)) {
       window.alert("Додайте принаймні одне поле та вкажіть назву кожного поля.");
       return;
@@ -429,6 +462,11 @@ function SectionEditor({
             + Додати поле
           </button>
         </div>
+        {!canAddFields ? (
+          <div className="alert alert-notice limit-inline-notice">
+            {fieldBlockedMessage || "Створення власних полів недоступне на поточному тарифі."}
+          </div>
+        ) : null}
 
         <div className="builder-field-list">
           {form.fields.map((field, index) => (

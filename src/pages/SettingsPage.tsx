@@ -7,7 +7,11 @@ export function SettingsPage({
   onChange,
   readOnly = false,
   canCreateCustomSection = true,
+  customSectionLimitMessage,
+  canCreateCustomField = true,
+  customFieldLimitMessage,
   onUpgradeRequired,
+  onCustomFieldUpgradeRequired,
   sectionCreateRequest,
   onSectionCreateRequestHandled,
 }: {
@@ -15,7 +19,11 @@ export function SettingsPage({
   onChange: (db: AppDatabase) => void;
   readOnly?: boolean;
   canCreateCustomSection?: boolean;
+  customSectionLimitMessage?: string;
+  canCreateCustomField?: boolean;
+  customFieldLimitMessage?: string;
   onUpgradeRequired?: () => void;
+  onCustomFieldUpgradeRequired?: () => void;
   sectionCreateRequest?: { id: number; parentKey: SectionParentKey };
   onSectionCreateRequestHandled?: () => void;
 }) {
@@ -86,7 +94,11 @@ export function SettingsPage({
         onChange={onChange}
         readOnly={readOnly}
         canCreate={canCreateCustomSection}
+        createBlockedMessage={customSectionLimitMessage}
+        canAddFields={canCreateCustomField}
+        fieldBlockedMessage={customFieldLimitMessage}
         onCreateBlocked={onUpgradeRequired}
+        onFieldBlocked={onCustomFieldUpgradeRequired}
         createRequest={sectionCreateRequest}
         onCreateRequestHandled={onSectionCreateRequestHandled}
       />

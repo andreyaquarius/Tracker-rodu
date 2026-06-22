@@ -67,7 +67,7 @@ import {
 } from "./services/supabaseAuth";
 import { useSubscription } from "./hooks/useSubscription";
 import { subscriptionErrorCode, subscriptionErrorMessage } from "./services/subscriptionService";
-import type { UpgradeReason } from "./types/subscription";
+import type { PlanLimitKey, UpgradeReason } from "./types/subscription";
 import {
   clearProjectResearchCache,
   deleteProjectResearch,
@@ -545,6 +545,60 @@ export default function App() {
     if (!sectionKey) return true;
     return subscriptionAccess.context?.sectionQuotas[sectionKey]?.canCreate ?? true;
   }, [canCreateProjectRecords, subscriptionAccess.context]);
+  const canCreateCustomSection = !workspace || subscriptionAccess.canCreateCustomSection;
+  const canCreateCustomField = !workspace || subscriptionAccess.canCreateCustomField;
+  const limitNotice = useCallback((label: string, key: PlanLimitKey) => {
+    if (subscriptionAccess.loading) return "Перевіряємо ліміти тарифу…";
+    const limit = subscriptionAccess.getLimit(key);
+    const used = subscriptionAccess.getUsage(key);
+    if (limit && !limit.isUnlimited && limit.value !== null) {
+      if (limit.value === 0) {
+        return `Створення ${label} недоступне на поточному тарифі. Перегляньте платні тарифи, щоб додати цю можливість.`;
+      }
+      return `Досягнуто ліміт ${label}: використано ${used} із ${limit.value}. Ви можете редагувати або видаляти наявні елементи, але не можете додавати нові.`;
+    }
+    return `Створення ${label} недоступне на поточному тарифі.`;
+  }, [subscriptionAccess.getLimit, subscriptionAccess.getUsage, subscriptionAccess.loading]);
+  const customSectionLimitMessage = canCreateCustomSection
+    ? undefined
+    : limitNotice("власних розділів", "custom_sections_per_project");
+  const customFieldLimitMessage = canCreateCustomField
+    ? undefined
+    : limitNotice("власних полів", "custom_fields_per_project");
+  const showCustomFieldBlocked = useCallback(() => {
+    setUpgradeReason({
+      featureName: "Власні поля",
+      reason: customFieldLimitMessage || "Створення нового власного поля недоступне або ліміт уже використано.",
+      recommendedPlan: "researcher",
+      used: subscriptionAccess.getUsage("custom_fields_per_project"),
+      limit: subscriptionAccess.getLimit("custom_fields_per_project")?.value ?? undefined,
+    });
+  }, [
+    customFieldLimitMessage,
+    subscriptionAccess.getLimit,
+    subscriptionAccess.getUsage,
+  ]);
+  const firstReachedLimitNotice = useCallback((label: string, keys: PlanLimitKey[]) => {
+    if (subscriptionAccess.loading) return "Перевіряємо ліміти тарифу…";
+    const reachedKey = keys.find((key) => {
+      const limit = subscriptionAccess.getLimit(key);
+      const used = subscriptionAccess.getUsage(key);
+      return Boolean(limit && !limit.isUnlimited && limit.value !== null && used >= limit.value);
+    });
+    return limitNotice(label, reachedKey ?? keys[0]);
+  }, [
+    limitNotice,
+    subscriptionAccess.getLimit,
+    subscriptionAccess.getUsage,
+    subscriptionAccess.loading,
+  ]);
+  const canCreateResearchRecord = !workspace || subscriptionAccess.canCreateResearch;
+  const researchLimitMessage = canCreateResearchRecord
+    ? undefined
+    : firstReachedLimitNotice("досліджень", [
+        "researches_per_project",
+        "researches_total",
+      ]);
   const researchRequiredByPlan = subscriptionAccess.effectivePlan !== "professional";
   const requestedDataGroups = useMemo(() => {
     if (workspace && searchDataProjectId === workspace.projectId) {
@@ -1933,7 +1987,7 @@ export default function App() {
     if (!previousEntity && !subscriptionAccess.canCreateResearch) {
       setUpgradeReason({
         featureName: "Нове дослідження",
-        reason: "Досягнуто ліміт досліджень для поточного тарифу.",
+        reason: researchLimitMessage || "Досягнуто ліміт досліджень для поточного тарифу.",
         recommendedPlan: "researcher",
         used: subscriptionAccess.getUsage("researches_per_project"),
         limit: subscriptionAccess.getLimit("researches_per_project")?.value ?? undefined,
@@ -2929,10 +2983,15 @@ export default function App() {
   };
   const createRelatedRecord = (nextPage: PageKey, initialValues: Record<string, unknown>) => {
     if (!ensureCanCreateProjectRecord("Новий пов’язаний запис")) return;
-    if (!canCreateStandardSection(standardSectionQuotaKeys[nextPage])) {
+    const canCreateRelatedRecord = nextPage === "researches"
+      ? canCreateResearchRecord
+      : canCreateStandardSection(standardSectionQuotaKeys[nextPage]);
+    if (!canCreateRelatedRecord) {
       setUpgradeReason({
         featureName: "Новий пов’язаний запис",
-        reason: "Досягнуто ліміт записів у цьому розділі. Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+        reason: nextPage === "researches"
+          ? researchLimitMessage || "Досягнуто ліміт досліджень для поточного тарифу."
+          : "Досягнуто ліміт записів у цьому розділі. Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
         recommendedPlan: "researcher",
       });
       return;
@@ -2950,10 +3009,10 @@ export default function App() {
   };
 
   const createSubsection = (parentKey: SectionParentKey) => {
-    if (!subscriptionAccess.canCreateCustomSection) {
+    if (!canCreateCustomSection) {
       setUpgradeReason({
         featureName: "Власні розділи",
-        reason: "Створення нового власного розділу недоступне або ліміт уже використано.",
+        reason: customSectionLimitMessage || "Створення нового власного розділу недоступне або ліміт уже використано.",
         recommendedPlan: "researcher",
         used: subscriptionAccess.getUsage("custom_sections_per_project"),
         limit: subscriptionAccess.getLimit("custom_sections_per_project")?.value ?? undefined,
@@ -3376,13 +3435,7 @@ export default function App() {
       return;
     }
     if (!subscriptionAccess.canCreateCustomField) {
-      setUpgradeReason({
-        featureName: "Власні поля",
-        reason: "Створення нового власного поля недоступне або ліміт уже використано.",
-        recommendedPlan: "researcher",
-        used: subscriptionAccess.getUsage("custom_fields_per_project"),
-        limit: subscriptionAccess.getLimit("custom_fields_per_project")?.value ?? undefined,
-      });
+      showCustomFieldBlocked();
       return;
     }
     if (workspace.role !== "owner") {
@@ -3803,6 +3856,10 @@ export default function App() {
           onDelete={deleteCustomRecord}
           onOpenRelated={openRelatedRecord}
           onAddField={canManageStructure && canCreateProjectRecords ? (field) => {
+            if (!canCreateCustomField) {
+              showCustomFieldBlocked();
+              return;
+            }
             changeSettings({
               ...activeDb,
               customSections: activeDb.customSections.map((item) =>
@@ -3817,6 +3874,9 @@ export default function App() {
               ),
             });
           } : undefined}
+          canAddField={canCreateCustomField}
+          fieldLimitMessage={customFieldLimitMessage}
+          onAddFieldBlocked={showCustomFieldBlocked}
           readOnly={readOnly}
           canCreate={canCreateProjectRecords}
           projectName={workspace?.projectName}
@@ -3847,7 +3907,27 @@ export default function App() {
       case "archiveRequests":
       case "tasks":
       case "findings":
-      case "hypotheses":
+      case "hypotheses": {
+        const pageCanCreate = page === "researches"
+          ? canCreateResearchRecord
+          : canCreateStandardSection(standardSectionQuotaKeys[page]);
+        const showCreateBlocked = () => {
+          setUpgradeReason({
+            featureName: page === "researches"
+              ? "Нове дослідження"
+              : `Новий запис: ${configs[page].title}`,
+            reason: page === "researches"
+              ? researchLimitMessage || "Досягнуто ліміт досліджень для поточного тарифу."
+              : "Досягнуто ліміт записів у цьому розділі. Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
+            recommendedPlan: "researcher",
+            used: page === "researches"
+              ? subscriptionAccess.getUsage("researches_per_project")
+              : undefined,
+            limit: page === "researches"
+              ? subscriptionAccess.getLimit("researches_per_project")?.value ?? undefined
+              : undefined,
+          });
+        };
         return (
           <CrudPage
             db={activeDb}
@@ -3860,6 +3940,8 @@ export default function App() {
             customFieldDefinitions={activeDb.settings.customFields}
             onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
             onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
+            canAddCustomField={canCreateCustomField}
+            customFieldLimitMessage={customFieldLimitMessage}
             onSavePerson={savePerson}
             initialSearch={moduleSearch}
             initialOpenEntityId={openEntityId}
@@ -3872,14 +3954,16 @@ export default function App() {
             onSave={saveFor(page)}
             onImportRecords={importTableRecords}
             onDelete={deleteFor(page)}
+            onCreateBlocked={showCreateBlocked}
             projectId={workspace?.projectId}
             onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
             readOnly={readOnly}
-            canCreate={canCreateStandardSection(standardSectionQuotaKeys[page])}
+            canCreate={pageCanCreate}
             projectName={workspace?.projectName}
             researchRequired={researchRequiredByPlan}
           />
         );
+      }
       case "persons":
         return (
           <PersonsPage
@@ -3896,6 +3980,8 @@ export default function App() {
             )}
             onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
             onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
+            canAddCustomField={canCreateCustomField}
+            customFieldLimitMessage={customFieldLimitMessage}
             initialSearch={moduleSearch}
             initialOpenPersonId={openEntityId}
             onSavePerson={savePerson}
@@ -3922,6 +4008,8 @@ export default function App() {
             customFieldDefinitions={activeDb.settings.customFields}
             onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
             onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
+            canAddCustomField={canCreateCustomField}
+            customFieldLimitMessage={customFieldLimitMessage}
             initialSearch={moduleSearch}
             onOpenRelated={openRelatedRecord}
             onSave={saveFor("yearMatrix")}
@@ -3951,12 +4039,16 @@ export default function App() {
             db={activeDb}
             onChange={changeSettings}
             readOnly={Boolean(workspace && workspace.role !== "owner")}
-            canCreateCustomSection={subscriptionAccess.canCreateCustomSection}
+            canCreateCustomSection={canCreateCustomSection}
+            customSectionLimitMessage={customSectionLimitMessage}
+            canCreateCustomField={canCreateCustomField}
+            customFieldLimitMessage={customFieldLimitMessage}
             onUpgradeRequired={() => setUpgradeReason({
               featureName: "Власні розділи",
-              reason: "Створення власних розділів недоступне або тарифний ліміт уже використано.",
+              reason: customSectionLimitMessage || "Створення власних розділів недоступне або тарифний ліміт уже використано.",
               recommendedPlan: "researcher",
             })}
+            onCustomFieldUpgradeRequired={showCustomFieldBlocked}
             sectionCreateRequest={sectionCreateRequest ?? undefined}
             onSectionCreateRequestHandled={() => setSectionCreateRequest(null)}
           />

@@ -82,6 +82,8 @@ interface Props {
   customFieldDefinitions?: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
+  canAddCustomField?: boolean;
+  customFieldLimitMessage?: string;
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onSave: (entity: AppEntity) => void;
   onSaveRange?: (records: YearMatrixRecord[]) => void;
@@ -102,6 +104,8 @@ export function YearMatrixPage({
   customFieldDefinitions = [],
   onAddCustomField,
   onDeleteCustomField,
+  canAddCustomField = true,
+  customFieldLimitMessage,
   onOpenRelated,
   onSave,
   onSaveRange,
@@ -369,6 +373,8 @@ export function YearMatrixPage({
         customFieldDefinitions={customFieldDefinitions}
         onAddCustomField={onAddCustomField}
         onDeleteCustomField={onDeleteCustomField}
+        canAddCustomField={canAddCustomField}
+        customFieldLimitMessage={customFieldLimitMessage}
         initialSearch={initialSearch}
         onOpenRelated={onOpenRelated}
         onSave={onSave}

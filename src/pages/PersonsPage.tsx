@@ -48,6 +48,8 @@ export function PersonsPage({
   customFieldDefinitions = [],
   onAddCustomField,
   onDeleteCustomField,
+  canAddCustomField = true,
+  customFieldLimitMessage,
   initialSearch = "",
   initialOpenPersonId = "",
   onSavePerson,
@@ -73,6 +75,8 @@ export function PersonsPage({
   customFieldDefinitions?: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
+  canAddCustomField?: boolean;
+  customFieldLimitMessage?: string;
   initialSearch?: string;
   initialOpenPersonId?: string;
   onSavePerson: (person: Person) => void;
@@ -298,6 +302,8 @@ export function PersonsPage({
           customFieldDefinitions={customFieldDefinitions}
           onAddCustomField={onAddCustomField}
           onDeleteCustomField={onDeleteCustomField}
+          canAddCustomField={canAddCustomField}
+          customFieldLimitMessage={customFieldLimitMessage}
           onClose={() => setEditing(null)}
           onSave={(person) => {
             onSavePerson(person);

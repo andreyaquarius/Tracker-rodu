@@ -38,6 +38,9 @@ export function CustomSectionPage({
   onDelete,
   onOpenRelated,
   onAddField,
+  canAddField = true,
+  fieldLimitMessage,
+  onAddFieldBlocked,
   readOnly = false,
   canCreate = true,
   projectName = "Трекер Роду",
@@ -51,6 +54,9 @@ export function CustomSectionPage({
   onDelete: (id: string) => void;
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onAddField?: (field: CustomSectionField) => void;
+  canAddField?: boolean;
+  fieldLimitMessage?: string;
+  onAddFieldBlocked?: () => void;
   readOnly?: boolean;
   canCreate?: boolean;
   projectName?: string;
@@ -228,6 +234,9 @@ export function CustomSectionPage({
             setEditing(null);
           }}
           onAddField={onAddField}
+          canAddField={canAddField}
+          fieldLimitMessage={fieldLimitMessage}
+          onAddFieldBlocked={onAddFieldBlocked}
         />
       ) : null}
     </>
@@ -241,6 +250,9 @@ function CustomRecordEditor({
   onClose,
   onSave,
   onAddField,
+  canAddField,
+  fieldLimitMessage,
+  onAddFieldBlocked,
 }: {
   db: AppDatabase;
   section: CustomSectionDefinition;
@@ -248,6 +260,9 @@ function CustomRecordEditor({
   onClose: () => void;
   onSave: (record: CustomSectionRecord) => void;
   onAddField?: (field: CustomSectionField) => void;
+  canAddField: boolean;
+  fieldLimitMessage?: string;
+  onAddFieldBlocked?: () => void;
 }) {
   const [values, setValues] = useState<Record<string, CustomSectionRecordValue>>(() =>
     Object.fromEntries(section.fields.map((field) => [
@@ -312,6 +327,9 @@ function CustomRecordEditor({
               db={db}
               fields={section.fields}
               onAdd={onAddField}
+              canAdd={canAddField}
+              blockedMessage={fieldLimitMessage}
+              onBlocked={onAddFieldBlocked}
             />
           ) : null}
         </div>
