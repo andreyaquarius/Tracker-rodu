@@ -26,6 +26,8 @@ import { normalizeCustomFieldValues } from "../utils/customFields";
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
 import { exportPersonsToExcel } from "../utils/excelExport";
 import { TableDataImportButton } from "../components/TableDataImportButton";
+import { PaginationControls } from "../components/PaginationControls";
+import { usePagination } from "../hooks/usePagination";
 
 type PersonTab =
   | "overview"
@@ -142,6 +144,15 @@ export function PersonsPage({
       );
     });
   }, [genderFilter, persons, placeFilter, researchFilter, search, statusFilter, surnameFilter]);
+  const paginationResetKey = [
+    search,
+    researchFilter,
+    statusFilter,
+    genderFilter,
+    placeFilter,
+    surnameFilter,
+  ].join("\u001f");
+  const pagination = usePagination(filtered, paginationResetKey);
 
   const remove = async (person: Person) => {
     if (readOnly) return;
@@ -244,44 +255,66 @@ export function PersonsPage({
         </div>
 
         {filtered.length ? (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Повне ім’я</th>
-                  <th>Роки життя</th>
-                  <th>Основні місця</th>
-                  <th>Статус</th>
-                  <th>Знахідки</th>
-                  <th>Завдання</th>
-                  <th>Гіпотези</th>
-                  <th className="actions-column">Дії</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((person) => (
-                  <tr key={person.id} className="clickable-row" onClick={() => setViewing(person)}>
-                    <td data-label="Повне ім’я"><strong>{personDisplayName(person)}</strong></td>
-                    <td data-label="Роки життя">{lifeYears(person)}</td>
-                    <td data-label="Основні місця">{personPlaces(person) || "—"}</td>
-                    <td data-label="Статус"><span className="status-pill">{person.status}</span></td>
-                    <td data-label="Знахідки">{linkedCount(findings, person.id)}</td>
-                    <td data-label="Завдання">{linkedCount(tasks, person.id)}</td>
-                    <td data-label="Гіпотези">{linkedCount(hypotheses, person.id)}</td>
-                    <td data-label="Дії" className="row-actions" onClick={(event) => event.stopPropagation()}>
-                      <button className="icon-button" title="Переглянути" onClick={() => setViewing(person)}>◉</button>
-                      {!readOnly ? (
-                        <>
-                          <button className="icon-button" title="Редагувати" onClick={() => setEditing(person)}>✎</button>
-                          <button className="icon-button danger" title="Видалити" onClick={() => void remove(person)}>×</button>
-                        </>
-                      ) : null}
-                    </td>
+          <>
+            <PaginationControls
+              totalItems={pagination.totalItems}
+              page={pagination.page}
+              pageCount={pagination.pageCount}
+              pageSize={pagination.pageSize}
+              startIndex={pagination.startIndex}
+              endIndex={pagination.endIndex}
+              onPageChange={pagination.setPage}
+              onPageSizeChange={pagination.setPageSize}
+            />
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Повне ім’я</th>
+                    <th>Роки життя</th>
+                    <th>Основні місця</th>
+                    <th>Статус</th>
+                    <th>Знахідки</th>
+                    <th>Завдання</th>
+                    <th>Гіпотези</th>
+                    <th className="actions-column">Дії</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pagination.pageItems.map((person) => (
+                    <tr key={person.id} className="clickable-row" onClick={() => setViewing(person)}>
+                      <td data-label="Повне ім’я"><strong>{personDisplayName(person)}</strong></td>
+                      <td data-label="Роки життя">{lifeYears(person)}</td>
+                      <td data-label="Основні місця">{personPlaces(person) || "—"}</td>
+                      <td data-label="Статус"><span className="status-pill">{person.status}</span></td>
+                      <td data-label="Знахідки">{linkedCount(findings, person.id)}</td>
+                      <td data-label="Завдання">{linkedCount(tasks, person.id)}</td>
+                      <td data-label="Гіпотези">{linkedCount(hypotheses, person.id)}</td>
+                      <td data-label="Дії" className="row-actions" onClick={(event) => event.stopPropagation()}>
+                        <button className="icon-button" title="Переглянути" onClick={() => setViewing(person)}>◉</button>
+                        {!readOnly ? (
+                          <>
+                            <button className="icon-button" title="Редагувати" onClick={() => setEditing(person)}>✎</button>
+                            <button className="icon-button danger" title="Видалити" onClick={() => void remove(person)}>×</button>
+                          </>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationControls
+              totalItems={pagination.totalItems}
+              page={pagination.page}
+              pageCount={pagination.pageCount}
+              pageSize={pagination.pageSize}
+              startIndex={pagination.startIndex}
+              endIndex={pagination.endIndex}
+              onPageChange={pagination.setPage}
+              onPageSizeChange={pagination.setPageSize}
+            />
+          </>
         ) : (
           <div className="empty-state">
             {canCreateRecords ? (

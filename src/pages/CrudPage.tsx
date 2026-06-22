@@ -47,6 +47,8 @@ import { TableDataImportButton } from "../components/TableDataImportButton";
 import { canImportCollection } from "../utils/tableDataImport";
 import { sanitizeWebUrl } from "../utils/safeUrl";
 import { GeoPlaceField } from "../components/GeoPlaceField";
+import { PaginationControls } from "../components/PaginationControls";
+import { usePagination } from "../hooks/usePagination";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -224,6 +226,17 @@ export function CrudPage({
       || (config.collection === "yearMatrix"
         && (placeFilter || yearFilter || documentTypeFilter)),
   );
+  const paginationResetKey = [
+    config.collection,
+    search,
+    researchFilter,
+    statusFilter,
+    archiveFilter,
+    placeFilter,
+    yearFilter,
+    documentTypeFilter,
+  ].join("\u001f");
+  const pagination = usePagination(filtered, paginationResetKey);
 
   const confirmDelete = async (entity: AppEntity) => {
     if (readOnly) return;
@@ -392,19 +405,41 @@ export function CrudPage({
         </div>
 
         {filtered.length ? (
-          <DataTable
-            items={filtered}
-            columns={config.columns}
-            documents={documents}
-            researches={researches}
-            onView={setViewing}
-            onEdit={setEditing}
-            onDelete={(entity) => void confirmDelete(entity)}
-            onOpenRelated={onOpenRelated}
-            onQuickStatus={config.statusKey ? quickStatus : undefined}
-            statusOptions={config.statusOptions}
-            readOnly={readOnly}
-          />
+          <>
+            <PaginationControls
+              totalItems={pagination.totalItems}
+              page={pagination.page}
+              pageCount={pagination.pageCount}
+              pageSize={pagination.pageSize}
+              startIndex={pagination.startIndex}
+              endIndex={pagination.endIndex}
+              onPageChange={pagination.setPage}
+              onPageSizeChange={pagination.setPageSize}
+            />
+            <DataTable
+              items={pagination.pageItems}
+              columns={config.columns}
+              documents={documents}
+              researches={researches}
+              onView={setViewing}
+              onEdit={setEditing}
+              onDelete={(entity) => void confirmDelete(entity)}
+              onOpenRelated={onOpenRelated}
+              onQuickStatus={config.statusKey ? quickStatus : undefined}
+              statusOptions={config.statusOptions}
+              readOnly={readOnly}
+            />
+            <PaginationControls
+              totalItems={pagination.totalItems}
+              page={pagination.page}
+              pageCount={pagination.pageCount}
+              pageSize={pagination.pageSize}
+              startIndex={pagination.startIndex}
+              endIndex={pagination.endIndex}
+              onPageChange={pagination.setPage}
+              onPageSizeChange={pagination.setPageSize}
+            />
+          </>
         ) : (
           <div className="empty-state">
             {canAttemptCreate ? (

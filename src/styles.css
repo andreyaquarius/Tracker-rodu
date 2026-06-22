@@ -376,6 +376,42 @@ input, select { min-height: 40px; padding: 8px 10px; }
 textarea { padding: 10px; resize: vertical; }
 input:focus, select:focus, textarea:focus { border-color: #71988b; box-shadow: 0 0 0 3px rgba(66,116,100,.1); }
 .result-count { padding: 11px 2px; color: #344640; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pagination-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  padding: 12px 18px; border-bottom: 1px solid var(--line);
+}
+.table-wrap + .pagination-bar { border-top: 1px solid var(--line); border-bottom: 0; }
+.pagination-summary { color: #344640; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.pagination-size {
+  display: flex; align-items: center; gap: 8px; margin-left: auto;
+}
+.pagination-size > span {
+  margin: 0; white-space: nowrap;
+}
+.pagination-size select {
+  width: 78px; min-height: 34px; padding-top: 6px; padding-bottom: 6px;
+}
+.pagination-pages {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+}
+.pagination-pages button,
+.pagination-ellipsis {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 34px; height: 34px; padding: 0 9px; border-radius: 8px;
+  font-size: 12px; font-weight: 800;
+}
+.pagination-pages button {
+  color: var(--green-800); background: #fff; border: 1px solid var(--line);
+}
+.pagination-pages button:hover:not(:disabled),
+.pagination-pages button.active {
+  color: #fff; background: var(--green-900); border-color: var(--green-900);
+}
+.pagination-pages button:disabled {
+  color: #9aa8a3; background: #f4f3ee; cursor: not-allowed;
+}
+.pagination-ellipsis { color: var(--muted); }
+.pagination-arrow { font-size: 18px; line-height: 1; }
 
 .custom-section-toolbar {
   display: flex;
@@ -1522,6 +1558,9 @@ tbody tr:hover { background: #fbfaf5; }
   .global-search-results section > div { grid-template-columns: 1fr; }
   .filters { align-items: stretch; flex-direction: column; }
   .filters label { width: 100%; }
+  .pagination-bar { align-items: stretch; flex-direction: column; }
+  .pagination-size { margin-left: 0; justify-content: space-between; }
+  .pagination-pages { justify-content: flex-start; }
   .map-toolbar { grid-template-columns: 1fr; }
   .map-layout, .tracker-map-wrap { min-height: 480px; }
   .map-marker-list { grid-template-columns: 1fr; }

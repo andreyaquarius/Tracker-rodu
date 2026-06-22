@@ -27,6 +27,8 @@ import { ExcelExportMenu } from "../components/ExcelExportMenu";
 import { exportCustomSectionToExcel } from "../utils/excelExport";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 import { sanitizeWebUrl } from "../utils/safeUrl";
+import { PaginationControls } from "../components/PaginationControls";
+import { usePagination } from "../hooks/usePagination";
 
 export function CustomSectionPage({
   db,
@@ -85,6 +87,7 @@ export function CustomSectionPage({
         .includes(query),
     );
   }, [db, records, search, section]);
+  const pagination = usePagination(filtered, `${section.id}\u001f${search}`);
   const columns = section.fields
     .filter((field) => field.type !== "attachments")
     .slice(0, 4);
@@ -150,57 +153,79 @@ export function CustomSectionPage({
           <span className="result-count">{filtered.length} записів</span>
         </div>
         {filtered.length ? (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Назва</th>
-                  {columns.filter((field) => field.id !== section.titleFieldId).map((field) => (
-                    <th key={field.id}>{field.label}</th>
-                  ))}
-                  <th className="actions-column">Дії</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((record) => (
-                  <tr
-                    className="clickable-row"
-                    key={record.id}
-                    onClick={() => setViewing(record)}
-                  >
-                    <td data-label="Назва"><strong>{customRecordTitle(section, record)}</strong></td>
+          <>
+            <PaginationControls
+              totalItems={pagination.totalItems}
+              page={pagination.page}
+              pageCount={pagination.pageCount}
+              pageSize={pagination.pageSize}
+              startIndex={pagination.startIndex}
+              endIndex={pagination.endIndex}
+              onPageChange={pagination.setPage}
+              onPageSizeChange={pagination.setPageSize}
+            />
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Назва</th>
                     {columns.filter((field) => field.id !== section.titleFieldId).map((field) => (
-                      <td key={field.id} data-label={field.label}>
-                        {compactValue(db, field, record.values[field.id])}
-                      </td>
+                      <th key={field.id}>{field.label}</th>
                     ))}
-                    <td className="row-actions" data-label="Дії">
-                      {!readOnly ? (
-                        <>
-                          <button
-                            className="icon-button"
-                            title="Редагувати"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setEditing(record);
-                            }}
-                          >✎</button>
-                          <button
-                            className="icon-button danger"
-                            title="Видалити"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void remove(record);
-                            }}
-                          >×</button>
-                        </>
-                      ) : null}
-                    </td>
+                    <th className="actions-column">Дії</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pagination.pageItems.map((record) => (
+                    <tr
+                      className="clickable-row"
+                      key={record.id}
+                      onClick={() => setViewing(record)}
+                    >
+                      <td data-label="Назва"><strong>{customRecordTitle(section, record)}</strong></td>
+                      {columns.filter((field) => field.id !== section.titleFieldId).map((field) => (
+                        <td key={field.id} data-label={field.label}>
+                          {compactValue(db, field, record.values[field.id])}
+                        </td>
+                      ))}
+                      <td className="row-actions" data-label="Дії">
+                        {!readOnly ? (
+                          <>
+                            <button
+                              className="icon-button"
+                              title="Редагувати"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setEditing(record);
+                              }}
+                            >✎</button>
+                            <button
+                              className="icon-button danger"
+                              title="Видалити"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void remove(record);
+                              }}
+                            >×</button>
+                          </>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationControls
+              totalItems={pagination.totalItems}
+              page={pagination.page}
+              pageCount={pagination.pageCount}
+              pageSize={pagination.pageSize}
+              startIndex={pagination.startIndex}
+              endIndex={pagination.endIndex}
+              onPageChange={pagination.setPage}
+              onPageSizeChange={pagination.setPageSize}
+            />
+          </>
         ) : (
           <div className="empty-state">
             <strong>{search ? "Нічого не знайдено" : "Записів поки немає"}</strong>
