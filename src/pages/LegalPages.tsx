@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 type LegalPageKind = "privacy" | "terms";
 
 const updatedAt = "22 червня 2026 року";
-const contactEmail = "andreyaquarius@gmail.com";
+const contactEmail = "support@trekerrodu.com.ua";
 
 function LegalLayout({
   kind,
