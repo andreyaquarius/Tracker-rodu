@@ -1302,7 +1302,8 @@ tbody tr:hover { background: #fbfaf5; }
 .plan-card-heading { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .plan-card h3 { margin: 0; font-size: 21px; }
 .plan-card > p { min-height: 48px; color: var(--muted); }
-.plan-price { min-height: 34px; margin: 8px 0 14px; color: var(--green-900); font-family: var(--font-serif); font-size: 20px; font-weight: 800; }
+.plan-price { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 58px; margin: 8px 0 14px; color: var(--green-900); font-family: var(--font-serif); font-size: 20px; font-weight: 800; line-height: 1.2; }
+.price-yearly { display: block; color: var(--muted); font-family: "Manrope", system-ui, sans-serif; font-size: 15px; font-weight: 500; line-height: 1.35; }
 .plan-card ul { display: grid; gap: 0; margin: 0 0 20px; padding: 0; list-style: none; }
 .plan-card li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .plan-card li span { color: var(--muted); }
@@ -1382,7 +1383,7 @@ tbody tr:hover { background: #fbfaf5; }
 }
 .trial-panel { margin-top: 28px; border-color: #d8bd7c; background: #fff9ec; }
 .public-plan-card { display: flex; flex-direction: column; }
-.public-plan-price { display: flex; align-items: flex-start; min-height: 58px; margin: 14px 0; color: var(--green-950); font-family: "Source Serif 4", Georgia, serif; font-size: 22px; }
+.public-plan-price { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 58px; margin: 14px 0; color: var(--green-950); font-family: "Source Serif 4", Georgia, serif; font-size: 22px; line-height: 1.2; }
 .public-plan-card ul { display: grid; gap: 0; margin: 0 0 22px; padding: 0; list-style: none; }
 .public-plan-card li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .public-plan-card li span { color: var(--muted); }

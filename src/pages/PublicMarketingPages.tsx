@@ -126,7 +126,10 @@ export function PricingPage() {
             <article className="public-plan-card" key={plan.code}>
               <h3>{plan.name}</h3>
               <p>{plan.description}</p>
-              <strong className="public-plan-price">{plan.price}</strong>
+              <strong className="public-plan-price">
+                <span>{plan.price}</span>
+                {plan.yearlyPrice ? <span className="price-yearly">{plan.yearlyPrice}</span> : null}
+              </strong>
               <ul>
                 {plan.limits.map((limit) => (
                   <li key={limit.label}>

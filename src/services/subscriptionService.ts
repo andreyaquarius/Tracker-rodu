@@ -36,6 +36,11 @@ const usageProperty: Record<PlanLimitKey, string> = {
   hypothesis_ai_reviews_per_month: "hypothesisAiReviewsPerMonth",
 };
 
+const publishedPlanPrices: Partial<Record<PlanCode, { monthly: number; yearly: number; currency: string }>> = {
+  researcher: { monthly: 229, yearly: 2290, currency: "UAH" },
+  professional: { monthly: 699, yearly: 6990, currency: "UAH" },
+};
+
 export async function loadSubscriptionContext(projectId?: string): Promise<SubscriptionContext> {
   const { data, error } = await getSupabaseClient().rpc(
     "get_my_subscription_context",
@@ -70,25 +75,28 @@ export async function loadSubscriptionPlans(): Promise<Array<{
   ]);
   if (plansResult.error) throw plansResult.error;
   if (limitsResult.error) throw limitsResult.error;
-  return (plansResult.data ?? []).map((row) => ({
-    plan: {
-      id: String(row.id),
-      code: String(row.code) as PlanCode,
-      name: String(row.name),
-      description: nullableString(row.description),
-      priceMonthly: nullableNumber(row.price_monthly),
-      priceYearly: nullableNumber(row.price_yearly),
-      currency: String(row.currency),
-      isActive: Boolean(row.is_active),
-    },
-    limits: (limitsResult.data ?? [])
-      .filter((limit) => limit.plan_id === row.id)
-      .map((limit) => ({
-        key: String(limit.limit_key) as PlanLimitKey,
-        value: limit.limit_value === null ? null : Number(limit.limit_value),
-        isUnlimited: Boolean(limit.is_unlimited),
-      })),
-  }));
+  return (plansResult.data ?? []).map((row) => {
+    const code = String(row.code) as PlanCode;
+    return {
+      plan: {
+        id: String(row.id),
+        code,
+        name: String(row.name),
+        description: nullableString(row.description),
+        priceMonthly: planPriceMonthly(code, row.price_monthly),
+        priceYearly: planPriceYearly(code, row.price_yearly),
+        currency: planCurrency(code, row.currency),
+        isActive: Boolean(row.is_active),
+      },
+      limits: (limitsResult.data ?? [])
+        .filter((limit) => limit.plan_id === row.id)
+        .map((limit) => ({
+          key: String(limit.limit_key) as PlanLimitKey,
+          value: limit.limit_value === null ? null : Number(limit.limit_value),
+          isUnlimited: Boolean(limit.is_unlimited),
+        })),
+    };
+  });
 }
 
 export interface AdminSubscriptionRow {
@@ -211,14 +219,15 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
     trialEndsAt: nullableString(rawSubscription.trialEndsAt),
     trialUsed: Boolean(rawSubscription.trialUsed),
   };
+  const planCode = String(rawPlan.code ?? raw.effectivePlanCode ?? "free") as PlanCode;
   const plan: SubscriptionPlan = {
     id: String(rawPlan.id ?? ""),
-    code: String(rawPlan.code ?? raw.effectivePlanCode ?? "free") as PlanCode,
+    code: planCode,
     name: String(rawPlan.name ?? "Старт"),
     description: nullableString(rawPlan.description),
-    priceMonthly: nullableNumber(rawPlan.price_monthly),
-    priceYearly: nullableNumber(rawPlan.price_yearly),
-    currency: String(rawPlan.currency ?? "UAH"),
+    priceMonthly: planPriceMonthly(planCode, rawPlan.price_monthly ?? rawPlan.priceMonthly),
+    priceYearly: planPriceYearly(planCode, rawPlan.price_yearly ?? rawPlan.priceYearly),
+    currency: planCurrency(planCode, rawPlan.currency),
     isActive: Boolean(rawPlan.is_active ?? true),
   };
   return {
@@ -261,4 +270,16 @@ function nullableString(value: unknown): string | null {
 
 function nullableNumber(value: unknown): number | null {
   return value === null || value === undefined || value === "" ? null : Number(value);
+}
+
+function planPriceMonthly(code: PlanCode, value: unknown): number | null {
+  return nullableNumber(value) ?? publishedPlanPrices[code]?.monthly ?? null;
+}
+
+function planPriceYearly(code: PlanCode, value: unknown): number | null {
+  return nullableNumber(value) ?? publishedPlanPrices[code]?.yearly ?? null;
+}
+
+function planCurrency(code: PlanCode, value: unknown): string {
+  return nullableString(value) ?? publishedPlanPrices[code]?.currency ?? "UAH";
 }

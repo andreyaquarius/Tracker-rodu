@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   adminSetSubscription,
   cancelMySubscription,
@@ -418,10 +418,18 @@ function dateInputValue(value: string | null): string {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
-function priceLabel(plan: SubscriptionPlan): string {
+function priceLabel(plan: SubscriptionPlan): ReactNode {
   if (plan.code === "free") return "0 грн";
-  if (plan.priceMonthly === null) return "Ціну буде оголошено";
-  return `${plan.priceMonthly.toLocaleString("uk-UA")} ${plan.currency} / місяць`;
+  const currency = plan.currency === "UAH" ? "грн" : plan.currency;
+  const monthly = plan.priceMonthly === null ? "" : `${plan.priceMonthly.toLocaleString("uk-UA")} ${currency} / місяць`;
+  const yearly = plan.priceYearly === null ? "" : `${plan.priceYearly.toLocaleString("uk-UA")} ${currency} / рік`;
+  if (!monthly && !yearly) return "Ціну буде оголошено";
+  return (
+    <>
+      {monthly ? <span>{monthly}</span> : null}
+      {yearly ? <span className="price-yearly">{yearly}</span> : null}
+    </>
+  );
 }
 
 function planLimitValue(planCode: PlanCode, limit: PlanLimit): string | number | null {

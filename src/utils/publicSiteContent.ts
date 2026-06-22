@@ -16,6 +16,7 @@ export interface PublicPricingPlan {
   name: string;
   description: string;
   price: string;
+  yearlyPrice?: string;
   limits: PublicPlanLimit[];
 }
 
@@ -104,7 +105,8 @@ export const publicPricingPlans: PublicPricingPlan[] = [
     code: "researcher",
     name: "Дослідник",
     description: "Для системної особистої роботи.",
-    price: "Ціна буде оголошена",
+    price: "229 грн / місяць",
+    yearlyPrice: "2290 грн / рік",
     limits: [
       { label: "Проєкти", value: "5" },
       { label: "Дослідження у проєкті", value: "10" },
@@ -120,7 +122,8 @@ export const publicPricingPlans: PublicPricingPlan[] = [
     code: "professional",
     name: "Професійний",
     description: "Для великих досліджень і командної роботи.",
-    price: "Ціна буде оголошена",
+    price: "699 грн / місяць",
+    yearlyPrice: "6990 грн / рік",
     limits: [
       { label: "Проєкти", value: "Без обмежень" },
       { label: "Дослідження у проєкті", value: "Без обмежень" },
