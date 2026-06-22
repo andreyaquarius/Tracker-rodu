@@ -134,11 +134,18 @@ export function LoginPage({
   return (
     <main className="login-page">
       <section className="login-copy">
-        <div className="brand login-brand">
-          <div className="brand-mark">
-            <img src="/tracker-rodu-logo.png" alt="" />
+        <div className="login-header">
+          <div className="brand login-brand">
+            <div className="brand-mark">
+              <img src="/tracker-rodu-logo.png" alt="" />
+            </div>
+            <strong>Трекер Роду</strong>
           </div>
-          <strong>Трекер Роду</strong>
+          <nav className="login-public-nav" aria-label="Публічна навігація">
+            <a href="/" aria-current="page">Головна</a>
+            <a href="/features">Можливості</a>
+            <a href="/pricing">Тарифи</a>
+          </nav>
         </div>
         <span className="eyebrow">Робочий простір для генеалогічного дослідження</span>
         <h1>Не губи сліди свого роду</h1>

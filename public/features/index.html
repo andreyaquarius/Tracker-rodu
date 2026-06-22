@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#173f38" />
+    <meta
+      name="description"
+      content="Можливості Трекера Роду для генеалогічного дослідження: документи, особи, знахідки, гіпотези, карта, власні розділи, командна робота й резервні копії."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://trekerrodu.com.ua/features" />
+    <link rel="icon" type="image/png" href="/tracker-rodu-logo.png" />
+    <meta property="og:title" content="Можливості Трекера Роду — інструменти генеалогічного дослідження" />
+    <meta property="og:description" content="Огляд реалізованих можливостей Трекера Роду для генеалогічного й краєзнавчого дослідження." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://trekerrodu.com.ua/features" />
+    <meta property="og:site_name" content="Трекер Роду" />
+    <meta property="og:locale" content="uk_UA" />
+    <meta property="og:image" content="https://trekerrodu.com.ua/tracker-rodu-logo.png" />
+    <meta property="og:image:alt" content="Трекер Роду" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Можливості Трекера Роду — інструменти генеалогічного дослідження" />
+    <meta name="twitter:description" content="Дослідження, документи, особи, гіпотези, карта, власні розділи, командна робота й резервні копії." />
+    <meta name="twitter:image" content="https://trekerrodu.com.ua/tracker-rodu-logo.png" />
+    <title>Можливості Трекера Роду — інструменти генеалогічного дослідження</title>
+    <style>
+      :root {
+        color: #20312d;
+        background: #f4f2ea;
+        font-family: Arial, system-ui, sans-serif;
+        --green-950: #102f2a;
+        --green-900: #173f38;
+        --green-800: #22574d;
+        --paper: #fffdf8;
+        --line: #deddd5;
+        --muted: #4f5f5a;
+        --amber: #c98b34;
+        --shadow: 0 16px 38px rgba(25, 53, 46, 0.08);
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; background: #f4f2ea; }
+      main { min-height: 100vh; padding: clamp(24px, 5vw, 58px); }
+      header, section, footer { max-width: 1120px; margin-right: auto; margin-left: auto; }
+      .brand { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 24px; color: var(--green-950); text-decoration: none; }
+      .brand img { width: 52px; height: 52px; object-fit: contain; }
+      .brand strong, .brand small { display: block; }
+      .brand strong { font-size: 22px; }
+      .brand small { margin-top: 2px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+      nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 42px; }
+      nav a { display: inline-flex; align-items: center; min-height: 36px; padding: 8px 12px; color: var(--green-800); background: rgba(255, 253, 248, .72); border: 1px solid var(--line); border-radius: 999px; font-size: 13px; font-weight: 800; text-decoration: none; }
+      nav a[aria-current="page"] { color: var(--green-950); border-color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
+      .eyebrow { display: block; margin-bottom: 10px; color: #9b6b2d; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+      h1, h2, h3 { color: var(--green-950); }
+      h1, h2 { font-family: Georgia, serif; }
+      h1 { max-width: 820px; margin: 0 0 14px; font-size: clamp(2rem, 4vw, 3.2rem); line-height: 1.05; }
+      h2 { margin: 0; font-size: 28px; }
+      h3 { margin: 0 0 10px; font-size: 19px; }
+      p { color: var(--muted); line-height: 1.7; }
+      header > p { max-width: 820px; margin: 0; font-size: 18px; }
+      section { margin-top: 28px; }
+      .section-heading { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 420px); gap: 18px; align-items: end; margin-bottom: 18px; }
+      .section-heading p { margin: 0; }
+      .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+      article { min-width: 0; padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
+      article p { margin-bottom: 0; }
+      .pill { display: inline-flex; margin-bottom: 12px; padding: 4px 8px; color: #5d3f12; background: #f1dfbd; border: 1px solid #d8bd7c; border-radius: 999px; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
+      footer { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 18px; margin-top: 28px; font-size: 12px; }
+      footer a { color: var(--green-800); font-weight: 800; }
+      @media (max-width: 850px) {
+        .grid, .section-heading { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <a class="brand" href="/" aria-label="Перейти на головну">
+          <img src="/tracker-rodu-logo.png" alt="" />
+          <span><strong>Трекер Роду</strong><small>Trekerrodu</small></span>
+        </a>
+        <nav aria-label="Публічна навігація">
+          <a href="/">Головна</a>
+          <a href="/features" aria-current="page">Можливості</a>
+          <a href="/pricing">Тарифи</a>
+          <a href="/privacy">Політика конфіденційності</a>
+          <a href="/terms">Умови користування</a>
+        </nav>
+        <span class="eyebrow">Можливості</span>
+        <h1>Інструменти для генеалогічного дослідження</h1>
+        <p>Трекер Роду допомагає зібрати дослідження, джерела, людей, гіпотези, карту подій і командну роботу в одному робочому просторі.</p>
+      </header>
+
+      <section>
+        <div class="section-heading">
+          <h2>Що вже є в застосунку</h2>
+        </div>
+        <div class="grid">
+          <article><h3>Дослідження</h3><p>Окремі дослідницькі напрями всередині проєкту з власними записами й контекстом.</p></article>
+          <article><h3>Документи</h3><p>Облік джерел, архівних реквізитів, місць, дат і пов'язаних записів.</p></article>
+          <article><h3>Запити в архів</h3><p>Фіксація звернень, статусів, архівів, відповідей і пов'язаних осіб.</p></article>
+          <article><h3>Матриця років</h3><p>Робота з роками, подіями, прогалинами та джерелами у хронологічному вигляді.</p></article>
+          <article><h3>Завдання</h3><p>Планування перевірок, пошуків, архівних дій і наступних кроків дослідження.</p></article>
+          <article><h3>Знахідки</h3><p>Збереження фактів, посилань, місць, учасників і документального підтвердження.</p></article>
+          <article><h3>Гіпотези</h3><p>Окремий простір для припущень, аргументів, статусів і перевірки висновків.</p></article>
+          <article><h3>Особи</h3><p>Картки людей із подіями, місцями, родинними зв'язками та пов'язаними матеріалами.</p></article>
+          <article><h3>Глобальний пошук</h3><p>Пошук по робочих розділах проєкту з індексуванням ключових дослідницьких полів.</p></article>
+          <article><h3>Власні розділи</h3><p>Користувацькі структури для тем, які не вкладаються у стандартні розділи.</p></article>
+          <article><h3>Власні поля</h3><p>Додаткові поля у стандартних розділах для специфіки конкретного дослідження.</p></article>
+          <article><h3>Командна робота</h3><p>Запрошення учасників до проєкту та розмежування доступу за ролями.</p></article>
+          <article><h3>Google Drive</h3><p>Підключення Google Drive для роботи з файлами й дослідницькими матеріалами.</p></article>
+          <article><h3>Резервні копії</h3><p>Створення й відновлення резервних копій даних проєкту.</p></article>
+          <article><h3>ШІ-перевірка гіпотез</h3><p>Перевірка дослідницьких гіпотез через серверну функцію та API-ключі.</p></article>
+          <article><span class="pill">Планується</span><h3>Біографічні довідки</h3><p>Окремі згенеровані або оформлені довідки за даними особи.</p></article>
+        </div>
+      </section>
+
+      <footer>
+        <a href="/">Головна</a>
+        <a href="/features">Можливості</a>
+        <a href="/pricing">Тарифи</a>
+        <a href="/privacy">Політика конфіденційності</a>
+        <a href="/terms">Умови користування</a>
+      </footer>
+    </main>
+  </body>
+</html>

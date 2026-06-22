@@ -53,13 +53,19 @@ jobs:
             exit 1
           fi
 
-      - name: Build application
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Build application and static public pages
         env:
           CUSTOM_DOMAIN: trekerrodu.com.ua
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
+
+      - name: Verify prerendered public output
+        run: npm run verify:pages
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

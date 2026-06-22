@@ -33,6 +33,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PrivacyPage, TermsPage } from "./pages/LegalPages";
+import { FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
 import { PersonsPage } from "./pages/PersonsPage";
 import { MapPage } from "./pages/MapPage";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
@@ -169,6 +170,125 @@ import {
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
+const SITE_ORIGIN = "https://trekerrodu.com.ua";
+const SITE_IMAGE_URL = `${SITE_ORIGIN}/tracker-rodu-logo.png`;
+
+type PublicPageKey = "privacy" | "terms" | "features" | "pricing";
+
+const PUBLIC_PAGE_SEO: Record<PublicPageKey, {
+  title: string;
+  description: string;
+  canonical: string;
+}> = {
+  privacy: {
+    title: "Політика конфіденційності — Трекер Роду",
+    description:
+      "Політика конфіденційності Трекера Роду: дані акаунта, Supabase, Google Auth, Google Drive, Gemini, права користувача та видалення акаунта.",
+    canonical: `${SITE_ORIGIN}/privacy`,
+  },
+  terms: {
+    title: "Умови користування — Трекер Роду",
+    description:
+      "Умови користування Трекером Роду: акаунт, trial, тарифи, оплата, скасування, контент користувача, Google Drive, ШІ-функції та відповідальність.",
+    canonical: `${SITE_ORIGIN}/terms`,
+  },
+  features: {
+    title: "Можливості Трекера Роду — інструменти генеалогічного дослідження",
+    description:
+      "Можливості Трекера Роду для генеалогічного дослідження: документи, особи, знахідки, гіпотези, карта, власні розділи, командна робота й резервні копії.",
+    canonical: `${SITE_ORIGIN}/features`,
+  },
+  pricing: {
+    title: "Тарифи Трекера Роду — Старт, Дослідник і Професійний",
+    description:
+      "Тарифи Трекера Роду: Старт, Дослідник і Професійний, 30 днів пробного повного доступу без платіжної картки.",
+    canonical: `${SITE_ORIGIN}/pricing`,
+  },
+};
+
+const HOME_SEO = {
+  title: "Трекер Роду — Не губи сліди свого роду",
+  description:
+    "Керуйте родовим дослідженням: від першої зачіпки до підтвердженого факту.",
+  canonical: `${SITE_ORIGIN}/`,
+};
+
+function upsertMetaName(name: string, content: string): void {
+  let element = document.head.querySelector<HTMLMetaElement>(
+    `meta[name="${name}"]`,
+  );
+  if (!element) {
+    element = document.createElement("meta");
+    element.name = name;
+    document.head.appendChild(element);
+  }
+  element.content = content;
+}
+
+function upsertMetaProperty(property: string, content: string): void {
+  let element = document.head.querySelector<HTMLMetaElement>(
+    `meta[property="${property}"]`,
+  );
+  if (!element) {
+    element = document.createElement("meta");
+    element.setAttribute("property", property);
+    document.head.appendChild(element);
+  }
+  element.content = content;
+}
+
+function upsertCanonical(href: string | null): void {
+  const existing = document.head.querySelector<HTMLLinkElement>(
+    'link[rel="canonical"]',
+  );
+  if (!href) {
+    existing?.remove();
+    return;
+  }
+  const element = existing ?? document.createElement("link");
+  element.rel = "canonical";
+  element.href = href;
+  if (!existing) document.head.appendChild(element);
+}
+
+function applyPublicSeo(page: PublicPageKey): void {
+  const seo = PUBLIC_PAGE_SEO[page];
+  document.title = seo.title;
+  upsertMetaName("description", seo.description);
+  upsertMetaName("robots", "index, follow");
+  upsertCanonical(seo.canonical);
+  upsertMetaProperty("og:title", seo.title);
+  upsertMetaProperty("og:description", seo.description);
+  upsertMetaProperty("og:type", "website");
+  upsertMetaProperty("og:url", seo.canonical);
+  upsertMetaProperty("og:site_name", "Трекер Роду");
+  upsertMetaProperty("og:locale", "uk_UA");
+  upsertMetaProperty("og:image", SITE_IMAGE_URL);
+  upsertMetaProperty("og:image:alt", "Трекер Роду");
+  upsertMetaName("twitter:card", "summary");
+  upsertMetaName("twitter:title", seo.title);
+  upsertMetaName("twitter:description", seo.description);
+  upsertMetaName("twitter:image", SITE_IMAGE_URL);
+}
+
+function applyHomeSeo(): void {
+  document.title = HOME_SEO.title;
+  upsertMetaName("description", HOME_SEO.description);
+  upsertMetaName("robots", "index, follow");
+  upsertCanonical(HOME_SEO.canonical);
+  upsertMetaProperty("og:title", HOME_SEO.title);
+  upsertMetaProperty("og:description", HOME_SEO.description);
+  upsertMetaProperty("og:type", "website");
+  upsertMetaProperty("og:url", HOME_SEO.canonical);
+  upsertMetaProperty("og:site_name", "Трекер Роду");
+  upsertMetaProperty("og:locale", "uk_UA");
+  upsertMetaProperty("og:image", SITE_IMAGE_URL);
+  upsertMetaProperty("og:image:alt", "Трекер Роду");
+  upsertMetaName("twitter:card", "summary");
+  upsertMetaName("twitter:title", HOME_SEO.title);
+  upsertMetaName("twitter:description", HOME_SEO.description);
+  upsertMetaName("twitter:image", SITE_IMAGE_URL);
+}
 
 type ProjectDataGroup =
   | "researches"
@@ -415,7 +535,10 @@ export default function App() {
     projectId: string;
     value: string;
   } | null>(null);
-  const subscriptionAccess = useSubscription(workspace?.projectId, Boolean(account));
+  const subscriptionAccess = useSubscription(
+    workspace?.projectId,
+    Boolean(account) && route.kind !== "public",
+  );
   const canCreateProjectRecords = !workspace || subscriptionAccess.canCreateProjectRecords;
   const canCreateStandardSection = useCallback((sectionKey?: string) => {
     if (!canCreateProjectRecords) return false;
@@ -429,6 +552,21 @@ export default function App() {
     }
     return dataGroupsForPage(page);
   }, [page, searchDataProjectId, workspace]);
+
+  useEffect(() => {
+    if (route.kind === "public") {
+      applyPublicSeo(route.page);
+      return;
+    }
+
+    if (route.kind === "root" && !account) {
+      applyHomeSeo();
+      return;
+    }
+
+    upsertMetaName("robots", "noindex, nofollow");
+    upsertCanonical(null);
+  }, [account, route]);
 
   const describeError = useCallback((error: unknown, fallback: string) => {
     if (subscriptionErrorCode(error)) return subscriptionErrorMessage(error);
@@ -1757,7 +1895,10 @@ export default function App() {
   };
 
   if (route.kind === "public") {
-    return route.page === "privacy" ? <PrivacyPage /> : <TermsPage />;
+    if (route.page === "privacy") return <PrivacyPage />;
+    if (route.page === "terms") return <TermsPage />;
+    if (route.page === "features") return <FeaturesPage />;
+    return <PricingPage />;
   }
 
   if (!account) {

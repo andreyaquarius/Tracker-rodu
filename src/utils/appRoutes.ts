@@ -26,7 +26,7 @@ const segmentPages = new Map(
 
 export type AppRoute =
   | { kind: "root" }
-  | { kind: "public"; page: "privacy" | "terms" }
+  | { kind: "public"; page: "privacy" | "terms" | "features" | "pricing" }
   | { kind: "projects" }
   | { kind: "settings"; page: "settings" | "subscription" }
   | {
@@ -126,6 +126,12 @@ export function parseAppRoute(
   }
   if (parts.length === 1 && parts[0] === "terms") {
     return { kind: "public", page: "terms" };
+  }
+  if (parts.length === 1 && parts[0] === "features") {
+    return { kind: "public", page: "features" };
+  }
+  if (parts.length === 1 && parts[0] === "pricing") {
+    return { kind: "public", page: "pricing" };
   }
   if (parts.length === 1 && parts[0] === "projects") return { kind: "projects" };
   if (parts.length === 1 && parts[0] === "settings") {

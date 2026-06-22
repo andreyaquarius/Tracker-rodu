@@ -2,14 +2,75 @@
 <html lang="uk">
   <head>
     <meta charset="UTF-8" />
-    <meta name="robots" content="noindex" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
-    <title>Трекер Роду</title>
+    <title>Сторінку не знайдено — Трекер Роду</title>
+    <style>
+      :root {
+        color: #20312d;
+        background: #f4f2ea;
+        font-family: Arial, system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        display: grid;
+        min-width: 320px;
+        min-height: 100vh;
+        margin: 0;
+        place-items: center;
+        padding: 28px;
+        background: #f4f2ea;
+      }
+      main {
+        width: min(100%, 620px);
+        padding: clamp(24px, 6vw, 44px);
+        background: #fffdf8;
+        border: 1px solid #deddd5;
+        border-radius: 8px;
+        box-shadow: 0 16px 38px rgba(25, 53, 46, 0.08);
+      }
+      img { width: 58px; height: 58px; object-fit: contain; }
+      h1 {
+        margin: 20px 0 10px;
+        color: #102f2a;
+        font-family: Georgia, serif;
+        font-size: clamp(2rem, 5vw, 3rem);
+        line-height: 1.05;
+      }
+      p {
+        margin: 0 0 22px;
+        color: #4f5f5a;
+        line-height: 1.7;
+      }
+      a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 42px;
+        padding: 10px 16px;
+        color: #fff;
+        background: #173f38;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 800;
+        text-decoration: none;
+      }
+    </style>
     <script src="/spa-redirect.js"></script>
   </head>
-  <body></body>
+  <body>
+    <main>
+      <img src="/tracker-rodu-logo.png" alt="" />
+      <h1>Сторінку не знайдено</h1>
+      <p>
+        Такої публічної сторінки немає або посилання застаріло. Поверніться на
+        головну сторінку Трекера Роду.
+      </p>
+      <a href="/">Повернутися на головну</a>
+    </main>
+  </body>
 </html>
