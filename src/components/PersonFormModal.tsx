@@ -10,7 +10,11 @@ import type {
   Research,
 } from "../types";
 import { createId } from "../utils/id";
-import { nowIso } from "../utils/dateHelpers";
+import {
+  formatFlexibleDateForDisplay,
+  normalizeFlexibleDateInput,
+  nowIso,
+} from "../utils/dateHelpers";
 import { Modal } from "./Modal";
 import { CustomFieldsEditor } from "./CustomFields";
 import { normalizeCustomFieldValues } from "../utils/customFields";
@@ -28,6 +32,44 @@ const statuses: PersonStatus[] = [
 ];
 
 type PersonDraft = Omit<Person, "id" | "createdAt" | "updatedAt">;
+type PersonDateFieldKey = "birthDate" | "marriageDate" | "deathDate";
+
+const personDateFields: Array<{ key: PersonDateFieldKey; label: string }> = [
+  { key: "birthDate", label: "Дата народження" },
+  { key: "marriageDate", label: "Дата шлюбу" },
+  { key: "deathDate", label: "Дата смерті" },
+];
+
+function PersonDateInput({
+  label,
+  value,
+  error,
+  onChange,
+  onBlur,
+}: {
+  label: string;
+  value: string;
+  error: string;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="дд.мм.рррр"
+        value={value}
+        aria-invalid={error ? "true" : undefined}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+      />
+      {error ? <small className="form-field-error">{error}</small> : null}
+    </label>
+  );
+}
 
 function emptyPerson(initialFullName = "", researchId = ""): PersonDraft {
   return {
@@ -129,9 +171,60 @@ export function PersonFormModal({
         }
       : emptyPerson(initialFullName, initialResearchId),
   );
+  const [dateDrafts, setDateDrafts] = useState<Record<PersonDateFieldKey, string>>(() => ({
+    birthDate: formatFlexibleDateForDisplay(person?.birthDate ?? ""),
+    marriageDate: formatFlexibleDateForDisplay(person?.marriageDate ?? ""),
+    deathDate: formatFlexibleDateForDisplay(person?.deathDate ?? ""),
+  }));
+  const [dateErrors, setDateErrors] = useState<Record<PersonDateFieldKey, string>>({
+    birthDate: "",
+    marriageDate: "",
+    deathDate: "",
+  });
 
   const update = <K extends keyof PersonDraft>(key: K, value: PersonDraft[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateDateDraft = (key: PersonDateFieldKey, value: string) => {
+    setDateDrafts((current) => ({ ...current, [key]: value }));
+    setDateErrors((current) => ({ ...current, [key]: "" }));
+    const parsed = normalizeFlexibleDateInput(value);
+    if (!parsed.error) update(key, parsed.value);
+  };
+
+  const commitDateDraft = (key: PersonDateFieldKey) => {
+    const parsed = normalizeFlexibleDateInput(dateDrafts[key]);
+    if (parsed.error) {
+      setDateErrors((current) => ({ ...current, [key]: parsed.error ?? "" }));
+      return false;
+    }
+    update(key, parsed.value);
+    setDateDrafts((current) => ({ ...current, [key]: formatFlexibleDateForDisplay(parsed.value) }));
+    setDateErrors((current) => ({ ...current, [key]: "" }));
+    return true;
+  };
+
+  const normalizeDateDrafts = () => {
+    const nextDates = {} as Record<PersonDateFieldKey, string>;
+    const nextDrafts = { ...dateDrafts };
+    const nextErrors: Record<PersonDateFieldKey, string> = {
+      birthDate: "",
+      marriageDate: "",
+      deathDate: "",
+    };
+    for (const field of personDateFields) {
+      const parsed = normalizeFlexibleDateInput(dateDrafts[field.key]);
+      if (parsed.error) {
+        nextErrors[field.key] = parsed.error;
+      } else {
+        nextDates[field.key] = parsed.value;
+        nextDrafts[field.key] = formatFlexibleDateForDisplay(parsed.value);
+      }
+    }
+    setDateErrors(nextErrors);
+    setDateDrafts(nextDrafts);
+    return Object.values(nextErrors).some(Boolean) ? null : nextDates;
   };
 
   const composedFullName = [form.surname, form.givenName, form.patronymic]
@@ -170,10 +263,16 @@ export function PersonFormModal({
       window.alert("Оберіть дослідження для цієї особи.");
       return;
     }
+    const normalizedDates = normalizeDateDrafts();
+    if (!normalizedDates) {
+      window.alert("Перевірте формат дат. Можна вводити через крапку, косу лінію або як рррр-мм-дд.");
+      return;
+    }
     const timestamp = nowIso();
     const personId = person?.id ?? createId();
+    const normalizedForm = { ...form, ...normalizedDates };
     const finalPerson = {
-      ...form,
+      ...normalizedForm,
       fullName: displayedFullName,
       id: personId,
       createdAt: person?.createdAt ?? timestamp,
@@ -243,10 +342,13 @@ export function PersonFormModal({
             <span>Варіанти прізвища</span>
             <input value={form.surnameVariants} onChange={(event) => update("surnameVariants", event.target.value)} />
           </label>
-          <label>
-            <span>Дата народження</span>
-            <input type="date" value={form.birthDate} onChange={(event) => update("birthDate", event.target.value)} />
-          </label>
+          <PersonDateInput
+            label="Дата народження"
+            value={dateDrafts.birthDate}
+            error={dateErrors.birthDate}
+            onChange={(value) => updateDateDraft("birthDate", value)}
+            onBlur={() => commitDateDraft("birthDate")}
+          />
           <label>
             <span>Місце народження</span>
             <input value={form.birthPlace} onChange={(event) => update("birthPlace", event.target.value)} />
@@ -259,18 +361,24 @@ export function PersonFormModal({
             <span>Рік народження до</span>
             <input type="number" value={form.birthYearTo} onChange={(event) => update("birthYearTo", event.target.value)} />
           </label>
-          <label>
-            <span>Дата шлюбу</span>
-            <input type="date" value={form.marriageDate} onChange={(event) => update("marriageDate", event.target.value)} />
-          </label>
+          <PersonDateInput
+            label="Дата шлюбу"
+            value={dateDrafts.marriageDate}
+            error={dateErrors.marriageDate}
+            onChange={(value) => updateDateDraft("marriageDate", value)}
+            onBlur={() => commitDateDraft("marriageDate")}
+          />
           <label>
             <span>Місце шлюбу</span>
             <input value={form.marriagePlace} onChange={(event) => update("marriagePlace", event.target.value)} />
           </label>
-          <label>
-            <span>Дата смерті</span>
-            <input type="date" value={form.deathDate} onChange={(event) => update("deathDate", event.target.value)} />
-          </label>
+          <PersonDateInput
+            label="Дата смерті"
+            value={dateDrafts.deathDate}
+            error={dateErrors.deathDate}
+            onChange={(value) => updateDateDraft("deathDate", value)}
+            onBlur={() => commitDateDraft("deathDate")}
+          />
           <label>
             <span>Місце смерті</span>
             <input value={form.deathPlace} onChange={(event) => update("deathPlace", event.target.value)} />
