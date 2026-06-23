@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import L from "leaflet";
 import type { GeoPoint } from "../types";
-import { searchPlaces, type PlaceSuggestion } from "../services/placeSearch";
+import { reversePlace, searchPlaces, type PlaceSuggestion } from "../services/placeSearch";
 import { Modal } from "./Modal";
 import { DEFAULT_GEO_MARKER_COLOR, GEO_MARKER_COLORS, geoMarkerColor } from "../utils/geo";
 
@@ -195,7 +195,10 @@ function GeoMapPicker({
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstance = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
+  const lookupRef = useRef(0);
   const [draft, setDraft] = useState<GeoPoint | null>(value);
+  const [resolvingPlace, setResolvingPlace] = useState(false);
+  const [lookupError, setLookupError] = useState("");
 
   useEffect(() => {
     if (!mapRef.current || mapInstance.current) return;
@@ -222,9 +225,14 @@ function GeoMapPicker({
       setMarker([value.latitude, value.longitude]);
     }
     map.on("click", (event) => {
+      const lookupId = lookupRef.current + 1;
+      lookupRef.current = lookupId;
       setMarker(event.latlng);
+      setResolvingPlace(true);
+      setLookupError("");
+      const fallbackName = placeName || value?.displayName || "Позначка на карті";
       setDraft({
-        displayName: placeName || value?.displayName || "Позначка на карті",
+        displayName: fallbackName,
         latitude: event.latlng.lat,
         longitude: event.latlng.lng,
         source: "map_click",
@@ -233,6 +241,27 @@ function GeoMapPicker({
         externalId: null,
         markerColor,
       });
+      reversePlace(event.latlng.lat, event.latlng.lng)
+        .then((suggestion) => {
+          if (lookupRef.current !== lookupId) return;
+          if (!suggestion) return;
+          setDraft({
+            ...suggestion.geo,
+            displayName: suggestion.geo.displayName || suggestion.label || fallbackName,
+            latitude: event.latlng.lat,
+            longitude: event.latlng.lng,
+            source: "map_click",
+            precision: suggestion.geo.precision || "approximate",
+            markerColor,
+          });
+        })
+        .catch(() => {
+          if (lookupRef.current !== lookupId) return;
+          setLookupError("Не вдалося автоматично визначити назву місця. Можна зберегти позначку і вписати назву вручну.");
+        })
+        .finally(() => {
+          if (lookupRef.current === lookupId) setResolvingPlace(false);
+        });
     });
     window.setTimeout(() => map.invalidateSize(), 50);
     return () => {
@@ -247,12 +276,14 @@ function GeoMapPicker({
       <div className="geo-picker">
         <p>Клацніть на карті в потрібному місці, а потім збережіть позначку.</p>
         <div className="geo-picker-map" ref={mapRef} />
+        {resolvingPlace ? <p className="geo-hint">Визначаємо назву місця...</p> : null}
+        {lookupError ? <p className="geo-hint geo-error">{lookupError}</p> : null}
         <div className="modal-actions">
           <button type="button" className="button button-ghost" onClick={onClose}>Скасувати</button>
           <button
             type="button"
             className="button button-primary"
-            disabled={!hasCoordinates(draft)}
+            disabled={!hasCoordinates(draft) || resolvingPlace}
             onClick={() => draft && onSave(draft)}
           >
             Зберегти позначку

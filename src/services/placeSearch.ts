@@ -22,6 +22,7 @@ type NominatimResult = {
 
 type PlaceSearchResponse = {
   suggestions?: PlaceSuggestion[];
+  place?: PlaceSuggestion;
   error?: string;
 };
 
@@ -29,6 +30,7 @@ function placeDetails(address: Record<string, string> | undefined): string {
   if (!address) return "";
   return [
     address.village,
+    address.hamlet,
     address.town,
     address.city,
     address.municipality,
@@ -36,6 +38,19 @@ function placeDetails(address: Record<string, string> | undefined): string {
     address.state,
     address.country,
   ].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(", ");
+}
+
+function placeLabel(address: Record<string, string> | undefined, fallback: string): string {
+  if (!address) return fallback;
+  return [
+    address.village,
+    address.hamlet,
+    address.town,
+    address.city,
+    address.municipality,
+    address.county,
+    address.state,
+  ].find((value) => typeof value === "string" && value.trim()) ?? fallback;
 }
 
 function normalizeSuggestion(value: unknown): PlaceSuggestion | null {
@@ -56,7 +71,9 @@ function normalizeSuggestion(value: unknown): PlaceSuggestion | null {
       latitude,
       longitude,
       source: geoRecord.source === "map_click" ? "map_click" : "search",
-      precision: geoRecord.precision === "exact" ? "exact" : "settlement",
+      precision: ["exact", "approximate", "settlement", "unknown"].includes(String(geoRecord.precision))
+        ? String(geoRecord.precision) as GeoPoint["precision"]
+        : "settlement",
       provider: String(geoRecord.provider ?? "OpenStreetMap Nominatim"),
       externalId: geoRecord.externalId == null ? null : String(geoRecord.externalId),
       markerColor: typeof geoRecord.markerColor === "string" ? geoRecord.markerColor : undefined,
@@ -89,6 +106,24 @@ function mapNominatimResults(data: NominatimResult[], normalized: string): Place
     .filter((item): item is PlaceSuggestion => Boolean(item));
 }
 
+function mapNominatimReverseResult(item: NominatimResult, latitude: number, longitude: number): PlaceSuggestion {
+  const label = placeLabel(item.address, item.name || item.display_name || "Позначка на карті");
+  return {
+    id: String(item.place_id ?? item.osm_id ?? `${latitude}:${longitude}`),
+    label,
+    details: placeDetails(item.address) || item.display_name || "",
+    geo: {
+      displayName: label,
+      latitude,
+      longitude,
+      source: "map_click",
+      precision: "approximate",
+      provider: "OpenStreetMap Nominatim",
+      externalId: String(item.place_id ?? item.osm_id ?? ""),
+    },
+  };
+}
+
 async function searchPlacesViaServer(normalized: string): Promise<PlaceSuggestion[]> {
   const { data, error } = await getSupabaseClient().functions.invoke("search-places", {
     body: { query: normalized },
@@ -114,6 +149,29 @@ async function searchPlacesViaServer(normalized: string): Promise<PlaceSuggestio
     .filter((item): item is PlaceSuggestion => Boolean(item));
 }
 
+async function reversePlaceViaServer(latitude: number, longitude: number): Promise<PlaceSuggestion | null> {
+  const { data, error } = await getSupabaseClient().functions.invoke("search-places", {
+    body: { latitude, longitude },
+  });
+  if (error) {
+    const context = "context" in error ? error.context : null;
+    if (context instanceof Response) {
+      try {
+        const payload = await context.clone().json() as PlaceSearchResponse;
+        if (payload.error) throw new Error(payload.error);
+      } catch (contextError) {
+        if (contextError instanceof Error && contextError.message !== "Unexpected end of JSON input") {
+          throw contextError;
+        }
+      }
+    }
+    throw error;
+  }
+  const payload = data as PlaceSearchResponse | null;
+  if (payload?.error) throw new Error(payload.error);
+  return normalizeSuggestion(payload?.place) ?? null;
+}
+
 async function searchPlacesDirectly(normalized: string): Promise<PlaceSuggestion[]> {
   const params = new URLSearchParams({
     q: normalized,
@@ -130,6 +188,25 @@ async function searchPlacesDirectly(normalized: string): Promise<PlaceSuggestion
   }
   const data = await response.json() as NominatimResult[];
   return mapNominatimResults(data, normalized);
+}
+
+async function reversePlaceDirectly(latitude: number, longitude: number): Promise<PlaceSuggestion | null> {
+  const params = new URLSearchParams({
+    lat: String(latitude),
+    lon: String(longitude),
+    format: "jsonv2",
+    addressdetails: "1",
+    zoom: "14",
+    "accept-language": "uk",
+  });
+  const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error("Не вдалося визначити назву місця.");
+  }
+  const item = await response.json() as NominatimResult;
+  return mapNominatimReverseResult(item, latitude, longitude);
 }
 
 export async function searchPlaces(query: string): Promise<PlaceSuggestion[]> {
@@ -153,5 +230,18 @@ export async function searchPlaces(query: string): Promise<PlaceSuggestion[]> {
           : "Не вдалося підключитися до пошуку місць. Спробуйте вибрати точку на карті вручну.",
       );
     }
+  }
+}
+
+export async function reversePlace(latitude: number, longitude: number): Promise<PlaceSuggestion | null> {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  try {
+    if (isSupabaseConfigured) {
+      return await reversePlaceViaServer(latitude, longitude);
+    }
+    return await reversePlaceDirectly(latitude, longitude);
+  } catch (error) {
+    if (!isSupabaseConfigured) throw error;
+    return reversePlaceDirectly(latitude, longitude);
   }
 }

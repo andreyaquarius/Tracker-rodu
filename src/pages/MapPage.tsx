@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
+import Fuse, { type IFuseOptions } from "fuse.js";
 import type { AppDatabase, Finding, GeoPoint, Person, PersonEvent } from "../types";
 import type { PageKey } from "../components/Sidebar";
 import { geoMarkerColor, personEventLabel } from "../utils/geo";
@@ -15,6 +16,7 @@ interface TrackerMapMarker {
   title: string;
   subtitle: string;
   place: string;
+  settlement: string;
   researchId: string;
   personIds: string[];
   searchText: string;
@@ -22,6 +24,27 @@ interface TrackerMapMarker {
   relatedId: string;
   geo: GeoPoint & { latitude: number; longitude: number };
 }
+
+interface TrackerMapMarkerGroup {
+  key: string;
+  markers: TrackerMapMarker[];
+  geo: GeoPoint & { latitude: number; longitude: number };
+}
+
+const mapSearchOptions: IFuseOptions<TrackerMapMarker> = {
+  keys: [
+    { name: "title", weight: 0.3 },
+    { name: "subtitle", weight: 0.15 },
+    { name: "settlement", weight: 0.22 },
+    { name: "place", weight: 0.18 },
+    { name: "searchText", weight: 0.15 },
+  ],
+  includeScore: true,
+  ignoreLocation: true,
+  isCaseSensitive: false,
+  minMatchCharLength: 2,
+  threshold: 0.34,
+};
 
 function hasCoordinates(value: GeoPoint | null | undefined): value is GeoPoint & { latitude: number; longitude: number } {
   return Boolean(value && Number.isFinite(value.latitude) && Number.isFinite(value.longitude));
@@ -34,12 +57,12 @@ function markerColor(marker: TrackerMapMarker): string {
   );
 }
 
-function markerIcon(color: string): L.DivIcon {
+function markerIcon(color: string, count = 1): L.DivIcon {
   const safeColor = geoMarkerColor(color);
   return L.divIcon({
     className: "tracker-map-marker-shell",
-    html: `<span class="tracker-map-marker" style="--marker-color:${safeColor}"></span>`,
-    iconSize: [22, 22],
+    html: `<span class="tracker-map-marker" style="--marker-color:${safeColor}"></span>${count > 1 ? `<span class="tracker-map-marker-count">${count}</span>` : ""}`,
+    iconSize: count > 1 ? [34, 30] : [22, 22],
     iconAnchor: [11, 22],
   });
 }
@@ -69,27 +92,63 @@ function personSearchText(person: Person): string {
   ].join(" ").toLocaleLowerCase("uk");
 }
 
+function normalizeMapText(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("uk");
+}
+
+function settlementName(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized || normalized === "Позначка на карті") return "";
+  return normalized.split(",")[0]?.trim() ?? "";
+}
+
+function markerGroupKey(marker: TrackerMapMarker): string {
+  return [
+    marker.geo.latitude.toFixed(5),
+    marker.geo.longitude.toFixed(5),
+  ].join(":");
+}
+
+function groupMarkers(markers: TrackerMapMarker[]): TrackerMapMarkerGroup[] {
+  const groups = new Map<string, TrackerMapMarkerGroup>();
+  for (const marker of markers) {
+    const key = markerGroupKey(marker);
+    const group = groups.get(key);
+    if (group) {
+      group.markers.push(marker);
+    } else {
+      groups.set(key, { key, markers: [marker], geo: marker.geo });
+    }
+  }
+  return Array.from(groups.values());
+}
+
 function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
   const markers: TrackerMapMarker[] = [];
   const peopleIndex = new Map(db.persons.map((person) => [person.id, personSearchText(person)]));
+  const researchIndex = new Map(db.researches.map((research) => [research.id, research.title]));
   for (const person of db.persons) {
     for (const event of person.events ?? []) {
       if (!hasCoordinates(event.geo)) continue;
       const title = personName(person);
       const subtitle = personEventTitle(event);
       const place = event.placeName || event.geo.displayName || "";
+      const settlement = settlementName(place);
       markers.push({
         id: `person:${person.id}:${event.id}`,
         kind: "person-event",
         title,
         subtitle,
         place,
+        settlement,
         researchId: person.researchId,
         personIds: [person.id],
         searchText: [
           title,
           subtitle,
           place,
+          settlement,
+          researchIndex.get(person.researchId),
           event.geo.displayName,
           event.notes,
           peopleIndex.get(person.id),
@@ -105,18 +164,22 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
     const title = findingTitle(finding);
     const subtitle = [finding.findingType, finding.eventDate].filter(Boolean).join(" · ") || "Знахідка";
     const place = finding.place || finding.geo.displayName || "";
+    const settlement = settlementName(place);
     markers.push({
       id: `finding:${finding.id}`,
       kind: "finding",
       title,
       subtitle,
       place,
+      settlement,
       researchId: finding.researchId,
       personIds: finding.personIds,
       searchText: [
         title,
         subtitle,
         place,
+        settlement,
+        researchIndex.get(finding.researchId),
         finding.people,
         finding.personsText,
         finding.participants.map((participant) => `${participant.name} ${participant.role} ${participant.notes}`).join(" "),
@@ -140,6 +203,25 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
   return markers;
 }
 
+function createMapSearch(markers: TrackerMapMarker[]) {
+  const index = Fuse.createIndex(
+    ["title", "subtitle", "settlement", "place", "searchText"],
+    markers,
+  );
+  const fuse = new Fuse(markers, mapSearchOptions, index);
+  return (query: string) => {
+    const normalized = normalizeMapText(query);
+    if (!normalized) return markers;
+    const matchedIds = new Set(
+      markers
+        .filter((marker) => marker.searchText.includes(normalized))
+        .map((marker) => marker.id),
+    );
+    for (const result of fuse.search(query)) matchedIds.add(result.item.id);
+    return markers.filter((marker) => matchedIds.has(marker.id));
+  };
+}
+
 function personEventTitle(event: PersonEvent): string {
   return [personEventLabel(event.type), event.date].filter(Boolean).join(" · ");
 }
@@ -153,18 +235,35 @@ export function MapPage({
 }) {
   const [kind, setKind] = useState<"all" | MapMarkerKind>("all");
   const [researchId, setResearchId] = useState("");
+  const [settlement, setSettlement] = useState("");
   const [personId, setPersonId] = useState("");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
-  const markers = useMemo(() => buildMarkers(db), [db.persons, db.findings]);
-  const normalizedQuery = query.trim().toLocaleLowerCase("uk");
-  const filtered = useMemo(() => markers.filter((marker) => {
+  const markers = useMemo(() => buildMarkers(db), [db.persons, db.findings, db.researches]);
+  const searchMarkers = useMemo(() => createMapSearch(markers), [markers]);
+  const placeOptions = useMemo(() => Array.from(new Set(
+    markers.map((marker) => marker.settlement).filter(Boolean),
+  )).sort((first, second) => first.localeCompare(second, "uk")), [markers]);
+  const searched = useMemo(() => searchMarkers(query), [searchMarkers, query]);
+  const filtered = useMemo(() => searched.filter((marker) => {
     const matchesResearch = !researchId || marker.researchId === researchId;
+    const matchesSettlement = !settlement || marker.settlement === settlement;
     const matchesKind = kind === "all" || marker.kind === kind;
     const matchesPerson = !personId || marker.personIds.includes(personId);
-    return matchesResearch && matchesKind && matchesPerson && (!normalizedQuery || marker.searchText.includes(normalizedQuery));
-  }), [markers, researchId, kind, personId, normalizedQuery]);
+    return matchesResearch && matchesSettlement && matchesKind && matchesPerson;
+  }), [searched, researchId, settlement, kind, personId]);
   const selectedMarker = filtered.find((marker) => marker.id === selectedId) ?? filtered[0];
+  const selectedGroupKey = selectedMarker ? markerGroupKey(selectedMarker) : "";
+
+  useEffect(() => {
+    if (settlement && !placeOptions.includes(settlement)) setSettlement("");
+  }, [placeOptions, settlement]);
+
+  useEffect(() => {
+    if (selectedId && !filtered.some((marker) => marker.id === selectedId)) {
+      setSelectedId("");
+    }
+  }, [filtered, selectedId]);
 
   return (
     <div className="map-page">
@@ -187,6 +286,15 @@ export function MapPage({
               <option value="">Усі дослідження</option>
               {db.researches.map((research) => (
                 <option key={research.id} value={research.id}>{research.title}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Населений пункт</span>
+            <select value={settlement} onChange={(event) => setSettlement(event.target.value)}>
+              <option value="">Усі населені пункти</option>
+              {placeOptions.map((place) => (
+                <option key={place} value={place}>{place}</option>
               ))}
             </select>
           </label>
@@ -217,7 +325,7 @@ export function MapPage({
               <button
                 type="button"
                 key={marker.id}
-                className={marker.id === selectedMarker?.id ? "active" : ""}
+                className={markerGroupKey(marker) === selectedGroupKey ? "active" : ""}
                 onClick={() => setSelectedId(marker.id)}
               >
                 <span
@@ -367,18 +475,16 @@ function TrackerMap({
     if (!map || !layer) return;
     layer.clearLayers();
     const bounds: L.LatLngExpression[] = [];
-    markers.forEach((marker) => {
-      const latlng: L.LatLngExpression = [marker.geo.latitude, marker.geo.longitude];
+    const groups = groupMarkers(markers);
+    groups.forEach((group) => {
+      const latlng: L.LatLngExpression = [group.geo.latitude, group.geo.longitude];
       bounds.push(latlng);
+      const primary = group.markers[0];
       const leafletMarker = L.marker(latlng, {
-        icon: markerIcon(markerColor(marker)),
+        icon: markerIcon(markerColor(primary), group.markers.length),
       }).addTo(layer);
-      leafletMarker.bindPopup(`
-        <strong>${escapeHtml(marker.title)}</strong>
-        <span>${escapeHtml(marker.subtitle)}</span>
-        ${marker.place ? `<em>${escapeHtml(marker.place)}</em>` : ""}
-      `);
-      leafletMarker.on("click", () => onSelect(marker.id));
+      leafletMarker.bindPopup(markerGroupPopupHtml(group));
+      leafletMarker.on("click", () => onSelect(primary.id));
     });
     if (bounds.length > 1) {
       map.fitBounds(L.latLngBounds(bounds), { padding: [36, 36], maxZoom: 12 });
@@ -422,6 +528,29 @@ function TrackerMap({
       ) : null}
     </div>
   );
+}
+
+function markerGroupPopupHtml(group: TrackerMapMarkerGroup): string {
+  const records = group.markers
+    .slice(0, 8)
+    .map((marker) => `
+      <div class="map-popup-record">
+        <strong>${escapeHtml(marker.title)}</strong>
+        <span>${escapeHtml(marker.subtitle)}</span>
+        ${marker.place ? `<em>${escapeHtml(marker.place)}</em>` : ""}
+      </div>
+    `)
+    .join("");
+  const more = group.markers.length > 8
+    ? `<p class="map-popup-more">Ще ${group.markers.length - 8} записів у цьому місці.</p>`
+    : "";
+  return `
+    <div class="map-popup-group">
+      <strong>${group.markers.length > 1 ? `${group.markers.length} записів у цьому місці` : "1 запис у цьому місці"}</strong>
+      <div class="map-popup-records">${records}</div>
+      ${more}
+    </div>
+  `;
 }
 
 function escapeHtml(value: string): string {

@@ -37,6 +37,15 @@ type NominatimResult = {
   address?: Record<string, string>;
 };
 
+function isValidCoordinate(latitude: number, longitude: number): boolean {
+  return Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180;
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -55,6 +64,19 @@ function placeDetails(address: Record<string, string> | undefined): string {
     address.state,
     address.country,
   ].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(", ");
+}
+
+function placeLabel(address: Record<string, string> | undefined, fallback: string): string {
+  if (!address) return fallback;
+  return [
+    address.village,
+    address.hamlet,
+    address.town,
+    address.city,
+    address.municipality,
+    address.county,
+    address.state,
+  ].find((value) => typeof value === "string" && value.trim()) ?? fallback;
 }
 
 function mapNominatimResults(data: NominatimResult[], normalized: string) {
@@ -82,6 +104,24 @@ function mapNominatimResults(data: NominatimResult[], normalized: string) {
     .filter(Boolean);
 }
 
+function mapNominatimReverseResult(item: NominatimResult, latitude: number, longitude: number) {
+  const label = placeLabel(item.address, item.name || item.display_name || "Позначка на карті");
+  return {
+    id: String(item.place_id ?? item.osm_id ?? `${latitude}:${longitude}`),
+    label,
+    details: placeDetails(item.address) || item.display_name || "",
+    geo: {
+      displayName: label,
+      latitude,
+      longitude,
+      source: "map_click",
+      precision: "approximate",
+      provider: "OpenStreetMap Nominatim",
+      externalId: String(item.place_id ?? item.osm_id ?? ""),
+    },
+  };
+}
+
 async function requireAuthenticatedUser(request: Request) {
   const authorization = request.headers.get("Authorization");
   if (!authorization) throw new Error("Потрібна авторизація.");
@@ -103,7 +143,46 @@ Deno.serve(async (request) => {
 
   try {
     await requireAuthenticatedUser(request);
-    const { query } = await request.json() as { query?: unknown };
+    const { query, latitude, longitude } = await request.json() as {
+      query?: unknown;
+      latitude?: unknown;
+      longitude?: unknown;
+    };
+    const reverseLatitude = Number(latitude);
+    const reverseLongitude = Number(longitude);
+    const appUrl = Deno.env.get("APP_URL")?.trim() || "https://trekerrodu.com.ua";
+
+    if (isValidCoordinate(reverseLatitude, reverseLongitude)) {
+      const params = new URLSearchParams({
+        lat: String(reverseLatitude),
+        lon: String(reverseLongitude),
+        format: "jsonv2",
+        addressdetails: "1",
+        zoom: "14",
+        "accept-language": "uk",
+      });
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+            "Accept-Language": "uk",
+            "User-Agent": `Trekerrodu/1.0 (${appUrl})`,
+          },
+        });
+        if (!response.ok) {
+          return json({ error: "Сервіс пошуку місць тимчасово недоступний." }, 502);
+        }
+        const data = await response.json() as NominatimResult;
+        return json({ place: mapNominatimReverseResult(data, reverseLatitude, reverseLongitude) });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
     const normalized = typeof query === "string" ? query.trim() : "";
     if (normalized.length < 3) return json({ suggestions: [] });
     if (normalized.length > 120) return json({ error: "Назва місця занадто довга." }, 400);
@@ -119,7 +198,6 @@ Deno.serve(async (request) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
     try {
-      const appUrl = Deno.env.get("APP_URL")?.trim() || "https://trekerrodu.com.ua";
       const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
         signal: controller.signal,
         headers: {
