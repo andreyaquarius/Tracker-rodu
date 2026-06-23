@@ -202,6 +202,11 @@ export function Sidebar({
     });
   }, [activeAncestors.join("|")]);
 
+  useEffect(() => {
+    document.body.classList.toggle("sidebar-mobile-open", open);
+    return () => document.body.classList.remove("sidebar-mobile-open");
+  }, [open]);
+
   const navigate = (nextPage: PageKey) => {
     onNavigate(nextPage);
     onClose();
