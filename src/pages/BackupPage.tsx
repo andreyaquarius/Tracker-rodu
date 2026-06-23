@@ -10,6 +10,7 @@ import {
 } from "../services/projectBackups";
 import { formatDateTime } from "../utils/dateHelpers";
 import { exportProjectToExcel } from "../utils/excelExport";
+import { readProjectExcelBackup } from "../utils/excelBackupImport";
 import { cloneDatabaseForProjectImport } from "../utils/database";
 
 interface Props {
@@ -43,6 +44,7 @@ export function BackupPage({
     percent: number;
   } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const excelImportInputRef = useRef<HTMLInputElement>(null);
   const isOwner = workspace?.role === "owner";
 
   const requireOwner = (): SupabaseWorkspace => {
@@ -212,6 +214,50 @@ export function BackupPage({
       .finally(() => setRestoreProgress(null));
   };
 
+  const importExcelBackup = (file: File) => {
+    if (!window.confirm(
+      `Відновити проєкт із Excel-файла «${file.name}»? Поточні дані буде замінено, а перед цим застосунок створить страхувальну копію.`,
+    )) return;
+
+    setRestoreProgress({
+      title: "Імпорт Excel-копії",
+      message: "Читаємо та перевіряємо Excel-файл…",
+      percent: 2,
+    });
+    void run(async () => {
+      const activeWorkspace = requireOwner();
+      const imported = cloneDatabaseForProjectImport(
+        await readProjectExcelBackup(file),
+      );
+      setRestoreProgress({
+        title: "Імпорт Excel-копії",
+        message: "Створюємо страховочну копію поточного проєкту…",
+        percent: 7,
+      });
+      await createProjectBackup(activeWorkspace.projectId, db, "manual");
+      await onReplace(imported, (message, percent) =>
+        setRestoreProgress({
+          title: "Імпорт Excel-копії",
+          message,
+          percent,
+        }),
+      );
+      onActivity?.(
+        activeWorkspace.projectId,
+        `Відновлено проєкт із Excel-копії «${file.name}».`,
+        "backup_restored",
+      );
+      await refreshBackups();
+      setRestoreProgress({
+        title: "Імпорт завершено",
+        message: "Excel-копію успішно додано до проєкту.",
+        percent: 100,
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+    }, "Проєкт відновлено з Excel-копії.")
+      .finally(() => setRestoreProgress(null));
+  };
+
   return (
     <>
       {restoreProgress ? (
@@ -250,7 +296,7 @@ export function BackupPage({
           <h1>Резервні копії проєкту</h1>
           <p>
             Робочі дані та резервні копії зберігаються у приватному захищеному сховищі.
-            Файл JSON можна завантажити як додаткову копію.
+            Файл JSON або Excel можна завантажити як додаткову копію.
           </p>
         </div>
       </div>
@@ -330,7 +376,7 @@ export function BackupPage({
           <h2>Експорт у Excel</h2>
           <p>
             Завантажте весь проєкт одним файлом XLSX. Кожен стандартний і власний
-            розділ буде розміщено на окремому аркуші.
+            розділ буде розміщено на окремому аркуші, а копію можна буде відновити.
           </p>
           <button
             className="button button-secondary"
@@ -338,6 +384,33 @@ export function BackupPage({
             onClick={() => exportProjectToExcel(db, workspace?.projectName ?? "Трекер Роду")}
           >
             Завантажити весь проєкт
+          </button>
+        </article>
+
+        <article className="panel backup-card">
+          <span className="card-icon">↑</span>
+          <h2>Імпорт з Excel</h2>
+          <p>
+            Відновіть проєкт із XLSX-файла, який раніше було створено через експорт
+            у цьому розділі.
+          </p>
+          <input
+            ref={excelImportInputRef}
+            className="visually-hidden"
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) importExcelBackup(file);
+            }}
+          />
+          <button
+            className="button button-secondary"
+            disabled={busy || !isOwner}
+            onClick={() => excelImportInputRef.current?.click()}
+          >
+            Вибрати файл Excel
           </button>
         </article>
       </section>

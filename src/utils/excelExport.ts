@@ -14,6 +14,10 @@ import type {
 } from "../types";
 import type { FieldConfig } from "../pages/entityConfigs";
 import { customRecordTitle, relatedRecordLabel } from "./customSections";
+import {
+  projectBackupRecords,
+  PROJECT_EXCEL_BACKUP_SHEET_NAME,
+} from "./excelBackupFormat";
 import { neutralizeSpreadsheetValue } from "./spreadsheetSafe";
 
 interface WorkbookColumn {
@@ -27,6 +31,7 @@ interface WorkbookSheet {
   name: string;
   columns: WorkbookColumn[];
   records: Array<Record<string, unknown>>;
+  hidden?: boolean;
 }
 
 interface HyperlinkCell {
@@ -359,6 +364,16 @@ export function exportProjectToExcel(db: AppDatabase, projectName: string): void
     });
   }
 
+  sheets.push({
+    name: PROJECT_EXCEL_BACKUP_SHEET_NAME,
+    hidden: true,
+    columns: [
+      { key: "key", label: "Ключ" },
+      { key: "value", label: "Значення", width: 42 },
+    ],
+    records: projectBackupRecords(db) as unknown as Array<Record<string, unknown>>,
+  });
+
   downloadWorkbook(exportFileName(projectName, "повний-проєкт"), sheets);
 }
 
@@ -647,7 +662,7 @@ function workbookXml(sheets: WorkbookSheet[]): string {
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <bookViews><workbookView/></bookViews>
   <sheets>${sheets.map((sheet, index) =>
-    `<sheet name="${escapeXml(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`
+    `<sheet name="${escapeXml(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"${sheet.hidden ? ' state="hidden"' : ""}/>`
   ).join("")}</sheets>
 </workbook>`);
 }
