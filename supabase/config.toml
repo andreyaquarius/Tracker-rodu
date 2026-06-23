@@ -23,3 +23,6 @@ verify_jwt = true
 
 [functions.send-project-invitation]
 verify_jwt = true
+
+[functions.search-places]
+verify_jwt = true

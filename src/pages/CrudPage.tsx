@@ -255,6 +255,13 @@ export function CrudPage({
     if (readOnly) return;
     const key = config.statusKey;
     if (!key) return;
+    if (config.collection === "archiveRequests" && key === "status" && status !== "чернетка") {
+      const record = entity as unknown as Record<string, unknown>;
+      if (!String(record.requestDate ?? "").trim()) {
+        window.alert("Заповніть дату запиту перед зміною статусу.");
+        return;
+      }
+    }
     onSave({
       ...(entity as unknown as Record<string, unknown>),
       [key]: status,
@@ -872,6 +879,14 @@ function EntityModal({
     normalizeCustomFieldValues((entity as unknown as { customFields?: unknown } | null)?.customFields),
   );
 
+  const fieldRequired = (field: FieldConfig) => {
+    if (config.collection === "archiveRequests" && field.key === "requestDate") {
+      const status = String(form.status ?? "чернетка").trim() || "чернетка";
+      return status !== "чернетка";
+    }
+    return Boolean(field.required || (field.type === "research" && researchRequired));
+  };
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const timestamp = nowIso();
@@ -891,6 +906,17 @@ function EntityModal({
       !String(form.researchId ?? "").trim()
     ) {
       window.alert("Оберіть дослідження для цього запису.");
+      return;
+    }
+    const missingRequiredField = config.fields.find((field) => {
+      if (!fieldRequired(field)) return false;
+      const value = form[field.key];
+      if (Array.isArray(value)) return value.length === 0;
+      if (typeof value === "boolean") return false;
+      return !String(value ?? "").trim();
+    });
+    if (missingRequiredField) {
+      window.alert(`Заповніть обов’язкове поле «${missingRequiredField.label}».`);
       return;
     }
     onSave({
@@ -922,6 +948,7 @@ function EntityModal({
               persons={persons}
               researchId={String(form.researchId ?? "")}
               researchRequired={researchRequired}
+              required={fieldRequired(field)}
               matrixYear={config.collection === "yearMatrix" ? String(form.year ?? "") : ""}
               matrixDocumentType={
                 config.collection === "yearMatrix" ? String(form.documentType ?? "") : ""
@@ -1021,6 +1048,7 @@ function FormField({
   persons,
   researchId,
   researchRequired,
+  required,
   matrixYear,
   matrixDocumentType,
   findingType,
@@ -1035,6 +1063,7 @@ function FormField({
   persons: Person[];
   researchId: string;
   researchRequired: boolean;
+  required: boolean;
   matrixYear: string;
   matrixDocumentType: string;
   findingType: string;
@@ -1055,7 +1084,7 @@ function FormField({
       <ParticipantsEditor
         participants={participants}
         findingType={findingType}
-        required={field.required}
+        required={required}
         onChange={onChange}
       />
     );
@@ -1124,7 +1153,7 @@ function FormField({
   }
   const common = {
     value: Array.isArray(value) ? "" : String(value ?? ""),
-    required: field.required || (field.type === "research" && researchRequired),
+    required,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       onChange(event.target.value),
   };
