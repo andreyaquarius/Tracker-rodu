@@ -80,6 +80,7 @@ export function SubscriptionPage({
   const trialExpired = context?.subscription.status === "expired";
   const isPermanentAdmin = Boolean(context?.isAdmin);
   const canCancelSubscription = Boolean(context && !isPermanentAdmin && context.effectivePlanCode !== "free");
+  const isPaidPlan = Boolean(context && context.effectivePlanCode !== "free");
   const statusText = context?.subscription.status === "trialing"
     ? "Пробний доступ"
     : context?.subscription.status === "active"
@@ -167,7 +168,11 @@ export function SubscriptionPage({
           <div className="subscription-status-value compact">
             <strong>{statusText}</strong>
           </div>
-          {trialExpired ? <p>Пробний період завершився. Дані збережено, нові дії перевіряються за лімітами тарифу «Старт».</p> : null}
+          {isPaidPlan ? (
+            <p>{paidSubscriptionEndText(context?.subscription.currentPeriodEnd ?? null, context?.subscription.status)}</p>
+          ) : trialExpired ? (
+            <p>Пробний період завершився. Дані збережено, нові дії перевіряються за лімітами тарифу «Старт».</p>
+          ) : null}
         </section>
       )}
 
@@ -416,6 +421,23 @@ function dateInputValue(value: string | null): string {
   if (!value) return "";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
+function paidSubscriptionEndText(
+  currentPeriodEnd: string | null,
+  status: SubscriptionStatus | undefined,
+): string {
+  if (!currentPeriodEnd) {
+    return "Дата завершення платної підписки ще не встановлена.";
+  }
+  const date = formatDate(currentPeriodEnd);
+  if (status === "cancelled") {
+    return `Підписку скасовано. Доступ до платного тарифу діє до ${date}.`;
+  }
+  if (status === "expired") {
+    return `Платна підписка завершилася ${date}.`;
+  }
+  return `Платна підписка діє до ${date}.`;
 }
 
 function priceLabel(plan: SubscriptionPlan): ReactNode {
