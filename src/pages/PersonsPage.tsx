@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import Fuse, { type IFuseOptions } from "fuse.js";
+import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import type {
   AppDatabase,
   AppEntity,
@@ -773,12 +774,21 @@ function RelationFormModal({
   onSave: (relation: PersonRelation) => void;
 }) {
   const [relatedPersonId, setRelatedPersonId] = useState("");
+  const [selectionError, setSelectionError] = useState(false);
   const [relationType, setRelationType] = useState<PersonRelationType>("інше");
   const [status, setStatus] = useState<PersonRelationStatus>("гіпотеза");
   const [evidenceText, setEvidenceText] = useState("");
   const [notes, setNotes] = useState("");
+  const availablePersons = useMemo(
+    () => persons.filter((item) => item.id !== person.id),
+    [person.id, persons],
+  );
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (!relatedPersonId) {
+      setSelectionError(true);
+      return;
+    }
     const timestamp = nowIso();
     onSave({
       id: createId(),
@@ -796,19 +806,31 @@ function RelationFormModal({
     <Modal title="Додати зв’язок" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
-          <label className="field-wide">
-            <span>Пов’язана особа *</span>
-            <select required value={relatedPersonId} onChange={(event) => setRelatedPersonId(event.target.value)}>
-              <option value="">Виберіть особу</option>
-              {persons.filter((item) => item.id !== person.id).map((item) => (
-                <option key={item.id} value={item.id}>{personDisplayName(item)}</option>
-              ))}
-            </select>
-          </label>
+          <RelationPersonPicker
+            persons={availablePersons}
+            selectedId={relatedPersonId}
+            error={selectionError}
+            onChange={(id) => {
+              setRelatedPersonId(id);
+              setSelectionError(false);
+            }}
+          />
           <label>
             <span>Тип зв’язку</span>
             <select value={relationType} onChange={(event) => setRelationType(event.target.value as PersonRelationType)}>
-              {["батько", "мати", "чоловік", "дружина", "дитина", "брат", "сестра", "інше"].map((type) => <option key={type}>{type}</option>)}
+              {[
+                "батько",
+                "мати",
+                "чоловік",
+                "дружина",
+                "дитина",
+                "брат",
+                "сестра",
+                "хрещений",
+                "хрещена",
+                "свідок",
+                "інше",
+              ].map((type) => <option key={type}>{type}</option>)}
             </select>
           </label>
           <label>
@@ -832,6 +854,136 @@ function RelationFormModal({
         </div>
       </form>
     </Modal>
+  );
+}
+
+interface RelationPersonSearchDocument {
+  id: string;
+  person: Person;
+  title: string;
+  description: string;
+  searchText: string;
+}
+
+const relationPersonSearchOptions: IFuseOptions<RelationPersonSearchDocument> = {
+  keys: [
+    { name: "title", weight: 0.5 },
+    { name: "description", weight: 0.2 },
+    { name: "searchText", weight: 0.3 },
+  ],
+  ignoreLocation: true,
+  includeScore: true,
+  isCaseSensitive: false,
+  minMatchCharLength: 2,
+  threshold: 0.35,
+};
+
+function RelationPersonPicker({
+  persons,
+  selectedId,
+  error,
+  onChange,
+}: {
+  persons: Person[];
+  selectedId: string;
+  error: boolean;
+  onChange: (id: string) => void;
+}) {
+  const inputId = useId();
+  const [query, setQuery] = useState("");
+  const documents = useMemo<RelationPersonSearchDocument[]>(
+    () => persons.map((person) => {
+      const title = personDisplayName(person);
+      const places = personPlaces(person);
+      const years = lifeYears(person);
+      return {
+        id: person.id,
+        person,
+        title,
+        description: [years !== "—" ? years : "", places, person.status].filter(Boolean).join(" · "),
+        searchText: [
+          title,
+          person.surname,
+          person.givenName,
+          person.patronymic,
+          person.nameVariants,
+          person.surnameVariants,
+          places,
+          person.notes,
+        ].join(" "),
+      };
+    }),
+    [persons],
+  );
+  const fuse = useMemo(
+    () => new Fuse(
+      documents,
+      relationPersonSearchOptions,
+      Fuse.createIndex(["title", "description", "searchText"], documents),
+    ),
+    [documents],
+  );
+  const selected = documents.find((item) => item.id === selectedId);
+  const trimmedQuery = query.trim();
+  const results = useMemo(
+    () => trimmedQuery
+      ? fuse.search(trimmedQuery, { limit: 12 }).map((result) => result.item)
+      : documents.slice(0, 8),
+    [documents, fuse, trimmedQuery],
+  );
+
+  return (
+    <div className="field-wide relation-person-search">
+      <label htmlFor={inputId}>
+        <span>Пов’язана особа *</span>
+      </label>
+      <input
+        id={inputId}
+        value={query}
+        autoComplete="off"
+        placeholder="Введіть прізвище, ім’я або по батькові"
+        aria-invalid={error}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {selected ? (
+        <div className="relation-person-selected">
+          <span>
+            <strong>{selected.title}</strong>
+            {selected.description ? <small>{selected.description}</small> : null}
+          </span>
+          <button type="button" className="text-button" onClick={() => onChange("")}>
+            Змінити
+          </button>
+        </div>
+      ) : null}
+      {error ? (
+        <small className="form-field-error">Виберіть особу зі списку результатів.</small>
+      ) : null}
+      <div className="relation-person-results" role="listbox" aria-label="Знайдені особи">
+        {results.length ? (
+          results.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="option"
+              aria-selected={item.id === selectedId}
+              className={item.id === selectedId ? "active" : ""}
+              onClick={() => {
+                onChange(item.id);
+                setQuery(item.title);
+              }}
+            >
+              <span>
+                <strong>{item.title}</strong>
+                {item.description ? <small>{item.description}</small> : null}
+              </span>
+            </button>
+          ))
+        ) : (
+          <p>Осіб за цим запитом не знайдено.</p>
+        )}
+      </div>
+    </div>
   );
 }
 

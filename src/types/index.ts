@@ -364,6 +364,9 @@ export type PersonRelationType =
   | "дитина"
   | "брат"
   | "сестра"
+  | "хрещений"
+  | "хрещена"
+  | "свідок"
   | "інше";
 
 export type PersonRelationStatus =
