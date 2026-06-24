@@ -238,7 +238,7 @@ export function MapPage({
   const [settlement, setSettlement] = useState("");
   const [personId, setPersonId] = useState("");
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedGroupKey, setSelectedGroupKey] = useState("");
   const markers = useMemo(() => buildMarkers(db), [db.persons, db.findings, db.researches]);
   const searchMarkers = useMemo(() => createMapSearch(markers), [markers]);
   const placeOptions = useMemo(() => Array.from(new Set(
@@ -252,18 +252,21 @@ export function MapPage({
     const matchesPerson = !personId || marker.personIds.includes(personId);
     return matchesResearch && matchesSettlement && matchesKind && matchesPerson;
   }), [searched, researchId, settlement, kind, personId]);
-  const selectedMarker = filtered.find((marker) => marker.id === selectedId) ?? filtered[0];
-  const selectedGroupKey = selectedMarker ? markerGroupKey(selectedMarker) : "";
+  const filteredGroups = useMemo(() => groupMarkers(filtered), [filtered]);
+  const selectedGroup = selectedGroupKey
+    ? filteredGroups.find((group) => group.key === selectedGroupKey) ?? null
+    : null;
+  const visibleListMarkers = selectedGroup?.markers ?? filtered;
 
   useEffect(() => {
     if (settlement && !placeOptions.includes(settlement)) setSettlement("");
   }, [placeOptions, settlement]);
 
   useEffect(() => {
-    if (selectedId && !filtered.some((marker) => marker.id === selectedId)) {
-      setSelectedId("");
+    if (selectedGroupKey && !filteredGroups.some((group) => group.key === selectedGroupKey)) {
+      setSelectedGroupKey("");
     }
-  }, [filtered, selectedId]);
+  }, [filteredGroups, selectedGroupKey]);
 
   return (
     <div className="map-page">
@@ -316,17 +319,26 @@ export function MapPage({
         <div className="map-layout">
           <TrackerMap
             markers={filtered}
-            selectedId={selectedMarker?.id ?? ""}
-            onSelect={setSelectedId}
-            onOpenRelated={onOpenRelated}
+            selectedGroupKey={selectedGroupKey}
+            onSelectGroup={setSelectedGroupKey}
           />
           <div className="map-marker-list">
-            {filtered.length ? filtered.map((marker) => (
+            {selectedGroup ? (
+              <div className="map-marker-list-filter">
+                <strong>
+                  {selectedGroup.markers.length} {selectedGroup.markers.length === 1 ? "запис" : "записів"} у цьому місці
+                </strong>
+                <button type="button" className="text-button" onClick={() => setSelectedGroupKey("")}>
+                  Показати всі
+                </button>
+              </div>
+            ) : null}
+            {visibleListMarkers.length ? visibleListMarkers.map((marker) => (
               <button
                 type="button"
                 key={marker.id}
                 className={markerGroupKey(marker) === selectedGroupKey ? "active" : ""}
-                onClick={() => setSelectedId(marker.id)}
+                onClick={() => onOpenRelated?.(marker.relatedPage, marker.relatedId)}
               >
                 <span
                   className={`map-kind-dot ${marker.kind}`}
@@ -438,14 +450,12 @@ function PersonMapFilter({
 
 function TrackerMap({
   markers,
-  selectedId,
-  onSelect,
-  onOpenRelated,
+  selectedGroupKey,
+  onSelectGroup,
 }: {
   markers: TrackerMapMarker[];
-  selectedId: string;
-  onSelect: (id: string) => void;
-  onOpenRelated?: (page: PageKey, entityId: string) => void;
+  selectedGroupKey: string;
+  onSelectGroup: (groupKey: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -483,22 +493,26 @@ function TrackerMap({
       const leafletMarker = L.marker(latlng, {
         icon: markerIcon(markerColor(primary), group.markers.length),
       }).addTo(layer);
-      leafletMarker.bindPopup(markerGroupPopupHtml(group));
-      leafletMarker.on("click", () => onSelect(primary.id));
+      leafletMarker.on("click", () => {
+        onSelectGroup(group.key);
+        map.closePopup();
+      });
     });
     if (bounds.length > 1) {
       map.fitBounds(L.latLngBounds(bounds), { padding: [36, 36], maxZoom: 12 });
     } else if (bounds.length === 1) {
       map.setView(bounds[0], 11);
     }
-  }, [markers, onSelect]);
+  }, [markers, onSelectGroup]);
 
   useEffect(() => {
-    const marker = markers.find((item) => item.id === selectedId);
+    const selectedGroup = selectedGroupKey
+      ? groupMarkers(markers).find((group) => group.key === selectedGroupKey)
+      : null;
     const map = mapRef.current;
-    if (!marker || !map) return;
-    map.panTo([marker.geo.latitude, marker.geo.longitude]);
-  }, [selectedId, markers]);
+    if (!selectedGroup || !map) return;
+    map.panTo([selectedGroup.geo.latitude, selectedGroup.geo.longitude]);
+  }, [selectedGroupKey, markers]);
 
   useEffect(() => {
     window.setTimeout(() => mapRef.current?.invalidateSize(), 80);
@@ -514,50 +528,6 @@ function TrackerMap({
       >
         {fullscreen ? "Згорнути карту" : "На весь екран"}
       </button>
-      {selectedId ? (
-        <button
-          type="button"
-          className="button button-secondary map-open-button"
-          onClick={() => {
-            const marker = markers.find((item) => item.id === selectedId);
-            if (marker) onOpenRelated?.(marker.relatedPage, marker.relatedId);
-          }}
-        >
-          Відкрити запис
-        </button>
-      ) : null}
     </div>
   );
-}
-
-function markerGroupPopupHtml(group: TrackerMapMarkerGroup): string {
-  const records = group.markers
-    .slice(0, 8)
-    .map((marker) => `
-      <div class="map-popup-record">
-        <strong>${escapeHtml(marker.title)}</strong>
-        <span>${escapeHtml(marker.subtitle)}</span>
-        ${marker.place ? `<em>${escapeHtml(marker.place)}</em>` : ""}
-      </div>
-    `)
-    .join("");
-  const more = group.markers.length > 8
-    ? `<p class="map-popup-more">Ще ${group.markers.length - 8} записів у цьому місці.</p>`
-    : "";
-  return `
-    <div class="map-popup-group">
-      <strong>${group.markers.length > 1 ? `${group.markers.length} записів у цьому місці` : "1 запис у цьому місці"}</strong>
-      <div class="map-popup-records">${records}</div>
-      ${more}
-    </div>
-  `;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }

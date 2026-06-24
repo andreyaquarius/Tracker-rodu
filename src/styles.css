@@ -1617,7 +1617,10 @@ tbody tr:hover { background: #fbfaf5; }
 .tracker-map-wrap.map-fullscreen .map-fullscreen-button { top: 18px; right: 18px; }
 .map-marker-list { display: grid; align-content: start; gap: 8px; max-height: 620px; overflow: auto; padding-right: 3px; }
 .map-marker-list button { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; padding: 12px; text-align: left; background: #fffdfa; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.map-marker-list button:hover { border-color: #9eb9af; background: #f7faf7; }
 .map-marker-list button.active { border-color: var(--gold); box-shadow: inset 3px 0 0 var(--gold); }
+.map-marker-list-filter { padding: 11px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #edf5f1; border: 1px solid #cddfd7; border-radius: 8px; }
+.map-marker-list-filter strong { color: var(--green-950); font-size: 12px; }
 .map-marker-list strong { color: var(--green-950); font-size: 13px; }
 .map-marker-list small, .map-marker-list em { grid-column: 2; color: var(--muted); font-size: 11px; font-style: normal; }
 .map-kind-dot { width: 11px; height: 11px; margin-top: 3px; border-radius: 50%; background: var(--gold); }
