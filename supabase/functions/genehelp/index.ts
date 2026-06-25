@@ -8,6 +8,7 @@ import {
 } from "../_shared/ai.ts";
 
 type GeneHelpAction =
+  | "account-status"
   | "create-simple-request"
   | "get-status";
 
@@ -45,6 +46,8 @@ Deno.serve(async (request) => {
     const action = String(input.action ?? "") as GeneHelpAction;
 
     switch (action) {
+      case "account-status":
+        return await getAccountStatus(context);
       case "create-simple-request":
         return await createSimpleRequest(context, input);
       case "get-status":
@@ -57,6 +60,21 @@ Deno.serve(async (request) => {
   }
 });
 
+async function getAccountStatus(context: GeneHelpContext): Promise<Response> {
+  const { data, error } = await context.admin
+    .from("user_genehelp_accounts")
+    .select("user_id")
+    .eq("user_id", context.user.id)
+    .maybeSingle();
+  if (error) throw decorateSupabaseError(error);
+
+  return json({
+    connected: Boolean(data),
+    email: context.user.email?.trim().toLocaleLowerCase() ?? "",
+    name: userDisplayName(context),
+  });
+}
+
 async function createSimpleRequest(
   context: GeneHelpContext,
   input: Record<string, unknown>,
@@ -67,7 +85,8 @@ async function createSimpleRequest(
   }
 
   const title = normalizeOptionalText(input.title);
-  let integrationToken = await ensureIntegrationToken(context);
+  const registrationConsent = input.registrationConsent === true;
+  let integrationToken = await ensureIntegrationToken(context, registrationConsent);
   try {
     const response = await createRequestWithToken(integrationToken, title, description);
     return json(response);
@@ -86,7 +105,7 @@ async function getStatus(
   input: Record<string, unknown>,
 ): Promise<Response> {
   const id = normalizeGeneHelpId(input.id);
-  const integrationToken = await ensureIntegrationToken(context);
+  const integrationToken = await ensureIntegrationToken(context, false);
   const response = await callGeneHelp(
     `/api/partners/genealogy-requests/${encodeURIComponent(id)}`,
     integrationToken,
@@ -118,14 +137,22 @@ async function createRequestWithToken(
   );
 }
 
-async function ensureIntegrationToken(context: GeneHelpContext): Promise<string> {
+async function ensureIntegrationToken(
+  context: GeneHelpContext,
+  allowOnboarding: boolean,
+): Promise<string> {
   const { data, error } = await context.admin
     .from("user_genehelp_accounts")
     .select("genehelp_user_id, genehelp_email, genehelp_name, encrypted_integration_token, token_last4, created_in_genehelp")
     .eq("user_id", context.user.id)
     .maybeSingle();
   if (error) throw decorateSupabaseError(error);
-  if (!data) return onboardGeneHelpUser(context);
+  if (!data) {
+    if (!allowOnboarding) {
+      throw new Error("Потрібна згода на передачу email та імені для реєстрації в GeneHelp.");
+    }
+    return onboardGeneHelpUser(context);
+  }
   const row = data as GeneHelpAccountRow;
   return decryptApiKey(row.encrypted_integration_token, context.encryptionKey);
 }
@@ -163,6 +190,7 @@ async function onboardGeneHelpUser(context: GeneHelpContext): Promise<string> {
       encrypted_integration_token: encryptedToken,
       token_last4: integrationToken.slice(-4),
       created_in_genehelp: response.user?.created === true,
+      consented_at: new Date().toISOString(),
       connected_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });

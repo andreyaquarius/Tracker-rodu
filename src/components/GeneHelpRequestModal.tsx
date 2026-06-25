@@ -1,7 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   createGeneHelpSimpleRequest,
+  getGeneHelpAccountStatus,
   getGeneHelpRequestStatus,
+  type GeneHelpAccountStatus,
   type GeneHelpSimpleRequestResponse,
 } from "../services/geneHelp";
 import { sanitizeWebUrl } from "../utils/safeUrl";
@@ -17,7 +19,33 @@ export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
   const [createdRequest, setCreatedRequest] =
     useState<GeneHelpSimpleRequestResponse | null>(null);
   const [busy, setBusy] = useState<"create" | "status" | null>(null);
+  const [accountStatus, setAccountStatus] = useState<GeneHelpAccountStatus | null>(null);
+  const [accountLoading, setAccountLoading] = useState(true);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getGeneHelpAccountStatus()
+      .then((status) => {
+        if (!active) return;
+        setAccountStatus(status);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setMessage({
+          text: readableError(error, "Не вдалося перевірити підключення GeneHelp."),
+          error: true,
+        });
+      })
+      .finally(() => {
+        if (active) setAccountLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -25,14 +53,25 @@ export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
       setMessage({ text: "Опишіть, яка саме допомога потрібна в GeneHelp.", error: true });
       return;
     }
+    if (!accountStatus?.connected) {
+      setConsentChecked(false);
+      setConsentOpen(true);
+      return;
+    }
+    await submitRequest(false);
+  };
+
+  const submitRequest = async (registrationConsent: boolean) => {
     setBusy("create");
     setMessage(null);
     try {
       const response = await createGeneHelpSimpleRequest({
         title: title.trim(),
         description: description.trim(),
+        registrationConsent,
       });
       setCreatedRequest(response);
+      setAccountStatus((current) => current ? { ...current, connected: true } : current);
       setTitle("");
       setDescription("");
       setMessage({ text: response.message || "Запит передано в GeneHelp." });
@@ -44,6 +83,12 @@ export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
     } finally {
       setBusy(null);
     }
+  };
+
+  const confirmRegistrationConsent = async () => {
+    if (!consentChecked) return;
+    setConsentOpen(false);
+    await submitRequest(true);
   };
 
   const refreshStatus = async () => {
@@ -66,7 +111,17 @@ export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
 
   return (
     <Modal title="Допомога GeneHelp" onClose={onClose}>
-      <form className="genehelp-request-modal" onSubmit={create}>
+      {consentOpen ? (
+        <GeneHelpConsentStep
+          account={accountStatus}
+          checked={consentChecked}
+          busy={busy === "create"}
+          onCheckedChange={setConsentChecked}
+          onCancel={() => setConsentOpen(false)}
+          onConfirm={() => void confirmRegistrationConsent()}
+        />
+      ) : (
+        <form className="genehelp-request-modal" onSubmit={create}>
         <div className="genehelp-intro">
           <span className="eyebrow">Партнерський сервіс</span>
           <p>
@@ -74,6 +129,9 @@ export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
             немає профілю GeneHelp, Трекер Роду створить його автоматично за
             email вашого акаунта.
           </p>
+          {accountLoading ? (
+            <small className="field-hint">Перевіряємо підключення до GeneHelp...</small>
+          ) : null}
         </div>
 
         {message ? (
@@ -115,12 +173,73 @@ export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
           <button type="button" className="button button-ghost" onClick={onClose}>
             Закрити
           </button>
-          <button className="button button-primary" disabled={Boolean(busy)} type="submit">
+          <button className="button button-primary" disabled={Boolean(busy) || accountLoading} type="submit">
             {busy === "create" ? "Надсилання..." : "Попросити допомоги"}
           </button>
         </div>
       </form>
+      )}
     </Modal>
+  );
+}
+
+function GeneHelpConsentStep({
+  account,
+  checked,
+  busy,
+  onCheckedChange,
+  onCancel,
+  onConfirm,
+}: {
+  account: GeneHelpAccountStatus | null;
+  checked: boolean;
+  busy: boolean;
+  onCheckedChange: (value: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="genehelp-consent-modal">
+      <div>
+        <span className="eyebrow">Згода на реєстрацію</span>
+        <h3>Підключити GeneHelp</h3>
+        <p>
+          Щоб передати запит у GeneHelp, Трекер Роду має створити або
+          підключити ваш профіль у GeneHelp. Для цього буде передано тільки
+          email та ім’я вашого акаунта.
+        </p>
+      </div>
+
+      <div className="genehelp-consent-data">
+        <div>
+          <span>Email</span>
+          <strong>{account?.email || "email акаунта"}</strong>
+        </div>
+        <div>
+          <span>Ім’я</span>
+          <strong>{account?.name || "ім’я акаунта"}</strong>
+        </div>
+      </div>
+
+      <label className="checkbox-field">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={busy}
+          onChange={(event) => onCheckedChange(event.target.checked)}
+        />
+        <span>Я погоджуюсь передати ці дані до GeneHelp для реєстрації та створення запиту.</span>
+      </label>
+
+      <div className="modal-actions">
+        <button type="button" className="button button-ghost" disabled={busy} onClick={onCancel}>
+          Скасувати
+        </button>
+        <button type="button" className="button button-primary" disabled={busy || !checked} onClick={onConfirm}>
+          {busy ? "Надсилання..." : "Надати згоду і надіслати"}
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -27,9 +27,20 @@ export interface GeneHelpSimpleRequestResponse {
   data?: unknown;
 }
 
+export interface GeneHelpAccountStatus {
+  connected: boolean;
+  email: string;
+  name: string;
+}
+
+export async function getGeneHelpAccountStatus(): Promise<GeneHelpAccountStatus> {
+  return invokeGeneHelp<GeneHelpAccountStatus>("account-status", {});
+}
+
 export async function createGeneHelpSimpleRequest(input: {
   title?: string;
   description: string;
+  registrationConsent?: boolean;
 }): Promise<GeneHelpSimpleRequestResponse> {
   return invokeGeneHelp<GeneHelpSimpleRequestResponse>("create-simple-request", input);
 }

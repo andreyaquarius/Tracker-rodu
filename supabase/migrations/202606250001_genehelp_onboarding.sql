@@ -8,6 +8,7 @@ create table if not exists public.user_genehelp_accounts (
   encrypted_integration_token text not null,
   token_last4 text not null default '',
   created_in_genehelp boolean not null default false,
+  consented_at timestamptz not null default now(),
   connected_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
