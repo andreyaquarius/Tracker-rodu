@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 
@@ -15,6 +16,7 @@ interface TopBarProps {
   onOpenTeam: () => void;
   isAccountSigningIn: boolean;
   isCreatingWorkspace: boolean;
+  helpAction?: ReactNode;
 }
 
 function roleLabel(role: SupabaseWorkspace["role"]): string {
@@ -37,6 +39,7 @@ export function TopBar({
   onOpenTeam,
   isAccountSigningIn,
   isCreatingWorkspace,
+  helpAction,
 }: TopBarProps) {
   const accountMenuRef = useDismissibleDetails();
   const initials = account?.name
@@ -68,6 +71,7 @@ export function TopBar({
         <span className="online-state">{navigator.onLine ? "Онлайн" : "Офлайн"}</span>
         <small>Дані активного проєкту зберігаються автоматично</small>
       </div>
+      {helpAction}
       {account ? (
         <details className="account-menu" ref={accountMenuRef}>
           <summary aria-label="Відкрити меню профілю">

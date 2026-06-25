@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { CustomSectionDefinition } from "../types";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
 import { Sidebar, type PageKey } from "./Sidebar";
+import { HelpCenter } from "./HelpCenter";
 import { TopBar } from "./TopBar";
 
 interface LayoutProps {
@@ -51,6 +52,7 @@ export function Layout(props: LayoutProps) {
           onOpenTeam={props.onOpenTeam}
           isAccountSigningIn={props.isAccountSigningIn}
           isCreatingWorkspace={props.isCreatingWorkspace}
+          helpAction={<HelpCenter page={props.page} />}
         />
         <main className="page">{props.children}</main>
       </div>
