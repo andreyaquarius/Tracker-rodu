@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   AppEntity,
   AppDatabase,
@@ -49,6 +49,7 @@ import { sanitizeWebUrl } from "../utils/safeUrl";
 import { GeoPlaceField } from "../components/GeoPlaceField";
 import { PaginationControls } from "../components/PaginationControls";
 import { usePagination } from "../hooks/usePagination";
+import { useWorkspaceWindows } from "../components/WorkspaceWindows";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -85,6 +86,10 @@ interface CrudPageProps {
 
 type FormValue = string | boolean | string[] | FindingParticipant[] | ScanAttachment[] | GeoPoint | null;
 type FormRecord = Record<string, FormValue>;
+type EntityWindow =
+  | { windowId: string; kind: "view"; entityId: string }
+  | { windowId: string; kind: "edit"; entityId: string }
+  | { windowId: string; kind: "new"; initialValues?: Record<string, unknown> };
 
 export function CrudPage({
   config,
@@ -124,36 +129,140 @@ export function CrudPage({
   const [placeFilter, setPlaceFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("");
   const [documentTypeFilter, setDocumentTypeFilter] = useState("");
-  const [editing, setEditing] = useState<AppEntity | null | "new">(null);
-  const [viewing, setViewing] = useState<AppEntity | null>(null);
-  const [createInitialValues, setCreateInitialValues] = useState<Record<string, unknown> | undefined>();
+  const initialOpenRef = useRef("");
+  const createRequestRef = useRef<number | null>(null);
+  const windowOwnerKey = `${projectId || "local"}:${config.collection}`;
+  const { openWindow: openWorkspaceWindow, closeWindows } = useWorkspaceWindows();
 
   useEffect(() => {
     setSearch(initialSearch);
   }, [initialSearch]);
   useEffect(() => {
     if (!initialOpenEntityId) return;
+    if (initialOpenRef.current === `${config.collection}:${initialOpenEntityId}`) return;
     const entity = items.find((item) => item.id === initialOpenEntityId);
-    if (entity) setViewing(entity);
-  }, [initialOpenEntityId, items]);
+    if (entity) {
+      initialOpenRef.current = `${config.collection}:${initialOpenEntityId}`;
+      openViewWindow(entity);
+    }
+  }, [config.collection, initialOpenEntityId, items]);
   useEffect(() => {
-    if (!viewing) return;
-    setViewing(items.find((item) => item.id === viewing.id) ?? null);
-  }, [items, viewing?.id]);
+    if (!initialOpenEntityId) initialOpenRef.current = "";
+  }, [initialOpenEntityId]);
   useEffect(() => {
     if (!initialCreateRequest || !canCreateRecords) return;
-    setViewing(null);
-    setCreateInitialValues(initialCreateRequest.initialValues);
-    setEditing("new");
+    if (createRequestRef.current === initialCreateRequest.id) return;
+    createRequestRef.current = initialCreateRequest.id;
+    openNewWindow(initialCreateRequest.initialValues);
   }, [canCreateRecords, initialCreateRequest?.id]);
+  useEffect(() => {
+    const existingIds = new Set(items.map((item) => item.id));
+    closeWindows((window) =>
+      window.ownerKey === windowOwnerKey &&
+      crudEntityIdFromWindowKey(window.logicalKey) !== null &&
+      !existingIds.has(crudEntityIdFromWindowKey(window.logicalKey) ?? ""),
+    );
+  }, [closeWindows, items, windowOwnerKey]);
+  const openViewWindow = (entity: AppEntity) => {
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: entityWindowKey({ windowId: "", kind: "view", entityId: entity.id }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <EntityDetailsModal
+          config={config}
+          db={db}
+          entity={entity}
+          researches={researches}
+          documents={documents}
+          findings={findings}
+          persons={persons}
+          customFieldDefinitions={customFieldDefinitions}
+          onOpenRelated={onOpenRelated}
+          projectId={projectId}
+          canCreateTasks={canCreateRecords}
+          onCreateTask={onCreateTask}
+          onClose={close}
+          onEdit={readOnly ? undefined : () => openEditWindow(entity)}
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
+  const openEditWindow = (entity: AppEntity) => {
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: entityWindowKey({ windowId: "", kind: "edit", entityId: entity.id }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <EntityModal
+          config={config}
+          db={db}
+          entity={entity}
+          researches={researches}
+          documents={documents}
+          findings={findings}
+          persons={persons}
+          customFieldDefinitions={customFieldDefinitions}
+          onAddCustomField={onAddCustomField}
+          onDeleteCustomField={onDeleteCustomField}
+          canAddCustomField={canAddCustomField}
+          customFieldLimitMessage={customFieldLimitMessage}
+          onSavePerson={onSavePerson}
+          researchRequired={researchRequired}
+          onClose={close}
+          onSave={(savedEntity) => {
+            onSave(savedEntity);
+            close();
+          }}
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
+  const openNewWindow = (initialValues?: Record<string, unknown>) => {
+    const windowId = createId();
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: entityWindowKey({ windowId, kind: "new", initialValues }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <EntityModal
+          config={config}
+          db={db}
+          entity={null}
+          initialValues={initialValues}
+          researches={researches}
+          documents={documents}
+          findings={findings}
+          persons={persons}
+          customFieldDefinitions={customFieldDefinitions}
+          onAddCustomField={onAddCustomField}
+          onDeleteCustomField={onDeleteCustomField}
+          canAddCustomField={canAddCustomField}
+          customFieldLimitMessage={customFieldLimitMessage}
+          onSavePerson={onSavePerson}
+          researchRequired={researchRequired}
+          onClose={close}
+          onSave={(savedEntity) => {
+            onSave(savedEntity);
+            close();
+          }}
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
   const startNew = () => {
     if (readOnly) return;
     if (!canCreate) {
       onCreateBlocked?.();
       return;
     }
-    setCreateInitialValues(undefined);
-    setEditing("new");
+    openNewWindow();
   };
 
   const structuredFilterOptions = useMemo(() => {
@@ -247,6 +356,10 @@ export function CrudPage({
         .flatMap(([, value]) => value as ScanAttachment[])
         .concat(customAttachmentScans(record.customFields, customFieldDefinitions, config.collection));
       await Promise.allSettled(scans.map(deleteScanFile));
+      closeWindows((window) =>
+        window.ownerKey === windowOwnerKey &&
+        crudEntityIdFromWindowKey(window.logicalKey) === entity.id,
+      );
       onDelete(entity.id);
     }
   };
@@ -428,8 +541,8 @@ export function CrudPage({
               columns={config.columns}
               documents={documents}
               researches={researches}
-              onView={setViewing}
-              onEdit={setEditing}
+              onView={openViewWindow}
+              onEdit={openEditWindow}
               onDelete={(entity) => void confirmDelete(entity)}
               onOpenRelated={onOpenRelated}
               onQuickStatus={config.statusKey ? quickStatus : undefined}
@@ -472,58 +585,18 @@ export function CrudPage({
         )}
       </section>
 
-      {viewing ? (
-        <EntityDetailsModal
-          config={config}
-          db={db}
-          entity={viewing}
-          researches={researches}
-          documents={documents}
-          findings={findings}
-          persons={persons}
-          customFieldDefinitions={customFieldDefinitions}
-          onOpenRelated={onOpenRelated}
-          projectId={projectId}
-          canCreateTasks={canCreateRecords}
-          onCreateTask={onCreateTask}
-          onClose={() => setViewing(null)}
-          onEdit={readOnly ? undefined : () => {
-              setEditing(viewing);
-              setViewing(null);
-            }}
-        />
-      ) : null}
-
-      {editing && !readOnly && (editing !== "new" || canCreateRecords) ? (
-        <EntityModal
-          config={config}
-          db={db}
-          entity={editing === "new" ? null : editing}
-          initialValues={editing === "new" ? createInitialValues : undefined}
-          researches={researches}
-          documents={documents}
-          findings={findings}
-          persons={persons}
-          customFieldDefinitions={customFieldDefinitions}
-          onAddCustomField={onAddCustomField}
-          onDeleteCustomField={onDeleteCustomField}
-          canAddCustomField={canAddCustomField}
-          customFieldLimitMessage={customFieldLimitMessage}
-          onSavePerson={onSavePerson}
-          researchRequired={researchRequired}
-          onClose={() => {
-            setEditing(null);
-            setCreateInitialValues(undefined);
-          }}
-          onSave={(entity) => {
-            onSave(entity);
-            setEditing(null);
-            setCreateInitialValues(undefined);
-          }}
-        />
-      ) : null}
     </>
   );
+}
+
+function entityWindowKey(window: EntityWindow): string {
+  if (window.kind === "new") return window.windowId;
+  return `${window.kind}:${window.entityId}`;
+}
+
+function crudEntityIdFromWindowKey(logicalKey: string): string | null {
+  const [kind, entityId] = logicalKey.split(":");
+  return (kind === "view" || kind === "edit") && entityId ? entityId : null;
 }
 
 function documentMatchesYear(row: Record<string, unknown>, filter: string): boolean {
@@ -582,6 +655,9 @@ function EntityDetailsModal({
   onCreateTask,
   onClose,
   onEdit,
+  stackIndex,
+  dockIndex,
+  onFocus,
 }: {
   config: EntityConfig;
   db: AppDatabase;
@@ -597,6 +673,9 @@ function EntityDetailsModal({
   onCreateTask?: (task: TaskRecord) => void;
   onClose: () => void;
   onEdit?: () => void;
+  stackIndex: number;
+  dockIndex: number;
+  onFocus: () => void;
 }) {
   const record = entity as unknown as Record<string, unknown>;
   const customDefinitions = definitionsForModule(customFieldDefinitions, config.collection);
@@ -612,7 +691,14 @@ function EntityDetailsModal({
   });
 
   return (
-    <Modal title={getEntityTitle(config, record)} onClose={onClose}>
+    <Modal
+      title={getEntityTitle(config, record)}
+      onClose={onClose}
+      mode="window"
+      stackIndex={stackIndex}
+      dockIndex={dockIndex}
+      onFocus={onFocus}
+    >
       <div className="details-body">
         {visibleFields.length || customDefinitions.length || geo?.displayName ? (
           <div className="details-grid">
@@ -843,6 +929,9 @@ function EntityModal({
   researchRequired,
   onClose,
   onSave,
+  stackIndex,
+  dockIndex,
+  onFocus,
 }: {
   config: EntityConfig;
   db: AppDatabase;
@@ -861,6 +950,9 @@ function EntityModal({
   researchRequired: boolean;
   onClose: () => void;
   onSave: (entity: AppEntity) => void;
+  stackIndex: number;
+  dockIndex: number;
+  onFocus: () => void;
 }) {
   const initial = (entity ?? initialValues ?? {}) as unknown as FormRecord;
   const [form, setForm] = useState<FormRecord>(() => {
@@ -934,7 +1026,14 @@ function EntityModal({
   };
 
   return (
-    <Modal title={`${entity ? "Редагувати" : "Додати"} ${config.singular}`} onClose={onClose}>
+    <Modal
+      title={`${entity ? "Редагувати" : "Додати"} ${config.singular}`}
+      onClose={onClose}
+      mode="window"
+      stackIndex={stackIndex}
+      dockIndex={dockIndex}
+      onFocus={onFocus}
+    >
       <form onSubmit={submit}>
         <div className="form-grid">
           {config.fields.map((field) => (
