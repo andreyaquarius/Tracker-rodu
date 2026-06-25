@@ -120,6 +120,10 @@ export function PersonFormModal({
   customFieldLimitMessage,
   onClose,
   onSave,
+  modalMode = "dialog",
+  stackIndex = 0,
+  dockIndex = 0,
+  onFocus,
 }: {
   person?: Person | null;
   db: AppDatabase;
@@ -134,6 +138,10 @@ export function PersonFormModal({
   customFieldLimitMessage?: string;
   onClose: () => void;
   onSave: (person: Person) => void;
+  modalMode?: "dialog" | "window";
+  stackIndex?: number;
+  dockIndex?: number;
+  onFocus?: () => void;
 }) {
   const [form, setForm] = useState<PersonDraft>(() =>
     person
@@ -286,7 +294,14 @@ export function PersonFormModal({
   };
 
   return (
-    <Modal title={person ? "Редагувати особу" : "Додати особу"} onClose={onClose}>
+    <Modal
+      title={person ? "Редагувати особу" : "Додати особу"}
+      onClose={onClose}
+      mode={modalMode}
+      stackIndex={stackIndex}
+      dockIndex={dockIndex}
+      onFocus={onFocus}
+    >
       <form onSubmit={submit}>
         <div className="form-grid">
           <label>

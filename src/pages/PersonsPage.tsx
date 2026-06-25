@@ -1,5 +1,5 @@
 import Fuse, { type IFuseOptions } from "fuse.js";
-import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   AppDatabase,
   AppEntity,
@@ -29,6 +29,7 @@ import { exportPersonsToExcel } from "../utils/excelExport";
 import { TableDataImportButton } from "../components/TableDataImportButton";
 import { PaginationControls } from "../components/PaginationControls";
 import { usePagination } from "../hooks/usePagination";
+import { useWorkspaceWindows } from "../components/WorkspaceWindows";
 
 type PersonTab =
   | "overview"
@@ -38,6 +39,11 @@ type PersonTab =
   | "archiveRequests"
   | "relations"
   | "notes";
+
+type PersonWindow =
+  | { windowId: string; kind: "view"; personId: string }
+  | { windowId: string; kind: "edit"; personId: string }
+  | { windowId: string; kind: "new" };
 
 export function PersonsPage({
   db,
@@ -101,19 +107,119 @@ export function PersonsPage({
   const [genderFilter, setGenderFilter] = useState("");
   const [placeFilter, setPlaceFilter] = useState("");
   const [surnameFilter, setSurnameFilter] = useState("");
-  const [editing, setEditing] = useState<Person | "new" | null>(null);
-  const [viewing, setViewing] = useState<Person | null>(null);
+  const initialOpenRef = useRef("");
+  const windowOwnerKey = "persons";
+  const { openWindow: openWorkspaceWindow, closeWindows } = useWorkspaceWindows();
 
   useEffect(() => setSearch(initialSearch), [initialSearch]);
   useEffect(() => {
     if (!initialOpenPersonId) return;
+    if (initialOpenRef.current === initialOpenPersonId) return;
     const person = persons.find((item) => item.id === initialOpenPersonId);
-    if (person) setViewing(person);
+    if (person) {
+      initialOpenRef.current = initialOpenPersonId;
+      openViewWindow(person);
+    }
   }, [initialOpenPersonId, persons]);
   useEffect(() => {
-    if (!viewing) return;
-    setViewing(persons.find((person) => person.id === viewing.id) ?? null);
-  }, [persons, viewing?.id]);
+    if (!initialOpenPersonId) initialOpenRef.current = "";
+  }, [initialOpenPersonId]);
+  useEffect(() => {
+    const existingIds = new Set(persons.map((person) => person.id));
+    closeWindows((window) =>
+      window.ownerKey === windowOwnerKey &&
+      personIdFromWindowKey(window.logicalKey) !== null &&
+      !existingIds.has(personIdFromWindowKey(window.logicalKey) ?? ""),
+    );
+  }, [closeWindows, persons]);
+  const openViewWindow = (person: Person) => {
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: personWindowKey({ windowId: "", kind: "view", personId: person.id }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <PersonCardModal
+          db={db}
+          person={person}
+          persons={persons}
+          researches={researches}
+          customFieldDefinitions={customFieldDefinitions}
+          relations={relations}
+          findings={findings}
+          tasks={tasks}
+          hypotheses={hypotheses}
+          archiveRequests={archiveRequests}
+          onClose={close}
+          onEdit={readOnly ? undefined : () => openEditWindow(person)}
+          onSaveRelation={onSaveRelation}
+          onDeleteRelation={onDeleteRelation}
+          onOpenRelated={onOpenRelated}
+          onCreateRelated={onCreateRelated}
+          readOnly={readOnly}
+          canCreate={canCreateRecords}
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
+  const openEditWindow = (person: Person) => {
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: personWindowKey({ windowId: "", kind: "edit", personId: person.id }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <PersonFormModal
+          db={db}
+          person={person}
+          researches={researches}
+          researchRequired={researchRequired}
+          customFieldDefinitions={customFieldDefinitions}
+          onAddCustomField={onAddCustomField}
+          onDeleteCustomField={onDeleteCustomField}
+          canAddCustomField={canAddCustomField}
+          customFieldLimitMessage={customFieldLimitMessage}
+          onClose={close}
+          onSave={(savedPerson) => {
+            onSavePerson(savedPerson);
+            close();
+          }}
+          modalMode="window"
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
+  const openNewWindow = () => {
+    const windowId = createId();
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: personWindowKey({ windowId, kind: "new" }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <PersonFormModal
+          db={db}
+          person={null}
+          researches={researches}
+          researchRequired={researchRequired}
+          customFieldDefinitions={customFieldDefinitions}
+          onAddCustomField={onAddCustomField}
+          onDeleteCustomField={onDeleteCustomField}
+          canAddCustomField={canAddCustomField}
+          customFieldLimitMessage={customFieldLimitMessage}
+          onClose={close}
+          onSave={(savedPerson) => {
+            onSavePerson(savedPerson);
+            close();
+          }}
+          modalMode="window"
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
 
   const filtered = useMemo(() => {
     const query = normalize(search);
@@ -167,7 +273,10 @@ export function PersonsPage({
       ];
       await Promise.allSettled(scans.map(deleteScanFile));
       onDeletePerson(person.id);
-      if (viewing?.id === person.id) setViewing(null);
+      closeWindows((window) =>
+        window.ownerKey === windowOwnerKey &&
+        personIdFromWindowKey(window.logicalKey) === person.id,
+      );
     }
   };
 
@@ -208,7 +317,7 @@ export function PersonsPage({
             />
           ) : null}
           {canCreateRecords ? (
-            <button className="button button-primary" onClick={() => setEditing("new")}>+ Додати особу</button>
+            <button className="button button-primary" onClick={openNewWindow}>+ Додати особу</button>
           ) : null}
         </div>
       </div>
@@ -283,7 +392,7 @@ export function PersonsPage({
                 </thead>
                 <tbody>
                   {pagination.pageItems.map((person) => (
-                    <tr key={person.id} className="clickable-row" onClick={() => setViewing(person)}>
+                    <tr key={person.id} className="clickable-row" onClick={() => openViewWindow(person)}>
                       <td data-label="Повне ім’я"><strong>{personDisplayName(person)}</strong></td>
                       <td data-label="Роки життя">{lifeYears(person)}</td>
                       <td data-label="Основні місця">{personPlaces(person) || "—"}</td>
@@ -292,10 +401,10 @@ export function PersonsPage({
                       <td data-label="Завдання">{linkedCount(tasks, person.id)}</td>
                       <td data-label="Гіпотези">{linkedCount(hypotheses, person.id)}</td>
                       <td data-label="Дії" className="row-actions" onClick={(event) => event.stopPropagation()}>
-                        <button className="icon-button" title="Переглянути" onClick={() => setViewing(person)}>◉</button>
+                        <button className="icon-button" title="Переглянути" onClick={() => openViewWindow(person)}>◉</button>
                         {!readOnly ? (
                           <>
-                            <button className="icon-button" title="Редагувати" onClick={() => setEditing(person)}>✎</button>
+                            <button className="icon-button" title="Редагувати" onClick={() => openEditWindow(person)}>✎</button>
                             <button className="icon-button danger" title="Видалити" onClick={() => void remove(person)}>×</button>
                           </>
                         ) : null}
@@ -319,7 +428,7 @@ export function PersonsPage({
         ) : (
           <div className="empty-state">
             {canCreateRecords ? (
-              <button className="empty-mark" onClick={() => setEditing("new")}>+</button>
+              <button className="empty-mark" onClick={openNewWindow}>+</button>
             ) : null}
             <h2>Осіб не знайдено</h2>
             <p>Змініть фільтри або додайте першу картку особи.</p>
@@ -327,52 +436,18 @@ export function PersonsPage({
         )}
       </section>
 
-      {editing && !readOnly && (editing !== "new" || canCreateRecords) ? (
-        <PersonFormModal
-          db={db}
-          person={editing === "new" ? null : editing}
-          researches={researches}
-          researchRequired={researchRequired}
-          customFieldDefinitions={customFieldDefinitions}
-          onAddCustomField={onAddCustomField}
-          onDeleteCustomField={onDeleteCustomField}
-          canAddCustomField={canAddCustomField}
-          customFieldLimitMessage={customFieldLimitMessage}
-          onClose={() => setEditing(null)}
-          onSave={(person) => {
-            onSavePerson(person);
-            setEditing(null);
-          }}
-        />
-      ) : null}
-
-      {viewing ? (
-        <PersonCardModal
-          db={db}
-          person={persons.find((person) => person.id === viewing.id) ?? viewing}
-          persons={persons}
-          researches={researches}
-          customFieldDefinitions={customFieldDefinitions}
-          relations={relations}
-          findings={findings}
-          tasks={tasks}
-          hypotheses={hypotheses}
-          archiveRequests={archiveRequests}
-          onClose={() => setViewing(null)}
-          onEdit={readOnly ? undefined : () => {
-              setEditing(viewing);
-              setViewing(null);
-            }}
-          onSaveRelation={onSaveRelation}
-          onDeleteRelation={onDeleteRelation}
-          onOpenRelated={onOpenRelated}
-          onCreateRelated={onCreateRelated}
-          readOnly={readOnly}
-          canCreate={canCreateRecords}
-        />
-      ) : null}
     </>
   );
+}
+
+function personWindowKey(window: PersonWindow): string {
+  if (window.kind === "new") return window.windowId;
+  return `${window.kind}:${window.personId}`;
+}
+
+function personIdFromWindowKey(logicalKey: string): string | null {
+  const [kind, personId] = logicalKey.split(":");
+  return (kind === "view" || kind === "edit") && personId ? personId : null;
 }
 
 function customAttachmentScans(
@@ -409,6 +484,9 @@ function PersonCardModal({
   onCreateRelated,
   readOnly,
   canCreate,
+  stackIndex,
+  dockIndex,
+  onFocus,
 }: {
   db: AppDatabase;
   person: Person;
@@ -428,6 +506,9 @@ function PersonCardModal({
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly: boolean;
   canCreate: boolean;
+  stackIndex: number;
+  dockIndex: number;
+  onFocus: () => void;
 }) {
   const [tab, setTab] = useState<PersonTab>("overview");
   const [relationFormOpen, setRelationFormOpen] = useState(false);
@@ -449,7 +530,14 @@ function PersonCardModal({
   ];
 
   return (
-    <Modal title={personDisplayName(person)} onClose={onClose}>
+    <Modal
+      title={personDisplayName(person)}
+      onClose={onClose}
+      mode="window"
+      stackIndex={stackIndex}
+      dockIndex={dockIndex}
+      onFocus={onFocus}
+    >
       <div className="person-card">
         <div className="person-tabs">
           {tabs.map(([key, label, count]) => (
