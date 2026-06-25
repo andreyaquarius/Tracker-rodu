@@ -31,6 +31,7 @@ import {
   ScanAttachmentsEditor,
   ScanAttachmentsView,
 } from "../components/ScanAttachments";
+import type { DocumentScanViewerContext } from "../components/DocumentWorkspaceViewer";
 import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile } from "../services/scanStorage";
 import { CustomFieldsEditor, CustomFieldsView } from "../components/CustomFields";
@@ -70,6 +71,11 @@ interface CrudPageProps {
     initialValues: Record<string, unknown>;
   };
   onOpenRelated?: (page: PageKey, entityId: string) => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
   onSavePerson?: (person: Person) => void;
   onSave: (entity: AppEntity) => void;
   onImportRecords?: (collection: CollectionKey, records: AppEntity[]) => Promise<void>;
@@ -103,6 +109,7 @@ export function CrudPage({
   initialOpenEntityId = "",
   initialCreateRequest,
   onOpenRelated,
+  onOpenScanViewer,
   onSavePerson,
   onSave,
   onImportRecords,
@@ -483,6 +490,7 @@ export function CrudPage({
           persons={persons}
           customFieldDefinitions={customFieldDefinitions}
           onOpenRelated={onOpenRelated}
+          onOpenScanViewer={onOpenScanViewer}
           projectId={projectId}
           canCreateTasks={canCreateRecords}
           onCreateTask={onCreateTask}
@@ -510,6 +518,7 @@ export function CrudPage({
           canAddCustomField={canAddCustomField}
           customFieldLimitMessage={customFieldLimitMessage}
           onSavePerson={onSavePerson}
+          onOpenScanViewer={onOpenScanViewer}
           researchRequired={researchRequired}
           onClose={() => {
             setEditing(null);
@@ -567,6 +576,29 @@ function customAttachmentScans(
     .flatMap(([, value]) => value as ScanAttachment[]);
 }
 
+function documentScanViewerContext(
+  collection: CollectionKey,
+  record: Record<string, unknown>,
+): DocumentScanViewerContext | undefined {
+  if (collection !== "documents") return undefined;
+  const id = String(record.id ?? "").trim();
+  if (!id) return undefined;
+  return {
+    source: "documents",
+    document: {
+      id,
+      title: String(record.title ?? "Документ"),
+      researchId: String(record.researchId ?? ""),
+      documentType: String(record.documentType ?? ""),
+      archive: String(record.archive ?? ""),
+      fund: String(record.fund ?? ""),
+      description: String(record.description ?? ""),
+      file: String(record.file ?? ""),
+      place: String(record.place ?? ""),
+    },
+  };
+}
+
 function EntityDetailsModal({
   config,
   db,
@@ -577,6 +609,7 @@ function EntityDetailsModal({
   persons,
   customFieldDefinitions,
   onOpenRelated,
+  onOpenScanViewer,
   projectId,
   canCreateTasks,
   onCreateTask,
@@ -592,6 +625,11 @@ function EntityDetailsModal({
   persons: Person[];
   customFieldDefinitions: CustomFieldDefinition[];
   onOpenRelated?: (page: PageKey, entityId: string) => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
   projectId: string;
   canCreateTasks: boolean;
   onCreateTask?: (task: TaskRecord) => void;
@@ -630,6 +668,8 @@ function EntityDetailsModal({
                   findings={findings}
                   persons={persons}
                   onOpenRelated={onOpenRelated}
+                  onOpenScanViewer={onOpenScanViewer}
+                  scanViewerContext={documentScanViewerContext(config.collection, record)}
                 />
               </div>
             ))}
@@ -683,6 +723,8 @@ function DetailValue({
   findings,
   persons,
   onOpenRelated,
+  onOpenScanViewer,
+  scanViewerContext,
 }: {
   field: FieldConfig;
   value: unknown;
@@ -691,6 +733,12 @@ function DetailValue({
   findings: Finding[];
   persons: Person[];
   onOpenRelated?: (page: PageKey, entityId: string) => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
+  scanViewerContext?: DocumentScanViewerContext;
 }) {
   if (field.type === "research") {
     const research = researches.find((item) => item.id === value);
@@ -758,7 +806,12 @@ function DetailValue({
   }
   if (field.type === "scans") {
     const scans = Array.isArray(value) ? value as ScanAttachment[] : [];
-    return <ScanAttachmentsView scans={scans} />;
+    return (
+      <ScanAttachmentsView
+        scans={scans}
+        onPreview={onOpenScanViewer ? (scan, scans) => onOpenScanViewer(scan, scanViewerContext, scans) : undefined}
+      />
+    );
   }
   if (field.type === "participants") {
     const participants = Array.isArray(value) ? value as FindingParticipant[] : [];
@@ -840,6 +893,7 @@ function EntityModal({
   canAddCustomField,
   customFieldLimitMessage,
   onSavePerson,
+  onOpenScanViewer,
   researchRequired,
   onClose,
   onSave,
@@ -858,6 +912,11 @@ function EntityModal({
   canAddCustomField: boolean;
   customFieldLimitMessage?: string;
   onSavePerson?: (person: Person) => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
   researchRequired: boolean;
   onClose: () => void;
   onSave: (entity: AppEntity) => void;
@@ -954,6 +1013,8 @@ function EntityModal({
                 config.collection === "yearMatrix" ? String(form.documentType ?? "") : ""
               }
               findingType={config.collection === "findings" ? String(form.findingType ?? "") : ""}
+              scanViewerContext={documentScanViewerContext(config.collection, form)}
+              onOpenScanViewer={onOpenScanViewer}
               onCreatePerson={() => {
                 const seed = config.collection === "findings"
                   ? String(form.personsText || participantSummary(
@@ -1052,7 +1113,9 @@ function FormField({
   matrixYear,
   matrixDocumentType,
   findingType,
+  scanViewerContext,
   onCreatePerson,
+  onOpenScanViewer,
   onChange,
 }: {
   field: FieldConfig;
@@ -1067,7 +1130,13 @@ function FormField({
   matrixYear: string;
   matrixDocumentType: string;
   findingType: string;
+  scanViewerContext?: DocumentScanViewerContext;
   onCreatePerson: () => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
   onChange: (value: FormValue) => void;
 }) {
   if (field.type === "checkbox") {
@@ -1101,6 +1170,7 @@ function FormField({
         policy={field.attachmentPolicy}
         scans={scans}
         onChange={onChange}
+        onPreview={onOpenScanViewer ? (scan, scans) => onOpenScanViewer(scan, scanViewerContext, scans) : undefined}
       />
     );
   }

@@ -12,9 +12,10 @@ export interface ScanAttachment {
   mimeType: string;
   size: number;
   createdAt: string;
-  storage: "google-drive";
+  storage: "google-drive" | "external-url";
   storagePath: string;
   webViewLink?: string;
+  deleteOnRemove?: boolean;
 }
 
 export type GeoSource = "search" | "map_click" | "import" | "unknown";

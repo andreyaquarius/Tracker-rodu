@@ -40,6 +40,11 @@ import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
+import {
+  DocumentWorkspaceViewer,
+  type ActiveDocumentScanViewer,
+  type DocumentScanViewerContext,
+} from "./components/DocumentWorkspaceViewer";
 import { isHierarchyPage } from "./utils/sectionHierarchy";
 import {
   pagePath,
@@ -472,6 +477,7 @@ export default function App() {
   const [isAccountSigningIn, setIsAccountSigningIn] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
+  const [scanViewer, setScanViewer] = useState<ActiveDocumentScanViewer | null>(null);
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
@@ -3031,6 +3037,23 @@ export default function App() {
       routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
     }
   };
+  const openScanViewer = (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => {
+    const pages = scans?.length ? scans : [scan];
+    setScanViewer({
+      scan,
+      scans: pages,
+      pageIndex: Math.max(0, pages.findIndex((item) => item.id === scan.id)),
+      context,
+      openedAt: Date.now(),
+    });
+  };
+  const createFindingFromViewedDocument = (initialValues: Record<string, unknown>) => {
+    createRelatedRecord("findings", initialValues);
+  };
 
   const createSubsection = (parentKey: SectionParentKey) => {
     if (!canCreateCustomSection) {
@@ -3975,6 +3998,7 @@ export default function App() {
                 : undefined
             }
             onOpenRelated={openRelatedRecord}
+            onOpenScanViewer={openScanViewer}
             onSave={saveFor(page)}
             onImportRecords={importTableRecords}
             onDelete={deleteFor(page)}
@@ -4165,6 +4189,12 @@ export default function App() {
         ) : null}
         {displayedContent}
       </Layout>
+      <DocumentWorkspaceViewer
+        viewer={scanViewer}
+        onClose={() => setScanViewer(null)}
+        onOpenDocument={(documentId) => openRelatedRecord("documents", documentId)}
+        onCreateFinding={createFindingFromViewedDocument}
+      />
       {teamOpen && account ? (
         <ProjectTeamModal
           account={account}

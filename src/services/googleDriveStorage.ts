@@ -1,4 +1,7 @@
-const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GOOGLE_DRIVE_SCOPE = [
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive.readonly",
+].join(" ");
 const GOOGLE_DRIVE_API = "https://www.googleapis.com/drive/v3";
 const GOOGLE_DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const GOOGLE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
@@ -43,6 +46,7 @@ type DriveFile = {
   mimeType?: string;
   size?: string;
   webViewLink?: string;
+  trashed?: boolean;
 };
 
 let googleScriptPromise: Promise<void> | null = null;
@@ -57,6 +61,14 @@ export interface GoogleDriveProjectTarget {
 
 export interface GoogleDriveUploadedFile {
   id: string;
+  webViewLink: string;
+}
+
+export interface GoogleDriveFileMetadata {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
   webViewLink: string;
 }
 
@@ -125,6 +137,63 @@ export async function downloadFileFromGoogleDrive(fileId: string): Promise<Blob>
   return response.blob();
 }
 
+export async function getGoogleDriveFileMetadata(fileId: string): Promise<GoogleDriveFileMetadata> {
+  const response = await driveFetch(
+    `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,size,webViewLink,trashed`,
+  );
+  const file = await response.json() as DriveFile & { trashed?: boolean };
+  if (!file.id || file.trashed) {
+    throw new Error("Файл Google Drive не знайдено або він у кошику.");
+  }
+  if (!file.name) {
+    throw new Error("Google Drive не повернув назву файлу.");
+  }
+  return {
+    id: file.id,
+    name: file.name,
+    mimeType: file.mimeType || "application/octet-stream",
+    size: Number(file.size ?? 0),
+    webViewLink: file.webViewLink || googleDriveViewUrl(file.id),
+  };
+}
+
+export async function listGoogleDriveFolderFiles(folderId: string): Promise<GoogleDriveFileMetadata[]> {
+  const files: GoogleDriveFileMetadata[] = [];
+  let pageToken = "";
+  const escapedFolderId = escapeDriveQueryValue(folderId);
+
+  do {
+    const query = `'${escapedFolderId}' in parents and trashed=false`;
+    const params = new URLSearchParams({
+      q: query,
+      spaces: "drive",
+      fields: "nextPageToken,files(id,name,mimeType,size,webViewLink,trashed)",
+      pageSize: "1000",
+      orderBy: "name_natural",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await driveFetch(`${GOOGLE_DRIVE_API}/files?${params.toString()}`);
+    const result = await response.json() as { nextPageToken?: string; files?: DriveFile[] };
+    for (const file of result.files ?? []) {
+      if (!file.id || !file.name || file.trashed) continue;
+      files.push({
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType || "application/octet-stream",
+        size: Number(file.size ?? 0),
+        webViewLink: file.webViewLink || googleDriveViewUrl(file.id),
+      });
+    }
+    pageToken = result.nextPageToken ?? "";
+  } while (pageToken);
+
+  return files.sort((first, second) => first.name.localeCompare(second.name, "uk", {
+    numeric: true,
+    sensitivity: "base",
+  }));
+}
+
 export async function deleteFileFromGoogleDrive(fileId: string): Promise<void> {
   await driveFetch(
     `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}`,
@@ -157,7 +226,7 @@ async function ensureProjectFolder(target: GoogleDriveProjectTarget): Promise<st
 }
 
 async function findOrCreateProjectFolder(target: GoogleDriveProjectTarget): Promise<string> {
-  const escapedProjectId = target.projectId.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const escapedProjectId = escapeDriveQueryValue(target.projectId);
   const query = [
     `mimeType='${GOOGLE_FOLDER_MIME_TYPE}'`,
     "trashed=false",
@@ -199,6 +268,10 @@ async function findOrCreateProjectFolder(target: GoogleDriveProjectTarget): Prom
     throw new Error("Не вдалося створити папку проєкту в хмарному сховищі.");
   }
   return created.id;
+}
+
+function escapeDriveQueryValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {

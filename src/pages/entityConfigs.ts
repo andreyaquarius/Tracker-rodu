@@ -23,7 +23,7 @@ export interface FieldConfig {
   options?: string[];
   required?: boolean;
   wide?: boolean;
-  attachmentPolicy?: "all" | "finding" | "archive-request";
+  attachmentPolicy?: "all" | "finding" | "archive-request" | "document";
   attachmentAccept?: string;
   attachmentDescription?: string;
   attachmentLimitMessage?: string;
@@ -131,6 +131,14 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
       { key: "yearTo", label: "Рік до", type: "number" },
       { key: "place", label: "Населений пункт" },
       { key: "url", label: "Посилання на документ", type: "url", wide: true },
+      {
+        key: "scans",
+        label: "Скан документа",
+        type: "scans",
+        wide: true,
+        attachmentPolicy: "document",
+        attachmentDescription: "Додайте скан, файл із хмарного сховища або посилання на зовнішнє джерело: Вікіджерела, електронний архів, бібліотеку чи інший сайт із документом.",
+      },
       { key: "pagesCount", label: "Кількість сторінок / аркушів", type: "number" },
       { key: "lastPage", label: "Остання переглянута сторінка", type: "number" },
       { key: "reviewStatus", label: "Статус перегляду", type: "select", options: ["не почато", "в роботі", "переглянуто", "потрібно повторно перевірити", "недоступно"] },
