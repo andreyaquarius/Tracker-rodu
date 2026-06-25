@@ -4,6 +4,7 @@ import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAut
 import { Sidebar, type PageKey } from "./Sidebar";
 import { HelpCenter } from "./HelpCenter";
 import { TopBar } from "./TopBar";
+import { WorkspaceWindowsProvider } from "./WorkspaceWindows";
 
 interface LayoutProps {
   page: PageKey | null;
@@ -28,34 +29,36 @@ interface LayoutProps {
 export function Layout(props: LayoutProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
-    <div className="app-shell">
-      <Sidebar
-        page={props.page}
-        onNavigate={props.onNavigate}
-        onOpenProjects={props.onOpenProjects}
-        customSections={props.customSections}
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
-      />
-      <div className="main-shell">
-        <TopBar
-          account={props.account}
-          workspace={props.workspace}
-          workspaces={props.workspaces}
-          onMenu={() => setMenuOpen(true)}
-          onSignInAccount={props.onSignInAccount}
-          onSignOutAccount={props.onSignOutAccount}
-          onSwitchWorkspace={props.onSwitchWorkspace}
-          onCreateWorkspace={props.onCreateWorkspace}
-          onRenameWorkspace={props.onRenameWorkspace}
-          onDeleteWorkspace={props.onDeleteWorkspace}
-          onOpenTeam={props.onOpenTeam}
-          isAccountSigningIn={props.isAccountSigningIn}
-          isCreatingWorkspace={props.isCreatingWorkspace}
-          helpAction={<HelpCenter page={props.page} />}
+    <WorkspaceWindowsProvider scopeKey={props.workspace?.projectId ?? "no-project"}>
+      <div className="app-shell">
+        <Sidebar
+          page={props.page}
+          onNavigate={props.onNavigate}
+          onOpenProjects={props.onOpenProjects}
+          customSections={props.customSections}
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
         />
-        <main className="page">{props.children}</main>
+        <div className="main-shell">
+          <TopBar
+            account={props.account}
+            workspace={props.workspace}
+            workspaces={props.workspaces}
+            onMenu={() => setMenuOpen(true)}
+            onSignInAccount={props.onSignInAccount}
+            onSignOutAccount={props.onSignOutAccount}
+            onSwitchWorkspace={props.onSwitchWorkspace}
+            onCreateWorkspace={props.onCreateWorkspace}
+            onRenameWorkspace={props.onRenameWorkspace}
+            onDeleteWorkspace={props.onDeleteWorkspace}
+            onOpenTeam={props.onOpenTeam}
+            isAccountSigningIn={props.isAccountSigningIn}
+            isCreatingWorkspace={props.isCreatingWorkspace}
+            helpAction={<HelpCenter page={props.page} />}
+          />
+          <main className="page">{props.children}</main>
+        </div>
       </div>
-    </div>
+    </WorkspaceWindowsProvider>
   );
 }

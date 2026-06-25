@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   AppDatabase,
   CustomSectionDefinition,
@@ -29,6 +29,12 @@ import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 import { sanitizeWebUrl } from "../utils/safeUrl";
 import { PaginationControls } from "../components/PaginationControls";
 import { usePagination } from "../hooks/usePagination";
+import { useWorkspaceWindows } from "../components/WorkspaceWindows";
+
+type CustomSectionWindow =
+  | { windowId: string; kind: "view"; recordId: string }
+  | { windowId: string; kind: "edit"; recordId: string }
+  | { windowId: string; kind: "new" };
 
 export function CustomSectionPage({
   db,
@@ -65,18 +71,101 @@ export function CustomSectionPage({
 }) {
   const canCreateRecords = !readOnly && canCreate;
   const [search, setSearch] = useState(initialSearch);
-  const [viewing, setViewing] = useState<CustomSectionRecord | null>(null);
-  const [editing, setEditing] = useState<CustomSectionRecord | "new" | null>(null);
+  const initialOpenRef = useRef("");
+  const windowOwnerKey = `custom:${section.id}`;
+  const { openWindow: openWorkspaceWindow, closeWindows } = useWorkspaceWindows();
 
   useEffect(() => setSearch(initialSearch), [initialSearch]);
   useEffect(() => {
     if (!initialOpenRecordId) return;
-    setViewing(records.find((record) => record.id === initialOpenRecordId) ?? null);
+    if (initialOpenRef.current === `${section.id}:${initialOpenRecordId}`) return;
+    const record = records.find((item) => item.id === initialOpenRecordId);
+    if (record) {
+      initialOpenRef.current = `${section.id}:${initialOpenRecordId}`;
+      openViewWindow(record);
+    }
   }, [initialOpenRecordId, records]);
   useEffect(() => {
-    if (!viewing) return;
-    setViewing(records.find((record) => record.id === viewing.id) ?? null);
-  }, [records, viewing?.id]);
+    if (!initialOpenRecordId) initialOpenRef.current = "";
+  }, [initialOpenRecordId]);
+  useEffect(() => {
+    const existingIds = new Set(records.map((record) => record.id));
+    closeWindows((window) =>
+      window.ownerKey === windowOwnerKey &&
+      customRecordIdFromWindowKey(window.logicalKey) !== null &&
+      !existingIds.has(customRecordIdFromWindowKey(window.logicalKey) ?? ""),
+    );
+  }, [closeWindows, records, windowOwnerKey]);
+  const openViewWindow = (record: CustomSectionRecord) => {
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: customSectionWindowKey({ windowId: "", kind: "view", recordId: record.id }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <CustomRecordDetails
+          db={db}
+          section={section}
+          record={record}
+          onOpenRelated={onOpenRelated}
+          onClose={close}
+          onEdit={readOnly ? undefined : () => openEditWindow(record)}
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
+  const openEditWindow = (record: CustomSectionRecord) => {
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: customSectionWindowKey({ windowId: "", kind: "edit", recordId: record.id }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <CustomRecordEditor
+          db={db}
+          section={section}
+          record={record}
+          onClose={close}
+          onSave={(savedRecord) => {
+            onSave(savedRecord);
+            close();
+          }}
+          onAddField={onAddField}
+          canAddField={canAddField}
+          fieldLimitMessage={fieldLimitMessage}
+          onAddFieldBlocked={onAddFieldBlocked}
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
+  const openNewWindow = () => {
+    const windowId = createId();
+    openWorkspaceWindow({
+      ownerKey: windowOwnerKey,
+      logicalKey: customSectionWindowKey({ windowId, kind: "new" }),
+      render: ({ stackIndex, dockIndex, onFocus, close }) => (
+        <CustomRecordEditor
+          db={db}
+          section={section}
+          record={null}
+          onClose={close}
+          onSave={(savedRecord) => {
+            onSave(savedRecord);
+            close();
+          }}
+          onAddField={onAddField}
+          canAddField={canAddField}
+          fieldLimitMessage={fieldLimitMessage}
+          onAddFieldBlocked={onAddFieldBlocked}
+          stackIndex={stackIndex}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        />
+      ),
+    });
+  };
 
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("uk");
@@ -100,9 +189,13 @@ export function CustomSectionPage({
       .flatMap((field) => {
         const value = record.values[field.id];
         return Array.isArray(value) ? value as ScanAttachment[] : [];
-      });
+    });
     await Promise.allSettled(attachments.map(deleteScanFile));
     onDelete(record.id);
+    closeWindows((window) =>
+      window.ownerKey === windowOwnerKey &&
+      customRecordIdFromWindowKey(window.logicalKey) === record.id,
+    );
   };
 
   return (
@@ -133,7 +226,7 @@ export function CustomSectionPage({
             )}
           />
           {canCreateRecords ? (
-            <button className="button button-primary" onClick={() => setEditing("new")}>
+            <button className="button button-primary" onClick={openNewWindow}>
               + Додати {section.singularName}
             </button>
           ) : null}
@@ -180,7 +273,7 @@ export function CustomSectionPage({
                     <tr
                       className="clickable-row"
                       key={record.id}
-                      onClick={() => setViewing(record)}
+                      onClick={() => openViewWindow(record)}
                     >
                       <td data-label="Назва"><strong>{customRecordTitle(section, record)}</strong></td>
                       {columns.filter((field) => field.id !== section.titleFieldId).map((field) => (
@@ -196,7 +289,7 @@ export function CustomSectionPage({
                               title="Редагувати"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                setEditing(record);
+                                openEditWindow(record);
                               }}
                             >✎</button>
                             <button
@@ -233,39 +326,18 @@ export function CustomSectionPage({
           </div>
         )}
       </section>
-
-      {viewing ? (
-        <CustomRecordDetails
-          db={db}
-          section={section}
-          record={viewing}
-          onOpenRelated={onOpenRelated}
-          onClose={() => setViewing(null)}
-          onEdit={readOnly ? undefined : () => {
-              setEditing(viewing);
-              setViewing(null);
-            }}
-        />
-      ) : null}
-
-      {editing && !readOnly && (editing !== "new" || canCreateRecords) ? (
-        <CustomRecordEditor
-          db={db}
-          section={section}
-          record={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSave={(record) => {
-            onSave(record);
-            setEditing(null);
-          }}
-          onAddField={onAddField}
-          canAddField={canAddField}
-          fieldLimitMessage={fieldLimitMessage}
-          onAddFieldBlocked={onAddFieldBlocked}
-        />
-      ) : null}
     </>
   );
+}
+
+function customSectionWindowKey(window: CustomSectionWindow): string {
+  if (window.kind === "new") return window.windowId;
+  return `${window.kind}:${window.recordId}`;
+}
+
+function customRecordIdFromWindowKey(logicalKey: string): string | null {
+  const [kind, recordId] = logicalKey.split(":");
+  return (kind === "view" || kind === "edit") && recordId ? recordId : null;
 }
 
 function CustomRecordEditor({
@@ -278,6 +350,9 @@ function CustomRecordEditor({
   canAddField,
   fieldLimitMessage,
   onAddFieldBlocked,
+  stackIndex,
+  dockIndex,
+  onFocus,
 }: {
   db: AppDatabase;
   section: CustomSectionDefinition;
@@ -288,6 +363,9 @@ function CustomRecordEditor({
   canAddField: boolean;
   fieldLimitMessage?: string;
   onAddFieldBlocked?: () => void;
+  stackIndex: number;
+  dockIndex: number;
+  onFocus: () => void;
 }) {
   const [values, setValues] = useState<Record<string, CustomSectionRecordValue>>(() =>
     Object.fromEntries(section.fields.map((field) => [
@@ -335,6 +413,10 @@ function CustomRecordEditor({
     <Modal
       title={`${record ? "Редагувати" : "Додати"} ${section.singularName}`}
       onClose={onClose}
+      mode="window"
+      stackIndex={stackIndex}
+      dockIndex={dockIndex}
+      onFocus={onFocus}
     >
       <form onSubmit={submit}>
         <div className="form-grid">
@@ -509,6 +591,9 @@ function CustomRecordDetails({
   onOpenRelated,
   onClose,
   onEdit,
+  stackIndex,
+  dockIndex,
+  onFocus,
 }: {
   db: AppDatabase;
   section: CustomSectionDefinition;
@@ -516,9 +601,19 @@ function CustomRecordDetails({
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onClose: () => void;
   onEdit?: () => void;
+  stackIndex: number;
+  dockIndex: number;
+  onFocus: () => void;
 }) {
   return (
-    <Modal title={customRecordTitle(section, record)} onClose={onClose}>
+    <Modal
+      title={customRecordTitle(section, record)}
+      onClose={onClose}
+      mode="window"
+      stackIndex={stackIndex}
+      dockIndex={dockIndex}
+      onFocus={onFocus}
+    >
       <div className="details-body">
         <div className="details-grid">
           {section.fields.map((field) => (

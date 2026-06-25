@@ -563,12 +563,42 @@ tbody tr:hover { background: #fbfaf5; }
 .activity-arrow { color: #8a9692; font-size: 15px; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 100; padding: 30px; display: grid; place-items: center; background: rgba(10,28,24,.58); backdrop-filter: blur(4px); }
-.modal { width: min(820px, 100%); max-height: calc(100vh - 60px); overflow-y: auto; background: var(--paper); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.26); }
+.modal-backdrop-windowed { pointer-events: none; background: transparent; backdrop-filter: none; }
+.modal { width: min(820px, 100%); max-height: calc(100vh - 60px); overflow-y: auto; background: var(--paper); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.26); pointer-events: auto; }
 .modal-draggable { position: fixed; margin: 0; }
 .modal-header { position: sticky; top: 0; z-index: 2; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; background: var(--paper); border-bottom: 1px solid var(--line); cursor: move; touch-action: none; user-select: none; }
 .modal-header .icon-button { cursor: pointer; }
 .modal-header h2 { margin: 0; font-size: 23px; }
+.modal-window-controls { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .modal form { padding: 24px; }
+.modal-minimized-card {
+  position: fixed;
+  min-height: 48px;
+  padding: 8px 9px 8px 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--green-950);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.22);
+}
+.modal-minimized-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-minimized-title:hover { color: var(--green-800); }
+.modal-minimized-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .help-backdrop {
   position: fixed;
   inset: 0;
@@ -1805,11 +1835,11 @@ tbody tr:hover { background: #fbfaf5; }
 .map-person-options small,
 .map-person-options p { margin: 0; color: var(--muted); font-size: 11px; }
 .map-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 330px); gap: 16px; min-height: 620px; }
-.tracker-map-wrap { position: relative; min-height: 620px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #edf1eb; }
+.tracker-map-wrap { position: relative; z-index: 0; min-height: 620px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #edf1eb; }
 .tracker-map { position: absolute; inset: 0; }
 .map-open-button { position: absolute; right: 14px; bottom: 14px; z-index: 450; box-shadow: var(--shadow); }
 .map-fullscreen-button { position: absolute; right: 14px; top: 14px; z-index: 450; box-shadow: var(--shadow); }
-.tracker-map-wrap.map-fullscreen { position: fixed; inset: 14px; z-index: 120; min-height: 0; border-radius: 12px; box-shadow: 0 22px 70px rgba(0,0,0,.35); }
+.tracker-map-wrap.map-fullscreen { position: fixed; inset: 14px; z-index: 220; min-height: 0; border-radius: 12px; box-shadow: 0 22px 70px rgba(0,0,0,.35); }
 .tracker-map-wrap.map-fullscreen .map-open-button { bottom: 18px; right: 18px; }
 .tracker-map-wrap.map-fullscreen .map-fullscreen-button { top: 18px; right: 18px; }
 .map-marker-list { display: grid; align-content: start; gap: 8px; max-height: 620px; overflow: auto; padding-right: 3px; }
@@ -1940,7 +1970,7 @@ tbody tr:hover { background: #fbfaf5; }
   .tracker-map-wrap { min-height: 430px; }
   .map-fullscreen-button { top: 10px; right: 10px; }
   .map-open-button { right: 10px; bottom: 10px; }
-  .tracker-map-wrap.map-fullscreen { inset: 8px; z-index: 760; }
+  .tracker-map-wrap.map-fullscreen { inset: 8px; }
   .map-marker-list { max-height: 420px; }
   .participants-heading { align-items: stretch; flex-direction: column; }
   .participant-row { grid-template-columns: 28px 1fr 36px; }
@@ -1958,6 +1988,9 @@ tbody tr:hover { background: #fbfaf5; }
   .modal-backdrop { padding: 0; place-items: end center; }
   .modal { max-height: 94vh; border-radius: 16px 16px 0 0; }
   .modal-header { cursor: default; touch-action: auto; }
+  .modal-minimized-card {
+    max-width: calc(100vw - 16px);
+  }
   .help-backdrop { padding: 0; place-items: end center; }
   .help-panel { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; }
   .help-panel-header { padding: 18px 20px; }
