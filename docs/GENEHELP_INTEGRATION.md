@@ -66,3 +66,13 @@
 Для адмінських перемикачів потрібно застосувати міграцію:
 
 `supabase/migrations/202606260002_app_feature_flags.sql`
+
+## Тестовий режим запитів
+
+Поки інтеграція тестується, Edge Function надсилає запити в GeneHelp з
+`meta.is_test = true`. Такі запити проходять через GeneHelp, але позначаються як
+тестові на їхньому боці.
+
+Перемикач знаходиться в `supabase/functions/genehelp/index.ts`:
+
+`geneHelpRequestTestMode`

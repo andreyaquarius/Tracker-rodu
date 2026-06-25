@@ -36,6 +36,7 @@ type GeneHelpOnboardingResponse = {
 type GeneHelpContext = Awaited<ReturnType<typeof authenticatedContext>>;
 
 const geneHelpBaseUrl = "https://genehelp.online";
+const geneHelpRequestTestMode = true;
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -158,7 +159,7 @@ async function createRequestWithToken(
       body: {
         meta: {
           locale: "uk",
-          is_test: false,
+          is_test: geneHelpRequestTestMode,
         },
         content: {
           title,
