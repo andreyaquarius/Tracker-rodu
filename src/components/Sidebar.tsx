@@ -180,6 +180,7 @@ interface SidebarProps {
   onNavigate: (page: PageKey) => void;
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
+  showGeneHelp: boolean;
   customSections: CustomSectionDefinition[];
   open: boolean;
   onClose: () => void;
@@ -190,6 +191,7 @@ export function Sidebar({
   onNavigate,
   onOpenProjects,
   onOpenGeneHelp,
+  showGeneHelp,
   customSections,
   open,
   onClose,
@@ -378,14 +380,16 @@ export function Sidebar({
           ) : null}
 
           <div className="system-nav-group">
-            <button
-              type="button"
-              className="genehelp-nav-action"
-              onClick={openGeneHelp}
-            >
-              <span className="nav-icon"><NavigationIcon icon="send" /></span>
-              Попросити допомоги в GeneHelp
-            </button>
+            {showGeneHelp ? (
+              <button
+                type="button"
+                className="genehelp-nav-action"
+                onClick={openGeneHelp}
+              >
+                <span className="nav-icon"><NavigationIcon icon="send" /></span>
+                Попросити допомоги в GeneHelp
+              </button>
+            ) : null}
             {systemItems.map((item) => (
               <button
                 type="button"
