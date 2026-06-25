@@ -55,6 +55,7 @@ type NavigationIconName =
   | "bookmark-check"
   | "lightbulb"
   | "users"
+  | "send"
   | "refresh"
   | "credit-card"
   | "settings";
@@ -130,6 +131,12 @@ function NavigationIcon({ icon }: { icon: NavigationIconName }) {
         <path d="M16 3.13a4 4 0 0 1 0 7.75" />
       </>
     ),
+    send: (
+      <>
+        <path d="M22 2 11 13" />
+        <path d="M22 2 15 22l-4-9-9-4z" />
+      </>
+    ),
     refresh: (
       <>
         <path d="M20 12a8 8 0 0 1-14.4 4.8" />
@@ -172,6 +179,7 @@ interface SidebarProps {
   page: PageKey | null;
   onNavigate: (page: PageKey) => void;
   onOpenProjects: () => void;
+  onOpenGeneHelp: () => void;
   customSections: CustomSectionDefinition[];
   open: boolean;
   onClose: () => void;
@@ -181,6 +189,7 @@ export function Sidebar({
   page,
   onNavigate,
   onOpenProjects,
+  onOpenGeneHelp,
   customSections,
   open,
   onClose,
@@ -213,6 +222,10 @@ export function Sidebar({
   };
   const openProjects = () => {
     onOpenProjects();
+    onClose();
+  };
+  const openGeneHelp = () => {
+    onOpenGeneHelp();
     onClose();
   };
   const toggle = (key: string) => {
@@ -365,6 +378,14 @@ export function Sidebar({
           ) : null}
 
           <div className="system-nav-group">
+            <button
+              type="button"
+              className="genehelp-nav-action"
+              onClick={openGeneHelp}
+            >
+              <span className="nav-icon"><NavigationIcon icon="send" /></span>
+              Попросити допомоги в GeneHelp
+            </button>
             {systemItems.map((item) => (
               <button
                 type="button"
