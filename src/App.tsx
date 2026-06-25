@@ -67,7 +67,11 @@ import {
   type SupabaseWorkspace,
 } from "./services/supabaseAuth";
 import { useSubscription } from "./hooks/useSubscription";
-import { subscriptionErrorCode, subscriptionErrorMessage } from "./services/subscriptionService";
+import {
+  loadAppFeatureFlags,
+  subscriptionErrorCode,
+  subscriptionErrorMessage,
+} from "./services/subscriptionService";
 import type { PlanLimitKey, UpgradeReason } from "./types/subscription";
 import {
   clearProjectResearchCache,
@@ -474,6 +478,7 @@ export default function App() {
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
@@ -542,6 +547,27 @@ export default function App() {
     workspace?.projectId,
     Boolean(account) && route.kind !== "public",
   );
+  useEffect(() => {
+    let active = true;
+    if (!account || route.kind === "public") {
+      setFeatureFlags({});
+      return () => {
+        active = false;
+      };
+    }
+    void loadAppFeatureFlags()
+      .then((flags) => {
+        if (active) setFeatureFlags(flags);
+      })
+      .catch(() => {
+        if (active) setFeatureFlags({});
+      });
+    return () => {
+      active = false;
+    };
+  }, [account?.id, route.kind]);
+
+  const canOpenGeneHelp = subscriptionAccess.isAdmin || featureFlags.genehelp_public === true;
   const canCreateProjectRecords = !workspace || subscriptionAccess.canCreateProjectRecords;
   const canCreateStandardSection = useCallback((sectionKey?: string) => {
     if (!canCreateProjectRecords) return false;
@@ -4136,7 +4162,10 @@ export default function App() {
         page={route.kind === "projects" ? null : page}
         onNavigate={navigate}
         onOpenProjects={openProjects}
-        onOpenGeneHelp={() => setGeneHelpOpen(true)}
+        onOpenGeneHelp={() => {
+          if (canOpenGeneHelp) setGeneHelpOpen(true);
+        }}
+        showGeneHelp={canOpenGeneHelp}
         customSections={activeDb.customSections}
         account={account}
         workspace={workspace}
@@ -4188,7 +4217,7 @@ export default function App() {
           }
         />
       ) : null}
-      {geneHelpOpen ? (
+      {geneHelpOpen && canOpenGeneHelp ? (
         <GeneHelpRequestModal onClose={() => setGeneHelpOpen(false)} />
       ) : null}
       {upgradeReason ? (

@@ -10,7 +10,8 @@ import {
 type GeneHelpAction =
   | "account-status"
   | "create-simple-request"
-  | "get-status";
+  | "get-status"
+  | "list-requests";
 
 type GeneHelpAccountRow = {
   genehelp_user_id: string | null;
@@ -52,6 +53,8 @@ Deno.serve(async (request) => {
         return await createSimpleRequest(context, input);
       case "get-status":
         return await getStatus(context, input);
+      case "list-requests":
+        return await listRequests(context);
       default:
         return json({ error: "Невідома дія GeneHelp." }, 400);
     }
@@ -86,9 +89,11 @@ async function createSimpleRequest(
 
   const title = normalizeOptionalText(input.title);
   const registrationConsent = input.registrationConsent === true;
+  await assertRequestHistoryReady(context);
   let integrationToken = await ensureIntegrationToken(context, registrationConsent);
   try {
     const response = await createRequestWithToken(integrationToken, title, description);
+    await saveGeneHelpRequest(context, response, title, description);
     return json(response);
   } catch (error) {
     if (!(error instanceof GeneHelpProviderError) || ![401, 403].includes(error.status)) {
@@ -96,6 +101,7 @@ async function createSimpleRequest(
     }
     integrationToken = await onboardGeneHelpUser(context);
     const response = await createRequestWithToken(integrationToken, title, description);
+    await saveGeneHelpRequest(context, response, title, description);
     return json(response);
   }
 }
@@ -110,7 +116,33 @@ async function getStatus(
     `/api/partners/genealogy-requests/${encodeURIComponent(id)}`,
     integrationToken,
   );
+  await updateGeneHelpRequestStatus(context, id, response);
   return json(response);
+}
+
+async function listRequests(context: GeneHelpContext): Promise<Response> {
+  const { data, error } = await context.admin
+    .from("user_genehelp_requests")
+    .select("genehelp_request_id, title, description, status, links, meta, response, created_at, updated_at, last_checked_at")
+    .eq("user_id", context.user.id)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw decorateGeneHelpRequestStorageError(error);
+
+  return json({
+    requests: (data ?? []).map((row) => ({
+      id: row.genehelp_request_id,
+      title: row.title,
+      description: row.description,
+      status: row.status,
+      links: row.links,
+      meta: row.meta,
+      data: row.response,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      lastCheckedAt: row.last_checked_at,
+    })),
+  });
 }
 
 async function createRequestWithToken(
@@ -135,6 +167,62 @@ async function createRequestWithToken(
       },
     },
   );
+}
+
+async function assertRequestHistoryReady(context: GeneHelpContext): Promise<void> {
+  const { error } = await context.admin
+    .from("user_genehelp_requests")
+    .select("genehelp_request_id")
+    .eq("user_id", context.user.id)
+    .limit(1);
+  if (error) throw decorateGeneHelpRequestStorageError(error);
+}
+
+async function saveGeneHelpRequest(
+  context: GeneHelpContext,
+  response: unknown,
+  title: string | null,
+  description: string,
+): Promise<void> {
+  const id = extractRequestId(response);
+  if (!id) return;
+  const now = new Date().toISOString();
+  const { error } = await context.admin
+    .from("user_genehelp_requests")
+    .upsert({
+      user_id: context.user.id,
+      genehelp_request_id: id,
+      title,
+      description,
+      status: extractObject(response, "status"),
+      links: extractObject(response, "links"),
+      meta: extractObject(response, "meta"),
+      response: toJsonValue(response),
+      last_checked_at: now,
+      updated_at: now,
+    }, { onConflict: "user_id,genehelp_request_id" });
+  if (error) throw decorateGeneHelpRequestStorageError(error);
+}
+
+async function updateGeneHelpRequestStatus(
+  context: GeneHelpContext,
+  id: string,
+  response: unknown,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await context.admin
+    .from("user_genehelp_requests")
+    .upsert({
+      user_id: context.user.id,
+      genehelp_request_id: id,
+      status: extractObject(response, "status"),
+      links: extractObject(response, "links"),
+      meta: extractObject(response, "meta"),
+      response: toJsonValue(response),
+      last_checked_at: now,
+      updated_at: now,
+    }, { onConflict: "user_id,genehelp_request_id" });
+  if (error) throw decorateGeneHelpRequestStorageError(error);
 }
 
 async function ensureIntegrationToken(
@@ -291,6 +379,50 @@ function normalizeOptionalText(value: unknown): string | null {
   return text ? text : null;
 }
 
+function extractRequestId(value: unknown): string | null {
+  const record = asRecord(value);
+  const nestedRequest = asRecord(record.request);
+  const nestedData = asRecord(record.data);
+  const candidates = [
+    record.id,
+    record.request_id,
+    record.genealogy_request_id,
+    nestedRequest.id,
+    nestedData.id,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return String(candidate);
+  }
+  return null;
+}
+
+function extractObject(value: unknown, key: string): Record<string, unknown> {
+  const nested = asRecord(asRecord(value)[key]);
+  return toPlainObject(nested);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function toPlainObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? JSON.parse(JSON.stringify(value)) as Record<string, unknown>
+    : {};
+}
+
+function toJsonValue(value: unknown): unknown {
+  if (value === undefined) return null;
+  try {
+    return JSON.parse(JSON.stringify(value)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeGeneHelpId(value: unknown): string {
   const id = String(value ?? "").trim();
   if (!/^[a-z0-9_-]{4,64}$/i.test(id)) {
@@ -322,6 +454,18 @@ function decorateSupabaseError(error: unknown): Error {
     message.includes("Could not find the table")
   ) {
     return new Error("Таблиця GeneHelp ще не створена. Застосуйте SQL-міграцію GeneHelp у Supabase.");
+  }
+  return new Error(message);
+}
+
+function decorateGeneHelpRequestStorageError(error: unknown): Error {
+  const message = errorMessage(error, "Не вдалося прочитати історію запитів GeneHelp.");
+  if (
+    message.includes("user_genehelp_requests") ||
+    message.includes("schema cache") ||
+    message.includes("Could not find the table")
+  ) {
+    return new Error("Таблиця історії GeneHelp ще не створена. Застосуйте SQL-міграцію GeneHelp для надісланих запитів у Supabase.");
   }
   return new Error(message);
 }

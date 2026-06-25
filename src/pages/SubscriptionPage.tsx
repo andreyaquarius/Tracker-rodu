@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  adminSetFeatureFlag,
   adminSetSubscription,
   cancelMySubscription,
+  loadAdminFeatureFlags,
   loadAdminSubscriptions,
   loadSubscriptionPlans,
   subscriptionErrorMessage,
+  type AppFeatureFlag,
   type AdminSubscriptionRow,
 } from "../services/subscriptionService";
 import type {
@@ -57,16 +60,32 @@ export function SubscriptionPage({
 }: SubscriptionPageProps) {
   const [plans, setPlans] = useState<Array<{ plan: SubscriptionPlan; limits: PlanLimit[] }>>([]);
   const [adminRows, setAdminRows] = useState<AdminSubscriptionRow[]>([]);
+  const [featureFlags, setFeatureFlags] = useState<AppFeatureFlag[]>([]);
+  const [featureFlagsError, setFeatureFlagsError] = useState("");
   const [pageError, setPageError] = useState("");
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelMessage, setCancelMessage] = useState("");
 
   const refreshPage = async () => {
     setPageError("");
+    setFeatureFlagsError("");
     try {
       const nextPlans = await loadSubscriptionPlans();
       setPlans(nextPlans);
-      if (context?.isAdmin) setAdminRows(await loadAdminSubscriptions());
+      if (context?.isAdmin) {
+        const nextAdminRows = await loadAdminSubscriptions();
+        setAdminRows(nextAdminRows);
+        try {
+          const nextFeatureFlags = await loadAdminFeatureFlags();
+          setFeatureFlags(nextFeatureFlags);
+          setFeatureFlagsError("");
+        } catch {
+          setFeatureFlags([]);
+          setFeatureFlagsError(
+            "Перемикачі функцій ще не налаштовані в базі. Список підписок працює окремо; для перемикачів потрібно застосувати SQL-міграцію 202606260002_app_feature_flags.sql.",
+          );
+        }
+      }
       await onRefresh();
     } catch (loadError) {
       setPageError(loadError instanceof Error ? loadError.message : "Не вдалося завантажити тарифи.");
@@ -235,9 +254,71 @@ export function SubscriptionPage({
       ) : null}
 
       {context?.isAdmin ? (
-        <AdminSubscriptions rows={adminRows} onChanged={refreshPage} />
+        <>
+          <AdminFeatureFlags
+            flags={featureFlags}
+            loadError={featureFlagsError}
+            onChanged={refreshPage}
+          />
+          <AdminSubscriptions rows={adminRows} onChanged={refreshPage} />
+        </>
       ) : null}
     </>
+  );
+}
+
+function AdminFeatureFlags({ flags, loadError, onChanged }: {
+  flags: AppFeatureFlag[];
+  loadError: string;
+  onChanged: () => Promise<void>;
+}) {
+  const [busyKey, setBusyKey] = useState("");
+  const [error, setError] = useState("");
+
+  const toggle = async (flag: AppFeatureFlag) => {
+    setBusyKey(flag.key);
+    setError("");
+    try {
+      await adminSetFeatureFlag({ key: flag.key, isEnabled: !flag.isEnabled });
+      await onChanged();
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : "Не вдалося змінити налаштування функції.");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  return (
+    <section className="subscription-admin-section feature-flags-section">
+      <div className="section-heading">
+        <h2>Керування функціями</h2>
+      </div>
+      {loadError ? <div className="alert alert-notice">{loadError}</div> : null}
+      {error ? <div className="alert alert-error">{error}</div> : null}
+      <div className="feature-flag-list">
+        {flags.map((flag) => (
+          <article className="feature-flag-item" key={flag.key}>
+            <div>
+              <h3>{flag.title}</h3>
+              {flag.description ? <p>{flag.description}</p> : null}
+              <small>Ключ: {flag.key}</small>
+            </div>
+            <button
+              type="button"
+              className={`feature-flag-toggle ${flag.isEnabled ? "enabled" : ""}`}
+              disabled={busyKey === flag.key}
+              onClick={() => void toggle(flag)}
+              aria-pressed={flag.isEnabled}
+            >
+              <span>{flag.isEnabled ? "Увімкнено" : "Вимкнено"}</span>
+            </button>
+          </article>
+        ))}
+        {!flags.length && !loadError ? (
+          <div className="empty-inline">Немає доступних перемикачів функцій.</div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

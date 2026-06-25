@@ -11,6 +11,7 @@ interface LayoutProps {
   onNavigate: (page: PageKey) => void;
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
+  showGeneHelp: boolean;
   customSections: CustomSectionDefinition[];
   account: SupabaseAccount | null;
   workspace: SupabaseWorkspace | null;
@@ -37,6 +38,7 @@ export function Layout(props: LayoutProps) {
           onNavigate={props.onNavigate}
           onOpenProjects={props.onOpenProjects}
           onOpenGeneHelp={props.onOpenGeneHelp}
+          showGeneHelp={props.showGeneHelp}
           customSections={props.customSections}
           open={menuOpen}
           onClose={() => setMenuOpen(false)}

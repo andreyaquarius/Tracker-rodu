@@ -27,6 +27,18 @@ export interface GeneHelpSimpleRequestResponse {
   data?: unknown;
 }
 
+export interface GeneHelpStoredRequest extends GeneHelpSimpleRequestResponse {
+  title?: string | null;
+  description?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastCheckedAt?: string | null;
+}
+
+export interface GeneHelpRequestListResponse {
+  requests: GeneHelpStoredRequest[];
+}
+
 export interface GeneHelpAccountStatus {
   connected: boolean;
   email: string;
@@ -47,6 +59,10 @@ export async function createGeneHelpSimpleRequest(input: {
 
 export async function getGeneHelpRequestStatus(id: string): Promise<GeneHelpSimpleRequestResponse> {
   return invokeGeneHelp<GeneHelpSimpleRequestResponse>("get-status", { id });
+}
+
+export async function listGeneHelpRequests(): Promise<GeneHelpRequestListResponse> {
+  return invokeGeneHelp<GeneHelpRequestListResponse>("list-requests", {});
 }
 
 async function invokeGeneHelp<T = unknown>(
