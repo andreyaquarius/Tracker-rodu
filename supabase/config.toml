@@ -26,3 +26,6 @@ verify_jwt = true
 
 [functions.search-places]
 verify_jwt = true
+
+[functions.genehelp]
+verify_jwt = true

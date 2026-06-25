@@ -38,6 +38,7 @@ import { PersonsPage } from "./pages/PersonsPage";
 import { MapPage } from "./pages/MapPage";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
+import { GeneHelpRequestModal } from "./components/GeneHelpRequestModal";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
 import { isHierarchyPage } from "./utils/sectionHierarchy";
@@ -472,6 +473,7 @@ export default function App() {
   const [isAccountSigningIn, setIsAccountSigningIn] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
+  const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
@@ -4134,6 +4136,7 @@ export default function App() {
         page={route.kind === "projects" ? null : page}
         onNavigate={navigate}
         onOpenProjects={openProjects}
+        onOpenGeneHelp={() => setGeneHelpOpen(true)}
         customSections={activeDb.customSections}
         account={account}
         workspace={workspace}
@@ -4184,6 +4187,9 @@ export default function App() {
             recordProjectActivity("settings", relatedId, text, actionType)
           }
         />
+      ) : null}
+      {geneHelpOpen ? (
+        <GeneHelpRequestModal onClose={() => setGeneHelpOpen(false)} />
       ) : null}
       {upgradeReason ? (
         <UpgradeRequiredModal

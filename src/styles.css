@@ -875,6 +875,28 @@ tbody tr:hover { background: #fbfaf5; }
 .ai-key-status span { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
 .ai-key-status strong { color: var(--green-950); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; }
 .ai-settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.genehelp-nav-action { margin-bottom: 7px; }
+.genehelp-request-modal { padding: 24px; display: grid; gap: 16px; }
+.genehelp-intro { display: grid; gap: 7px; }
+.genehelp-intro p { max-width: 720px; margin: 0; color: var(--muted); line-height: 1.55; }
+.genehelp-result {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  color: var(--green-950);
+  background: #fffdfa;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.genehelp-result h3 { margin: 0; color: var(--green-950); font-size: 18px; }
+.genehelp-box-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.genehelp-box-heading .button { min-height: 34px; padding: 7px 11px; }
+.genehelp-result > strong { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.genehelp-result dl { margin: 0; display: grid; gap: 7px; }
+.genehelp-result dl > div { display: grid; grid-template-columns: 90px 1fr; gap: 10px; }
+.genehelp-result dt { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.genehelp-result dd { margin: 0; font-size: 12px; }
+.genehelp-links { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .ai-review-modal { min-width: min(720px, 78vw); }
 .ai-data-list, .ai-review-block ul { margin: 10px 0 0; padding-left: 22px; }
 .ai-data-list li, .ai-review-block li { margin: 5px 0; line-height: 1.5; }
