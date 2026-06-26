@@ -8,6 +8,7 @@ import {
   type GeneHelpSimpleRequestResponse,
   type GeneHelpStoredRequest,
 } from "../services/geneHelp";
+import { authenticatedGeneHelpViewUrl } from "../utils/geneHelpLinks";
 import { sanitizeWebUrl } from "../utils/safeUrl";
 import { Modal } from "./Modal";
 
@@ -476,7 +477,7 @@ function GeneHelpRequestResult({
 }
 
 function GeneHelpLinks({ view, edit }: { view?: string; edit?: string }) {
-  const viewHref = sanitizeWebUrl(view || "");
+  const viewHref = authenticatedGeneHelpViewUrl(view);
   const editHref = sanitizeWebUrl(edit || "");
   if (!viewHref && !editHref) return null;
   return (
