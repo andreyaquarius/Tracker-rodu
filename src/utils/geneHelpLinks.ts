@@ -14,28 +14,7 @@ function sanitizeWebUrl(value: unknown): string | null {
   }
 }
 
-export function geneHelpLoginRedirectUrl(targetUrl: string): string | null {
-  const sanitizedTarget = sanitizeWebUrl(targetUrl);
-  if (!sanitizedTarget) return null;
-
-  let target: URL;
-  try {
-    target = new URL(sanitizedTarget);
-  } catch {
-    return null;
-  }
-
-  if (target.origin !== GENEHELP_ORIGIN) return sanitizedTarget;
-
-  const loginUrl = new URL("/login", target.origin);
-  loginUrl.searchParams.set(
-    "redirect",
-    `${target.pathname}${target.search}${target.hash}`,
-  );
-  return loginUrl.toString();
-}
-
-export function authenticatedGeneHelpViewUrl(viewUrl?: string): string | null {
+export function authenticatedGeneHelpViewUrl(viewUrl?: string, editUrl?: string): string | null {
   const sanitizedView = sanitizeWebUrl(viewUrl || "");
   if (!sanitizedView) return null;
 
@@ -49,5 +28,18 @@ export function authenticatedGeneHelpViewUrl(viewUrl?: string): string | null {
   if (view.origin !== GENEHELP_ORIGIN) return sanitizedView;
   if (!/^\/requests\/[^/]+\/?$/.test(view.pathname)) return sanitizedView;
 
-  return geneHelpLoginRedirectUrl(sanitizedView) || sanitizedView;
+  const sanitizedEdit = sanitizeWebUrl(editUrl || "");
+  if (!sanitizedEdit) return sanitizedView;
+
+  try {
+    const edit = new URL(sanitizedEdit);
+    const expectedEditPath = `${view.pathname.replace(/\/$/g, "")}/edit`;
+    if (edit.origin === GENEHELP_ORIGIN && edit.pathname === expectedEditPath) {
+      return sanitizedEdit;
+    }
+  } catch {
+    return sanitizedView;
+  }
+
+  return sanitizedView;
 }

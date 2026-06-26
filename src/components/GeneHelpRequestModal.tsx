@@ -477,8 +477,8 @@ function GeneHelpRequestResult({
 }
 
 function GeneHelpLinks({ view, edit }: { view?: string; edit?: string }) {
-  const viewHref = authenticatedGeneHelpViewUrl(view);
   const editHref = sanitizeWebUrl(edit || "");
+  const viewHref = authenticatedGeneHelpViewUrl(view, editHref || undefined);
   if (!viewHref && !editHref) return null;
   return (
     <div className="genehelp-links">
