@@ -110,6 +110,23 @@ export interface AdminSubscriptionRow {
   isAdmin: boolean;
 }
 
+export interface AppFeatureFlag {
+  key: string;
+  title: string;
+  description: string;
+  isEnabled: boolean;
+  updatedAt: string | null;
+}
+
+export async function loadAppFeatureFlags(): Promise<Record<string, boolean>> {
+  const { data, error } = await getSupabaseClient().rpc("get_app_feature_flags");
+  if (error) throw error;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+  return Object.fromEntries(
+    Object.entries(data as Record<string, unknown>).map(([key, value]) => [key, Boolean(value)]),
+  );
+}
+
 export async function loadAdminSubscriptions(): Promise<AdminSubscriptionRow[]> {
   const { data, error } = await getSupabaseClient().rpc("admin_list_subscriptions");
   if (error) throw error;
@@ -123,6 +140,29 @@ export async function loadAdminSubscriptions(): Promise<AdminSubscriptionRow[]> 
     currentPeriodEnd: nullableString(row.current_period_end),
     isAdmin: Boolean(row.is_admin),
   }));
+}
+
+export async function loadAdminFeatureFlags(): Promise<AppFeatureFlag[]> {
+  const { data, error } = await getSupabaseClient().rpc("admin_list_feature_flags");
+  if (error) throw error;
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    key: String(row.key),
+    title: String(row.title ?? row.key),
+    description: String(row.description ?? ""),
+    isEnabled: Boolean(row.is_enabled),
+    updatedAt: nullableString(row.updated_at),
+  }));
+}
+
+export async function adminSetFeatureFlag(input: {
+  key: string;
+  isEnabled: boolean;
+}): Promise<void> {
+  const { error } = await getSupabaseClient().rpc("admin_set_feature_flag", {
+    target_key: input.key,
+    target_is_enabled: input.isEnabled,
+  });
+  if (error) throw error;
 }
 
 export async function adminSetSubscription(input: {
