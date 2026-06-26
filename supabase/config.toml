@@ -29,3 +29,9 @@ verify_jwt = true
 
 [functions.genehelp]
 verify_jwt = true
+
+# Public pre-signup guard. It does not read or write private data and exposes no
+# secrets; it only blocks restricted email domains / country headers before the
+# browser calls Supabase Auth.
+[functions.registration-guard]
+verify_jwt = false

@@ -4,6 +4,11 @@ import {
   type Session,
   type Subscription,
 } from "@supabase/supabase-js";
+import {
+  assertAllowedRegistrationEmail,
+  normalizeEmailForAuth,
+  registrationBlockMessage,
+} from "../utils/authRestrictions";
 
 export interface SupabaseAccount {
   id: string;
@@ -39,6 +44,13 @@ type ProjectRow = {
   id: string;
   name: string;
   slug?: string | null;
+};
+
+type RegistrationGuardResponse = {
+  allowed?: boolean;
+  reason?: string;
+  message?: string;
+  countryCode?: string | null;
 };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? "";
@@ -226,6 +238,32 @@ async function waitForWorkspaceRemoval(projectId: string): Promise<SupabaseWorks
   return lastResult;
 }
 
+async function checkRegistrationGuard(email: string): Promise<void> {
+  assertAllowedRegistrationEmail(email);
+
+  const client = requireSupabase();
+  try {
+    const { data, error } = await client.functions.invoke<RegistrationGuardResponse>(
+      "registration-guard",
+      { body: { email } },
+    );
+    if (error) return;
+    if (data?.allowed === false) {
+      throw new Error(data.message || registrationBlockMessage(data.reason));
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      const message = error.message;
+      if (
+        message === registrationBlockMessage("blocked_email_domain") ||
+        message === registrationBlockMessage("blocked_region")
+      ) {
+        throw error;
+      }
+    }
+  }
+}
+
 export async function signInWithSupabaseGoogle(): Promise<void> {
   const client = requireSupabase();
   const { error } = await client.auth.signInWithOAuth({
@@ -253,8 +291,11 @@ export async function signUpWithSupabaseEmail(
   email: string,
   password: string,
 ): Promise<{ confirmationRequired: boolean }> {
+  const normalizedEmail = normalizeEmailForAuth(email);
+  await checkRegistrationGuard(normalizedEmail);
+
   const { data, error } = await requireSupabase().auth.signUp({
-    email: email.trim().toLocaleLowerCase(),
+    email: normalizedEmail,
     password,
     options: {
       emailRedirectTo: applicationUrl(),
