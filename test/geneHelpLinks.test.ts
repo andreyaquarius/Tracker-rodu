@@ -2,23 +2,24 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { authenticatedGeneHelpViewUrl } from "../src/utils/geneHelpLinks.ts";
 
-test("routes GeneHelp request view links to the user's request list", () => {
+test("routes GeneHelp request view links to the user's request list with request id", () => {
   assert.equal(
     authenticatedGeneHelpViewUrl(
       "https://genehelp.online/requests/8FY4R0CN",
       "https://genehelp.online/requests/8FY4R0CN/edit",
+      "8FY4R0CN",
     ),
-    "https://genehelp.online/uk/my/requests",
+    "https://genehelp.online/uk/my/requests?request=8FY4R0CN",
   );
 });
 
-test("routes localized GeneHelp request links to the user's request list", () => {
+test("extracts request id from localized GeneHelp request links", () => {
   assert.equal(
     authenticatedGeneHelpViewUrl(
       "https://genehelp.online/uk/requests/8FY4R0CN",
       "https://genehelp.online/uk/requests/8FY4R0CN/edit",
     ),
-    "https://genehelp.online/uk/my/requests",
+    "https://genehelp.online/uk/my/requests?request=8FY4R0CN",
   );
 });
 

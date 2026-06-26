@@ -362,7 +362,11 @@ function GeneHelpRequestHistory({
               {selectedRequest.description ? (
                 <p>{selectedRequest.description}</p>
               ) : null}
-              <GeneHelpLinks view={selectedRequest.links?.view} edit={selectedRequest.links?.edit} />
+              <GeneHelpLinks
+                requestId={selectedRequest.id}
+                view={selectedRequest.links?.view}
+                edit={selectedRequest.links?.edit}
+              />
             </article>
           ) : null}
         </div>
@@ -471,14 +475,14 @@ function GeneHelpRequestResult({
           <div><dt>Повідомлення</dt><dd>{status.message || "—"}</dd></div>
         </dl>
       ) : null}
-      <GeneHelpLinks view={request.links?.view} edit={request.links?.edit} />
+      <GeneHelpLinks requestId={request.id} view={request.links?.view} edit={request.links?.edit} />
     </section>
   );
 }
 
-function GeneHelpLinks({ view, edit }: { view?: string; edit?: string }) {
+function GeneHelpLinks({ requestId, view, edit }: { requestId?: string; view?: string; edit?: string }) {
   const editHref = sanitizeWebUrl(edit || "");
-  const viewHref = authenticatedGeneHelpViewUrl(view, editHref || undefined);
+  const viewHref = authenticatedGeneHelpViewUrl(view, editHref || undefined, requestId);
   if (!viewHref && !editHref) return null;
   return (
     <div className="genehelp-links">

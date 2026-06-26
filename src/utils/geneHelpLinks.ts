@@ -19,17 +19,36 @@ function isGeneHelpRequestRoute(url: URL): boolean {
   return /^\/(?:uk\/)?requests\/[^/]+\/?(?:edit\/?)?$/.test(url.pathname);
 }
 
-export function authenticatedGeneHelpViewUrl(viewUrl?: string, editUrl?: string): string | null {
+function requestIdFromGeneHelpUrl(url: URL): string | null {
+  const match = url.pathname.match(/^\/(?:uk\/)?requests\/([^/]+)\/?(?:edit\/?)?$/);
+  const requestId = match?.[1]?.trim();
+  return requestId && /^[a-z0-9_-]{4,64}$/i.test(requestId) ? requestId : null;
+}
+
+function geneHelpMyRequestsUrl(requestId?: string | null): string {
+  const url = new URL(GENEHELP_MY_REQUESTS_URL);
+  if (requestId) url.searchParams.set("request", requestId);
+  return url.toString();
+}
+
+export function authenticatedGeneHelpViewUrl(
+  viewUrl?: string,
+  editUrl?: string,
+  requestId?: string,
+): string | null {
   const sanitizedView = sanitizeWebUrl(viewUrl || "");
   const sanitizedEdit = sanitizeWebUrl(editUrl || "");
   if (!sanitizedView && !sanitizedEdit) return null;
+  const normalizedRequestId = requestId?.trim();
 
   if (sanitizedView) {
     try {
       const view = new URL(sanitizedView);
       if (view.origin !== GENEHELP_ORIGIN) return sanitizedView;
       if (view.pathname === "/uk/my/requests") return sanitizedView;
-      if (isGeneHelpRequestRoute(view)) return GENEHELP_MY_REQUESTS_URL;
+      if (isGeneHelpRequestRoute(view)) {
+        return geneHelpMyRequestsUrl(normalizedRequestId || requestIdFromGeneHelpUrl(view));
+      }
       return sanitizedView;
     } catch {
       return sanitizedView;
@@ -41,7 +60,7 @@ export function authenticatedGeneHelpViewUrl(viewUrl?: string, editUrl?: string)
   try {
     const edit = new URL(sanitizedEdit);
     if (edit.origin === GENEHELP_ORIGIN && isGeneHelpRequestRoute(edit)) {
-      return GENEHELP_MY_REQUESTS_URL;
+      return geneHelpMyRequestsUrl(normalizedRequestId || requestIdFromGeneHelpUrl(edit));
     }
   } catch {
     return null;
