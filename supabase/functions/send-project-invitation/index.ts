@@ -1,17 +1,25 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-// Bind CORS to the deployed app origin instead of "*" (see _shared/ai.ts).
-const allowedOrigin =
-  Deno.env.get("ALLOWED_ORIGIN")?.trim() ||
-  Deno.env.get("APP_URL")?.trim() ||
-  "*";
+const configuredOrigins = [
+  Deno.env.get("ALLOWED_ORIGIN")?.trim(),
+  Deno.env.get("APP_URL")?.trim(),
+].filter((origin): origin is string => Boolean(origin));
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": allowedOrigin,
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Vary": "Origin",
-};
+function corsHeaders(request: Request): HeadersInit {
+  const origin = request.headers.get("Origin") ?? "";
+  const localOrigin = origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:");
+  const allowedOrigin =
+    origin && (localOrigin || configuredOrigins.includes(origin))
+      ? origin
+      : configuredOrigins[0] ?? "*";
+
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
+}
 
 type InvitationRow = {
   id: string;
@@ -23,10 +31,10 @@ type InvitationRow = {
   projects: { name: string } | Array<{ name: string }> | null;
 };
 
-function json(body: unknown, status = 200): Response {
+function json(request: Request, body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeaders(request), "Content-Type": "application/json" },
   });
 }
 
@@ -46,15 +54,15 @@ function projectName(value: InvitationRow["projects"]): string {
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { headers: corsHeaders(request) });
   }
   if (request.method !== "POST") {
-    return json({ error: "Method not allowed" }, 405);
+    return json(request, { error: "Method not allowed" }, 405);
   }
 
   try {
     const authorization = request.headers.get("Authorization");
-    if (!authorization) return json({ error: "Authentication required" }, 401);
+    if (!authorization) return json(request, { error: "Authentication required" }, 401);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
@@ -62,10 +70,11 @@ Deno.serve(async (request) => {
     const emailFrom = Deno.env.get("INVITATION_EMAIL_FROM");
     const appUrl = Deno.env.get("APP_URL");
     if (!supabaseUrl || !supabaseAnonKey) {
-      return json({ error: "Supabase function environment is incomplete" }, 500);
+      return json(request, { error: "Supabase function environment is incomplete" }, 500);
     }
     if (!resendApiKey || !emailFrom || !appUrl) {
       return json(
+        request,
         {
           error:
             "Email delivery is not configured. Set RESEND_API_KEY, INVITATION_EMAIL_FROM and APP_URL.",
@@ -75,14 +84,14 @@ Deno.serve(async (request) => {
     }
 
     const { invitationId } = await request.json() as { invitationId?: string };
-    if (!invitationId) return json({ error: "Invitation ID is required" }, 400);
+    if (!invitationId) return json(request, { error: "Invitation ID is required" }, 400);
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authorization } },
     });
     const { data: userResult, error: userError } = await supabase.auth.getUser();
     if (userError || !userResult.user) {
-      return json({ error: "Authentication required" }, 401);
+      return json(request, { error: "Authentication required" }, 401);
     }
 
     const { data, error } = await supabase
@@ -92,7 +101,7 @@ Deno.serve(async (request) => {
       )
       .eq("id", invitationId)
       .single();
-    if (error || !data) return json({ error: "Invitation not found" }, 404);
+    if (error || !data) return json(request, { error: "Invitation not found" }, 404);
 
     const invitation = data as InvitationRow;
     if (
@@ -100,7 +109,7 @@ Deno.serve(async (request) => {
       invitation.status !== "pending" ||
       new Date(invitation.expires_at).getTime() <= Date.now()
     ) {
-      return json({ error: "Invitation cannot be sent" }, 403);
+      return json(request, { error: "Invitation cannot be sent" }, 403);
     }
 
     const inviterName = String(
@@ -148,6 +157,7 @@ Deno.serve(async (request) => {
     const emailResult = await emailResponse.json();
     if (!emailResponse.ok) {
       return json(
+        request,
         {
           error:
             typeof emailResult?.message === "string"
@@ -158,9 +168,10 @@ Deno.serve(async (request) => {
       );
     }
 
-    return json({ sent: true, id: emailResult.id });
+    return json(request, { sent: true, id: emailResult.id });
   } catch (error) {
     return json(
+      request,
       { error: error instanceof Error ? error.message : "Unexpected error" },
       500,
     );
