@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabaseAuth";
+import { invokeEdgeFunction } from "./edgeFunctions";
 import type {
   AdminAnnouncementInput,
   AnnouncementCategory,
@@ -51,22 +52,17 @@ export async function adminDeleteAnnouncement(id: string): Promise<void> {
 }
 
 export async function sendAnnouncementEmail(id: string): Promise<{ sent: number; failed: number }> {
-  const { data, error } = await getSupabaseClient().functions.invoke("send-announcement-email", {
-    body: { announcementId: id },
-  });
-  if (error) {
-    const response = (error as { context?: Response }).context;
-    const payload = response
-      ? await response.clone().json().catch(() => null)
-      : null;
-    if (payload && typeof (payload as { error?: unknown }).error === "string") {
-      throw new Error(String((payload as { error: string }).error));
-    }
-    throw error;
-  }
+  const data = await invokeEdgeFunction<{ sent?: unknown; failed?: unknown }>(
+    "send-announcement-email",
+    { announcementId: id },
+    {
+      connectionErrorMessage:
+        "Не вдалося підключитися до серверної функції email-розсилки. Перевірте, що Edge Function send-announcement-email передеплоєно.",
+    },
+  );
   return {
-    sent: Number((data as { sent?: unknown } | null)?.sent ?? 0),
-    failed: Number((data as { failed?: unknown } | null)?.failed ?? 0),
+    sent: Number(data.sent ?? 0),
+    failed: Number(data.failed ?? 0),
   };
 }
 
