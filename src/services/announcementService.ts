@@ -1,5 +1,4 @@
 import { getSupabaseClient } from "./supabaseAuth";
-import { invokeEdgeFunction } from "./edgeFunctions";
 import type {
   AdminAnnouncementInput,
   AnnouncementCategory,
@@ -52,18 +51,64 @@ export async function adminDeleteAnnouncement(id: string): Promise<void> {
 }
 
 export async function sendAnnouncementEmail(id: string): Promise<{ sent: number; failed: number }> {
-  const data = await invokeEdgeFunction<{ sent?: unknown; failed?: unknown }>(
-    "send-announcement-email",
-    { announcementId: id },
-    {
-      connectionErrorMessage:
-        "Не вдалося підключитися до серверної функції email-розсилки. Перевірте, що Edge Function send-announcement-email передеплоєно.",
-    },
-  );
+  const client = getSupabaseClient();
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError) throw sessionError;
+  const token = sessionData.session?.access_token;
+  if (!token) throw new Error("Увійдіть в акаунт перед надсиланням email-розсилки.");
+
+  const localFunctionsUrl = import.meta.env.VITE_LOCAL_EDGE_FUNCTIONS_URL?.trim();
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
+  const baseUrl = localFunctionsUrl || (supabaseUrl ? `${supabaseUrl.replace(/\/+$/, "")}/functions/v1` : "");
+  if (!baseUrl) {
+    throw new Error("Не налаштована адреса Supabase для email-розсилки.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl.replace(/\/+$/, "")}/send-announcement-email`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(anonKey ? { apikey: anonKey } : {}),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ announcementId: id }),
+    });
+  } catch {
+    throw new Error(
+      "Не вдалося підключитися до серверної функції email-розсилки. Перевірте, що Edge Function send-announcement-email передеплоєно.",
+    );
+  }
+
+  const data = await readJsonSafely(response);
+  if (!response.ok) {
+    throw new Error(
+      stringField(data, "error") ||
+        stringField(data, "message") ||
+        `Серверна функція email-розсилки повернула помилку ${response.status}.`,
+    );
+  }
+
   return {
-    sent: Number(data.sent ?? 0),
-    failed: Number(data.failed ?? 0),
+    sent: Number((data as { sent?: unknown } | null)?.sent ?? 0),
+    failed: Number((data as { failed?: unknown } | null)?.failed ?? 0),
   };
+}
+
+async function readJsonSafely(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function stringField(value: unknown, field: string): string {
+  if (!value || typeof value !== "object" || !(field in value)) return "";
+  const text = String((value as Record<string, unknown>)[field] ?? "").trim();
+  return text;
 }
 
 function mapAnnouncement(row: Record<string, unknown>): AppAnnouncement {
