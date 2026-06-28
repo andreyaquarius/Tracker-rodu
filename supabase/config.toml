@@ -21,6 +21,11 @@ verify_jwt = true
 [functions.review-hypothesis]
 verify_jwt = true
 
+# Browser CORS preflight requests do not include the user JWT. The function
+# still validates authenticated POST requests in code through auth.getUser().
+[functions.index-finding-fragment]
+verify_jwt = false
+
 [functions.send-project-invitation]
 verify_jwt = true
 

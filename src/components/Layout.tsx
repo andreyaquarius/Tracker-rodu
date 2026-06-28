@@ -2,7 +2,9 @@ import { useState, type ReactNode } from "react";
 import type { CustomSectionDefinition } from "../types";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
 import { Sidebar, type PageKey } from "./Sidebar";
+import { AnnouncementBell } from "./AnnouncementBell";
 import { HelpCenter } from "./HelpCenter";
+import { GoogleDriveConnectionButton } from "./GoogleDriveConnectionButton";
 import { TopBar } from "./TopBar";
 import { WorkspaceWindowsProvider } from "./WorkspaceWindows";
 
@@ -58,7 +60,13 @@ export function Layout(props: LayoutProps) {
             onOpenTeam={props.onOpenTeam}
             isAccountSigningIn={props.isAccountSigningIn}
             isCreatingWorkspace={props.isCreatingWorkspace}
-            helpAction={<HelpCenter page={props.page} />}
+            helpAction={(
+              <>
+                <AnnouncementBell account={props.account} />
+                <GoogleDriveConnectionButton />
+                <HelpCenter page={props.page} />
+              </>
+            )}
           />
           <main className="page">{props.children}</main>
         </div>

@@ -10,6 +10,18 @@ import {
   type AppFeatureFlag,
   type AdminSubscriptionRow,
 } from "../services/subscriptionService";
+import {
+  adminDeleteAnnouncement,
+  adminSaveAnnouncement,
+  loadAdminAnnouncements,
+} from "../services/announcementService";
+import type {
+  AdminAnnouncementInput,
+  AnnouncementCategory,
+  AnnouncementEmailStatus,
+  AnnouncementMediaType,
+  AppAnnouncement,
+} from "../types/announcements";
 import type {
   PlanCode,
   PlanLimit,
@@ -61,6 +73,8 @@ export function SubscriptionPage({
   const [plans, setPlans] = useState<Array<{ plan: SubscriptionPlan; limits: PlanLimit[] }>>([]);
   const [adminRows, setAdminRows] = useState<AdminSubscriptionRow[]>([]);
   const [featureFlags, setFeatureFlags] = useState<AppFeatureFlag[]>([]);
+  const [adminAnnouncements, setAdminAnnouncements] = useState<AppAnnouncement[]>([]);
+  const [announcementsError, setAnnouncementsError] = useState("");
   const [featureFlagsError, setFeatureFlagsError] = useState("");
   const [pageError, setPageError] = useState("");
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -69,12 +83,23 @@ export function SubscriptionPage({
   const refreshPage = async () => {
     setPageError("");
     setFeatureFlagsError("");
+    setAnnouncementsError("");
     try {
       const nextPlans = await loadSubscriptionPlans();
       setPlans(nextPlans);
       if (context?.isAdmin) {
         const nextAdminRows = await loadAdminSubscriptions();
         setAdminRows(nextAdminRows);
+        try {
+          const nextAnnouncements = await loadAdminAnnouncements();
+          setAdminAnnouncements(nextAnnouncements);
+          setAnnouncementsError("");
+        } catch {
+          setAdminAnnouncements([]);
+          setAnnouncementsError(
+            "Центр оновлень ще не налаштований у базі. Застосуйте SQL-міграцію 202606280001_app_announcements.sql.",
+          );
+        }
         try {
           const nextFeatureFlags = await loadAdminFeatureFlags();
           setFeatureFlags(nextFeatureFlags);
@@ -255,6 +280,11 @@ export function SubscriptionPage({
 
       {context?.isAdmin ? (
         <>
+          <AdminAnnouncements
+            announcements={adminAnnouncements}
+            loadError={announcementsError}
+            onChanged={refreshPage}
+          />
           <AdminFeatureFlags
             flags={featureFlags}
             loadError={featureFlagsError}
@@ -264,6 +294,247 @@ export function SubscriptionPage({
         </>
       ) : null}
     </>
+  );
+}
+
+const announcementCategoryLabels: Record<AnnouncementCategory, string> = {
+  update: "Оновлення",
+  feature: "Нова функція",
+  maintenance: "Технічне",
+  tip: "Порада",
+};
+
+const announcementMediaLabels: Record<AnnouncementMediaType, string> = {
+  none: "Без медіа",
+  image: "Скриншот",
+  video: "Відео",
+  link: "Посилання",
+};
+
+const announcementEmailLabels: Record<AnnouncementEmailStatus, string> = {
+  not_planned: "Без email-розсилки",
+  planned: "Підготувати для ручної розсилки",
+  sent: "Email уже надіслано",
+};
+
+const emptyAnnouncementDraft: AdminAnnouncementInput = {
+  id: null,
+  title: "",
+  body: "",
+  category: "update",
+  mediaType: "none",
+  mediaUrl: "",
+  ctaLabel: "",
+  ctaUrl: "",
+  isPublished: false,
+  emailStatus: "not_planned",
+};
+
+function AdminAnnouncements({ announcements, loadError, onChanged }: {
+  announcements: AppAnnouncement[];
+  loadError: string;
+  onChanged: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<AdminAnnouncementInput>(emptyAnnouncementDraft);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const updateDraft = (patch: Partial<AdminAnnouncementInput>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const resetDraft = () => setDraft(emptyAnnouncementDraft);
+
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await adminSaveAnnouncement(draft);
+      resetDraft();
+      await onChanged();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Не вдалося зберегти оголошення.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const edit = (announcement: AppAnnouncement) => {
+    setDraft({
+      id: announcement.id,
+      title: announcement.title,
+      body: announcement.body,
+      category: announcement.category,
+      mediaType: announcement.mediaType,
+      mediaUrl: announcement.mediaUrl ?? "",
+      ctaLabel: announcement.ctaLabel ?? "",
+      ctaUrl: announcement.ctaUrl ?? "",
+      isPublished: announcement.isPublished,
+      emailStatus: announcement.emailStatus,
+    });
+  };
+
+  const remove = async (announcement: AppAnnouncement) => {
+    if (!window.confirm(`Видалити оголошення "${announcement.title}"?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await adminDeleteAnnouncement(announcement.id);
+      if (draft.id === announcement.id) resetDraft();
+      await onChanged();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Не вдалося видалити оголошення.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="subscription-admin-section announcement-admin-section">
+      <div className="section-heading">
+        <div>
+          <h2>Центр оновлень</h2>
+          <p>Оголошення з'являються у дзвіночку в кабінеті користувача. Email-розсилка тут тільки готується і не запускається автоматично.</p>
+        </div>
+      </div>
+      {loadError ? <div className="alert alert-notice">{loadError}</div> : null}
+      {error ? <div className="alert alert-error">{error}</div> : null}
+
+      <div className="announcement-admin-grid">
+        <div className="announcement-editor">
+          <label>
+            <span>Заголовок</span>
+            <input
+              value={draft.title}
+              onChange={(event) => updateDraft({ title: event.target.value })}
+              placeholder="Наприклад: Новий переглядач документів"
+            />
+          </label>
+          <label>
+            <span>Текст повідомлення</span>
+            <textarea
+              value={draft.body}
+              onChange={(event) => updateDraft({ body: event.target.value })}
+              rows={5}
+              placeholder="Коротко поясніть, що змінилося і навіщо це користувачу."
+            />
+          </label>
+          <div className="announcement-editor-row">
+            <label>
+              <span>Тип</span>
+              <select
+                value={draft.category}
+                onChange={(event) => updateDraft({ category: event.target.value as AnnouncementCategory })}
+              >
+                {Object.entries(announcementCategoryLabels).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Медіа</span>
+              <select
+                value={draft.mediaType}
+                onChange={(event) => updateDraft({ mediaType: event.target.value as AnnouncementMediaType })}
+              >
+                {Object.entries(announcementMediaLabels).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label>
+            <span>Посилання на скриншот або відео</span>
+            <input
+              value={draft.mediaUrl ?? ""}
+              onChange={(event) => updateDraft({ mediaUrl: event.target.value })}
+              placeholder="https://..."
+            />
+          </label>
+          <div className="announcement-editor-row">
+            <label>
+              <span>Текст кнопки</span>
+              <input
+                value={draft.ctaLabel ?? ""}
+                onChange={(event) => updateDraft({ ctaLabel: event.target.value })}
+                placeholder="Детальніше"
+              />
+            </label>
+            <label>
+              <span>Посилання кнопки</span>
+              <input
+                value={draft.ctaUrl ?? ""}
+                onChange={(event) => updateDraft({ ctaUrl: event.target.value })}
+                placeholder="https://..."
+              />
+            </label>
+          </div>
+          <div className="announcement-editor-row">
+            <label>
+              <span>Email</span>
+              <select
+                value={draft.emailStatus}
+                onChange={(event) => updateDraft({ emailStatus: event.target.value as AnnouncementEmailStatus })}
+              >
+                {Object.entries(announcementEmailLabels).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="checkbox-line announcement-publish-toggle">
+              <input
+                type="checkbox"
+                checked={draft.isPublished}
+                onChange={(event) => updateDraft({ isPublished: event.target.checked })}
+              />
+              Опублікувати у дзвіночку
+            </label>
+          </div>
+          <div className="form-actions">
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={busy}
+              onClick={() => void save()}
+            >
+              {draft.id ? "Зберегти зміни" : "Створити оголошення"}
+            </button>
+            {draft.id ? (
+              <button type="button" className="button button-secondary" disabled={busy} onClick={resetDraft}>
+                Нове оголошення
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="announcement-admin-list">
+          {announcements.map((announcement) => (
+            <article className={announcement.isPublished ? "published" : ""} key={announcement.id}>
+              <div>
+                <span>{announcementCategoryLabels[announcement.category]}</span>
+                <h3>{announcement.title}</h3>
+                <p>{announcement.body}</p>
+                <small>
+                  {announcement.isPublished ? "Опубліковано" : "Чернетка"} · {formatDate(announcement.publishedAt ?? announcement.createdAt)}
+                  {announcement.emailStatus === "planned" ? " · email підготовлено" : ""}
+                </small>
+              </div>
+              <div className="row-actions">
+                <button type="button" className="button button-secondary" disabled={busy} onClick={() => edit(announcement)}>
+                  Редагувати
+                </button>
+                <button type="button" className="button button-secondary danger" disabled={busy} onClick={() => void remove(announcement)}>
+                  Видалити
+                </button>
+              </div>
+            </article>
+          ))}
+          {!announcements.length && !loadError ? (
+            <div className="empty-inline">Оголошень ще немає.</div>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 

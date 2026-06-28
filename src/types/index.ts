@@ -12,9 +12,13 @@ export interface ScanAttachment {
   mimeType: string;
   size: number;
   createdAt: string;
-  storage: "google-drive";
+  storage: "google-drive" | "external-url";
   storagePath: string;
   webViewLink?: string;
+  driveMd5Checksum?: string;
+  driveModifiedTime?: string;
+  driveRevisionId?: string;
+  deleteOnRemove?: boolean;
 }
 
 export type GeoSource = "search" | "map_click" | "import" | "unknown";
@@ -29,6 +33,20 @@ export interface GeoPoint {
   provider?: string | null;
   externalId?: string | null;
   markerColor?: string | null;
+}
+
+export interface DocumentFragmentSelection {
+  documentId: EntityId;
+  sourceFileId: EntityId;
+  pageNumber: number;
+  rotation: number;
+  rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  createdAt: string;
 }
 
 export type PersonEventType =
@@ -220,6 +238,7 @@ export interface Finding extends BaseEntity {
   needsReview: boolean;
   notes: string;
   scans: ScanAttachment[];
+  fragmentSelection?: DocumentFragmentSelection;
   geo: GeoPoint | null;
   customFields: CustomFieldValues;
 }
@@ -359,14 +378,39 @@ export interface Person extends BaseEntity {
 export type PersonRelationType =
   | "батько"
   | "мати"
+  | "батько або мати"
   | "чоловік"
   | "дружина"
+  | "подружжя"
   | "дитина"
+  | "син"
+  | "донька"
   | "брат"
   | "сестра"
+  | "брат або сестра"
   | "хрещений"
   | "хрещена"
+  | "хрещеник"
+  | "хрещениця"
+  | "вітчим"
+  | "мачуха"
+  | "пасинок"
+  | "падчерка"
+  | "опікун"
+  | "підопічний"
+  | "усиновлювач"
+  | "усиновлена дитина"
   | "свідок"
+  | "поручитель"
+  | "священник"
+  | "духовна особа"
+  | "посадова особа"
+  | "повитуха"
+  | "особа, яка повідомила"
+  | "голова господарства"
+  | "член господарства"
+  | "наймит або служник"
+  | "родич"
   | "інше";
 
 export type PersonRelationStatus =

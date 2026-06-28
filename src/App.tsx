@@ -41,6 +41,11 @@ import { ProjectTeamModal } from "./components/ProjectTeamModal";
 import { GeneHelpRequestModal } from "./components/GeneHelpRequestModal";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
+import {
+  DocumentWorkspaceViewer,
+  type ActiveDocumentScanViewer,
+  type DocumentScanViewerContext,
+} from "./components/DocumentWorkspaceViewer";
 import { isHierarchyPage } from "./utils/sectionHierarchy";
 import {
   pagePath,
@@ -477,6 +482,7 @@ export default function App() {
   const [isAccountSigningIn, setIsAccountSigningIn] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
+  const [scanViewer, setScanViewer] = useState<ActiveDocumentScanViewer | null>(null);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
@@ -2519,28 +2525,28 @@ export default function App() {
     });
   };
 
-  const saveFinding = (entity: AppEntity) => {
+  const saveFinding = (entity: AppEntity): Promise<Finding | null> => {
     if (!workspace) {
       app.saveEntity("findings", entity);
-      return;
+      return Promise.resolve(entity as Finding);
     }
     if (workspace.role === "viewer") {
       notify("У цьому проєкті у вас є лише право перегляду.", true);
-      return;
+      return Promise.resolve(null);
     }
 
     const finding = entity as Finding;
     const projectId = workspace.projectId;
     const previous = projectFindings;
     const previousEntity = previous.find((item) => item.id === finding.id);
-    if (!previousEntity && !ensureCanCreateProjectRecord("Нова знахідка")) return;
+    if (!previousEntity && !ensureCanCreateProjectRecord("Нова знахідка")) return Promise.resolve(null);
     const optimistic = previous.some((item) => item.id === finding.id)
       ? previous.map((item) => (item.id === finding.id ? finding : item))
       : [finding, ...previous];
     setProjectFindings(optimistic);
     saveProjectWorkRecordsCache(projectId, projectTasks, optimistic);
 
-    void assertProjectRecordUnchanged(
+    return assertProjectRecordUnchanged(
       "findings",
       projectId,
       finding.id,
@@ -2551,7 +2557,7 @@ export default function App() {
         finding,
         new Set(projectResearches.map((research) => research.id)),
         new Set(projectDocuments.map((document) => document.id)),
-        new Set(projectPersons.map((person) => person.id)),
+        new Set([...projectPersons.map((person) => person.id), ...finding.personIds]),
       ))
       .then((saved) => {
         refreshSubscriptionAfterCreate(previousEntity);
@@ -2563,19 +2569,21 @@ export default function App() {
             item.id === saved.id ? saved : item,
           );
           saveProjectWorkRecordsCache(projectId, cached.tasks, findings);
-          return;
+          return saved;
         }
         setProjectFindings((current) => {
           const next = current.map((item) => (item.id === saved.id ? saved : item));
           saveProjectWorkRecordsCache(projectId, projectTasks, next);
           return next;
         });
+        return saved;
       })
       .catch((error: unknown) => {
         const cached = loadProjectWorkRecordsCache(projectId);
         saveProjectWorkRecordsCache(projectId, cached.tasks, previous);
         if (activeWorkspaceIdRef.current === projectId) setProjectFindings(previous);
         notify(describeError(error, "Не вдалося зберегти знахідку."), true);
+        return null;
       });
   };
 
@@ -2853,7 +2861,7 @@ export default function App() {
     });
   };
 
-  const saveFor = (collection: CollectionKey) => (entity: AppEntity) => {
+  const saveFor = (collection: CollectionKey) => (entity: AppEntity): AppEntity | null | void | Promise<AppEntity | null | void> => {
     try {
       validateResearchScope(collection, [entity]);
     } catch (error) {
@@ -2864,7 +2872,7 @@ export default function App() {
     else if (collection === "documents") saveDocument(entity);
     else if (collection === "yearMatrix") saveYearMatrixRecord(entity);
     else if (collection === "tasks") saveTask(entity);
-    else if (collection === "findings") saveFinding(entity);
+    else if (collection === "findings") return saveFinding(entity);
     else if (collection === "hypotheses") saveHypothesis(entity);
     else if (collection === "archiveRequests") saveArchiveRequest(entity);
     else app.saveEntity(collection, entity);
@@ -3059,6 +3067,23 @@ export default function App() {
       routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
     }
   };
+  const openScanViewer = (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => {
+    const pages = scans?.length ? scans : [scan];
+    setScanViewer({
+      scan,
+      scans: pages,
+      pageIndex: Math.max(0, pages.findIndex((item) => item.id === scan.id)),
+      context,
+      openedAt: Date.now(),
+    });
+  };
+  const createFindingFromViewedDocument = (initialValues: Record<string, unknown>) => {
+    createRelatedRecord("findings", initialValues);
+  };
 
   const createSubsection = (parentKey: SectionParentKey) => {
     if (!canCreateCustomSection) {
@@ -3077,33 +3102,33 @@ export default function App() {
     });
     navigate("settings");
   };
-  const savePerson = (person: Person) => {
+  const savePerson = (person: Person): Promise<Person | null> => {
     try {
       validateResearchScope("persons", [person as unknown as AppEntity]);
     } catch (error) {
       notify(describeError(error, "Оберіть дослідження для цієї особи."), true);
-      return;
+      return Promise.resolve(null);
     }
     if (!workspace) {
       app.saveEntity("persons", person);
-      return;
+      return Promise.resolve(person);
     }
     if (workspace.role === "viewer") {
       notify("У цьому проєкті у вас є лише право перегляду.", true);
-      return;
+      return Promise.resolve(null);
     }
 
     const projectId = workspace.projectId;
     const previous = projectPersons;
     const previousEntity = previous.find((item) => item.id === person.id);
-    if (!previousEntity && !ensureCanCreateProjectRecord("Нова особа")) return;
+    if (!previousEntity && !ensureCanCreateProjectRecord("Нова особа")) return Promise.resolve(null);
     const optimistic = previous.some((item) => item.id === person.id)
       ? previous.map((item) => (item.id === person.id ? person : item))
       : [person, ...previous];
     setProjectPersons(optimistic);
     saveProjectPeopleCache(projectId, optimistic, projectPersonRelations);
 
-    void assertProjectRecordUnchanged(
+    return assertProjectRecordUnchanged(
       "persons",
       projectId,
       person.id,
@@ -3122,19 +3147,21 @@ export default function App() {
           const cached = loadProjectPeopleCache(projectId);
           const persons = cached.persons.map((item) => (item.id === saved.id ? saved : item));
           saveProjectPeopleCache(projectId, persons, cached.relations);
-          return;
+          return saved;
         }
         setProjectPersons((current) => {
           const next = current.map((item) => (item.id === saved.id ? saved : item));
           saveProjectPeopleCache(projectId, next, projectPersonRelations);
           return next;
         });
+        return saved;
       })
       .catch((error: unknown) => {
         const cached = loadProjectPeopleCache(projectId);
         saveProjectPeopleCache(projectId, previous, cached.relations);
         if (activeWorkspaceIdRef.current === projectId) setProjectPersons(previous);
         notify(describeError(error, "Не вдалося зберегти особу."), true);
+        return null;
       });
   };
   const deletePerson = (id: string) => {
@@ -3255,7 +3282,7 @@ export default function App() {
       notify(describeError(error, "Не вдалося видалити особу."), true);
       });
   };
-  const saveRelation = (relation: PersonRelation) => {
+  const saveRelation = (relation: PersonRelation): Promise<PersonRelation | null> => {
     if (!workspace) {
       app.setDatabase((current) => ({
         ...current,
@@ -3263,27 +3290,31 @@ export default function App() {
           ? current.personRelations.map((item) => item.id === relation.id ? relation : item)
           : [...current.personRelations, relation],
       }));
-      return;
+      return Promise.resolve(relation);
     }
     if (workspace.role === "viewer") {
       notify("У цьому проєкті у вас є лише право перегляду.", true);
-      return;
+      return Promise.resolve(null);
     }
 
     const projectId = workspace.projectId;
     const previous = projectPersonRelations;
     const previousRelation = previous.find((item) => item.id === relation.id);
-    if (!previousRelation && !ensureCanCreateProjectRecord("Новий зв’язок між особами")) return;
+    if (!previousRelation && !ensureCanCreateProjectRecord("Новий зв’язок між особами")) return Promise.resolve(null);
     const optimistic = previous.some((item) => item.id === relation.id)
       ? previous.map((item) => (item.id === relation.id ? relation : item))
       : [...previous, relation];
+    const cachedPeople = loadProjectPeopleCache(projectId);
+    const cachePersons = cachedPeople.persons.length ? cachedPeople.persons : projectPersons;
     setProjectPersonRelations(optimistic);
-    saveProjectPeopleCache(projectId, projectPersons, optimistic);
+    saveProjectPeopleCache(projectId, cachePersons, optimistic);
 
-    void saveProjectPersonRelation(projectId, relation)
+    return saveProjectPersonRelation(projectId, relation)
       .then((saved) => {
-        const firstPerson = projectPersons.find((person) => person.id === saved.personId);
-        const secondPerson = projectPersons.find((person) => person.id === saved.relatedPersonId);
+        const latestPeople = loadProjectPeopleCache(projectId);
+        const peopleForNames = latestPeople.persons.length ? latestPeople.persons : projectPersons;
+        const firstPerson = peopleForNames.find((person) => person.id === saved.personId);
+        const secondPerson = peopleForNames.find((person) => person.id === saved.relatedPersonId);
         const firstName = firstPerson?.fullName || firstPerson?.surname || "особою";
         const secondName = secondPerson?.fullName || secondPerson?.surname || "особою";
         recordProjectActivity(
@@ -3296,19 +3327,22 @@ export default function App() {
           const cached = loadProjectPeopleCache(projectId);
           const relations = cached.relations.map((item) => (item.id === saved.id ? saved : item));
           saveProjectPeopleCache(projectId, cached.persons, relations);
-          return;
+          return saved;
         }
         setProjectPersonRelations((current) => {
           const next = current.map((item) => (item.id === saved.id ? saved : item));
-          saveProjectPeopleCache(projectId, projectPersons, next);
+          const latestPeople = loadProjectPeopleCache(projectId);
+          saveProjectPeopleCache(projectId, latestPeople.persons.length ? latestPeople.persons : projectPersons, next);
           return next;
         });
+        return saved;
       })
       .catch((error: unknown) => {
         const cached = loadProjectPeopleCache(projectId);
         saveProjectPeopleCache(projectId, cached.persons, previous);
         if (activeWorkspaceIdRef.current === projectId) setProjectPersonRelations(previous);
         notify(describeError(error, "Не вдалося зберегти зв’язок."), true);
+        return null;
       });
   };
   const deleteRelation = (id: string) => {
@@ -3995,6 +4029,7 @@ export default function App() {
             canAddCustomField={canCreateCustomField}
             customFieldLimitMessage={customFieldLimitMessage}
             onSavePerson={savePerson}
+            onSaveRelation={saveRelation}
             initialSearch={moduleSearch}
             initialOpenEntityId={openEntityId}
             initialCreateRequest={
@@ -4003,6 +4038,7 @@ export default function App() {
                 : undefined
             }
             onOpenRelated={openRelatedRecord}
+            onOpenScanViewer={openScanViewer}
             onSave={saveFor(page)}
             onImportRecords={importTableRecords}
             onDelete={deleteFor(page)}
@@ -4197,6 +4233,12 @@ export default function App() {
         ) : null}
         {displayedContent}
       </Layout>
+      <DocumentWorkspaceViewer
+        viewer={scanViewer}
+        onClose={() => setScanViewer(null)}
+        onOpenDocument={(documentId) => openRelatedRecord("documents", documentId)}
+        onCreateFinding={createFindingFromViewedDocument}
+      />
       {teamOpen && account ? (
         <ProjectTeamModal
           account={account}

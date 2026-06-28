@@ -21,9 +21,10 @@ export interface FieldConfig {
     | "persons"
     | "scans";
   options?: string[];
+  suggestions?: string[];
   required?: boolean;
   wide?: boolean;
-  attachmentPolicy?: "all" | "finding" | "archive-request";
+  attachmentPolicy?: "all" | "finding" | "archive-request" | "document";
   attachmentAccept?: string;
   attachmentDescription?: string;
   attachmentLimitMessage?: string;
@@ -54,15 +55,18 @@ const archiveOptions = [
   "ЦДІАЛ України (Львів)",
   "ЦДАВО України",
   "ЦДАГО України",
+  "Державний архів в Автономній Республіці Крим",
   "Державний архів Вінницької області",
   "Державний архів Волинської області",
   "Державний архів Дніпропетровської області",
+  "Державний архів Донецької області",
   "Державний архів Житомирської області",
   "Державний архів Закарпатської області",
   "Державний архів Запорізької області",
   "Державний архів Івано-Франківської області",
   "Державний архів Київської області",
   "Державний архів Кіровоградської області",
+  "Державний архів Луганської області",
   "Державний архів Львівської області",
   "Державний архів Миколаївської області",
   "Державний архів Одеської області",
@@ -122,8 +126,8 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
     fields: [
       researchField,
       { key: "title", label: "Назва документа", required: true, wide: true },
-      { key: "documentType", label: "Тип документа", type: "select", options: ["народження", "шлюби", "смерті", "метрична книга", "сповідний розпис", "ревізія", "інвентар", "судова справа", "військовий документ", "інше"] },
-      { key: "archive", label: "Архів" },
+      { key: "documentType", label: "Тип документа", type: "select", options: ["народження", "шлюби", "смерті", "метрична книга", "сповідний розпис", "ревізія", "перепис", "інвентар", "судова справа", "військовий документ", "інше"] },
+      { key: "archive", label: "Архів", suggestions: archiveOptions },
       { key: "fund", label: "Фонд" },
       { key: "description", label: "Опис" },
       { key: "file", label: "Справа" },
@@ -131,6 +135,14 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
       { key: "yearTo", label: "Рік до", type: "number" },
       { key: "place", label: "Населений пункт" },
       { key: "url", label: "Посилання на документ", type: "url", wide: true },
+      {
+        key: "scans",
+        label: "Скан документа",
+        type: "scans",
+        wide: true,
+        attachmentPolicy: "document",
+        attachmentDescription: "Додайте скан, файл із хмарного сховища або посилання на зовнішнє джерело: Вікіджерела, електронний архів, бібліотеку чи інший сайт із документом.",
+      },
       { key: "pagesCount", label: "Кількість сторінок / аркушів", type: "number" },
       { key: "lastPage", label: "Остання переглянута сторінка", type: "number" },
       { key: "reviewStatus", label: "Статус перегляду", type: "select", options: ["не почато", "в роботі", "переглянуто", "потрібно повторно перевірити", "недоступно"] },
@@ -253,13 +265,13 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
     fields: [
       researchField,
       { key: "documentId", label: "Пов’язаний документ", type: "document", wide: true },
-      { key: "findingType", label: "Тип знахідки", type: "select", options: ["народження", "шлюб", "смерть", "згадка", "посімейний список", "сповідний розпис", "ревізія", "інвентар", "судова справа", "військовий документ", "інше"] },
+      { key: "findingType", label: "Тип знахідки", type: "select", options: ["народження", "шлюб", "смерть", "згадка", "посімейний список", "сповідний розпис", "ревізія", "перепис", "інвентар", "судова справа", "військовий документ", "інше"] },
       { key: "eventDate", label: "Дата події", type: "date" },
       { key: "personsText", label: "Особа або особи — сирий текст", type: "textarea", wide: true },
       { key: "personIds", label: "Пов’язані особи", type: "persons", wide: true },
       { key: "participants", label: "Учасники запису", type: "participants", required: true, wide: true },
       { key: "place", label: "Населений пункт" },
-      { key: "archive", label: "Архів" },
+      { key: "archive", label: "Архів", suggestions: archiveOptions },
       { key: "fund", label: "Фонд" },
       { key: "description", label: "Опис" },
       { key: "file", label: "Справа" },
@@ -287,6 +299,7 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
         label: "Основна особа",
         render: (item) => primaryParticipantName(
           (item as unknown as { participants?: import("../types").FindingParticipant[] }).participants ?? [],
+          String((item as unknown as { findingType?: unknown }).findingType ?? ""),
         ) || "—",
       },
       { key: "findingType", label: "Тип" },

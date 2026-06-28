@@ -32,6 +32,7 @@ const statuses: PersonStatus[] = [
 ];
 
 type PersonDraft = Omit<Person, "id" | "createdAt" | "updatedAt">;
+export type PersonInitialDraft = Partial<PersonDraft>;
 type PersonDateFieldKey = "birthDate" | "marriageDate" | "deathDate";
 
 const personDateFields: Array<{ key: PersonDateFieldKey; label: string }> = [
@@ -106,12 +107,34 @@ function emptyPerson(initialFullName = "", researchId = ""): PersonDraft {
   };
 }
 
+function buildInitialPerson(
+  initialFullName: string,
+  researchId: string,
+  initialPersonDraft?: PersonInitialDraft,
+): PersonDraft {
+  const empty = emptyPerson(initialFullName, researchId);
+  if (!initialPersonDraft) return empty;
+  return {
+    ...empty,
+    ...initialPersonDraft,
+    researchId: initialPersonDraft.researchId ?? empty.researchId,
+    fullName: initialPersonDraft.fullName ?? empty.fullName,
+    birthScans: initialPersonDraft.birthScans ?? empty.birthScans,
+    marriageScans: initialPersonDraft.marriageScans ?? empty.marriageScans,
+    deathScans: initialPersonDraft.deathScans ?? empty.deathScans,
+    mentionScans: initialPersonDraft.mentionScans ?? empty.mentionScans,
+    events: initialPersonDraft.events ?? empty.events,
+    customFields: normalizeCustomFieldValues(initialPersonDraft.customFields),
+  };
+}
+
 export function PersonFormModal({
   person,
   db,
   researches,
   initialFullName = "",
   initialResearchId = "",
+  initialPersonDraft,
   customFieldDefinitions = [],
   researchRequired = false,
   onAddCustomField,
@@ -130,6 +153,7 @@ export function PersonFormModal({
   researches: Research[];
   initialFullName?: string;
   initialResearchId?: string;
+  initialPersonDraft?: PersonInitialDraft;
   customFieldDefinitions?: CustomFieldDefinition[];
   researchRequired?: boolean;
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
@@ -137,7 +161,7 @@ export function PersonFormModal({
   canAddCustomField?: boolean;
   customFieldLimitMessage?: string;
   onClose: () => void;
-  onSave: (person: Person) => void;
+  onSave: (person: Person) => void | Promise<unknown>;
   modalMode?: "dialog" | "window";
   stackIndex?: number;
   dockIndex?: number;
@@ -177,12 +201,12 @@ export function PersonFormModal({
           events: person.events ?? [],
           customFields: normalizeCustomFieldValues(person.customFields),
         }
-      : emptyPerson(initialFullName, initialResearchId),
+      : buildInitialPerson(initialFullName, initialResearchId, initialPersonDraft),
   );
   const [dateDrafts, setDateDrafts] = useState<Record<PersonDateFieldKey, string>>(() => ({
-    birthDate: formatFlexibleDateForDisplay(person?.birthDate ?? ""),
-    marriageDate: formatFlexibleDateForDisplay(person?.marriageDate ?? ""),
-    deathDate: formatFlexibleDateForDisplay(person?.deathDate ?? ""),
+    birthDate: formatFlexibleDateForDisplay(person?.birthDate ?? initialPersonDraft?.birthDate ?? ""),
+    marriageDate: formatFlexibleDateForDisplay(person?.marriageDate ?? initialPersonDraft?.marriageDate ?? ""),
+    deathDate: formatFlexibleDateForDisplay(person?.deathDate ?? initialPersonDraft?.deathDate ?? ""),
   }));
   const [dateErrors, setDateErrors] = useState<Record<PersonDateFieldKey, string>>({
     birthDate: "",
@@ -265,7 +289,7 @@ export function PersonFormModal({
     if (type === "residence") update("residencePlaces", place);
   };
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (researchRequired && !form.researchId.trim()) {
       window.alert("Оберіть дослідження для цієї особи.");
@@ -287,7 +311,7 @@ export function PersonFormModal({
       __baseUpdatedAt: person?.updatedAt,
       updatedAt: timestamp,
     } as Person;
-    onSave({
+    await onSave({
       ...finalPerson,
       events: normalizePersonEvents(form.events, finalPerson),
     });

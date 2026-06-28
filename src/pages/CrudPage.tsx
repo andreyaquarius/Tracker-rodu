@@ -1,16 +1,22 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   AppEntity,
   AppDatabase,
   CollectionKey,
   CustomFieldDefinition,
   CustomFieldValues,
+  DocumentFragmentSelection,
   DocumentRecord,
   Finding,
   FindingParticipant,
   GeoPoint,
   Hypothesis,
   Person,
+  PersonEvent,
+  PersonEventType,
+  PersonGender,
+  PersonRelation,
+  PersonRelationType,
   Research,
   ScanAttachment,
   TaskRecord,
@@ -24,18 +30,21 @@ import {
   participantRoles,
   participantSummary,
   primaryParticipantName,
+  sortFindingParticipants,
 } from "../utils/findingParticipants";
 import { PersonSelector } from "../components/PersonSelector";
-import { PersonFormModal } from "../components/PersonFormModal";
+import { PersonFormModal, type PersonInitialDraft } from "../components/PersonFormModal";
 import {
   ScanAttachmentsEditor,
   ScanAttachmentsView,
 } from "../components/ScanAttachments";
+import type { DocumentScanViewerContext } from "../components/DocumentWorkspaceViewer";
 import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile } from "../services/scanStorage";
 import { CustomFieldsEditor, CustomFieldsView } from "../components/CustomFields";
 import { InlineCustomFieldCreator } from "../components/InlineCustomFieldCreator";
 import { HypothesisAiAgent } from "../components/HypothesisAiAgent";
+import { FindingAiIndexingPanel } from "../components/FindingAiIndexingPanel";
 import {
   definitionsForModule,
   normalizeCustomFieldValues,
@@ -71,8 +80,14 @@ interface CrudPageProps {
     initialValues: Record<string, unknown>;
   };
   onOpenRelated?: (page: PageKey, entityId: string) => void;
-  onSavePerson?: (person: Person) => void;
-  onSave: (entity: AppEntity) => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
+  onSavePerson?: (person: Person) => void | Promise<Person | null | void>;
+  onSaveRelation?: (relation: PersonRelation) => void | Promise<PersonRelation | null | void>;
+  onSave: (entity: AppEntity) => void | AppEntity | null | Promise<AppEntity | null | void>;
   onImportRecords?: (collection: CollectionKey, records: AppEntity[]) => Promise<void>;
   onDelete: (id: string) => void;
   onCreateBlocked?: () => void;
@@ -84,12 +99,43 @@ interface CrudPageProps {
   researchRequired?: boolean;
 }
 
-type FormValue = string | boolean | string[] | FindingParticipant[] | ScanAttachment[] | GeoPoint | null;
+type FormValue =
+  | string
+  | boolean
+  | string[]
+  | FindingParticipant[]
+  | ScanAttachment[]
+  | DocumentFragmentSelection
+  | GeoPoint
+  | null;
 type FormRecord = Record<string, FormValue>;
 type EntityWindow =
   | { windowId: string; kind: "view"; entityId: string }
   | { windowId: string; kind: "edit"; entityId: string }
   | { windowId: string; kind: "new"; initialValues?: Record<string, unknown> };
+
+type PersonSeed = {
+  key: string;
+  title: string;
+  draft: PersonInitialDraft;
+  participantId?: string;
+  participantRole?: string;
+};
+
+type PersonSeedChoice = {
+  key: string;
+  title: string;
+  description: string;
+  draft: PersonInitialDraft;
+  participantId?: string;
+  participantRole?: string;
+};
+
+type CreatedFindingPerson = {
+  participantId: string;
+  participantRole: string;
+  person: Person;
+};
 
 export function CrudPage({
   config,
@@ -108,7 +154,9 @@ export function CrudPage({
   initialOpenEntityId = "",
   initialCreateRequest,
   onOpenRelated,
+  onOpenScanViewer,
   onSavePerson,
+  onSaveRelation,
   onSave,
   onImportRecords,
   onDelete,
@@ -178,6 +226,7 @@ export function CrudPage({
           persons={persons}
           customFieldDefinitions={customFieldDefinitions}
           onOpenRelated={onOpenRelated}
+          onOpenScanViewer={onOpenScanViewer}
           projectId={projectId}
           canCreateTasks={canCreateRecords}
           onCreateTask={onCreateTask}
@@ -209,6 +258,9 @@ export function CrudPage({
           canAddCustomField={canAddCustomField}
           customFieldLimitMessage={customFieldLimitMessage}
           onSavePerson={onSavePerson}
+          onSaveRelation={onSaveRelation}
+          onPersist={onSave}
+          onOpenScanViewer={onOpenScanViewer}
           researchRequired={researchRequired}
           onClose={close}
           onSave={(savedEntity) => {
@@ -243,6 +295,9 @@ export function CrudPage({
           canAddCustomField={canAddCustomField}
           customFieldLimitMessage={customFieldLimitMessage}
           onSavePerson={onSavePerson}
+          onSaveRelation={onSaveRelation}
+          onPersist={onSave}
+          onOpenScanViewer={onOpenScanViewer}
           researchRequired={researchRequired}
           onClose={close}
           onSave={(savedEntity) => {
@@ -640,6 +695,150 @@ function customAttachmentScans(
     .flatMap(([, value]) => value as ScanAttachment[]);
 }
 
+function documentScanViewerContext(
+  collection: CollectionKey,
+  record: Record<string, unknown>,
+): DocumentScanViewerContext | undefined {
+  if (collection !== "documents") return undefined;
+  const id = String(record.id ?? "").trim();
+  if (!id) return undefined;
+  return {
+    source: "documents",
+    document: {
+      id,
+      title: String(record.title ?? "Документ"),
+      researchId: String(record.researchId ?? ""),
+      documentType: String(record.documentType ?? ""),
+      archive: String(record.archive ?? ""),
+      fund: String(record.fund ?? ""),
+      description: String(record.description ?? ""),
+      file: String(record.file ?? ""),
+      place: String(record.place ?? ""),
+    },
+  };
+}
+
+function scanDriveFolderPath(
+  collection: CollectionKey,
+  field: FieldConfig,
+  record: Record<string, unknown>,
+  persons: Person[],
+): string[] | undefined {
+  if (field.type !== "scans") return undefined;
+
+  if (collection === "documents") {
+    return compactDrivePath(["Документи", ...archiveReferenceFolderPath(record)]);
+  }
+
+  if (collection === "archiveRequests") {
+    const fileGroup = field.key === "responseScans"
+      ? "Відповіді архіву"
+      : field.key === "requestScans"
+        ? "Запити"
+        : "";
+    return compactDrivePath([
+      "Запити в архів",
+      String(record.archive ?? "").trim(),
+      shortFolderSegment(record.subject, 90),
+      fileGroup,
+    ]);
+  }
+
+  if (collection === "findings") {
+    return compactDrivePath([
+      "Знахідки",
+      findingPersonFolderName(record, persons),
+      String(record.findingType ?? "").trim() || "Без типу",
+      ...archiveReferenceFolderPath(record),
+    ]);
+  }
+
+  return undefined;
+}
+
+function labeledFolderSegment(label: string, value: unknown): string {
+  const normalized = String(value ?? "").trim();
+  return normalized ? `${label} ${normalized}` : "";
+}
+
+function archiveReferenceFolderPath(record: Record<string, unknown>): string[] {
+  return [
+    String(record.archive ?? "").trim(),
+    labeledFolderSegment("Фонд", record.fund),
+    labeledFolderSegment("Опис", record.description),
+    labeledFolderSegment("Справа", record.file),
+  ];
+}
+
+function compactDrivePath(segments: string[]): string[] {
+  return segments.map((segment) => segment.trim()).filter(Boolean);
+}
+
+function shortFolderSegment(value: unknown, maxLength: number): string {
+  const normalized = String(value ?? "").trim().replace(/\s+/g, " ");
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength).trim()}…` : normalized;
+}
+
+function findingPersonFolderName(record: Record<string, unknown>, persons: Person[]): string {
+  const participants = Array.isArray(record.participants)
+    ? record.participants as FindingParticipant[]
+    : [];
+  const participantName = primaryParticipantName(participants, String(record.findingType ?? ""));
+  if (participantName) return participantName;
+
+  const personIds = Array.isArray(record.personIds) ? record.personIds as string[] : [];
+  const linkedPerson = persons.find((person) => personIds.includes(person.id));
+  if (linkedPerson) return personDisplayName(linkedPerson);
+
+  const rawPersonText = shortFolderSegment(record.personsText ?? record.people, 90);
+  return rawPersonText || "Без особи";
+}
+
+function personDisplayName(person: Person): string {
+  return [
+    String(person.surname ?? ""),
+    String(person.givenName ?? ""),
+    String(person.patronymic ?? ""),
+  ].map((part) => part.trim()).filter(Boolean).join(" ") || person.fullName || "Без імені";
+}
+
+function requiresArchiveReferenceField(
+  collection: CollectionKey,
+  field: FieldConfig,
+  fields: FieldConfig[],
+  form: FormRecord,
+): boolean {
+  if (collection !== "documents" && collection !== "findings") return false;
+  if (!["fund", "description", "file"].includes(field.key)) return false;
+  const archiveField = fields.find((item) => item.key === "archive");
+  return isKnownUkrainianArchive(String(form.archive ?? ""), archiveField);
+}
+
+function isKnownUkrainianArchive(value: string, archiveField?: FieldConfig): boolean {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  const options = archiveField?.suggestions ?? archiveField?.options ?? [];
+  return options.some((option) => option === normalized && !isFreeArchiveOption(option));
+}
+
+function isFreeArchiveOption(value: string): boolean {
+  return value.trim().toLocaleLowerCase("uk").startsWith("інший архів");
+}
+
+function missingArchiveReferenceLabels(
+  collection: CollectionKey,
+  fields: FieldConfig[],
+  form: FormRecord,
+): string[] {
+  if (collection !== "documents" && collection !== "findings") return [];
+  const archiveField = fields.find((item) => item.key === "archive");
+  if (!isKnownUkrainianArchive(String(form.archive ?? ""), archiveField)) return [];
+  return fields
+    .filter((field) => ["fund", "description", "file"].includes(field.key))
+    .filter((field) => !String(form[field.key] ?? "").trim())
+    .map((field) => field.label);
+}
+
 function EntityDetailsModal({
   config,
   db,
@@ -650,6 +849,7 @@ function EntityDetailsModal({
   persons,
   customFieldDefinitions,
   onOpenRelated,
+  onOpenScanViewer,
   projectId,
   canCreateTasks,
   onCreateTask,
@@ -668,6 +868,11 @@ function EntityDetailsModal({
   persons: Person[];
   customFieldDefinitions: CustomFieldDefinition[];
   onOpenRelated?: (page: PageKey, entityId: string) => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
   projectId: string;
   canCreateTasks: boolean;
   onCreateTask?: (task: TaskRecord) => void;
@@ -711,11 +916,14 @@ function EntityDetailsModal({
                 <DetailValue
                   field={field}
                   value={record[field.key]}
+                  findingType={String(record.findingType ?? "")}
                   researches={researches}
                   documents={documents}
                   findings={findings}
                   persons={persons}
                   onOpenRelated={onOpenRelated}
+                  onOpenScanViewer={onOpenScanViewer}
+                  scanViewerContext={documentScanViewerContext(config.collection, record)}
                 />
               </div>
             ))}
@@ -764,19 +972,29 @@ function EntityDetailsModal({
 function DetailValue({
   field,
   value,
+  findingType,
   researches,
   documents,
   findings,
   persons,
   onOpenRelated,
+  onOpenScanViewer,
+  scanViewerContext,
 }: {
   field: FieldConfig;
   value: unknown;
+  findingType?: string;
   researches: Research[];
   documents: DocumentRecord[];
   findings: Finding[];
   persons: Person[];
   onOpenRelated?: (page: PageKey, entityId: string) => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
+  scanViewerContext?: DocumentScanViewerContext;
 }) {
   if (field.type === "research") {
     const research = researches.find((item) => item.id === value);
@@ -844,10 +1062,17 @@ function DetailValue({
   }
   if (field.type === "scans") {
     const scans = Array.isArray(value) ? value as ScanAttachment[] : [];
-    return <ScanAttachmentsView scans={scans} />;
+    return (
+      <ScanAttachmentsView
+        scans={scans}
+        onPreview={onOpenScanViewer ? (scan, scans) => onOpenScanViewer(scan, scanViewerContext, scans) : undefined}
+      />
+    );
   }
   if (field.type === "participants") {
-    const participants = Array.isArray(value) ? value as FindingParticipant[] : [];
+    const participants = Array.isArray(value)
+      ? sortFindingParticipants(value as FindingParticipant[], findingType ?? "")
+      : [];
     return (
       <div className="participant-details">
         {participants.map((participant) => (
@@ -896,7 +1121,10 @@ function RelatedButton({
 
 function getEntityTitle(config: EntityConfig, record: Record<string, unknown>): string {
   if (Array.isArray(record.participants)) {
-    const participantName = primaryParticipantName(record.participants as FindingParticipant[]);
+    const participantName = primaryParticipantName(
+      record.participants as FindingParticipant[],
+      String(record.findingType ?? ""),
+    );
     if (participantName) return participantName;
   }
   const preferredKeys = ["title", "subject", "people", "year", "personName"];
@@ -926,6 +1154,9 @@ function EntityModal({
   canAddCustomField,
   customFieldLimitMessage,
   onSavePerson,
+  onSaveRelation,
+  onPersist,
+  onOpenScanViewer,
   researchRequired,
   onClose,
   onSave,
@@ -946,10 +1177,17 @@ function EntityModal({
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
   canAddCustomField: boolean;
   customFieldLimitMessage?: string;
-  onSavePerson?: (person: Person) => void;
+  onSavePerson?: (person: Person) => void | Promise<Person | null | void>;
+  onSaveRelation?: (relation: PersonRelation) => void | Promise<PersonRelation | null | void>;
+  onPersist?: (entity: AppEntity) => void | AppEntity | null | Promise<AppEntity | null | void>;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
   researchRequired: boolean;
   onClose: () => void;
-  onSave: (entity: AppEntity) => void;
+  onSave: (entity: AppEntity) => void | AppEntity | null | Promise<AppEntity | null | void>;
   stackIndex: number;
   dockIndex: number;
   onFocus: () => void;
@@ -962,19 +1200,66 @@ function EntityModal({
     }
     if (config.collection === "findings") {
       defaults.geo = (initial.geo as GeoPoint | null | undefined) ?? null;
+      if (initial.fragmentSelection) {
+        defaults.fragmentSelection = initial.fragmentSelection as DocumentFragmentSelection;
+      }
     }
     return defaults;
   });
-  const [personSeed, setPersonSeed] = useState<string | null>(null);
+  const [personSeed, setPersonSeed] = useState<PersonSeed | null>(null);
+  const [personSeedChoices, setPersonSeedChoices] = useState<PersonSeedChoice[] | null>(null);
+  const [locallyCreatedPersons, setLocallyCreatedPersons] = useState<Person[]>([]);
+  const [createdFindingPersons, setCreatedFindingPersons] = useState<CreatedFindingPerson[]>([]);
+  const [locallyCreatedRelations, setLocallyCreatedRelations] = useState<PersonRelation[]>([]);
+  const persistedBaseUpdatedAtRef = useRef<string>(entity?.updatedAt ?? "");
+  const availablePersons = useMemo(
+    () => mergePersonsById(persons, locallyCreatedPersons),
+    [persons, locallyCreatedPersons],
+  );
   const customDefinitions = definitionsForModule(customFieldDefinitions, config.collection);
   const [customValues, setCustomValues] = useState<CustomFieldValues>(() =>
     normalizeCustomFieldValues((entity as unknown as { customFields?: unknown } | null)?.customFields),
   );
+  const archiveReferenceMissingLabels = missingArchiveReferenceLabels(config.collection, config.fields, form);
+
+  const buildEntityForSave = (sourceForm: FormRecord, timestamp = nowIso()): AppEntity => {
+    const findingType = String(sourceForm.findingType ?? "");
+    const sourceParticipants = Array.isArray(sourceForm.participants)
+      ? sortFindingParticipants(sourceForm.participants as FindingParticipant[], findingType)
+      : [];
+    return {
+      ...(entity ?? {}),
+      ...sourceForm,
+      ...(config.collection === "findings"
+        ? { people: participantSummary(sourceParticipants, findingType), participants: sourceParticipants }
+        : {}),
+      ...(supportsCustomFields(config.collection) ? { customFields: customValues } : {}),
+      id: entity?.id ?? createId(),
+      createdAt: entity?.createdAt ?? timestamp,
+      __baseUpdatedAt: persistedBaseUpdatedAtRef.current || entity?.updatedAt,
+      updatedAt: timestamp,
+    } as unknown as AppEntity;
+  };
+
+  const persistExistingFindingDraft = async (nextForm: FormRecord) => {
+    if (config.collection !== "findings" || !entity || !onPersist) return;
+    const timestamp = nowIso();
+    const entityToPersist = buildEntityForSave(nextForm, timestamp);
+    const saved = await onPersist(entityToPersist);
+    if (isEntitySaveResult(saved)) {
+      persistedBaseUpdatedAtRef.current = saved.updatedAt;
+    } else if (saved !== null) {
+      persistedBaseUpdatedAtRef.current = entityToPersist.updatedAt;
+    }
+  };
 
   const fieldRequired = (field: FieldConfig) => {
     if (config.collection === "archiveRequests" && field.key === "requestDate") {
       const status = String(form.status ?? "чернетка").trim() || "чернетка";
       return status !== "чернетка";
+    }
+    if (requiresArchiveReferenceField(config.collection, field, config.fields, form)) {
+      return true;
     }
     return Boolean(field.required || (field.type === "research" && researchRequired));
   };
@@ -1011,18 +1296,7 @@ function EntityModal({
       window.alert(`Заповніть обов’язкове поле «${missingRequiredField.label}».`);
       return;
     }
-    onSave({
-      ...(entity ?? {}),
-      ...form,
-      ...(config.collection === "findings"
-        ? { people: participantSummary(participants), participants }
-        : {}),
-      ...(supportsCustomFields(config.collection) ? { customFields: customValues } : {}),
-      id: entity?.id ?? createId(),
-      createdAt: entity?.createdAt ?? timestamp,
-      __baseUpdatedAt: entity?.updatedAt,
-      updatedAt: timestamp,
-    } as unknown as AppEntity);
+    onSave(buildEntityForSave(form, timestamp));
   };
 
   return (
@@ -1044,7 +1318,7 @@ function EntityModal({
               researches={researches}
               documents={documents}
               findings={findings}
-              persons={persons}
+              persons={availablePersons}
               researchId={String(form.researchId ?? "")}
               researchRequired={researchRequired}
               required={fieldRequired(field)}
@@ -1053,15 +1327,28 @@ function EntityModal({
                 config.collection === "yearMatrix" ? String(form.documentType ?? "") : ""
               }
               findingType={config.collection === "findings" ? String(form.findingType ?? "") : ""}
+              scanViewerContext={documentScanViewerContext(config.collection, form)}
+              scanDriveFolderPath={scanDriveFolderPath(config.collection, field, form, availablePersons)}
+              scanUploadBlockedMessage={
+                field.type === "scans" && archiveReferenceMissingLabels.length
+                  ? `Перед завантаженням файлу заповніть: ${archiveReferenceMissingLabels.join(", ")}.`
+                  : undefined
+              }
+              onOpenScanViewer={onOpenScanViewer}
               onCreatePerson={() => {
-                const seed = config.collection === "findings"
-                  ? String(form.personsText || participantSummary(
-                      Array.isArray(form.participants) ? form.participants as FindingParticipant[] : [],
-                    ))
-                  : config.collection === "tasks"
-                    ? String(form.personName ?? "")
-                    : String(form.relatedPeople ?? "");
-                setPersonSeed(seed);
+                if (config.collection === "findings") {
+                  const choices = personSeedChoicesFromFinding(form);
+                  if (choices.length > 1) {
+                    setPersonSeedChoices(choices);
+                    return;
+                  }
+                  setPersonSeed(choices[0] ?? createBasicPersonSeed("", String(form.researchId ?? "")));
+                  return;
+                }
+                const seed = config.collection === "tasks"
+                  ? String(form.personName ?? "")
+                  : String(form.relatedPeople ?? "");
+                setPersonSeed(createBasicPersonSeed(seed, String(form.researchId ?? "")));
               }}
               onChange={(value) => setForm((current) => ({ ...current, [field.key]: value }))}
             />
@@ -1099,17 +1386,61 @@ function EntityModal({
             />
           ) : null}
         </div>
+        {config.collection === "findings" ? (
+          <FindingAiIndexingPanel
+            finding={{ ...(form as Partial<Finding>), id: entity?.id }}
+            documents={documents}
+            customValues={customValues}
+            onApply={(patch) => {
+              setForm((current) => ({ ...current, ...patch.form } as FormRecord));
+              setCustomValues(patch.customValues);
+            }}
+          />
+        ) : null}
         <div className="modal-actions">
           <button type="button" className="button button-ghost" onClick={onClose}>Скасувати</button>
           <button type="submit" className="button button-primary">Зберегти</button>
         </div>
       </form>
+      {personSeedChoices && onSavePerson ? (
+        <Modal
+          title="Створити особу зі знахідки"
+          onClose={() => setPersonSeedChoices(null)}
+          mode="window"
+          minimizable={false}
+          stackIndex={stackIndex + 20}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        >
+          <div className="person-seed-choices">
+            <p>Оберіть, для кого створити картку особи. Дані зі знахідки будуть перенесені у форму автоматично.</p>
+            <div>
+              {personSeedChoices.map((choice) => (
+                <button
+                  key={choice.key}
+                  type="button"
+                  className="person-seed-choice"
+                  onClick={() => {
+                    setPersonSeed(choice);
+                    setPersonSeedChoices(null);
+                  }}
+                >
+                  <strong>{choice.title}</strong>
+                  {choice.description ? <span>{choice.description}</span> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        </Modal>
+      ) : null}
       {personSeed !== null && onSavePerson ? (
         <PersonFormModal
+          key={personSeed.key}
           researches={researches}
           db={db}
-          initialFullName={personSeed}
-          initialResearchId={String(form.researchId ?? "")}
+          initialFullName={String(personSeed.draft.fullName ?? "")}
+          initialResearchId={String(personSeed.draft.researchId ?? form.researchId ?? "")}
+          initialPersonDraft={personSeed.draft}
           researchRequired={researchRequired}
           customFieldDefinitions={definitionsForModule(customFieldDefinitions, "persons")}
           onAddCustomField={onAddCustomField}
@@ -1117,16 +1448,372 @@ function EntityModal({
           canAddCustomField={canAddCustomField}
           customFieldLimitMessage={customFieldLimitMessage}
           onClose={() => setPersonSeed(null)}
-          onSave={(person) => {
-            onSavePerson(person);
+          onSave={async (person) => {
+            const savedPerson = await onSavePerson(person);
+            if (savedPerson === null) return;
+            const linkedPerson = isPersonSaveResult(savedPerson) ? savedPerson : person;
+            setLocallyCreatedPersons((current) => mergePersonsById(current, [linkedPerson]));
+            if (config.collection === "findings" && personSeed.participantId) {
+              const nextCreatedFindingPersons = mergeCreatedFindingPersons(createdFindingPersons, {
+                participantId: personSeed.participantId,
+                participantRole: personSeed.participantRole ?? "",
+                person: linkedPerson,
+              });
+              setCreatedFindingPersons(nextCreatedFindingPersons);
+              if (onSaveRelation) {
+                const relations = relationsFromFindingPeople(
+                  nextCreatedFindingPersons,
+                  [...db.personRelations, ...locallyCreatedRelations],
+                  form,
+                );
+                if (relations.length) {
+                  const relationResults = await Promise.all(relations.map((relation) => onSaveRelation(relation)));
+                  const savedRelations = relations.filter((_, index) => relationResults[index] !== null);
+                  setLocallyCreatedRelations((current) => mergeRelationsByKey(current, savedRelations));
+                }
+              }
+            }
             const selected = Array.isArray(form.personIds) ? form.personIds as string[] : [];
-            setForm((current) => ({ ...current, personIds: [...new Set([...selected, person.id])] }));
+            const nextForm = { ...form, personIds: [...new Set([...selected, linkedPerson.id])] };
+            setForm(nextForm);
+            await persistExistingFindingDraft(nextForm);
             setPersonSeed(null);
           }}
         />
       ) : null}
     </Modal>
   );
+}
+
+function mergePersonsById(primary: Person[], additions: Person[]): Person[] {
+  const byId = new Map(primary.map((person) => [person.id, person]));
+  for (const person of additions) {
+    byId.set(person.id, person);
+  }
+  return [...byId.values()];
+}
+
+function isPersonSaveResult(value: Person | null | void): value is Person {
+  return Boolean(value && typeof value === "object" && "id" in value);
+}
+
+function isEntitySaveResult(value: AppEntity | null | void): value is AppEntity {
+  return Boolean(value && typeof value === "object" && "id" in value && "updatedAt" in value);
+}
+
+function mergeCreatedFindingPersons(
+  current: CreatedFindingPerson[],
+  next: CreatedFindingPerson,
+): CreatedFindingPerson[] {
+  return [
+    next,
+    ...current.filter((item) => item.participantId !== next.participantId),
+  ];
+}
+
+function mergeRelationsByKey(
+  current: PersonRelation[],
+  additions: PersonRelation[],
+): PersonRelation[] {
+  const next = [...current];
+  for (const relation of additions) {
+    if (!next.some((item) => areEquivalentRelations(item, relation))) {
+      next.push(relation);
+    }
+  }
+  return next;
+}
+
+function relationsFromFindingPeople(
+  created: CreatedFindingPerson[],
+  existingRelations: PersonRelation[],
+  form: FormRecord,
+): PersonRelation[] {
+  const eventType = personEventTypeFromFinding(String(form.findingType ?? ""));
+  const children = created.filter((item) => isChildParticipantRole(item.participantRole, eventType));
+  const fathers = created.filter((item) => isBiologicalFatherRole(item.participantRole));
+  const mothers = created.filter((item) => isBiologicalMotherRole(item.participantRole));
+  const genericParents = created.filter((item) => isGenericParentRole(item.participantRole));
+  const stepfathers = created.filter((item) => isStepfatherRole(item.participantRole));
+  const stepmothers = created.filter((item) => isStepmotherRole(item.participantRole));
+  const godfathers = created.filter((item) => isGodfatherRole(item.participantRole));
+  const godmothers = created.filter((item) => isGodmotherRole(item.participantRole));
+  const midwives = created.filter((item) => isMidwifeRole(item.participantRole));
+  const grooms = eventType === "marriage" ? created.filter((item) => isGroomRole(item.participantRole)) : [];
+  const brides = eventType === "marriage" ? created.filter((item) => isBrideRole(item.participantRole)) : [];
+  const groomFathers = created.filter((item) => isGroomFatherRole(item.participantRole));
+  const groomMothers = created.filter((item) => isGroomMotherRole(item.participantRole));
+  const brideFathers = created.filter((item) => isBrideFatherRole(item.participantRole));
+  const brideMothers = created.filter((item) => isBrideMotherRole(item.participantRole));
+  const deceasedPeople = created.filter((item) => isDeceasedRole(item.participantRole));
+  const spouseParticipants = created.filter((item) => isSpouseParticipantRole(item.participantRole));
+  const informants = created.filter((item) => isInformantRole(item.participantRole));
+  const householdHeads = created.filter((item) => isHouseholdHeadRole(item.participantRole));
+  const householdSpouses = created.filter((item) => isHouseholdSpouseRole(item.participantRole));
+  const sons = created.filter((item) => isSonRole(item.participantRole));
+  const daughters = created.filter((item) => isDaughterRole(item.participantRole));
+  const siblings = created.filter((item) => isSiblingRole(item.participantRole));
+  const relatives = created.filter((item) => isRelativeRole(item.participantRole));
+  const servants = created.filter((item) => isServantRole(item.participantRole));
+  const guardians = created.filter((item) => isGuardianRole(item.participantRole));
+  const wards = created.filter((item) => isWardRole(item.participantRole));
+  const witnesses = created.filter((item) => isWitnessRole(item.participantRole));
+  const pledgers = created.filter((item) => isPledgerRole(item.participantRole));
+  const priests = created.filter((item) => isPriestRole(item.participantRole));
+  const officials = created.filter((item) => isOfficialRole(item.participantRole));
+  const timestamp = nowIso();
+  const evidenceText = findingRelationEvidenceText(form);
+  const notes = "Створено автоматично зі знахідки після створення пов’язаних осіб.";
+  const additions: PersonRelation[] = [];
+
+  const add = (
+    personId: string,
+    relatedPersonId: string,
+    relationType: PersonRelationType,
+  ) => {
+    if (!personId || !relatedPersonId || personId === relatedPersonId) return;
+    const relation: PersonRelation = {
+      id: createId(),
+      personId,
+      relatedPersonId,
+      relationType,
+      status: "доведено",
+      evidenceText,
+      notes,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    if (
+      existingRelations.some((item) => areEquivalentRelations(item, relation)) ||
+      additions.some((item) => areEquivalentRelations(item, relation))
+    ) {
+      return;
+    }
+    additions.push(relation);
+  };
+
+  const addMany = (
+    people: CreatedFindingPerson[],
+    relatedPeople: CreatedFindingPerson[],
+    relationType: PersonRelationType | ((related: CreatedFindingPerson, person: CreatedFindingPerson) => PersonRelationType),
+  ) => {
+    for (const person of people) {
+      for (const related of relatedPeople) {
+        add(
+          person.person.id,
+          related.person.id,
+          typeof relationType === "function" ? relationType(related, person) : relationType,
+        );
+      }
+    }
+  };
+
+  const addContextRelations = (mainPeople: CreatedFindingPerson[]) => {
+    addMany(mainPeople, witnesses, "свідок");
+    addMany(mainPeople, pledgers, "поручитель");
+    addMany(mainPeople, priests, (priest) => isExactPriestRole(priest.participantRole) ? "священник" : "духовна особа");
+    addMany(mainPeople, officials, "посадова особа");
+  };
+
+  for (const child of children) {
+    for (const father of fathers) {
+      add(child.person.id, father.person.id, "батько");
+    }
+    for (const mother of mothers) {
+      add(child.person.id, mother.person.id, "мати");
+    }
+    for (const parent of genericParents) {
+      add(child.person.id, parent.person.id, "батько або мати");
+    }
+    for (const stepfather of stepfathers) {
+      add(child.person.id, stepfather.person.id, "вітчим");
+    }
+    for (const stepmother of stepmothers) {
+      add(child.person.id, stepmother.person.id, "мачуха");
+    }
+    for (const godfather of godfathers) {
+      add(child.person.id, godfather.person.id, "хрещений");
+    }
+    for (const godmother of godmothers) {
+      add(child.person.id, godmother.person.id, "хрещена");
+    }
+    addMany([child], midwives, "повитуха");
+  }
+
+  if (eventType === "birth" || eventType === "baptism" || eventType === "death" || eventType === "burial") {
+    for (const father of fathers) {
+      for (const mother of mothers) {
+        add(father.person.id, mother.person.id, "дружина");
+      }
+    }
+  }
+
+  for (const groom of grooms) {
+    for (const bride of brides) {
+      add(groom.person.id, bride.person.id, "дружина");
+    }
+    addMany([groom], groomFathers, "батько");
+    addMany([groom], groomMothers, "мати");
+  }
+
+  for (const bride of brides) {
+    addMany([bride], brideFathers, "батько");
+    addMany([bride], brideMothers, "мати");
+  }
+
+  const marriagePeople = [...grooms, ...brides];
+  if (marriagePeople.length) {
+    addContextRelations(marriagePeople);
+  }
+
+  const deathPeople = deceasedPeople.length
+    ? deceasedPeople
+    : eventType === "death" || eventType === "burial"
+      ? primaryCreatedPeopleForRelations(created, eventType)
+      : [];
+  for (const deceased of deathPeople) {
+    addMany([deceased], fathers, "батько");
+    addMany([deceased], mothers, "мати");
+    addMany([deceased], genericParents, "батько або мати");
+    addMany([deceased], spouseParticipants, (spouse) => spouseRelationTypeFromRole(spouse.participantRole));
+    addMany([deceased], informants, "особа, яка повідомила");
+  }
+  if (deathPeople.length) {
+    addContextRelations(deathPeople);
+  }
+
+  for (const head of householdHeads) {
+    addMany([head], householdSpouses, (spouse) => spouseRelationTypeFromRole(spouse.participantRole));
+    addMany(sons, [head], "батько або мати");
+    addMany(daughters, [head], "батько або мати");
+    addMany([head], genericParents, "батько або мати");
+    addMany([head], siblings, "брат або сестра");
+    addMany([head], relatives, "родич");
+    addMany([head], servants, "наймит або служник");
+    addMany([head], wards, "підопічний");
+    addMany(guardians, [head], "опікун");
+  }
+
+  for (const guardian of guardians) {
+    addMany(wards, [guardian], "опікун");
+  }
+
+  const genericMainPeople = primaryCreatedPeopleForRelations(created, eventType);
+  if (genericMainPeople.length && !marriagePeople.length && !deathPeople.length && !householdHeads.length) {
+    addMany(genericMainPeople, fathers, "батько");
+    addMany(genericMainPeople, mothers, "мати");
+    addMany(genericMainPeople, genericParents, "батько або мати");
+    addMany(genericMainPeople, spouseParticipants, (spouse) => spouseRelationTypeFromRole(spouse.participantRole));
+    addMany(genericMainPeople, siblings, "брат або сестра");
+    addMany(genericMainPeople, relatives, "родич");
+    addContextRelations(genericMainPeople);
+  }
+
+  if (children.length && !marriagePeople.length && !deathPeople.length) {
+    addContextRelations(children);
+  }
+
+  return additions;
+}
+
+function primaryCreatedPeopleForRelations(
+  created: CreatedFindingPerson[],
+  eventType: PersonEventType | null,
+): CreatedFindingPerson[] {
+  if (!created.length) return [];
+  if (eventType === "birth" || eventType === "baptism") {
+    const children = created.filter((item) => isChildParticipantRole(item.participantRole, eventType));
+    if (children.length) return children;
+  }
+  if (eventType === "marriage") {
+    const spouses = created.filter((item) => isGroomRole(item.participantRole) || isBrideRole(item.participantRole));
+    if (spouses.length) return spouses;
+  }
+  if (eventType === "death" || eventType === "burial") {
+    const deceased = created.filter((item) => isDeceasedRole(item.participantRole));
+    if (deceased.length) return deceased;
+  }
+  const heads = created.filter((item) => isHouseholdHeadRole(item.participantRole));
+  if (heads.length) return heads;
+  const primary = created.find((item) => !isContextOnlyRole(item.participantRole));
+  return primary ? [primary] : [created[0]];
+}
+
+function areEquivalentRelations(first: PersonRelation, second: PersonRelation): boolean {
+  if (first.personId === second.personId && first.relatedPersonId === second.relatedPersonId) {
+    return first.relationType === second.relationType ||
+      (isSpouseRelation(first.relationType) && isSpouseRelation(second.relationType)) ||
+      (isParentRelation(first.relationType) && isParentRelation(second.relationType)) ||
+      (isChildRelation(first.relationType) && isChildRelation(second.relationType)) ||
+      (isSiblingRelation(first.relationType) && isSiblingRelation(second.relationType)) ||
+      (isGodparentRelation(first.relationType) && isGodparentRelation(second.relationType));
+  }
+  if (first.personId === second.relatedPersonId && first.relatedPersonId === second.personId) {
+    if (isSpouseRelation(first.relationType) && isSpouseRelation(second.relationType)) return true;
+    if (isChildRelation(first.relationType) && isParentRelation(second.relationType)) return true;
+    if (isChildRelation(second.relationType) && isParentRelation(first.relationType)) return true;
+    if (isSiblingRelation(first.relationType) && isSiblingRelation(second.relationType)) return true;
+    if (isGodchildRelation(first.relationType) && isGodparentRelation(second.relationType)) return true;
+    if (isGodchildRelation(second.relationType) && isGodparentRelation(first.relationType)) return true;
+    if (first.relationType === "підопічний" && second.relationType === "опікун") return true;
+    if (second.relationType === "підопічний" && first.relationType === "опікун") return true;
+    if (first.relationType === "член господарства" && second.relationType === "голова господарства") return true;
+    if (second.relationType === "член господарства" && first.relationType === "голова господарства") return true;
+  }
+  return false;
+}
+
+function isParentRelation(value: PersonRelationType): boolean {
+  return [
+    "батько",
+    "мати",
+    "батько або мати",
+    "вітчим",
+    "мачуха",
+    "опікун",
+    "усиновлювач",
+  ].includes(value);
+}
+
+function isChildRelation(value: PersonRelationType): boolean {
+  return [
+    "дитина",
+    "син",
+    "донька",
+    "пасинок",
+    "падчерка",
+    "підопічний",
+    "усиновлена дитина",
+  ].includes(value);
+}
+
+function isSpouseRelation(value: PersonRelationType): boolean {
+  return value === "чоловік" || value === "дружина" || value === "подружжя";
+}
+
+function isSiblingRelation(value: PersonRelationType): boolean {
+  return value === "брат" || value === "сестра" || value === "брат або сестра";
+}
+
+function isGodparentRelation(value: PersonRelationType): boolean {
+  return value === "хрещений" || value === "хрещена";
+}
+
+function isGodchildRelation(value: PersonRelationType): boolean {
+  return value === "хрещеник" || value === "хрещениця";
+}
+
+function findingRelationEvidenceText(form: FormRecord): string {
+  return [
+    String(form.findingType ?? "").trim(),
+    String(form.eventDate ?? "").trim(),
+    String(form.place ?? "").trim(),
+    String(form.archive ?? "").trim(),
+    String(form.fund ?? "").trim(),
+    String(form.description ?? "").trim(),
+    String(form.file ?? "").trim(),
+    String(form.page ?? "").trim() ? `арк./стор. ${String(form.page ?? "").trim()}` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 function omitCustomField(
@@ -1136,6 +1823,777 @@ function omitCustomField(
   const next = { ...values };
   delete next[fieldId];
   return next;
+}
+
+function createBasicPersonSeed(rawName: string, researchId: string): PersonSeed {
+  const parsed = splitPersonName(rawName);
+  return {
+    key: `basic:${researchId}:${parsed.fullName}`,
+    title: parsed.fullName || "Нова особа",
+    draft: {
+      researchId,
+      ...parsed,
+    },
+  };
+}
+
+function personSeedChoicesFromFinding(form: FormRecord): PersonSeedChoice[] {
+  const participants = Array.isArray(form.participants)
+    ? sortFindingParticipants(
+        form.participants as FindingParticipant[],
+        String(form.findingType ?? ""),
+      ).filter((participant) => participant.name.trim())
+    : [];
+  if (participants.length > 1) {
+    return participants.map((participant, index) => ({
+      ...createPersonSeedFromFinding(form, participant),
+      key: `finding-participant:${participant.id || index}`,
+      description: [participant.role, participant.notes].filter(Boolean).join(" · "),
+    }));
+  }
+  return [createPersonSeedFromFinding(form, participants[0] ?? null)];
+}
+
+function createPersonSeedFromFinding(
+  form: FormRecord,
+  participant: FindingParticipant | null,
+): PersonSeedChoice {
+  const participants = Array.isArray(form.participants) ? form.participants as FindingParticipant[] : [];
+  const rawName = participant?.name ||
+    primaryParticipantName(participants, String(form.findingType ?? "")) ||
+    String(form.personsText || form.people || "");
+  const parsed = splitPersonName(rawName);
+  const researchId = String(form.researchId ?? "");
+  const eventType = personEventTypeFromFinding(String(form.findingType ?? ""));
+  const eventDate = String(form.eventDate ?? "");
+  const place = String(form.place ?? "");
+  const scans = Array.isArray(form.scans) ? form.scans as ScanAttachment[] : [];
+  const geo = isGeoPoint(form.geo) ? form.geo : null;
+  const role = participant?.role ?? "";
+  const gender = genderFromParticipantRole(role);
+  const childParticipant = isChildParticipantRole(role, eventType);
+  const personName = childParticipant && !parsed.givenName && parsed.surname
+    ? { ...parsed, surname: "", givenName: parsed.surname }
+    : parsed;
+  const patronymicFromFather = !personName.patronymic && childParticipant
+    ? patronymicFromFatherParticipant(participants, participant, gender, personName.givenName ?? "")
+    : "";
+  const shouldApplyEvent = shouldApplyFindingEventToPerson(eventType, role);
+  const participantFacts = personFactsFromParticipantNotes(participant?.notes ?? "");
+  const draft: PersonInitialDraft = {
+    researchId,
+    ...personName,
+    patronymic: personName.patronymic || patronymicFromFather,
+    status: "доведена",
+    gender,
+    ...participantFacts,
+    notes: notesFromFinding(form, participant),
+  };
+
+  if (!shouldApplyEvent) {
+    draft.mentionScans = scans;
+  } else if (eventType === "birth" || eventType === "baptism") {
+    draft.birthDate = eventDate;
+    draft.birthPlace = place;
+    draft.birthScans = scans;
+  } else if (eventType === "marriage") {
+    draft.marriageDate = eventDate;
+    draft.marriagePlace = place;
+    draft.marriageScans = scans;
+  } else if (eventType === "death" || eventType === "burial") {
+    draft.deathDate = eventDate;
+    draft.deathPlace = place;
+    draft.deathScans = scans;
+  } else {
+    draft.residencePlaces = place;
+    draft.mentionScans = scans;
+  }
+
+  if (shouldApplyEvent && eventType && geo) {
+    draft.events = [personEventFromFinding(eventType, eventDate, place, geo)];
+  }
+
+  return {
+    key: `finding:${participant?.id ?? personName.fullName}`,
+    title: personName.fullName || "Особа зі знахідки",
+    description: participant ? [participant.role, participant.notes].filter(Boolean).join(" · ") : "",
+    draft,
+    participantId: participant?.id,
+    participantRole: participant?.role,
+  };
+}
+
+function genderFromParticipantRole(role: string): PersonGender {
+  const normalizedRole = normalizeRole(role);
+  if (!normalizedRole || isAmbiguousGenderRole(normalizedRole)) return "невідомо";
+
+  if (roleHasAny(normalizedRole, [
+    "мати",
+    "дружина",
+    "жінка",
+    "донька",
+    "дочка",
+    "сестра",
+    "наречена",
+    "хрещена",
+    "повитуха",
+    "вдова",
+  ])) {
+    return "жінка";
+  }
+
+  if (roleHasAny(normalizedRole, [
+    "батько",
+    "чоловік",
+    "син",
+    "брат",
+    "наречений",
+    "хрещений",
+    "вдівець",
+  ])) {
+    return "чоловік";
+  }
+
+  return "невідомо";
+}
+
+function isAmbiguousGenderRole(role: string): boolean {
+  return roleHasAny(role, [
+    "батько або мати",
+    "мати або батько",
+    "чоловік або дружина",
+    "дружина або чоловік",
+    "син або донька",
+    "донька або син",
+    "брат або сестра",
+    "сестра або брат",
+  ]);
+}
+
+function isChildParticipantRole(role: string, eventType: PersonEventType | null): boolean {
+  const normalizedRole = normalizeRole(role);
+  if (isGodfatherRole(normalizedRole) || isGodmotherRole(normalizedRole)) return false;
+  if (roleHasAny(normalizedRole, [
+    "дитина",
+    "новонарод",
+    "народжен",
+    "охрещен",
+    "син",
+    "донька",
+    "дочка",
+  ])) {
+    return true;
+  }
+  return !normalizedRole && (eventType === "birth" || eventType === "baptism");
+}
+
+function patronymicFromFatherParticipant(
+  participants: FindingParticipant[],
+  currentParticipant: FindingParticipant | null,
+  childGender: PersonGender,
+  childGivenName: string,
+): string {
+  const father = participants.find((candidate) =>
+    candidate.id !== currentParticipant?.id &&
+    candidate.name.trim() &&
+    isBiologicalFatherRole(candidate.role)
+  );
+  if (!father) return "";
+
+  const fatherGivenName = extractGivenNameForPatronymic(father.name);
+  const patronymicGender = genderForPatronymic(childGender, childGivenName);
+  if (!fatherGivenName || !patronymicGender) return "";
+
+  return buildUkrainianPatronymic(fatherGivenName, patronymicGender);
+}
+
+function isBiologicalFatherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  if (!roleHasAny(normalizedRole, ["батько", "father"])) return false;
+  return !roleHasAny(normalizedRole, ["або мати", "мати або", "хрещ", "назван", "прийом", "вітчим", "свід"]);
+}
+
+function isBiologicalMotherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  if (!roleHasAny(normalizedRole, ["мати", "mother"])) return false;
+  return !roleHasAny(normalizedRole, ["батько або", "або батько", "хрещ", "назван", "прийом", "мачух", "свід"]);
+}
+
+function isGroomRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  if (isAmbiguousGenderRole(normalizedRole)) return false;
+  return roleStartsWithAny(normalizedRole, ["наречений", "молодий"]) ||
+    roleHasAny(normalizedRole, ["чоловік", "groom"]);
+}
+
+function isBrideRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  if (isAmbiguousGenderRole(normalizedRole)) return false;
+  return roleStartsWithAny(normalizedRole, ["наречена", "молода"]) ||
+    roleHasAny(normalizedRole, ["дружина", "bride"]);
+}
+
+function isGenericParentRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["батько або мати", "мати або батько", "parent"]);
+}
+
+function isGroomFatherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["батько нареченого", "батько молодого", "father of groom"]);
+}
+
+function isGroomMotherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["мати нареченого", "мати молодого", "mother of groom"]);
+}
+
+function isBrideFatherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["батько нареченої", "батько молодої", "father of bride"]);
+}
+
+function isBrideMotherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["мати нареченої", "мати молодої", "mother of bride"]);
+}
+
+function isGodfatherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["хрещений", "хресний", "godfather"]) ||
+    (roleHasAny(normalizedRole, ["хрещ", "хрес", "god"]) && roleHasAny(normalizedRole, ["батько", "father"]));
+}
+
+function isGodmotherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["хрещена", "хресна", "godmother"]) ||
+    (roleHasAny(normalizedRole, ["хрещ", "хрес", "god"]) && roleHasAny(normalizedRole, ["мати", "mother"]));
+}
+
+function isMidwifeRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["повитуха", "баба-повитуха", "акушерк", "midwife"]);
+}
+
+function isDeceasedRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["померла особа", "померлий", "померла", "покійний", "покійна", "похована", "похований", "deceased"]);
+}
+
+function isSpouseParticipantRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  if (isGroomRole(normalizedRole) || isBrideRole(normalizedRole)) return false;
+  return roleHasAny(normalizedRole, ["чоловік або дружина", "дружина або чоловік", "чоловік", "дружина", "вдівець", "вдова", "подруж"]);
+}
+
+function spouseRelationTypeFromRole(role: string): PersonRelationType {
+  const normalizedRole = normalizeRole(role);
+  if (!isAmbiguousGenderRole(normalizedRole)) {
+    if (roleHasAny(normalizedRole, ["чоловік", "вдівець", "husband"])) return "чоловік";
+    if (roleHasAny(normalizedRole, ["дружина", "вдова", "wife"])) return "дружина";
+  }
+  return "подружжя";
+}
+
+function isInformantRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["особа, яка повідомила", "повідомила", "повідомив", "інформатор", "informant"]);
+}
+
+function isHouseholdHeadRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["голова господарства", "голова двору", "голова родини", "голова сім", "head of household"]);
+}
+
+function isHouseholdSpouseRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["чоловік або дружина", "дружина або чоловік", "подруж"]);
+}
+
+function isSonRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleStartsWithAny(normalizedRole, ["син"]) || roleHasAny(normalizedRole, [" son"]);
+}
+
+function isDaughterRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleStartsWithAny(normalizedRole, ["донька", "дочка"]) || roleHasAny(normalizedRole, ["daughter"]);
+}
+
+function isSiblingRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["брат або сестра", "сестра або брат", "брат", "сестра", "sibling"]);
+}
+
+function isRelativeRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["інший родич", "родич", "relative"]);
+}
+
+function isServantRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["наймит", "служник", "слуга", "робітник", "servant", "worker"]);
+}
+
+function isGuardianRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["опікун", "піклувальник", "guardian"]);
+}
+
+function isWardRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["підопічний", "підопічна", "ward"]);
+}
+
+function isStepfatherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["вітчим", "stepfather"]);
+}
+
+function isStepmotherRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["мачуха", "stepmother"]);
+}
+
+function isWitnessRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["свідок", "witness"]);
+}
+
+function isPledgerRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["поручитель", "поручник", "шафер", "bondsman", "sponsor"]);
+}
+
+function isPriestRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["священ", "духовна особа", "духовний", "ієрей", "дяк", "псалом", "priest", "clergy"]);
+}
+
+function isExactPriestRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["священ", "ієрей", "priest"]);
+}
+
+function isOfficialRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["посадова особа", "укладач", "реєстратор", "суддя", "командир", "представник", "official", "registrar", "judge"]);
+}
+
+function isContextOnlyRole(role: string): boolean {
+  return isWitnessRole(role) ||
+    isPledgerRole(role) ||
+    isPriestRole(role) ||
+    isOfficialRole(role) ||
+    isMidwifeRole(role) ||
+    isInformantRole(role);
+}
+
+function extractGivenNameForPatronymic(rawName: string): string {
+  const fullName = cleanPersonName(rawName);
+  const parts = fullName.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] ?? "";
+
+  const parsed = splitPersonName(fullName);
+  if (parts.length >= 3 && parsed.givenName) return parsed.givenName;
+
+  const first = parts[0];
+  const second = parts[1];
+  const firstLooksLikeSurname = isLikelySurname(first);
+  const secondLooksLikeSurname = isLikelySurname(second);
+  if (firstLooksLikeSurname && !secondLooksLikeSurname) return second;
+  if (secondLooksLikeSurname && !firstLooksLikeSurname) return first;
+
+  return parsed.givenName || first;
+}
+
+function genderForPatronymic(
+  gender: PersonGender,
+  givenName: string,
+): "male" | "female" | null {
+  if (gender === "чоловік") return "male";
+  if (gender === "жінка") return "female";
+
+  const normalizedName = normalizeNameToken(givenName);
+  if (!normalizedName) return null;
+  if ([
+    "микола",
+    "ілля",
+    "лука",
+    "сава",
+    "кузьма",
+    "хома",
+    "ярема",
+    "некита",
+    "никита",
+  ].includes(normalizedName)) {
+    return "male";
+  }
+  if (normalizedName.endsWith("а") || normalizedName.endsWith("я")) return "female";
+  return null;
+}
+
+function buildUkrainianPatronymic(
+  fatherGivenName: string,
+  gender: "male" | "female",
+): string {
+  const name = titleNameToken(fatherGivenName);
+  const normalizedName = normalizeNameToken(name);
+  const exceptions: Record<string, { male: string; female: string }> = {
+    федір: { male: "Федорович", female: "Федорівна" },
+    микола: { male: "Миколайович", female: "Миколаївна" },
+    ілля: { male: "Ілліч", female: "Іллівна" },
+    сава: { male: "Савич", female: "Савівна" },
+    лука: { male: "Лукич", female: "Луківна" },
+    кузьма: { male: "Кузьмич", female: "Кузьмівна" },
+    хома: { male: "Хомич", female: "Хомівна" },
+    лев: { male: "Львович", female: "Львівна" },
+    яків: { male: "Якович", female: "Яківна" },
+  };
+  const exception = exceptions[normalizedName];
+  if (exception) return exception[gender];
+
+  if (normalizedName.endsWith("й")) {
+    return gender === "male"
+      ? `${name}ович`
+      : `${name.slice(0, -1)}ївна`;
+  }
+  if (normalizedName.endsWith("ь")) {
+    const base = name.slice(0, -1);
+    return gender === "male" ? `${base}ьович` : `${base}івна`;
+  }
+  if (normalizedName.endsWith("о")) {
+    const base = name.slice(0, -1);
+    return gender === "male" ? `${base}ович` : `${base}івна`;
+  }
+  if (normalizedName.endsWith("а") || normalizedName.endsWith("я")) {
+    const base = name.slice(0, -1);
+    return gender === "male" ? `${base}ич` : `${base}івна`;
+  }
+
+  return gender === "male" ? `${name}ович` : `${name}івна`;
+}
+
+function personFactsFromParticipantNotes(notes: string): Pick<PersonInitialDraft, "occupation" | "socialStatus" | "religion"> {
+  const occupation = normalizeExtractedFact(
+    extractParticipantFact(notes, ["заняття", "професія", "професія або заняття", "occupation", "profession"]),
+  );
+  return {
+    occupation,
+    socialStatus: normalizeSocialStatus(extractParticipantFact(notes, ["стан", "соціальний статус", "соціальний стан", "status", "social status"])),
+    religion: normalizeReligion(extractParticipantFact(notes, ["конфесія", "віросповідання", "віра", "religion", "confession"])),
+  };
+}
+
+function extractParticipantFact(notes: string, labels: string[]): string {
+  const normalizedLabels = labels.map((label) => label.toLocaleLowerCase("uk"));
+  const parts = notes.split(/[;\n]/);
+  for (const part of parts) {
+    const separatorIndex = part.indexOf(":");
+    if (separatorIndex < 0) continue;
+    const label = part.slice(0, separatorIndex).trim().toLocaleLowerCase("uk");
+    const value = part.slice(separatorIndex + 1).trim();
+    if (!value) continue;
+    if (normalizedLabels.some((candidate) => label === candidate || label.endsWith(` ${candidate}`))) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function normalizeSocialStatus(value: string): string {
+  const raw = normalizeExtractedFact(value);
+  const normalized = normalizeFactDictionaryText(raw);
+  if (!normalized) return "";
+
+  const rules: Array<{ needles: string[]; value: string }> = [
+    { needles: ["кріпак", "кріпос", "крепост", "serf"], value: "кріпацький стан" },
+    { needles: ["селя", "кресть", "peasant", "rolnik", "włośc", "wlosc"], value: "селянський стан" },
+    { needles: ["міщ", "мещ", "бургер", "mieszcz", "townsman"], value: "міщанський стан" },
+    { needles: ["дворян", "шляхт", "noble", "szlach"], value: "дворянський стан" },
+    { needles: ["козак", "казак", "cossack"], value: "козацький стан" },
+    { needles: ["купец", "купець", "merchant"], value: "купецький стан" },
+    { needles: ["духов", "свящ", "священ", "priest", "clergy"], value: "духовний стан" },
+    { needles: ["військ", "военн", "солдат", "рядов", "military", "soldier"], value: "військовий стан" },
+    { needles: ["однодвор", "однодворец"], value: "однодворці" },
+    { needles: ["чинш", "czynsz"], value: "чиншовики" },
+    { needles: ["робіт", "рабоч", "worker"], value: "робітничий стан" },
+  ];
+
+  return rules.find((rule) => includesAny(normalized, rule.needles))?.value ?? raw;
+}
+
+function normalizeReligion(value: string): string {
+  const raw = normalizeExtractedFact(value);
+  const normalized = normalizeFactDictionaryText(raw);
+  if (!normalized) return "";
+
+  const rules: Array<{ needles: string[]; value: string }> = [
+    { needles: ["греко катол", "греко-катол", "уніат", "униат", "greek catholic"], value: "греко-католицьке" },
+    { needles: ["римсько катол", "римсько-катол", "римо катол", "римо-катол", "rzymskokat", "roman catholic"], value: "римсько-католицьке" },
+    { needles: ["православ", "orthodox", "греко рос", "греко-рос"], value: "православне" },
+    { needles: ["юдей", "іудей", "иудей", "єврей", "еврей", "mosais", "juda"], value: "юдейське" },
+    { needles: ["лютеран", "luther"], value: "лютеранське" },
+    { needles: ["євангел", "евангел", "evangel"], value: "євангелічне" },
+    { needles: ["мусульм", "магомет", "islam", "muslim"], value: "мусульманське" },
+    { needles: ["старообряд", "старовір", "старовер"], value: "старообрядницьке" },
+    { needles: ["баптист", "baptist"], value: "баптистське" },
+    { needles: ["протест", "protest"], value: "протестантське" },
+    { needles: ["вірмено григор", "вірмено-григор", "армяно григ", "armenian"], value: "вірмено-григоріанське" },
+    { needles: ["катол", "catholic"], value: "римсько-католицьке" },
+  ];
+
+  return rules.find((rule) => includesAny(normalized, rule.needles))?.value ?? raw;
+}
+
+function normalizeExtractedFact(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) return "";
+  const comparable = normalizeFactDictionaryText(normalized);
+  if (["невідомо", "не відомо", "не вказано", "не зазначено", "немає", "unknown", "not specified", "n/a", "null"].includes(comparable)) {
+    return "";
+  }
+  return normalized;
+}
+
+function normalizeFactDictionaryText(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase("uk")
+    .replace(/[.,;:()[\]{}"“”„«»]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function includesAny(value: string, needles: string[]): boolean {
+  return needles.some((needle) => value.includes(needle));
+}
+
+function shouldApplyFindingEventToPerson(eventType: PersonEventType | null, role: string): boolean {
+  if (!eventType || !role.trim()) return true;
+  const normalizedRole = normalizeRole(role);
+
+  if (eventType === "birth" || eventType === "baptism") {
+    return roleHasAny(normalizedRole, ["дитина", "новонарод", "народжен", "охрещен"]);
+  }
+
+  if (eventType === "marriage") {
+    return roleStartsWithAny(normalizedRole, ["наречений", "наречена", "молодий", "молода"]);
+  }
+
+  if (eventType === "death" || eventType === "burial") {
+    return roleHasAny(normalizedRole, ["померл", "покійн", "похован"]);
+  }
+
+  return true;
+}
+
+function normalizeRole(role: string): string {
+  return role
+    .trim()
+    .toLocaleLowerCase("uk")
+    .replace(/\s+/g, " ");
+}
+
+function roleHasAny(role: string, needles: string[]): boolean {
+  return needles.some((needle) => role.includes(needle));
+}
+
+function roleStartsWithAny(role: string, needles: string[]): boolean {
+  return needles.some((needle) => role.startsWith(needle));
+}
+
+function splitPersonName(rawName: string): Pick<PersonInitialDraft, "fullName" | "surname" | "givenName" | "patronymic"> {
+  const fullName = cleanPersonName(rawName);
+  const parts = fullName.split(/\s+/).filter(Boolean);
+  if (parts.length >= 3) {
+    const patronymicIndex = parts.findIndex(isLikelyPatronymic);
+    if (patronymicIndex === 1) {
+      return {
+        fullName,
+        surname: parts.slice(2).join(" "),
+        givenName: parts[0],
+        patronymic: parts[1],
+      };
+    }
+    if (patronymicIndex > 1) {
+      return {
+        fullName,
+        surname: parts.slice(0, patronymicIndex - 1).join(" ") || parts[0],
+        givenName: parts[patronymicIndex - 1],
+        patronymic: parts.slice(patronymicIndex).join(" "),
+      };
+    }
+    return {
+      fullName,
+      surname: parts[0],
+      givenName: parts[1],
+      patronymic: parts.slice(2).join(" "),
+    };
+  }
+  if (parts.length === 2) {
+    if (isLikelyPatronymic(parts[1])) {
+      return {
+        fullName,
+        surname: "",
+        givenName: parts[0],
+        patronymic: parts[1],
+      };
+    }
+    if (isLikelySurname(parts[1]) && !isLikelySurname(parts[0])) {
+      return {
+        fullName,
+        surname: parts[1],
+        givenName: parts[0],
+        patronymic: "",
+      };
+    }
+    return {
+      fullName,
+      surname: parts[0],
+      givenName: parts[1],
+      patronymic: "",
+    };
+  }
+  return {
+    fullName,
+    surname: parts[0] ?? "",
+    givenName: "",
+    patronymic: "",
+  };
+}
+
+function isLikelyPatronymic(value: string): boolean {
+  const normalized = normalizeNameToken(value);
+  return [
+    "ович",
+    "евич",
+    "євич",
+    "івич",
+    "ївич",
+    "ич",
+    "овна",
+    "евна",
+    "євна",
+    "івна",
+    "ївна",
+    "ична",
+  ].some((suffix) => normalized.endsWith(suffix));
+}
+
+function isLikelySurname(value: string): boolean {
+  const normalized = normalizeNameToken(value);
+  return [
+    "енко",
+    "єнко",
+    "чук",
+    "щук",
+    "юк",
+    "ук",
+    "як",
+    "ак",
+    "ко",
+    "ський",
+    "цький",
+    "зький",
+    "ська",
+    "цька",
+    "зька",
+    "ов",
+    "ев",
+    "єв",
+    "ін",
+    "їн",
+  ].some((suffix) => normalized.endsWith(suffix));
+}
+
+function normalizeNameToken(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase("uk")
+    .replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+}
+
+function titleNameToken(value: string): string {
+  return value
+    .trim()
+    .replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "")
+    .split("-")
+    .map((part) => part ? `${part[0].toLocaleUpperCase("uk")}${part.slice(1).toLocaleLowerCase("uk")}` : "")
+    .filter(Boolean)
+    .join("-");
+}
+
+function cleanPersonName(rawName: string): string {
+  const firstChunk = rawName.split(";").find((part) => part.trim()) ?? rawName;
+  const withoutRole = firstChunk.includes(":") ? firstChunk.split(":").slice(1).join(":") : firstChunk;
+  return withoutRole.replace(/\s+/g, " ").trim();
+}
+
+function personEventTypeFromFinding(findingType: string): PersonEventType | null {
+  const normalized = findingType.trim().toLocaleLowerCase("uk");
+  if (!normalized) return null;
+  if (normalized.includes("народ") || normalized.includes("хрещ") || normalized.includes("birth") || normalized.includes("bapt")) return "birth";
+  if (normalized.includes("шлюб") || normalized.includes("marriage")) return "marriage";
+  if (normalized.includes("смерт") || normalized.includes("помер") || normalized.includes("death")) return "death";
+  if (normalized.includes("похов") || normalized.includes("burial")) return "burial";
+  if (
+    normalized.includes("посім") ||
+    normalized.includes("сповід") ||
+    normalized.includes("ревіз") ||
+    normalized.includes("перепис") ||
+    normalized.includes("інвентар") ||
+    normalized.includes("згад")
+  ) {
+    return "residence";
+  }
+  return "other";
+}
+
+function personEventFromFinding(
+  type: PersonEventType,
+  eventDate: string,
+  place: string,
+  geo: GeoPoint,
+): PersonEvent {
+  return {
+    id: type,
+    personId: "draft",
+    type,
+    date: eventDate || null,
+    placeName: place || geo.displayName || null,
+    geo,
+    notes: null,
+  };
+}
+
+function notesFromFinding(form: FormRecord, participant: FindingParticipant | null): string {
+  const sourceParts = [
+    fieldLine("Архів", form.archive),
+    fieldLine("Фонд", form.fund),
+    fieldLine("Опис", form.description),
+    fieldLine("Справа", form.file),
+    fieldLine("Аркуш/сторінка", form.page),
+  ].filter(Boolean);
+  return [
+    "Створено зі знахідки.",
+    fieldLine("Тип знахідки", form.findingType),
+    participant ? fieldLine("Учасник запису", [participant.role, participant.name].filter(Boolean).join(": ")) : "",
+    participant?.notes ? fieldLine("Нотатки учасника", participant.notes) : "",
+    fieldLine("Дата події", form.eventDate),
+    fieldLine("Місце", form.place),
+    sourceParts.length ? `Джерело: ${sourceParts.join(", ")}.` : "",
+    fieldLine("Короткий зміст", form.summary),
+    fieldLine("Нотатки знахідки", form.notes),
+  ].filter(Boolean).join("\n");
+}
+
+function fieldLine(label: string, value: unknown): string {
+  const text = String(value ?? "").trim();
+  return text ? `${label}: ${text}` : "";
+}
+
+function isGeoPoint(value: unknown): value is GeoPoint {
+  return Boolean(value && typeof value === "object" && "latitude" in value && "longitude" in value);
 }
 
 function FormField({
@@ -1151,7 +2609,11 @@ function FormField({
   matrixYear,
   matrixDocumentType,
   findingType,
+  scanViewerContext,
+  scanDriveFolderPath,
+  scanUploadBlockedMessage,
   onCreatePerson,
+  onOpenScanViewer,
   onChange,
 }: {
   field: FieldConfig;
@@ -1166,9 +2628,19 @@ function FormField({
   matrixYear: string;
   matrixDocumentType: string;
   findingType: string;
+  scanViewerContext?: DocumentScanViewerContext;
+  scanDriveFolderPath?: string[];
+  scanUploadBlockedMessage?: string;
   onCreatePerson: () => void;
+  onOpenScanViewer?: (
+    scan: ScanAttachment,
+    context?: DocumentScanViewerContext,
+    scans?: ScanAttachment[],
+  ) => void;
   onChange: (value: FormValue) => void;
 }) {
+  const suggestionsId = useId();
+
   if (field.type === "checkbox") {
     return (
       <label className={`checkbox-field ${field.wide ? "field-wide" : ""}`}>
@@ -1198,8 +2670,11 @@ function FormField({
         maxFiles={field.maxFiles}
         limitMessage={field.attachmentLimitMessage}
         policy={field.attachmentPolicy}
+        driveFolderPath={scanDriveFolderPath}
+        uploadBlockedMessage={scanUploadBlockedMessage}
         scans={scans}
         onChange={onChange}
+        onPreview={onOpenScanViewer ? (scan, scans) => onOpenScanViewer(scan, scanViewerContext, scans) : undefined}
       />
     );
   }
@@ -1256,6 +2731,7 @@ function FormField({
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       onChange(event.target.value),
   };
+  const suggestions = field.suggestions ?? [];
   return (
     <label className={field.wide ? "field-wide" : ""}>
       <span>{field.label}{common.required ? " *" : ""}</span>
@@ -1276,7 +2752,18 @@ function FormField({
           ))}
         </select>
       ) : (
-        <input {...common} type={field.type ?? "text"} />
+        <>
+          <input
+            {...common}
+            type={field.type ?? "text"}
+            list={suggestions.length ? suggestionsId : undefined}
+          />
+          {suggestions.length ? (
+            <datalist id={suggestionsId}>
+              {suggestions.map((option) => <option key={option} value={option} />)}
+            </datalist>
+          ) : null}
+        </>
       )}
     </label>
   );
@@ -1441,7 +2928,10 @@ function normalizeDocumentType(value: string): string {
 }
 
 function findingLabel(finding: Finding): string {
-  const title = primaryParticipantName(finding.participants) || finding.people || finding.summary || "Знахідка";
+  const title = primaryParticipantName(finding.participants, finding.findingType) ||
+    finding.people ||
+    finding.summary ||
+    "Знахідка";
   const details = [finding.findingType, finding.eventDate, finding.place].filter(Boolean).join(" · ");
   return details ? `${title} — ${details}` : title;
 }

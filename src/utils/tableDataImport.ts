@@ -11,7 +11,7 @@ import type {
 import type { FieldConfig } from "../pages/entityConfigs";
 import { createId } from "./id";
 import { nowIso } from "./dateHelpers";
-import { participantSummary } from "./findingParticipants";
+import { participantSummary, sortFindingParticipants } from "./findingParticipants";
 import { standardLabels } from "./excelExport";
 
 export interface ImportTableRow {
@@ -437,8 +437,9 @@ function buildRecordFromRow({
     const participants = participantInputs
       .map(parseParticipantCell)
       .filter((participant): participant is FindingParticipant => Boolean(participant));
-    if (participants.length) record.participants = participants;
-    record.people = participantSummary(record.participants as FindingParticipant[]);
+    const findingType = String(record.findingType ?? "");
+    if (participants.length) record.participants = sortFindingParticipants(participants, findingType);
+    record.people = participantSummary(record.participants as FindingParticipant[], findingType);
   }
 
   if (collection === "persons" && !String(record.fullName ?? "").trim()) {

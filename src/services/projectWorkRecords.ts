@@ -1,5 +1,6 @@
 import type {
   CustomFieldValues,
+  DocumentFragmentSelection,
   Finding,
   FindingParticipant,
   ScanAttachment,
@@ -7,6 +8,7 @@ import type {
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
 import { FINDING_GEO_META_KEY, normalizeGeo, stripInternalGeoFields } from "../utils/geo";
+import { sortFindingParticipants } from "../utils/findingParticipants";
 
 type TaskRow = {
   id: string;
@@ -134,6 +136,7 @@ function findingFromRow(
   row: FindingRow,
   participants: FindingParticipant[],
 ): Finding {
+  const sortedParticipants = sortFindingParticipants(participants, row.finding_type);
   const customRecord = asRecord(row.custom_fields);
   const meta = asRecord(customRecord[FINDING_META_KEY]);
   const customFields = { ...customRecord };
@@ -148,7 +151,7 @@ function findingFromRow(
     people: row.people,
     personsText: row.persons_text,
     personIds: Array.isArray(meta.personIds) ? (meta.personIds as string[]) : [],
-    participants,
+    participants: sortedParticipants,
     place: row.place,
     archive: row.archive,
     fund: row.fund,
@@ -162,6 +165,7 @@ function findingFromRow(
     needsReview: row.needs_review,
     notes: row.notes,
     scans: Array.isArray(meta.scans) ? (meta.scans as ScanAttachment[]) : [],
+    fragmentSelection: normalizeFragmentSelection(meta.fragmentSelection),
     geo: normalizeGeo(meta[FINDING_GEO_META_KEY] ?? customRecord[FINDING_GEO_META_KEY]),
     customFields: stripInternalGeoFields(customFields as CustomFieldValues),
     createdAt: row.created_at,
@@ -202,6 +206,7 @@ function findingToRow(
       [FINDING_META_KEY]: {
         personIds: finding.personIds.filter((id) => personIds.has(id)),
         scans: finding.scans ?? [],
+        fragmentSelection: finding.fragmentSelection ?? null,
         [FINDING_GEO_META_KEY]: finding.geo ?? null,
       },
     },
@@ -284,6 +289,45 @@ export async function listProjectWorkRecords(projectId: string): Promise<{
       findingFromRow(row, participantMap.get(row.id) ?? []),
     ),
   };
+}
+
+function normalizeFragmentSelection(value: unknown): DocumentFragmentSelection | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Partial<DocumentFragmentSelection> & {
+    rect?: Partial<DocumentFragmentSelection["rect"]>;
+  };
+  if (
+    typeof record.documentId !== "string" ||
+    typeof record.sourceFileId !== "string" ||
+    typeof record.pageNumber !== "number" ||
+    typeof record.rotation !== "number" ||
+    typeof record.createdAt !== "string" ||
+    !record.rect ||
+    typeof record.rect.x !== "number" ||
+    typeof record.rect.y !== "number" ||
+    typeof record.rect.width !== "number" ||
+    typeof record.rect.height !== "number"
+  ) {
+    return undefined;
+  }
+
+  return {
+    documentId: record.documentId,
+    sourceFileId: record.sourceFileId,
+    pageNumber: record.pageNumber,
+    rotation: record.rotation,
+    rect: {
+      x: clampUnit(record.rect.x),
+      y: clampUnit(record.rect.y),
+      width: clampUnit(record.rect.width),
+      height: clampUnit(record.rect.height),
+    },
+    createdAt: record.createdAt,
+  };
+}
+
+function clampUnit(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 async function replaceTaskPersons(

@@ -76,6 +76,7 @@ export const standardLabels: Record<CollectionKey, Record<string, string>> = {
     yearTo: "Рік до",
     place: "Населений пункт",
     url: "Посилання",
+    scans: "Скан документа",
     pagesCount: "Кількість сторінок / аркушів",
     lastPage: "Остання переглянута сторінка",
     reviewStatus: "Статус перегляду",
