@@ -156,16 +156,18 @@ async function invokeAiFunction<T = unknown>(
 
 function readableAiError(message: string): string {
   if (
+    message.includes("PLAN_LIMIT_REACHED:ai_credits_per_month") ||
+    message.includes("AI_CREDITS_LIMIT_REACHED") ||
     message.includes("PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month") ||
     message.includes("AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED")
   ) {
-    return "Використано всі включені ШІ-аналізи гіпотез цього місяця.";
+    return "Використано всі ШІ-кредити цього місяця.";
   }
   if (message.includes("Access denied") || message.includes("permission denied")) {
     return "У вас немає доступу до цього проєкту або до цієї дії.";
   }
   if (message.includes("Could not find the function") || message.includes("schema cache")) {
-    return "Серверна функція бази для ліміту ШІ-аналізу ще не застосована або не оновилась у Supabase.";
+    return "Серверна функція бази для ШІ-кредитів ще не застосована або не оновилась у Supabase.";
   }
   return message;
 }

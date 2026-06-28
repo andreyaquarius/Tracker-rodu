@@ -16,12 +16,14 @@ export type PlanLimitKey =
   | "custom_sections_per_project"
   | "custom_fields_per_project"
   | "table_imports_per_month"
+  | "ai_credits_per_month"
   | "hypothesis_ai_reviews_per_month";
 
 export type SubscriptionFeature =
   | "custom_sections"
   | "custom_fields"
   | "table_import"
+  | "ai_credit"
   | "hypothesis_ai_review"
   | "project_members";
 

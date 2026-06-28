@@ -98,7 +98,7 @@ export const publicPricingPlans: PublicPricingPlan[] = [
       { label: "Проєкти", value: "1" },
       { label: "Дослідження у проєкті", value: "1" },
       { label: "Записи в розділах", value: "До 1000" },
-      { label: "ШІ-аналізи гіпотез", value: "Власний API-ключ" },
+      { label: "ШІ-кредити", value: "5 на місяць" },
     ],
   },
   {
@@ -115,7 +115,7 @@ export const publicPricingPlans: PublicPricingPlan[] = [
       { label: "Власні поля", value: "20" },
       { label: "Власні розділи", value: "5" },
       { label: "Запрошені учасники", value: "3" },
-      { label: "ШІ-аналізи гіпотез", value: "20 на місяць" },
+      { label: "ШІ-кредити", value: "50 на місяць" },
     ],
   },
   {
@@ -132,7 +132,7 @@ export const publicPricingPlans: PublicPricingPlan[] = [
       { label: "Власні поля", value: "Без обмежень" },
       { label: "Власні розділи", value: "Без обмежень" },
       { label: "Запрошені учасники", value: "Без обмежень" },
-      { label: "ШІ-аналізи гіпотез", value: "50 на місяць" },
+      { label: "ШІ-кредити", value: "100 на місяць" },
     ],
   },
 ];
