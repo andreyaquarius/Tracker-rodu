@@ -57,7 +57,8 @@ export function useSubscription(projectId?: string, enabled = true) {
       custom_sections: "custom_sections_per_project",
       custom_fields: "custom_fields_per_project",
       table_import: "table_imports_per_month",
-      hypothesis_ai_review: "hypothesis_ai_reviews_per_month",
+      ai_credit: "ai_credits_per_month",
+      hypothesis_ai_review: "ai_credits_per_month",
       project_members: "project_members",
     };
     return withinLimit(key[feature]);
@@ -90,7 +91,7 @@ export function useSubscription(projectId?: string, enabled = true) {
     canCreateCustomSection: canCreateProjectRecords && canUseFeature("custom_sections"),
     canCreateCustomField: canCreateProjectRecords && canUseFeature("custom_fields"),
     canImportTable: canCreateProjectRecords && canUseFeature("table_import"),
-    canUseIncludedHypothesisAiReview: canUseFeature("hypothesis_ai_review"),
+    canUseIncludedHypothesisAiReview: canUseFeature("ai_credit"),
     canInviteMember: canCreateProjectRecords && canUseFeature("project_members"),
     canUseFeature,
     getLimit,

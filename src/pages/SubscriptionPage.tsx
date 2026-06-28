@@ -48,10 +48,11 @@ const limitLabels: Record<PlanLimitKey, string> = {
   custom_sections_per_project: "Власні розділи",
   custom_fields_per_project: "Власні поля",
   table_imports_per_month: "Імпорти за місяць",
+  ai_credits_per_month: "ШІ-кредити",
   hypothesis_ai_reviews_per_month: "ШІ-аналізи гіпотез",
 };
 
-const hiddenPlanLimitKeys = new Set<PlanLimitKey>(["researches_total"]);
+const hiddenPlanLimitKeys = new Set<PlanLimitKey>(["researches_total", "hypothesis_ai_reviews_per_month"]);
 const planCardLimitOrder: PlanLimitKey[] = [
   "projects",
   "researches_per_project",
@@ -60,7 +61,7 @@ const planCardLimitOrder: PlanLimitKey[] = [
   "custom_fields_per_project",
   "custom_sections_per_project",
   "project_members",
-  "hypothesis_ai_reviews_per_month",
+  "ai_credits_per_month",
 ];
 
 export function SubscriptionPage({
@@ -807,13 +808,10 @@ function priceLabel(plan: SubscriptionPlan): ReactNode {
 }
 
 function planLimitValue(planCode: PlanCode, limit: PlanLimit): string | number | null {
-  if (limit.key === "hypothesis_ai_reviews_per_month" && planCode === "free") {
-    return "Власний API-ключ";
-  }
   if (limit.key === "records_per_standard_section" && !limit.isUnlimited && limit.value !== null) {
     return `До ${limit.value}`;
   }
-  if (limit.key === "hypothesis_ai_reviews_per_month" && !limit.isUnlimited && limit.value !== null) {
+  if (limit.key === "ai_credits_per_month" && !limit.isUnlimited && limit.value !== null) {
     return `${limit.value} на місяць`;
   }
   if (limit.isUnlimited) return "Без обмежень";
@@ -821,19 +819,16 @@ function planLimitValue(planCode: PlanCode, limit: PlanLimit): string | number |
 }
 
 function usageValue(
-  planCode: PlanCode,
+  _planCode: PlanCode,
   item: PlanLimit & { used: number },
 ): string {
-  if (item.key === "hypothesis_ai_reviews_per_month" && planCode === "free") {
-    return "Власний API-ключ";
-  }
   if (item.isUnlimited) return "Без обмежень";
   return `${item.used} із ${item.value ?? 0}`;
 }
 
 function isVisibleLimit(planCode: PlanCode, limit: PlanLimit): boolean {
   if (hiddenPlanLimitKeys.has(limit.key)) return false;
-  if (limit.key === "hypothesis_ai_reviews_per_month" && planCode === "free") return true;
+  if (limit.key === "ai_credits_per_month" && planCode === "free") return true;
   return limit.isUnlimited || limit.value !== 0;
 }
 

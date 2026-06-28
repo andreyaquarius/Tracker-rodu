@@ -82,9 +82,11 @@ function limitText(value: unknown, max = 6000): string {
   return String(value ?? "").slice(0, max);
 }
 
-function isHypothesisAiLimitReached(error: unknown): boolean {
+function isAiCreditLimitReached(error: unknown): boolean {
   const message = errorMessage(error);
-  return message.includes("PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month") ||
+  return message.includes("PLAN_LIMIT_REACHED:ai_credits_per_month") ||
+    message.includes("AI_CREDITS_LIMIT_REACHED") ||
+    message.includes("PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month") ||
     message.includes("AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED");
 }
 
@@ -130,25 +132,32 @@ Deno.serve(async (request) => {
     if (membershipError) throw membershipError;
     if (!membership) return json({ error: "У вас немає доступу до цього проєкту." }, 403);
 
-    const { data: activePlan, error: planError } = await admin.rpc(
-      "get_user_active_plan",
-      { user_uuid: user.id },
-    );
-    if (planError) throw planError;
-    const planCode = String(activePlan ?? "free");
     let mode = input.mode ? normalizeMode(input.mode) : "fast";
     let apiKey = "";
     let model = platformModel;
     let keySource: "user" | "platform" = "user";
+    const platformApiKey = (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "").trim();
 
-    if (planCode === "free") {
+    if (!platformApiKey) {
       const userAccess = await readUserGeminiAccess(admin, user.id, encryptionKey);
       mode = input.mode ? normalizeMode(input.mode) : userAccess.mode;
       apiKey = userAccess.apiKey;
       model = userAccess.model;
     } else {
-      const platformApiKey = (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "").trim();
-      if (!platformApiKey) {
+      const { error: usageError } = await userClient.rpc(
+        "begin_ai_credit_usage",
+        {
+          target_project_id: hypothesis.project_id,
+          feature_key: "hypothesis_review",
+          credits_requested: 1,
+          input_chars: 0,
+          output_chars: 0,
+          model: platformModel,
+          metadata: { hypothesisId },
+        },
+      );
+      if (usageError) {
+        if (!isAiCreditLimitReached(usageError)) throw usageError;
         try {
           const userAccess = await readUserGeminiAccess(admin, user.id, encryptionKey);
           keySource = "user";
@@ -156,31 +165,12 @@ Deno.serve(async (request) => {
           apiKey = userAccess.apiKey;
           model = userAccess.model;
         } catch {
-          throw new Error("Серверний API-ключ Gemini не налаштовано для платних тарифів.");
+          throw new Error("Використано всі ШІ-кредити цього місяця. Додайте власний API-ключ Google AI Studio в налаштуваннях ШІ-агента, щоб продовжити.");
         }
       } else {
-        const { error: usageError } = await userClient.rpc(
-          "begin_hypothesis_ai_review",
-          { target_project_id: hypothesis.project_id },
-        );
-        if (usageError) {
-          if (!isHypothesisAiLimitReached(usageError)) throw usageError;
-          try {
-            const userAccess = await readUserGeminiAccess(admin, user.id, encryptionKey);
-            keySource = "user";
-            mode = input.mode ? normalizeMode(input.mode) : userAccess.mode;
-            apiKey = userAccess.apiKey;
-            model = userAccess.model;
-          } catch {
-            throw new Error(
-              "Використано всі включені ШІ-аналізи гіпотез цього місяця. Додайте власний API-ключ Google AI Studio в налаштуваннях ШІ-агента, щоб продовжити аналіз.",
-            );
-          }
-        } else {
-          keySource = "platform";
-          apiKey = platformApiKey;
-          model = platformModel;
-        }
+        keySource = "platform";
+        apiKey = platformApiKey;
+        model = platformModel;
       }
     }
 

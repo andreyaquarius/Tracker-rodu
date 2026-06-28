@@ -514,14 +514,40 @@ ${promptContext}
 
 async function readGeminiAccess(
   admin: Awaited<ReturnType<typeof authenticatedContext>>["admin"],
+  userClient: Awaited<ReturnType<typeof authenticatedContext>>["userClient"],
   userId: string,
   encryptionKey: string,
+  projectId: string,
+  metadata: Record<string, unknown>,
 ): Promise<{ apiKey: string; model: string; keySource: "platform" | "user" }> {
   const platformApiKey = (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "").trim();
   if (platformApiKey) {
-    return { apiKey: platformApiKey, model: platformModel, keySource: "platform" };
+    const { error: usageError } = await userClient.rpc(
+      "begin_ai_credit_usage",
+      {
+        target_project_id: projectId,
+        feature_key: "finding_indexing",
+        credits_requested: 1,
+        input_chars: JSON.stringify(metadata).length,
+        output_chars: 0,
+        model: platformModel,
+        metadata,
+      },
+    );
+    if (!usageError) {
+      return { apiKey: platformApiKey, model: platformModel, keySource: "platform" };
+    }
+    if (!isAiCreditLimitReached(usageError)) throw usageError;
   }
-  const settings = await readAiSettings(admin, userId);
+  let settings: Awaited<ReturnType<typeof readAiSettings>>;
+  try {
+    settings = await readAiSettings(admin, userId);
+  } catch (error) {
+    if (platformApiKey) {
+      throw new Error("Використано всі ШІ-кредити цього місяця. Додайте власний API-ключ Google AI Studio у налаштуваннях ШІ-агента, щоб продовжити.");
+    }
+    throw error;
+  }
   return {
     apiKey: await decryptApiKey(settings.encrypted_api_key, encryptionKey),
     model: normalizeSelectableGeminiModel(settings.model),
@@ -529,12 +555,20 @@ async function readGeminiAccess(
   };
 }
 
+function isAiCreditLimitReached(error: unknown): boolean {
+  const message = errorMessage(error);
+  return message.includes("PLAN_LIMIT_REACHED:ai_credits_per_month") ||
+    message.includes("AI_CREDITS_LIMIT_REACHED") ||
+    message.includes("PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month") ||
+    message.includes("AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED");
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeadersForRequest(request) });
   if (request.method !== "POST") return jsonWithCors(request, { error: "Method not allowed" }, 405);
 
   try {
-    const { user, admin, encryptionKey } = await authenticatedContext(request);
+    const { user, userClient, admin, encryptionKey } = await authenticatedContext(request);
     const input = await request.json() as IncomingRequest;
     if (!input.consent) {
       return jsonWithCors(request, { error: "Потрібна згода на передачу фрагмента до AI-обробки." }, 400);
@@ -666,7 +700,20 @@ Deno.serve(async (request) => {
         transcription: finding.transcription,
       });
     }
-    const { apiKey, model, keySource } = await readGeminiAccess(admin, user.id, encryptionKey);
+    const { apiKey, model, keySource } = await readGeminiAccess(
+      admin,
+      userClient,
+      user.id,
+      encryptionKey,
+      projectId,
+      {
+        findingId: findingId || `draft-${attachmentId}`,
+        draft: isDraftFinding,
+        attachmentId,
+        projectId,
+        contextChars: JSON.stringify(context).length,
+      },
+    );
     const result = normalizeGeminiResult(await callGeminiWithInlineImage(
       apiKey,
       model,

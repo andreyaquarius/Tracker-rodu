@@ -21,6 +21,7 @@ const limitKeys: PlanLimitKey[] = [
   "custom_sections_per_project",
   "custom_fields_per_project",
   "table_imports_per_month",
+  "ai_credits_per_month",
   "hypothesis_ai_reviews_per_month",
 ];
 
@@ -33,12 +34,19 @@ const usageProperty: Record<PlanLimitKey, string> = {
   custom_sections_per_project: "customSectionsPerProject",
   custom_fields_per_project: "customFieldsPerProject",
   table_imports_per_month: "tableImportsPerMonth",
+  ai_credits_per_month: "aiCreditsPerMonth",
   hypothesis_ai_reviews_per_month: "hypothesisAiReviewsPerMonth",
 };
 
 const publishedPlanPrices: Partial<Record<PlanCode, { monthly: number; yearly: number; currency: string }>> = {
   researcher: { monthly: 229, yearly: 2290, currency: "UAH" },
   professional: { monthly: 699, yearly: 6990, currency: "UAH" },
+};
+
+const publishedAiCreditsPerMonth: Record<PlanCode, number> = {
+  free: 5,
+  researcher: 50,
+  professional: 100,
 };
 
 export async function loadSubscriptionContext(projectId?: string): Promise<SubscriptionContext> {
@@ -77,6 +85,13 @@ export async function loadSubscriptionPlans(): Promise<Array<{
   if (limitsResult.error) throw limitsResult.error;
   return (plansResult.data ?? []).map((row) => {
     const code = String(row.code) as PlanCode;
+    const limits = (limitsResult.data ?? [])
+      .filter((limit) => limit.plan_id === row.id)
+      .map((limit) => ({
+        key: String(limit.limit_key) as PlanLimitKey,
+        value: limit.limit_value === null ? null : Number(limit.limit_value),
+        isUnlimited: Boolean(limit.is_unlimited),
+      }));
     return {
       plan: {
         id: String(row.id),
@@ -88,13 +103,7 @@ export async function loadSubscriptionPlans(): Promise<Array<{
         currency: planCurrency(code, row.currency),
         isActive: Boolean(row.is_active),
       },
-      limits: (limitsResult.data ?? [])
-        .filter((limit) => limit.plan_id === row.id)
-        .map((limit) => ({
-          key: String(limit.limit_key) as PlanLimitKey,
-          value: limit.limit_value === null ? null : Number(limit.limit_value),
-          isUnlimited: Boolean(limit.is_unlimited),
-        })),
+      limits: withDefaultPlanLimits(code, limits),
     };
   });
 }
@@ -194,7 +203,7 @@ export function subscriptionErrorCode(error: unknown): string {
     : typeof error === "object" && error && "message" in error
       ? String(error.message)
       : String(error ?? "");
-  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE|PLAN_SCOPE_CREATE_BLOCKED|PLAN_SECTION_RECORD_LIMIT_REACHED):[a-z_]+|AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED|ADMIN_SUBSCRIPTION_MANAGED_EXTERNALLY|START_PLAN_NOT_CONFIGURED|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
+  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE|PLAN_SCOPE_CREATE_BLOCKED|PLAN_SECTION_RECORD_LIMIT_REACHED):[a-z_]+|AI_CREDITS_LIMIT_REACHED|AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED|ADMIN_SUBSCRIPTION_MANAGED_EXTERNALLY|START_PLAN_NOT_CONFIGURED|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
   return match?.[0] ?? "";
 }
 
@@ -209,8 +218,10 @@ export function subscriptionErrorMessage(error: unknown): string {
     "PLAN_LIMIT_REACHED:custom_sections_per_project": "Досягнуто ліміт власних розділів.",
     "PLAN_LIMIT_REACHED:custom_fields_per_project": "Досягнуто ліміт власних полів.",
     "PLAN_LIMIT_REACHED:table_imports_per_month": "Використано всі імпорти цього календарного місяця.",
-    "PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month": "Використано всі включені ШІ-аналізи гіпотез цього місяця.",
-    AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED: "Використано всі включені ШІ-аналізи гіпотез цього місяця.",
+    "PLAN_LIMIT_REACHED:ai_credits_per_month": "Використано всі ШІ-кредити цього місяця.",
+    AI_CREDITS_LIMIT_REACHED: "Використано всі ШІ-кредити цього місяця.",
+    "PLAN_LIMIT_REACHED:hypothesis_ai_reviews_per_month": "Використано всі ШІ-кредити цього місяця.",
+    AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED: "Використано всі ШІ-кредити цього місяця.",
     "PLAN_SECTION_RECORD_LIMIT_REACHED:persons": "Досягнуто ліміт записів у розділі «Особи». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
     "PLAN_SECTION_RECORD_LIMIT_REACHED:documents": "Досягнуто ліміт записів у розділі «Документи». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
     "PLAN_SECTION_RECORD_LIMIT_REACHED:year_matrix": "Досягнуто ліміт записів у розділі «Матриця років». Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
@@ -235,16 +246,18 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
   const rawUsage = asRecord(raw.usage);
   const rawSectionQuotas = asRecord(raw.sectionQuotas);
   const projectAccessMode = nullableString(raw.projectAccessMode) as SubscriptionAccessMode | null;
+  const effectivePlanCode = String(raw.effectivePlanCode ?? rawPlan.code ?? "free") as PlanCode;
   const limits = {} as Record<PlanLimitKey, PlanLimit>;
   const usage = {} as SubscriptionUsage;
   for (const key of limitKeys) {
     const hasLimit = Object.prototype.hasOwnProperty.call(rawLimits, key);
     const limit = hasLimit ? asRecord(rawLimits[key]) : {};
+    const fallbackLimit = key === "ai_credits_per_month" ? publishedAiCreditsPerMonth[effectivePlanCode] : 0;
     limits[key] = {
       key,
       value: hasLimit
         ? limit.value === null || limit.value === undefined ? null : Number(limit.value)
-        : 0,
+        : fallbackLimit,
       isUnlimited: hasLimit ? Boolean(limit.isUnlimited) : false,
     };
     usage[key] = Number(rawUsage[usageProperty[key]] ?? 0);
@@ -272,7 +285,7 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
   };
   return {
     subscription,
-    effectivePlanCode: String(raw.effectivePlanCode ?? "free") as PlanCode,
+    effectivePlanCode,
     plan,
     limits,
     usage,
@@ -282,6 +295,18 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
     canCreateProjectRecords: Boolean(raw.canCreateProjectRecords ?? true),
     serverNow: String(raw.serverNow ?? new Date().toISOString()),
   };
+}
+
+function withDefaultPlanLimits(planCode: PlanCode, limits: PlanLimit[]): PlanLimit[] {
+  if (limits.some((limit) => limit.key === "ai_credits_per_month")) return limits;
+  return [
+    ...limits,
+    {
+      key: "ai_credits_per_month",
+      value: publishedAiCreditsPerMonth[planCode],
+      isUnlimited: false,
+    },
+  ];
 }
 
 function mapSectionQuotas(raw: Record<string, unknown>): Record<string, SectionQuota> {
