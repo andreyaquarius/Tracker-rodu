@@ -9,6 +9,7 @@
     "preview": "vite preview --configLoader runner",
     "lint": "tsc --noEmit --pretty false",
     "test": "node --test \"test/**/*.test.ts\"",
+    "functions:serve:index-finding": "supabase functions serve index-finding-fragment --env-file .env.functions.local --no-verify-jwt",
     "verify:pages": "node scripts/verify-pages-build.mjs"
   },
   "dependencies": {
@@ -25,6 +26,7 @@
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.5",
     "@vitejs/plugin-react": "^4.4.1",
+    "supabase": "^2.108.0",
     "typescript": "~5.8.3",
     "vite": "^6.3.5"
   }

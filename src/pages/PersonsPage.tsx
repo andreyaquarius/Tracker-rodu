@@ -850,6 +850,45 @@ function LinkedRecords({
   );
 }
 
+const personRelationTypeOptions: PersonRelationType[] = [
+  "батько",
+  "мати",
+  "батько або мати",
+  "чоловік",
+  "дружина",
+  "подружжя",
+  "дитина",
+  "син",
+  "донька",
+  "брат",
+  "сестра",
+  "брат або сестра",
+  "хрещений",
+  "хрещена",
+  "хрещеник",
+  "хрещениця",
+  "вітчим",
+  "мачуха",
+  "пасинок",
+  "падчерка",
+  "опікун",
+  "підопічний",
+  "усиновлювач",
+  "усиновлена дитина",
+  "свідок",
+  "поручитель",
+  "священник",
+  "духовна особа",
+  "посадова особа",
+  "повитуха",
+  "особа, яка повідомила",
+  "голова господарства",
+  "член господарства",
+  "наймит або служник",
+  "родич",
+  "інше",
+];
+
 function RelationFormModal({
   person,
   persons,
@@ -906,19 +945,7 @@ function RelationFormModal({
           <label>
             <span>Тип зв’язку</span>
             <select value={relationType} onChange={(event) => setRelationType(event.target.value as PersonRelationType)}>
-              {[
-                "батько",
-                "мати",
-                "чоловік",
-                "дружина",
-                "дитина",
-                "брат",
-                "сестра",
-                "хрещений",
-                "хрещена",
-                "свідок",
-                "інше",
-              ].map((type) => <option key={type}>{type}</option>)}
+              {personRelationTypeOptions.map((type) => <option key={type}>{type}</option>)}
             </select>
           </label>
           <label>
@@ -1093,18 +1120,65 @@ function relationTypeForPerson(
       return "дружина";
     case "дружина":
       return "чоловік";
+    case "подружжя":
+      return "подружжя";
     case "батько":
     case "мати":
+    case "батько або мати":
+      if (otherPerson?.gender === "чоловік") return "син";
+      if (otherPerson?.gender === "жінка") return "донька";
       return "дитина";
     case "дитина":
+    case "син":
+    case "донька":
       if (otherPerson?.gender === "чоловік") return "батько";
       if (otherPerson?.gender === "жінка") return "мати";
       return "батько або мати";
     case "брат":
     case "сестра":
+    case "брат або сестра":
       if (otherPerson?.gender === "чоловік") return "брат";
       if (otherPerson?.gender === "жінка") return "сестра";
-      return relation.relationType;
+      return "брат або сестра";
+    case "хрещений":
+    case "хрещена":
+      if (otherPerson?.gender === "чоловік") return "хрещеник";
+      if (otherPerson?.gender === "жінка") return "хрещениця";
+      return "хрещеник";
+    case "хрещеник":
+    case "хрещениця":
+      if (otherPerson?.gender === "жінка") return "хрещена";
+      return "хрещений";
+    case "вітчим":
+    case "мачуха":
+      if (otherPerson?.gender === "жінка") return "падчерка";
+      return "пасинок";
+    case "пасинок":
+    case "падчерка":
+      if (otherPerson?.gender === "жінка") return "мачуха";
+      return "вітчим";
+    case "опікун":
+      return "підопічний";
+    case "підопічний":
+      return "опікун";
+    case "усиновлювач":
+      return "усиновлена дитина";
+    case "усиновлена дитина":
+      return "усиновлювач";
+    case "голова господарства":
+      return "член господарства";
+    case "член господарства":
+      return "голова господарства";
+    case "наймит або служник":
+      return "господар";
+    case "свідок":
+    case "поручитель":
+    case "священник":
+    case "духовна особа":
+    case "посадова особа":
+    case "повитуха":
+    case "особа, яка повідомила":
+      return "особа у записі";
     default:
       return relation.relationType;
   }

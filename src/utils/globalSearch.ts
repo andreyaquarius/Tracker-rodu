@@ -279,7 +279,7 @@ function entityTitle(module: CollectionKey, entity: AppEntity): string {
       return (entity as TaskRecord).title || "Завдання без назви";
     case "findings": {
       const finding = entity as Finding;
-      return primaryParticipantName(finding.participants) || finding.summary || "Знахідка";
+      return primaryParticipantName(finding.participants, finding.findingType) || finding.summary || "Знахідка";
     }
     case "hypotheses":
       return (entity as Hypothesis).title || "Гіпотеза без назви";

@@ -74,7 +74,10 @@ function personName(person: Person): string {
 }
 
 function findingTitle(finding: Finding): string {
-  return primaryParticipantName(finding.participants) || finding.people || finding.summary || "Знахідка";
+  return primaryParticipantName(finding.participants, finding.findingType) ||
+    finding.people ||
+    finding.summary ||
+    "Знахідка";
 }
 
 function personSearchText(person: Person): string {

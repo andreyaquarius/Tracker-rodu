@@ -3,6 +3,10 @@ import { createId } from "../utils/id";
 import { sanitizeWebUrl } from "../utils/safeUrl";
 import { nowIso } from "../utils/dateHelpers";
 import {
+  getCachedDocumentBlob,
+  putCachedDocumentBlob,
+} from "./documentBlobCache";
+import {
   deleteFileFromGoogleDrive,
   downloadFileFromGoogleDrive,
   getGoogleDriveFileMetadata,
@@ -10,6 +14,7 @@ import {
   listGoogleDriveFolderFiles,
   uploadFileToGoogleDrive,
   type GoogleDriveFileMetadata,
+  type GoogleDriveUploadProgress,
 } from "./googleDriveStorage";
 
 export const MAX_ATTACHMENT_SIZE_MB = 25;
@@ -21,6 +26,15 @@ const imageExtensions = new Set(["jpg", "jpeg", "png", "webp", "gif", "bmp", "sv
 export type DriveAttachRange = {
   start?: number;
   end?: number;
+};
+
+export type ScanUploadProgress = GoogleDriveUploadProgress & {
+  fileName: string;
+};
+
+export type SaveScanOptions = {
+  driveFolderPath?: string[];
+  onUploadProgress?: (progress: ScanUploadProgress) => void;
 };
 
 export type ScanPreviewKind = "image" | "pdf" | "web";
@@ -60,6 +74,7 @@ export function setProjectAttachmentTarget(
 export async function saveScan(
   file: File,
   policy: AttachmentPolicy = "all",
+  options: SaveScanOptions = {},
 ): Promise<ScanAttachment> {
   const supported =
     policy === "finding"
@@ -82,8 +97,13 @@ export async function saveScan(
   }
 
   const id = createId();
-  const uploaded = await uploadFileToGoogleDrive(activeProject, file, id);
-  return {
+  const uploaded = await uploadFileToGoogleDrive(activeProject, file, id, {
+    folderPath: options.driveFolderPath,
+    onProgress: options.onUploadProgress
+      ? (progress) => options.onUploadProgress?.({ ...progress, fileName: file.name })
+      : undefined,
+  });
+  const attachment: ScanAttachment = {
     id,
     name: file.name,
     mimeType: file.type || "application/octet-stream",
@@ -92,7 +112,12 @@ export async function saveScan(
     storage: "google-drive",
     storagePath: uploaded.id,
     webViewLink: uploaded.webViewLink,
+    driveMd5Checksum: uploaded.md5Checksum,
+    driveModifiedTime: uploaded.modifiedTime,
+    driveRevisionId: uploaded.headRevisionId,
   };
+  void cacheScanBlob(attachment, file).catch(() => undefined);
+  return attachment;
 }
 
 export async function attachGoogleDriveFile(
@@ -214,6 +239,9 @@ function driveFileToAttachment(file: GoogleDriveFileMetadata): ScanAttachment {
     storage: "google-drive",
     storagePath: file.id,
     webViewLink: file.webViewLink,
+    driveMd5Checksum: file.md5Checksum,
+    driveModifiedTime: file.modifiedTime,
+    driveRevisionId: file.headRevisionId,
     deleteOnRemove: false,
   };
 }
@@ -278,12 +306,91 @@ export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
   if (scan.storage === "external-url") {
     const target = sanitizeWebUrl(scan.webViewLink || scan.storagePath);
     if (!target) throw new Error("Зовнішнє посилання має некоректний або небезпечний формат.");
-    return new Blob([externalPreviewHtml(target, scan.name)], { type: "text/html" });
+    const kind = previewKindFromMetadata(scan.name, scan.mimeType);
+    if (kind === "web") {
+      return new Blob([externalPreviewHtml(target, scan.name)], { type: "text/html" });
+    }
+
+    const cached = await getCachedDocumentBlob(scanBlobCacheKey(scan));
+    if (cached) return cached;
+
+    const blob = await fetchExternalDocumentBlob(target, kind);
+    await cacheScanBlob(scan, blob).catch(() => undefined);
+    return blob;
   }
   if (!scan.storagePath) {
     throw new Error("У файлу відсутній ідентифікатор хмарного сховища.");
   }
-  return downloadFileFromGoogleDrive(scan.storagePath);
+
+  const cached = await getCachedDocumentBlob(scanBlobCacheKey(scan));
+  if (cached) return cached;
+
+  const blob = await downloadFileFromGoogleDrive(scan.storagePath);
+  await cacheScanBlob(scan, blob).catch(() => undefined);
+  return blob;
+}
+
+async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind): Promise<Blob> {
+  if (new URL(target).protocol !== "https:") {
+    throw new Error("Для внутрішнього перегляду зовнішніх PDF і зображень підтримуються лише HTTPS-посилання.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(target, {
+      credentials: "omit",
+      mode: "cors",
+      headers: {
+        Accept: kind === "pdf"
+          ? "application/pdf,*/*"
+          : kind === "image"
+            ? "image/*,*/*"
+            : "*/*",
+      },
+    });
+  } catch {
+    throw new Error(
+      "Це джерело не дозволяє Трекеру Роду прочитати файл напряму. Відкрийте джерело в новій вкладці або збережіть копію у ваш Google Drive.",
+    );
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("Файл потребує авторизації на зовнішньому сайті або доступ до нього заборонено.");
+  }
+  if (!response.ok) {
+    throw new Error(`Не вдалося завантажити зовнішній файл (${response.status}).`);
+  }
+
+  const contentType = response.headers.get("content-type")?.toLocaleLowerCase() ?? "";
+  const blob = await response.blob();
+  const blobType = blob.type.toLocaleLowerCase();
+
+  if (kind === "pdf" && !contentType.includes("pdf") && !blobType.includes("pdf")) {
+    throw new Error("Джерело не повернуло PDF-файл для внутрішнього перегляду.");
+  }
+  if (kind === "image" && !contentType.startsWith("image/") && !blobType.startsWith("image/")) {
+    throw new Error("Джерело не повернуло зображення для внутрішнього перегляду.");
+  }
+
+  return blob;
+}
+
+async function cacheScanBlob(scan: ScanAttachment, blob: Blob): Promise<void> {
+  await putCachedDocumentBlob(scanBlobCacheKey(scan), blob, blob.type || scan.mimeType);
+}
+
+function scanBlobCacheKey(scan: ScanAttachment): string {
+  if (scan.storage === "google-drive") {
+    const version = scan.driveRevisionId
+      || scan.driveMd5Checksum
+      || scan.driveModifiedTime
+      || String(scan.size || scan.createdAt || "unknown");
+    return `gdrive:${scan.storagePath}:${version}`;
+  }
+
+  const source = scan.webViewLink || scan.storagePath;
+  const version = scan.driveModifiedTime || String(scan.size || scan.createdAt || "unknown");
+  return `external:${stableHash(source)}:${version}`;
 }
 
 export async function getScanPreviewSource(scan: ScanAttachment): Promise<ScanPreviewSource> {
@@ -472,7 +579,7 @@ function externalPreviewHtml(target: string, title: string): string {
     </style>
   </head>
   <body>
-    <iframe title="${safeTitle}" src="${safeTarget}" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    <iframe title="${safeTitle}" src="${safeTarget}" sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts" referrerpolicy="no-referrer-when-downgrade"></iframe>
     <a class="source-fallback" href="${safeTarget}" target="_blank" rel="noopener noreferrer">Відкрити джерело</a>
   </body>
 </html>`;
@@ -484,6 +591,15 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function stableHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function googleDriveFileId(value: string): string {

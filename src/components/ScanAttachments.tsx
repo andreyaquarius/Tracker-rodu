@@ -20,6 +20,15 @@ import {
   prepareGoogleDriveAuthorization,
 } from "../services/googleDriveStorage";
 
+type UploadProgressState = {
+  fileName: string;
+  fileIndex: number;
+  fileCount: number;
+  loaded: number;
+  total: number;
+  percent: number;
+};
+
 export function ScanAttachmentsEditor({
   title = "Файли та вкладення",
   description = `Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB. Максимальний розмір одного файлу — ${MAX_ATTACHMENT_SIZE_MB} МБ. Файли зберігаються у папці активного проєкту в хмарному сховищі.`,
@@ -27,6 +36,8 @@ export function ScanAttachmentsEditor({
   maxFiles,
   limitMessage,
   policy = "all",
+  driveFolderPath,
+  uploadBlockedMessage,
   scans,
   onChange,
   onPreview,
@@ -37,6 +48,8 @@ export function ScanAttachmentsEditor({
   maxFiles?: number;
   limitMessage?: string;
   policy?: AttachmentPolicy;
+  driveFolderPath?: string[];
+  uploadBlockedMessage?: string;
   scans: ScanAttachment[];
   onChange: (scans: ScanAttachment[]) => void;
   onPreview?: (scan: ScanAttachment, scans?: ScanAttachment[]) => void;
@@ -48,6 +61,7 @@ export function ScanAttachmentsEditor({
   const [driveAttachOpen, setDriveAttachOpen] = useState(false);
   const [attachingDriveFile, setAttachingDriveFile] = useState(false);
   const [showPages, setShowPages] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -85,6 +99,10 @@ export function ScanAttachmentsEditor({
   };
 
   const chooseFiles = () => {
+    if (uploadBlockedMessage) {
+      setError(uploadBlockedMessage);
+      return;
+    }
     if (!isGoogleDriveAuthorized()) {
       setDriveConnected(false);
       setError("Термін доступу до хмарного сховища завершився. Підключіть сховище повторно.");
@@ -107,10 +125,30 @@ export function ScanAttachmentsEditor({
     }
     setUploading(true);
     setError("");
+    setUploadProgress(null);
     const added: ScanAttachment[] = [];
     try {
-      for (const file of selected) {
-        added.push(await saveScan(file, policy));
+      for (let index = 0; index < selected.length; index += 1) {
+        const file = selected[index];
+        setUploadProgress({
+          fileName: file.name,
+          fileIndex: index + 1,
+          fileCount: selected.length,
+          loaded: 0,
+          total: file.size,
+          percent: 0,
+        });
+        added.push(await saveScan(file, policy, {
+          driveFolderPath,
+          onUploadProgress: (progress) => setUploadProgress({
+            fileName: progress.fileName,
+            fileIndex: index + 1,
+            fileCount: selected.length,
+            loaded: progress.loaded,
+            total: progress.total,
+            percent: progress.percent,
+          }),
+        }));
       }
       onChange([...scans, ...added]);
     } catch (uploadError) {
@@ -118,6 +156,7 @@ export function ScanAttachmentsEditor({
       if (added.length) onChange([...scans, ...added]);
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   };
   const limitReached = Boolean(maxFiles && scans.length >= maxFiles);
@@ -208,6 +247,7 @@ export function ScanAttachmentsEditor({
         />
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
+      {uploadProgress ? <ScanUploadProgress progress={uploadProgress} /> : null}
       {scans.length ? (
         <div className="scan-list">
           {groupedDocument ? (
@@ -240,6 +280,24 @@ export function ScanAttachmentsEditor({
         />
       ) : null}
     </fieldset>
+  );
+}
+
+function ScanUploadProgress({ progress }: { progress: UploadProgressState }) {
+  return (
+    <div className="scan-upload-progress" role="status" aria-live="polite">
+      <div>
+        <strong>
+          Завантаження {progress.fileIndex} з {progress.fileCount}: {progress.fileName}
+        </strong>
+        <span>
+          {progress.percent}% · {formatFileSize(progress.loaded)} з {formatFileSize(progress.total)}
+        </span>
+      </div>
+      <div className="scan-upload-progress-bar" aria-hidden="true">
+        <span style={{ width: `${progress.percent}%` }} />
+      </div>
+    </div>
   );
 }
 
@@ -601,7 +659,7 @@ const MIN_SCAN_PREVIEW_WIDTH = 420;
 const MIN_SCAN_PREVIEW_HEIGHT = 360;
 const MIN_SCAN_PREVIEW_ZOOM = 0.4;
 const MAX_SCAN_PREVIEW_ZOOM = 4;
-const SCAN_PREVIEW_ZOOM_STEP = 0.2;
+const SCAN_PREVIEW_ZOOM_STEP = 0.01;
 
 function ScanPreviewModal({
   preview,

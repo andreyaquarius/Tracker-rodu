@@ -6,9 +6,11 @@ import {
   type PointerEvent,
   type WheelEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { ScanAttachment } from "../types";
+import type { DocumentFragmentSelection, ScanAttachment } from "../types";
 import { downloadScan, getScanBlob, openScan, saveScan } from "../services/scanStorage";
+import { authorizeGoogleDrive } from "../services/googleDriveStorage";
 
 export type DocumentScanViewerContext = {
   source: "documents";
@@ -49,7 +51,7 @@ const MIN_VIEWER_WIDTH = 420;
 const MIN_VIEWER_HEIGHT = 360;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 4;
-const ZOOM_STEP = 0.2;
+const ZOOM_STEP = 0.01;
 const PDF_RENDER_SCALE = 2;
 
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
@@ -96,6 +98,7 @@ export function DocumentWorkspaceViewer({
   const [isSelecting, setIsSelecting] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [creatingCrop, setCreatingCrop] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState("");
 
   const pages = viewer?.scans?.length ? viewer.scans : viewer ? [viewer.scan] : [];
   const currentScan = pages[currentIndex] ?? viewer?.scan ?? null;
@@ -144,7 +147,14 @@ export function DocumentWorkspaceViewer({
       .then(async (blob) => {
         const data = new Uint8Array(await blob.arrayBuffer());
         const pdfJs = await loadPdfJs();
-        const document = await pdfJs.getDocument({ data }).promise;
+        const document = await pdfJs.getDocument({
+          data,
+          // Some scanned archival PDFs use image codecs that PDF.js tries to
+          // load through external WASM assets. In the app bundle those assets
+          // are not served from a stable folder, so the JS decoder path is the
+          // safer default for in-app previews.
+          useWasm: false,
+        }).promise;
         const cache = { document };
         pdfCacheRef.current.set(scan.id, cache);
         return cache;
@@ -283,7 +293,17 @@ export function DocumentWorkspaceViewer({
         canvas.style.height = `${Math.floor(viewport.height / PDF_RENDER_SCALE)}px`;
         context.clearRect(0, 0, canvas.width, canvas.height);
 
-        await page.render({ canvasContext: context, viewport, canvas }).promise;
+        await page.render({
+          canvasContext: context,
+          viewport,
+          canvas,
+          background: "rgb(255,255,255)",
+        }).promise;
+        if (active && isCanvasEffectivelyBlank(canvas)) {
+          setPdfNativeFallback(true);
+          setSelectionMode(false);
+          setCropRect(null);
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -333,37 +353,67 @@ export function DocumentWorkspaceViewer({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [viewer, pageCount, navigationPageCount, isInteractivePdf, mode, selectionMode]);
 
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (document.fullscreenElement !== viewerRef.current) {
+        setFullscreenError("");
+        setMode((value) => (value === "fullscreen" ? "window" : value));
+      }
+    };
+
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    if (!viewer || mode !== "fullscreen") return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [viewer, mode]);
+
   if (!viewer) return null;
 
-  const document = viewer.context?.document;
-  const title = document?.title || currentScan?.name || viewer.scan.name;
+  const sourceDocument = viewer.context?.document;
+  const title = sourceDocument?.title || currentScan?.name || viewer.scan.name;
   const activeScan = currentScan ?? viewer.scan;
   const pageLabel = navigationPageCount > 1
     ? `Сторінка ${navigationPageNumber} з ${navigationPageCount} · ${activeScan.name}`
     : activeScan.name;
 
-  const createFinding = () => {
-    if (!document) return;
+  const minimizeViewerForRecordAction = async () => {
+    setFullscreenError("");
+    if (document.fullscreenElement === viewerRef.current && document.exitFullscreen) {
+      await document.exitFullscreen().catch(() => undefined);
+    }
     setMode("minimized");
+  };
+
+  const createFinding = async () => {
+    if (!sourceDocument) return;
+    await minimizeViewerForRecordAction();
     onCreateFinding({
-      researchId: document.researchId,
-      documentId: document.id,
-      archive: document.archive,
-      fund: document.fund,
-      description: document.description,
-      file: document.file,
-      place: document.place,
+      researchId: sourceDocument.researchId,
+      documentId: sourceDocument.id,
+      archive: sourceDocument.archive,
+      fund: sourceDocument.fund,
+      description: sourceDocument.description,
+      file: sourceDocument.file,
+      place: sourceDocument.place,
       page: navigationPageCount > 1 ? String(navigationPageNumber) : "",
-      notes: `Створено під час перегляду документа «${document.title}». Скан: ${activeScan.name}.`,
+      notes: `Створено під час перегляду документа «${sourceDocument.title}». Скан: ${activeScan.name}.`,
     });
   };
 
   const createFindingFromCrop = async () => {
-    if (!document || !cropRect) return;
+    if (!sourceDocument || !cropRect) return;
     setError("");
     setCreatingCrop(true);
     try {
-      const sourceName = `${document.title || activeScan.name}-сторінка-${navigationPageNumber}-фрагмент.png`;
+      await authorizeGoogleDrive();
+      const sourceName = `${sourceDocument.title || activeScan.name}-сторінка-${navigationPageNumber}-фрагмент.png`;
       const croppedFile = kind === "pdf" && pdfCanvasRef.current
         ? await cropCanvasToFile(pdfCanvasRef.current, cropRect, sourceName, zoom)
         : imageRef.current
@@ -372,21 +422,31 @@ export function DocumentWorkspaceViewer({
       if (!croppedFile) {
         throw new Error("Не вдалося підготувати фрагмент для збереження.");
       }
+      const fragmentSelection = documentFragmentSelectionFromCrop(
+        sourceDocument.id,
+        activeScan,
+        navigationPageNumber,
+        rotation,
+        cropRect,
+        kind === "pdf" ? pdfCanvasRef.current : imageRef.current,
+        zoom,
+      );
       const fragmentScan = await saveScan(croppedFile, "finding");
       setSelectionMode(false);
       setCropRect(null);
-      setMode("minimized");
+      await minimizeViewerForRecordAction();
       onCreateFinding({
-        researchId: document.researchId,
-        documentId: document.id,
-        archive: document.archive,
-        fund: document.fund,
-        description: document.description,
-        file: document.file,
-        place: document.place,
+        researchId: sourceDocument.researchId,
+        documentId: sourceDocument.id,
+        archive: sourceDocument.archive,
+        fund: sourceDocument.fund,
+        description: sourceDocument.description,
+        file: sourceDocument.file,
+        place: sourceDocument.place,
         page: navigationPageCount > 1 ? String(navigationPageNumber) : "",
         scans: [fragmentScan],
-        notes: `Створено з виділеного фрагмента документа «${document.title}». Джерело: ${activeScan.name}.`,
+        fragmentSelection,
+        notes: `Створено з виділеного фрагмента документа «${sourceDocument.title}». Джерело: ${activeScan.name}.`,
       });
     } catch (cropError) {
       setError(cropError instanceof Error ? cropError.message : "Не вдалося створити знахідку з фрагмента.");
@@ -395,10 +455,10 @@ export function DocumentWorkspaceViewer({
     }
   };
 
-  const openSourceDocument = () => {
-    if (!document) return;
-    setMode("minimized");
-    onOpenDocument(document.id);
+  const openSourceDocument = async () => {
+    if (!sourceDocument) return;
+    await minimizeViewerForRecordAction();
+    onOpenDocument(sourceDocument.id);
   };
 
   const run = async (action: () => Promise<void>) => {
@@ -630,6 +690,30 @@ export function DocumentWorkspaceViewer({
     }
   };
 
+  const enterFullscreen = async () => {
+    setFullscreenError("");
+    setMode("fullscreen");
+    const panel = viewerRef.current;
+    if (!panel?.requestFullscreen) {
+      setFullscreenError("Браузер відкрив перегляд на всю вкладку без системного повноекранного режиму.");
+      return;
+    }
+
+    try {
+      await panel.requestFullscreen();
+    } catch {
+      setFullscreenError("Браузер не дозволив системний повноекранний режим. Перегляд відкрито на всю вкладку.");
+    }
+  };
+
+  const leaveFullscreen = async () => {
+    setFullscreenError("");
+    if (document.fullscreenElement === viewerRef.current && document.exitFullscreen) {
+      await document.exitFullscreen().catch(() => undefined);
+    }
+    setMode("window");
+  };
+
   const viewerStyle: CSSProperties | undefined =
     mode === "window"
       ? {
@@ -647,7 +731,7 @@ export function DocumentWorkspaceViewer({
     rotation === 0;
   const hasValidCrop = Boolean(cropRect && cropRect.width >= 12 && cropRect.height >= 12);
 
-  return (
+  const viewerContent = (
     <>
       {mode === "minimized" ? (
         <aside className="workspace-viewer-minimized" aria-label="Згорнутий перегляд документа">
@@ -731,7 +815,7 @@ export function DocumentWorkspaceViewer({
           <button
             type="button"
             className="button button-secondary"
-            onClick={() => setMode(mode === "fullscreen" ? "window" : "fullscreen")}
+            onClick={() => void (mode === "fullscreen" ? leaveFullscreen() : enterFullscreen())}
           >
             {mode === "fullscreen" ? "Згорнути" : "На весь екран"}
           </button>
@@ -745,6 +829,9 @@ export function DocumentWorkspaceViewer({
       </div>
 
       <div className="workspace-viewer-body" onWheelCapture={handlePreviewWheel}>
+        {fullscreenError ? (
+          <div className="workspace-viewer-notice">{fullscreenError}</div>
+        ) : null}
         {loading && !blobUrl ? (
           <div className="workspace-viewer-state">Завантажуємо джерело…</div>
         ) : error ? (
@@ -824,13 +911,13 @@ export function DocumentWorkspaceViewer({
 
       <div className="workspace-viewer-actions">
         <div>
-          {document ? (
-            <span>Документ: {document.title}</span>
+          {sourceDocument ? (
+            <span>Документ: {sourceDocument.title}</span>
           ) : (
             <span>Перегляд відкрито у браузері.</span>
           )}
         </div>
-        {document ? (
+        {sourceDocument ? (
           <>
             {navigationPageCount > 1 ? (
               <div className="workspace-page-controls" aria-label="Перемикання сторінок документа">
@@ -875,10 +962,10 @@ export function DocumentWorkspaceViewer({
                 </button>
               </>
             ) : null}
-            <button type="button" className="button button-secondary" onClick={openSourceDocument}>
+            <button type="button" className="button button-secondary" onClick={() => void openSourceDocument()}>
               Повернутись до документа
             </button>
-            <button type="button" className="button button-primary" onClick={createFinding}>
+            <button type="button" className="button button-primary" onClick={() => void createFinding()}>
               Створити знахідку
             </button>
           </>
@@ -899,13 +986,17 @@ export function DocumentWorkspaceViewer({
     </aside>
     </>
   );
+
+  return typeof document === "undefined"
+    ? viewerContent
+    : createPortal(viewerContent, document.body);
 }
 
 function previewKind(scan: ScanAttachment, blob: Blob): PreviewKind | null {
   const mimeType = (blob.type || scan.mimeType || "").toLocaleLowerCase();
   const extension = scan.name.split(".").pop()?.toLocaleLowerCase() ?? "";
   if (mimeType === "application/pdf" || extension === "pdf") return "pdf";
-  if (mimeType === "text/html" || ["html", "htm"].includes(extension) || scan.storage === "external-url") {
+  if (mimeType === "text/html" || ["html", "htm"].includes(extension)) {
     return "web";
   }
   if (
@@ -928,6 +1019,36 @@ async function loadPdfJs(): Promise<PdfJsModule> {
     });
   }
   return pdfJsModulePromise;
+}
+
+function documentFragmentSelectionFromCrop(
+  documentId: string,
+  scan: ScanAttachment,
+  pageNumber: number,
+  rotation: number,
+  rect: CropRect,
+  sourceElement: HTMLElement | null,
+  zoom: number,
+): DocumentFragmentSelection | undefined {
+  if (!sourceElement) return undefined;
+  const rendered = sourceElement.getBoundingClientRect();
+  const renderedWidth = rendered.width / Math.max(zoom, MIN_ZOOM);
+  const renderedHeight = rendered.height / Math.max(zoom, MIN_ZOOM);
+  if (!renderedWidth || !renderedHeight) return undefined;
+
+  return {
+    documentId,
+    sourceFileId: scan.storagePath || scan.id,
+    pageNumber,
+    rotation,
+    rect: {
+      x: clampUnit(rect.x / renderedWidth),
+      y: clampUnit(rect.y / renderedHeight),
+      width: clampUnit(rect.width / renderedWidth),
+      height: clampUnit(rect.height / renderedHeight),
+    },
+    createdAt: new Date().toISOString(),
+  };
 }
 
 async function cropImageToFile(
@@ -1053,8 +1174,44 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string): Promise<Blob> {
   });
 }
 
+function isCanvasEffectivelyBlank(canvas: HTMLCanvasElement): boolean {
+  if (!canvas.width || !canvas.height) return true;
+
+  const sampleSize = 64;
+  const sampleCanvas = document.createElement("canvas");
+  sampleCanvas.width = sampleSize;
+  sampleCanvas.height = sampleSize;
+  const sampleContext = sampleCanvas.getContext("2d", { willReadFrequently: true });
+  if (!sampleContext) return false;
+
+  try {
+    sampleContext.drawImage(canvas, 0, 0, sampleSize, sampleSize);
+    const pixels = sampleContext.getImageData(0, 0, sampleSize, sampleSize).data;
+    let visiblePixels = 0;
+
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = pixels[index] ?? 255;
+      const green = pixels[index + 1] ?? 255;
+      const blue = pixels[index + 2] ?? 255;
+      const alpha = pixels[index + 3] ?? 0;
+      if (alpha > 8 && (red < 245 || green < 245 || blue < 245)) {
+        visiblePixels += 1;
+        if (visiblePixels > 4) return false;
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100));
+}
+
+function clampUnit(value: number): number {
+  return Math.min(1, Math.max(0, Math.round(value * 1_000_000) / 1_000_000));
 }
 
 function normalizeDegrees(value: number): number {

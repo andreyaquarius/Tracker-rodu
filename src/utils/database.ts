@@ -14,7 +14,7 @@ import type {
 } from "../types";
 import { nowIso } from "./dateHelpers";
 import { createId } from "./id";
-import { participantSummary } from "./findingParticipants";
+import { participantSummary, sortFindingParticipants } from "./findingParticipants";
 import { normalizeCustomFieldValues } from "./customFields";
 import { normalizeGeo, normalizePersonEvents, syncPersonEventsFromFields } from "./geo";
 
@@ -75,11 +75,14 @@ export function normalizeDatabase(value: unknown): AppDatabase {
     customFields: normalizeCustomFieldValues(item.customFields),
   }));
   const findings = (Array.isArray(candidate.findings) ? candidate.findings : []).map((item) => {
-    const participants = normalizeParticipants(item.participants, item.people);
+    const participants = sortFindingParticipants(
+      normalizeParticipants(item.participants, item.people),
+      typeof item.findingType === "string" ? item.findingType : "",
+    );
     return {
       ...item,
       participants,
-      people: participantSummary(participants),
+      people: participantSummary(participants, typeof item.findingType === "string" ? item.findingType : ""),
       personsText: typeof item.personsText === "string" ? item.personsText : item.people ?? "",
       personIds: normalizeIds(item.personIds),
       scans: Array.isArray(item.scans) ? item.scans : [],
@@ -304,6 +307,12 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
         id: createId(),
       })),
       scans: mapScans(item.scans),
+      fragmentSelection: item.fragmentSelection
+        ? {
+            ...item.fragmentSelection,
+            documentId: mapReference(documents, item.fragmentSelection.documentId) || mapReference(documents, item.documentId),
+          }
+        : undefined,
       geo: item.geo,
       customFields: mapCustomFields("findings", item.customFields),
     })),

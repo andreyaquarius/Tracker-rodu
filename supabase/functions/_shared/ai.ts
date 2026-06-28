@@ -43,13 +43,24 @@ type GeminiResponseBody = {
   error?: {
     message?: string;
   };
+  promptFeedback?: {
+    blockReason?: string;
+    blockReasonMessage?: string;
+  };
   candidates?: Array<{
+    finishReason?: string;
+    finishMessage?: string;
     content?: {
       parts?: Array<{
         text?: string;
       }>;
     };
   }>;
+};
+
+export type GeminiInlineImageInput = {
+  mimeType: string;
+  data: string;
 };
 
 export const defaultGeminiModel = "gemini-3.5-flash";
@@ -218,6 +229,90 @@ function toGeminiResponseSchema(schema: unknown, parentKey?: string): unknown {
   return result;
 }
 
+export async function callGeminiWithInlineImage(
+  apiKey: string,
+  model: string,
+  prompt: string,
+  image: GeminiInlineImageInput,
+  responseJsonSchema?: Record<string, unknown>,
+): Promise<unknown> {
+  if (!image.data?.trim()) {
+    throw new Error("Фрагмент зображення не передано до Gemini.");
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: image.mimeType, data: image.data } },
+          ],
+        }],
+        generationConfig: responseJsonSchema
+          ? {
+              responseMimeType: "application/json",
+              responseSchema: toGeminiResponseSchema(responseJsonSchema),
+              maxOutputTokens: 8192,
+              temperature: 0.1,
+            }
+          : {
+              responseMimeType: "application/json",
+              maxOutputTokens: 8192,
+              temperature: 0.1,
+            },
+      }),
+    },
+  );
+  const rawBody = await response.text();
+  let body: GeminiResponseBody = {};
+  try {
+    body = rawBody ? JSON.parse(rawBody) as GeminiResponseBody : {};
+  } catch {
+    body = {};
+  }
+  if (!response.ok) {
+    const providerMessage = String(body.error?.message ?? rawBody ?? "");
+    if (response.status === 400 || response.status === 401 || response.status === 403) {
+      throw new Error(`Google відхилив API-ключ або налаштування моделі. ${providerMessage}`.trim());
+    }
+    if (response.status === 429) {
+      throw new Error("Вичерпано квоту Gemini або перевищено ліміт запитів.");
+    }
+    throw new Error(providerMessage || "Google Gemini не зміг виконати запит.");
+  }
+  const candidate = body.candidates?.[0];
+  const text = candidate?.content?.parts
+    ?.map((part: { text?: string }) => part.text ?? "")
+    .join("")
+    .trim();
+  if (!text) {
+    const details = [
+      body.promptFeedback?.blockReason && `blockReason: ${body.promptFeedback.blockReason}`,
+      body.promptFeedback?.blockReasonMessage && `blockReasonMessage: ${body.promptFeedback.blockReasonMessage}`,
+      candidate?.finishReason && `finishReason: ${candidate.finishReason}`,
+      candidate?.finishMessage && `finishMessage: ${candidate.finishMessage}`,
+    ].filter(Boolean).join("; ");
+    throw new Error(
+      details
+        ? `Google Gemini не повернув текст відповіді. ${details}`
+        : "Google Gemini повернув порожню відповідь.",
+    );
+  }
+  try {
+    return parseGeminiJsonText(text);
+  } catch {
+    throw new Error("Google Gemini повернув відповідь у неправильному форматі.");
+  }
+}
+
 export async function callGemini(
   apiKey: string,
   model: string,
@@ -271,8 +366,21 @@ export async function callGemini(
   if (!text) throw new Error("Google Gemini повернув порожню відповідь.");
   if (!responseJsonSchema) return text;
   try {
-    return JSON.parse(text);
+    return parseGeminiJsonText(text);
   } catch {
     throw new Error("Google Gemini повернув відповідь у неправильному форматі.");
+  }
+}
+
+function parseGeminiJsonText(text: string): unknown {
+  const normalized = text.trim().replace(/^\uFEFF/, "");
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    const fenced = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (fenced?.[1]) {
+      return JSON.parse(fenced[1].trim());
+    }
+    throw new Error("Invalid JSON");
   }
 }
