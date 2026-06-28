@@ -45,6 +45,7 @@ import { CustomFieldsEditor, CustomFieldsView } from "../components/CustomFields
 import { InlineCustomFieldCreator } from "../components/InlineCustomFieldCreator";
 import { HypothesisAiAgent } from "../components/HypothesisAiAgent";
 import { FindingAiIndexingPanel } from "../components/FindingAiIndexingPanel";
+import { GeneHelpRequestModal, type GeneHelpInitialRequest } from "../components/GeneHelpRequestModal";
 import {
   definitionsForModule,
   normalizeCustomFieldValues,
@@ -883,6 +884,7 @@ function EntityDetailsModal({
   onFocus: () => void;
 }) {
   const record = entity as unknown as Record<string, unknown>;
+  const [geneHelpRequest, setGeneHelpRequest] = useState<GeneHelpInitialRequest | null>(null);
   const customDefinitions = definitionsForModule(customFieldDefinitions, config.collection);
   const geo = config.collection === "findings" ? record.geo as GeoPoint | null | undefined : null;
   const visibleFields = config.fields.filter((field) => {
@@ -955,6 +957,19 @@ function EntityDetailsModal({
               onCreateTask={onCreateTask}
             />
           ) : null}
+          {config.collection === "tasks" ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setGeneHelpRequest(taskGeneHelpInitialRequest(record, {
+                researches,
+                documents,
+                persons,
+              }))}
+            >
+              Попросити допомоги в GeneHelp
+            </button>
+          ) : null}
           <button type="button" className="button button-ghost" onClick={onClose}>
             Закрити
           </button>
@@ -965,6 +980,12 @@ function EntityDetailsModal({
           ) : null}
         </div>
       </div>
+      {geneHelpRequest ? (
+        <GeneHelpRequestModal
+          initialRequest={geneHelpRequest}
+          onClose={() => setGeneHelpRequest(null)}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -1132,6 +1153,74 @@ function getEntityTitle(config: EntityConfig, record: Record<string, unknown>): 
   return typeof value === "string" ? value : `Перегляд: ${config.singular}`;
 }
 
+function taskGeneHelpInitialRequest(
+  task: Record<string, unknown>,
+  context: {
+    researches: Research[];
+    documents: DocumentRecord[];
+    persons: Person[];
+  },
+): GeneHelpInitialRequest {
+  const title = cleanTaskText(task.title) || "Запит із завдання Трекера Роду";
+  const research = context.researches.find((item) => item.id === cleanTaskText(task.researchId));
+  const document = context.documents.find((item) => item.id === cleanTaskText(task.documentId));
+  const personIds = Array.isArray(task.personIds) ? task.personIds.map(String) : [];
+  const linkedPersons = context.persons
+    .filter((person) => personIds.includes(person.id))
+    .map(personName);
+  const period = [cleanTaskText(task.yearFrom), cleanTaskText(task.yearTo)]
+    .filter(Boolean)
+    .join("–");
+
+  const rows: string[] = [
+    "Запит сформовано із завдання в Трекері Роду.",
+    "",
+    `Назва завдання: ${title}`,
+  ];
+  appendTaskLine(rows, "Опис", task.description);
+  appendTaskLine(rows, "Особа у полі завдання", task.personName);
+  if (linkedPersons.length) rows.push(`Пов’язані особи: ${linkedPersons.join("; ")}`);
+  appendTaskLine(rows, "Населений пункт", task.place);
+  if (period) rows.push(`Період або роки пошуку: ${period}`);
+  appendTaskLine(rows, "Тип документа", task.documentType);
+  if (research) rows.push(`Дослідження: ${research.title}`);
+  if (document) {
+    const documentDetails = [
+      document.title,
+      document.documentType,
+      document.archive,
+      document.fund ? `фонд ${document.fund}` : "",
+      document.description ? `опис ${document.description}` : "",
+      document.file ? `справа ${document.file}` : "",
+      document.place,
+      [document.yearFrom, document.yearTo].filter(Boolean).join("–"),
+    ].map(cleanTaskText).filter(Boolean);
+    rows.push(`Пов’язаний документ: ${documentDetails.join("; ")}`);
+  }
+  appendTaskLine(rows, "Статус завдання", task.status);
+  appendTaskLine(rows, "Пріоритет", task.priority);
+  appendTaskLine(rows, "Дедлайн", task.deadline);
+  appendTaskLine(rows, "Нотатки", task.notes);
+
+  rows.push("");
+  rows.push("Потрібна допомога GeneHelp: проаналізувати завдання і підказати, де або як шукати потрібні джерела, записи чи архівні документи.");
+
+  return {
+    title,
+    description: rows.join("\n"),
+    sourceLabel: `завдання «${title}»`,
+  };
+}
+
+function appendTaskLine(rows: string[], label: string, value: unknown): void {
+  const text = cleanTaskText(value);
+  if (text) rows.push(`${label}: ${text}`);
+}
+
+function cleanTaskText(value: unknown): string {
+  return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
 function formatEntityDate(value: string): string {
   return new Intl.DateTimeFormat("uk-UA", {
     dateStyle: "medium",
@@ -1211,6 +1300,7 @@ function EntityModal({
   const [locallyCreatedPersons, setLocallyCreatedPersons] = useState<Person[]>([]);
   const [createdFindingPersons, setCreatedFindingPersons] = useState<CreatedFindingPerson[]>([]);
   const [locallyCreatedRelations, setLocallyCreatedRelations] = useState<PersonRelation[]>([]);
+  const [geneHelpRequest, setGeneHelpRequest] = useState<GeneHelpInitialRequest | null>(null);
   const persistedBaseUpdatedAtRef = useRef<string>(entity?.updatedAt ?? "");
   const availablePersons = useMemo(
     () => mergePersonsById(persons, locallyCreatedPersons),
@@ -1398,10 +1488,29 @@ function EntityModal({
           />
         ) : null}
         <div className="modal-actions">
+          {config.collection === "tasks" ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setGeneHelpRequest(taskGeneHelpInitialRequest(form, {
+                researches,
+                documents,
+                persons: availablePersons,
+              }))}
+            >
+              Попросити допомоги в GeneHelp
+            </button>
+          ) : null}
           <button type="button" className="button button-ghost" onClick={onClose}>Скасувати</button>
           <button type="submit" className="button button-primary">Зберегти</button>
         </div>
       </form>
+      {geneHelpRequest ? (
+        <GeneHelpRequestModal
+          initialRequest={geneHelpRequest}
+          onClose={() => setGeneHelpRequest(null)}
+        />
+      ) : null}
       {personSeedChoices && onSavePerson ? (
         <Modal
           title="Створити особу зі знахідки"

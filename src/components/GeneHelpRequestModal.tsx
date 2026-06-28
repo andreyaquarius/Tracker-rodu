@@ -12,13 +12,20 @@ import { authenticatedGeneHelpViewUrl } from "../utils/geneHelpLinks";
 import { sanitizeWebUrl } from "../utils/safeUrl";
 import { Modal } from "./Modal";
 
-interface GeneHelpRequestModalProps {
-  onClose: () => void;
+export interface GeneHelpInitialRequest {
+  title?: string;
+  description?: string;
+  sourceLabel?: string;
 }
 
-export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+interface GeneHelpRequestModalProps {
+  onClose: () => void;
+  initialRequest?: GeneHelpInitialRequest | null;
+}
+
+export function GeneHelpRequestModal({ onClose, initialRequest = null }: GeneHelpRequestModalProps) {
+  const [title, setTitle] = useState(initialRequest?.title ?? "");
+  const [description, setDescription] = useState(initialRequest?.description ?? "");
   const [createdRequest, setCreatedRequest] =
     useState<GeneHelpSimpleRequestResponse | null>(null);
   const [view, setView] = useState<"create" | "history">("create");
@@ -58,6 +65,15 @@ export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
   useEffect(() => {
     void loadRequests();
   }, []);
+
+  useEffect(() => {
+    if (!initialRequest) return;
+    setTitle(initialRequest.title ?? "");
+    setDescription(initialRequest.description ?? "");
+    setCreatedRequest(null);
+    setMessage(null);
+    setView("create");
+  }, [initialRequest?.title, initialRequest?.description]);
 
   const selectedRequest =
     requests.find((request) => request.id === selectedRequestId) ?? requests[0] ?? null;
@@ -217,6 +233,9 @@ export function GeneHelpRequestModal({ onClose }: GeneHelpRequestModalProps) {
           </p>
           {accountLoading ? (
             <small className="field-hint">Перевіряємо підключення до GeneHelp...</small>
+          ) : null}
+          {initialRequest?.sourceLabel ? (
+            <small className="field-hint">Запит сформовано з: {initialRequest.sourceLabel}</small>
           ) : null}
         </div>
 
