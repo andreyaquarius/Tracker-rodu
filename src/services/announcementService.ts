@@ -50,6 +50,26 @@ export async function adminDeleteAnnouncement(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function sendAnnouncementEmail(id: string): Promise<{ sent: number; failed: number }> {
+  const { data, error } = await getSupabaseClient().functions.invoke("send-announcement-email", {
+    body: { announcementId: id },
+  });
+  if (error) {
+    const response = (error as { context?: Response }).context;
+    const payload = response
+      ? await response.clone().json().catch(() => null)
+      : null;
+    if (payload && typeof (payload as { error?: unknown }).error === "string") {
+      throw new Error(String((payload as { error: string }).error));
+    }
+    throw error;
+  }
+  return {
+    sent: Number((data as { sent?: unknown } | null)?.sent ?? 0),
+    failed: Number((data as { failed?: unknown } | null)?.failed ?? 0),
+  };
+}
+
 function mapAnnouncement(row: Record<string, unknown>): AppAnnouncement {
   return {
     id: String(row.id),

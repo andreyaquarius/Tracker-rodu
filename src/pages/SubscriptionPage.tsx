@@ -14,6 +14,7 @@ import {
   adminDeleteAnnouncement,
   adminSaveAnnouncement,
   loadAdminAnnouncements,
+  sendAnnouncementEmail,
 } from "../services/announcementService";
 import type {
   AdminAnnouncementInput,
@@ -338,6 +339,7 @@ function AdminAnnouncements({ announcements, loadError, onChanged }: {
 }) {
   const [draft, setDraft] = useState<AdminAnnouncementInput>(emptyAnnouncementDraft);
   const [busy, setBusy] = useState(false);
+  const [sendingAnnouncementId, setSendingAnnouncementId] = useState("");
   const [error, setError] = useState("");
 
   const updateDraft = (patch: Partial<AdminAnnouncementInput>) => {
@@ -387,6 +389,23 @@ function AdminAnnouncements({ announcements, loadError, onChanged }: {
       setError(deleteError instanceof Error ? deleteError.message : "Не вдалося видалити оголошення.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const sendEmail = async (announcement: AppAnnouncement) => {
+    if (!window.confirm(`Надіслати email-оновлення "${announcement.title}" усім користувачам?`)) return;
+    setSendingAnnouncementId(announcement.id);
+    setError("");
+    try {
+      const result = await sendAnnouncementEmail(announcement.id);
+      await onChanged();
+      if (result.failed > 0) {
+        setError(`Email-розсилку виконано частково: надіслано ${result.sent}, помилок ${result.failed}.`);
+      }
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : "Не вдалося надіслати email-оновлення.");
+    } finally {
+      setSendingAnnouncementId("");
     }
   };
 
@@ -518,9 +537,20 @@ function AdminAnnouncements({ announcements, loadError, onChanged }: {
                 <small>
                   {announcement.isPublished ? "Опубліковано" : "Чернетка"} · {formatDate(announcement.publishedAt ?? announcement.createdAt)}
                   {announcement.emailStatus === "planned" ? " · email підготовлено" : ""}
+                  {announcement.emailStatus === "sent" ? " · email надіслано" : ""}
                 </small>
               </div>
               <div className="row-actions">
+                {announcement.emailStatus === "planned" ? (
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={busy || sendingAnnouncementId === announcement.id}
+                    onClick={() => void sendEmail(announcement)}
+                  >
+                    {sendingAnnouncementId === announcement.id ? "Надсилання..." : "Надіслати email"}
+                  </button>
+                ) : null}
                 <button type="button" className="button button-secondary" disabled={busy} onClick={() => edit(announcement)}>
                   Редагувати
                 </button>
