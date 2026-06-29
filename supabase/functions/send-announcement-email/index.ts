@@ -1,15 +1,36 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const localDevOrigins = new Set([
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
+
+function normalizeOrigin(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "*") return trimmed || "*";
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
+}
+
 const configuredOrigins = [
   Deno.env.get("ALLOWED_ORIGIN")?.trim(),
   Deno.env.get("APP_URL")?.trim(),
-].filter((origin): origin is string => Boolean(origin));
+]
+  .flatMap((value) => (value ?? "").split(","))
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
 function corsHeaders(request: Request): HeadersInit {
-  const origin = request.headers.get("Origin") ?? "";
-  const localOrigin = origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:");
+  const origin = normalizeOrigin(request.headers.get("Origin") ?? "");
+  const allowedOrigins = new Set(configuredOrigins);
+  for (const localOrigin of localDevOrigins) allowedOrigins.add(localOrigin);
   const allowedOrigin =
-    origin && (localOrigin || configuredOrigins.includes(origin))
+    allowedOrigins.has("*")
+      ? "*"
+      : origin && allowedOrigins.has(origin)
       ? origin
       : configuredOrigins[0] ?? "*";
 
