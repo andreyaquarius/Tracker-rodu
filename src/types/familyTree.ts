@@ -1,4 +1,4 @@
-import type { EntityId } from "./index";
+import type { EntityId, GeoPoint } from "./index";
 
 export type FamilyTreePrivacyStatus = "private" | "project" | "public" | "confidential";
 export type EvidenceStatus = "proven" | "likely" | "disputed" | "disproven" | "unknown";
@@ -218,6 +218,86 @@ export interface AssociationRelationship {
   evidenceStatus: EvidenceStatus;
   confidence: number;
   privacyStatus: FamilyTreePrivacyStatus;
+  sourceDocumentId: EntityId | null;
+  sourceFindingId: EntityId | null;
+  notes: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FamilyTreePersonNameType =
+  | "primary"
+  | "birth"
+  | "married"
+  | "alias"
+  | "original"
+  | "transliteration"
+  | "religious"
+  | "patronymic_variant"
+  | "surname_variant"
+  | "other";
+
+export interface FamilyTreePersonName {
+  id: EntityId;
+  projectId: EntityId;
+  personId: EntityId;
+  nameType: FamilyTreePersonNameType;
+  languageCode: string;
+  scriptCode: string;
+  surname: string;
+  givenName: string;
+  patronymic: string;
+  fullName: string;
+  originalText: string;
+  isPrimary: boolean;
+  isPreferred: boolean;
+  evidenceStatus: EvidenceStatus;
+  confidence: number;
+  sourceDocumentId: EntityId | null;
+  sourceFindingId: EntityId | null;
+  notes: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FamilyTreePersonTimelineEventType =
+  | "birth"
+  | "baptism"
+  | "christening"
+  | "marriage"
+  | "divorce"
+  | "residence"
+  | "census"
+  | "revision_list"
+  | "confession_list"
+  | "immigration"
+  | "emigration"
+  | "military"
+  | "occupation"
+  | "death"
+  | "burial"
+  | "cremation"
+  | "probate"
+  | "mention"
+  | "other";
+
+export interface FamilyTreePersonTimelineEvent {
+  id: EntityId;
+  projectId: EntityId;
+  personId: EntityId;
+  eventType: FamilyTreePersonTimelineEventType;
+  title: string;
+  eventDate: string;
+  dateFrom: string;
+  dateTo: string;
+  dateText: string;
+  placeName: string;
+  geo: GeoPoint | null;
+  eventRole: string;
+  evidenceStatus: EvidenceStatus;
+  confidence: number;
   sourceDocumentId: EntityId | null;
   sourceFindingId: EntityId | null;
   notes: string;
