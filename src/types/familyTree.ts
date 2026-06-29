@@ -332,3 +332,53 @@ export interface FamilyTreeGraphEdgeIntent {
   lineStyle: FamilyTreeLineStyle;
   legacyRelationId?: EntityId;
 }
+
+export interface GedcomExportOptions {
+  sourceName?: string;
+  submitterName?: string;
+  createdAt?: Date | string;
+  gedcomVersion?: "5.5.1" | "7.0";
+  includeAssociations?: boolean;
+}
+
+export interface GedcomExportResult {
+  text: string;
+  individualXrefs: Record<EntityId, string>;
+  familyXrefs: Record<string, string>;
+  warnings: FamilyTreeGraphIssue[];
+}
+
+export interface GedcomLine {
+  level: number;
+  pointer: string | null;
+  tag: string;
+  value: string;
+  raw: string;
+  lineNumber: number;
+  parentIndex: number | null;
+}
+
+export interface GedcomRecord {
+  pointer: string | null;
+  tag: string;
+  value: string;
+  lineIndex: number;
+  lineNumber: number;
+}
+
+export interface GedcomParseResult {
+  lines: GedcomLine[];
+  records: GedcomRecord[];
+  warnings: FamilyTreeGraphIssue[];
+}
+
+export interface GedcomSummary {
+  individuals: number;
+  families: number;
+  sources: number;
+  notes: number;
+  repositories: number;
+  submitters: number;
+  characterEncoding: string | null;
+  gedcomVersion: string | null;
+}
