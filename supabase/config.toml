@@ -31,6 +31,11 @@ verify_jwt = false
 # still validates authenticated POST requests in code through auth.getUser().
 verify_jwt = false
 
+[functions.send-announcement-email]
+# Browser CORS preflight requests do not include the user JWT. The function
+# still validates authenticated POST requests in code through auth.getUser().
+verify_jwt = false
+
 [functions.search-places]
 verify_jwt = true
 
