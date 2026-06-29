@@ -382,3 +382,71 @@ export interface GedcomSummary {
   characterEncoding: string | null;
   gedcomVersion: string | null;
 }
+
+export type GedcomImportGender = "male" | "female" | "unknown";
+
+export interface GedcomImportNameDraft {
+  nameType: FamilyTreePersonNameType;
+  surname: string;
+  givenName: string;
+  patronymic: string;
+  fullName: string;
+  originalText: string;
+}
+
+export interface GedcomImportEventDraft {
+  eventType: FamilyTreePersonTimelineEventType;
+  eventDate: string;
+  dateText: string;
+  placeName: string;
+  notes: string;
+}
+
+export interface GedcomImportPersonDraft {
+  xref: string;
+  gender: GedcomImportGender;
+  names: GedcomImportNameDraft[];
+  events: GedcomImportEventDraft[];
+  fams: string[];
+  famc: Array<{
+    familyXref: string;
+    pedigree: "birth" | "adopted" | "foster" | "sealing" | "other" | null;
+  }>;
+  rawLineNumber: number;
+}
+
+export interface GedcomImportFamilyDraft {
+  xref: string;
+  partnerXrefs: string[];
+  childXrefs: string[];
+  events: GedcomImportEventDraft[];
+  rawLineNumber: number;
+}
+
+export interface GedcomImportParentChildDraft {
+  familyXref: string;
+  parentXref: string;
+  childXref: string;
+  relationshipType: ParentChildRelationshipType;
+  parentRoleLabel: ParentRoleLabel;
+  pedigree: "birth" | "adopted" | "foster" | "sealing" | "other" | null;
+}
+
+export interface GedcomImportPartnerDraft {
+  familyXref: string;
+  personAXref: string;
+  personBXref: string;
+  relationshipType: PartnerRelationshipType;
+  eventDate: string;
+  placeName: string;
+}
+
+export interface GedcomImportDraft {
+  people: GedcomImportPersonDraft[];
+  families: GedcomImportFamilyDraft[];
+  parentChildRelationships: GedcomImportParentChildDraft[];
+  partnerRelationships: GedcomImportPartnerDraft[];
+  unmappedRecords: GedcomRecord[];
+  summary: GedcomSummary;
+  warnings: FamilyTreeGraphIssue[];
+}
