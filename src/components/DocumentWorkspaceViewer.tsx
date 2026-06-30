@@ -116,15 +116,16 @@ export function DocumentWorkspaceViewer({
 
     const promise = getScanBlob(scan)
       .then((blob) => {
-        const nextKind = previewKind(scan, blob);
+        const previewBlob = normalizePreviewBlob(scan, blob);
+        const nextKind = previewKind(scan, previewBlob);
         if (!nextKind) {
           throw new Error("Попередній перегляд доступний для зображень, PDF і web-джерел.");
         }
         const preview = {
           kind: nextKind,
-          url: URL.createObjectURL(blob),
+          url: URL.createObjectURL(previewBlob),
           revokeOnClose: true,
-          blob,
+          blob: previewBlob,
         };
         previewCacheRef.current.set(scan.id, preview);
         return preview;
@@ -880,7 +881,15 @@ export function DocumentWorkspaceViewer({
             onPointerUp={finishImageInteraction}
             onPointerCancel={finishImageInteraction}
           >
-            <img ref={imageRef} src={blobUrl} alt={activeScan.name} draggable={false} />
+            <img
+              ref={imageRef}
+              src={blobUrl}
+              alt={activeScan.name}
+              draggable={false}
+              onError={() => {
+                setError("Файл завантажився, але браузер не зміг показати його у внутрішньому переглядачі. Спробуйте відкрити джерело або завантажити файл.");
+              }}
+            />
             {cropRect ? (
               <span
                 className="workspace-selection-rect"
@@ -942,7 +951,7 @@ export function DocumentWorkspaceViewer({
           {sourceDocument ? (
             <span>Документ: {sourceDocument.title}</span>
           ) : (
-            <span>Перегляд відкрито у браузері.</span>
+            <span>Прикріплений файл</span>
           )}
         </div>
         {sourceDocument ? (
@@ -1034,6 +1043,44 @@ function previewKind(scan: ScanAttachment, blob: Blob): PreviewKind | null {
     return "image";
   }
   return null;
+}
+
+function normalizePreviewBlob(scan: ScanAttachment, blob: Blob): Blob {
+  const currentType = blob.type.toLocaleLowerCase();
+  const extension = scan.name.split(".").pop()?.toLocaleLowerCase() ?? "";
+  const expectedType = previewMimeTypeFromExtension(extension);
+  if (
+    expectedType &&
+    (!currentType || currentType === "application/octet-stream" || currentType === "binary/octet-stream")
+  ) {
+    return new Blob([blob], { type: expectedType });
+  }
+  return blob;
+}
+
+function previewMimeTypeFromExtension(extension: string): string {
+  switch (extension) {
+    case "pdf":
+      return "application/pdf";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "svg":
+      return "image/svg+xml";
+    case "html":
+    case "htm":
+      return "text/html";
+    default:
+      return "";
+  }
 }
 
 async function loadPdfJs(): Promise<PdfJsModule> {
