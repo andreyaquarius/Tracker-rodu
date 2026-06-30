@@ -190,7 +190,7 @@ export function CustomSectionPage({
         const value = record.values[field.id];
         return Array.isArray(value) ? value as ScanAttachment[] : [];
     });
-    await Promise.allSettled(attachments.map(deleteScanFile));
+    await Promise.allSettled(attachments.map((scan) => deleteScanFile(scan)));
     onDelete(record.id);
     closeWindows((window) =>
       window.ownerKey === windowOwnerKey &&

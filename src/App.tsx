@@ -167,7 +167,7 @@ import {
   type ProjectRealtimeGroup,
 } from "./services/projectRealtime";
 import { assertProjectRecordUnchanged } from "./services/projectConflicts";
-import { setProjectAttachmentTarget } from "./services/scanStorage";
+import { deleteScanFile, setProjectAttachmentTarget } from "./services/scanStorage";
 import { clearGoogleDriveSession } from "./services/googleDriveStorage";
 import { clearAllProjectCaches } from "./utils/projectCache";
 import { createActivityEntries } from "./utils/activityLog";
@@ -437,6 +437,17 @@ function projectAttachmentFields(
     fields[`custom:${definition.id}`] = scanList(customValues[definition.id]);
   }
   return fields;
+}
+
+async function deleteEntityScanFiles(
+  collection: CollectionKey,
+  entity: AppEntity,
+  db: AppDatabase,
+): Promise<void> {
+  const scans = Object.values(projectAttachmentFields(collection, entity, db)).flat();
+  await Promise.all(scans.map((scan) =>
+    deleteScanFile(scan, { force: collection === "findings" })
+  ));
 }
 
 function activityModuleLabel(collection: CollectionKey): string {
@@ -2589,7 +2600,16 @@ export default function App() {
 
   const removeFinding = (id: string) => {
     if (!workspace) {
-      app.deleteEntity("findings", id);
+      const localFinding = activeDb.findings.find((finding) => finding.id === id);
+      if (!localFinding) {
+        app.deleteEntity("findings", id);
+        return;
+      }
+      void deleteEntityScanFiles("findings", localFinding, activeDb)
+        .then(() => app.deleteEntity("findings", id))
+        .catch((error: unknown) => {
+          notify(describeError(error, "РќРµ РІРґР°Р»РѕСЃСЏ РІРёРґР°Р»РёС‚Рё С„Р°Р№Р»Рё Р·РЅР°С…С–РґРєРё Р· Google Drive."), true);
+        });
       return;
     }
     if (workspace.role === "viewer") {
@@ -2599,6 +2619,7 @@ export default function App() {
 
     const projectId = workspace.projectId;
     const previous = projectFindings;
+    const deletedFinding = previous.find((finding) => finding.id === id) ?? null;
     const previousHypotheses = projectHypotheses;
     const optimistic = previous.filter((finding) => finding.id !== id);
     const nextHypotheses = previousHypotheses.map((hypothesis) => ({
@@ -2613,10 +2634,13 @@ export default function App() {
       nextHypotheses,
       projectArchiveRequests,
     );
-    void Promise.all([
+    void (deletedFinding
+      ? deleteEntityScanFiles("findings", deletedFinding, activeDb)
+      : Promise.resolve()
+    ).then(() => Promise.all([
       deleteProjectFinding(projectId, id),
       deleteProjectHypothesisTargetLinks(projectId, "finding", id),
-    ]).then(() => {
+    ])).then(() => {
       recordEntityDeletion("findings", id);
       deleteEntityAttachmentMetadata("findings", id);
     }).catch((error: unknown) => {

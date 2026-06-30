@@ -191,7 +191,7 @@ export function ScanAttachmentsEditor({
     if (!window.confirm(`Видалити файл «${scan.name}»?`)) return;
     setError("");
     try {
-      await deleteScanFile(scan);
+      await deleteScanFile(scan, { force: policy === "finding" });
       onChange(scans.filter((item) => item.id !== scan.id));
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Не вдалося видалити файл.");

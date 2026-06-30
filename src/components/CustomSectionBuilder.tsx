@@ -126,7 +126,7 @@ export function CustomSectionBuilder({
         .filter(([fieldId, value]) => attachmentFieldIds.has(fieldId) && Array.isArray(value))
         .flatMap(([, value]) => value as ScanAttachment[]),
     );
-    await Promise.allSettled(attachments.map(deleteScanFile));
+    await Promise.allSettled(attachments.map((scan) => deleteScanFile(scan)));
     onChange({
       ...db,
       customSections: db.customSections.filter((item) => item.id !== section.id),

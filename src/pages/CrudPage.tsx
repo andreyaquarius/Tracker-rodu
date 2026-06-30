@@ -411,12 +411,20 @@ export function CrudPage({
         .filter(([key, value]) => key.toLocaleLowerCase("uk").includes("scan") && Array.isArray(value))
         .flatMap(([, value]) => value as ScanAttachment[])
         .concat(customAttachmentScans(record.customFields, customFieldDefinitions, config.collection));
-      await Promise.allSettled(scans.map(deleteScanFile));
-      closeWindows((window) =>
-        window.ownerKey === windowOwnerKey &&
-        crudEntityIdFromWindowKey(window.logicalKey) === entity.id,
-      );
-      onDelete(entity.id);
+      try {
+        await Promise.all(scans.map((scan) =>
+          deleteScanFile(scan, { force: config.collection === "findings" })
+        ));
+        closeWindows((window) =>
+          window.ownerKey === windowOwnerKey &&
+          crudEntityIdFromWindowKey(window.logicalKey) === entity.id,
+        );
+        onDelete(entity.id);
+      } catch (error) {
+        window.alert(error instanceof Error
+          ? error.message
+          : "РќРµ РІРґР°Р»РѕСЃСЏ РІРёРґР°Р»РёС‚Рё С„Р°Р№Р»Рё Р· Google Drive.");
+      }
     }
   };
 

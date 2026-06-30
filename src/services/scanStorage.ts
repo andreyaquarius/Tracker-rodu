@@ -443,9 +443,12 @@ export async function downloadScan(scan: ScanAttachment): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-export async function deleteScanFile(scan: ScanAttachment): Promise<void> {
+export async function deleteScanFile(
+  scan: ScanAttachment,
+  options: { force?: boolean } = {},
+): Promise<void> {
   if (!scan.storagePath) return;
-  if (scan.deleteOnRemove === false) return;
+  if (scan.deleteOnRemove === false && !options.force) return;
   const storage = String(scan.storage ?? "");
 
   // Legacy attachments may still point to the former storage provider.

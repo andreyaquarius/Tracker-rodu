@@ -271,7 +271,7 @@ export function PersonsPage({
         ...(person.mentionScans ?? []),
         ...customAttachmentScans(person.customFields, customFieldDefinitions),
       ];
-      await Promise.allSettled(scans.map(deleteScanFile));
+      await Promise.allSettled(scans.map((scan) => deleteScanFile(scan)));
       onDeletePerson(person.id);
       closeWindows((window) =>
         window.ownerKey === windowOwnerKey &&
