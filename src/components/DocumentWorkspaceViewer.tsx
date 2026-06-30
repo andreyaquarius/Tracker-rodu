@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { DocumentFragmentSelection, ScanAttachment } from "../types";
 import { downloadScan, getScanBlob, openScan, saveScan } from "../services/scanStorage";
-import { authorizeGoogleDrive } from "../services/googleDriveStorage";
+import { authorizeGoogleDrive, reconnectGoogleDrive } from "../services/googleDriveStorage";
 
 export type DocumentScanViewerContext = {
   source: "documents";
@@ -99,6 +99,7 @@ export function DocumentWorkspaceViewer({
   const [isPanning, setIsPanning] = useState(false);
   const [creatingCrop, setCreatingCrop] = useState(false);
   const [fullscreenError, setFullscreenError] = useState("");
+  const [previewReloadKey, setPreviewReloadKey] = useState(0);
 
   const pages = viewer?.scans?.length ? viewer.scans : viewer ? [viewer.scan] : [];
   const currentScan = pages[currentIndex] ?? viewer?.scan ?? null;
@@ -258,7 +259,7 @@ export function DocumentWorkspaceViewer({
     return () => {
       active = false;
     };
-  }, [currentScan?.id, currentIndex]);
+  }, [currentScan?.id, currentIndex, previewReloadKey]);
 
   useEffect(() => {
     let active = true;
@@ -468,6 +469,22 @@ export function DocumentWorkspaceViewer({
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Не вдалося виконати дію.");
     }
+  };
+
+  const reconnectDriveAndRetry = async () => {
+    setError("");
+    previewPromisesRef.current.delete(activeScan.id);
+    const cached = previewCacheRef.current.get(activeScan.id);
+    if (cached?.revokeOnClose) {
+      URL.revokeObjectURL(cached.url);
+    }
+    previewCacheRef.current.delete(activeScan.id);
+    pdfCacheRef.current.delete(activeScan.id);
+    pdfPromisesRef.current.delete(activeScan.id);
+    await reconnectGoogleDrive();
+    setBlobUrl("");
+    setKind(null);
+    setPreviewReloadKey((value) => value + 1);
   };
 
   const goToPreviousPage = () => {
@@ -837,9 +854,20 @@ export function DocumentWorkspaceViewer({
         ) : error ? (
           <div className="workspace-viewer-state error">
             <strong>{error}</strong>
-            <button type="button" className="button button-secondary" onClick={() => void run(() => openScan(activeScan))}>
-              Відкрити джерело
-            </button>
+            <div className="workspace-viewer-state-actions">
+              {activeScan.storage === "google-drive" ? (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => void run(reconnectDriveAndRetry)}
+                >
+                  Підключити Google Drive
+                </button>
+              ) : null}
+              <button type="button" className="button button-secondary" onClick={() => void run(() => openScan(activeScan))}>
+                Відкрити джерело
+              </button>
+            </div>
           </div>
         ) : kind === "image" && blobUrl ? (
           <div

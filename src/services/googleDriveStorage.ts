@@ -18,8 +18,10 @@ type GoogleTokenResponse = {
   error_description?: string;
 };
 
+type GoogleDrivePrompt = "" | "consent" | "select_account";
+
 type GoogleTokenClient = {
-  requestAccessToken: (options?: { prompt?: "" | "consent" | "select_account" }) => void;
+  requestAccessToken: (options?: { prompt?: GoogleDrivePrompt }) => void;
 };
 
 type GoogleAccounts = {
@@ -106,7 +108,13 @@ export function hasGoogleDriveConnectionHint(): boolean {
 }
 
 export async function authorizeGoogleDrive(): Promise<void> {
-  await getGoogleDriveAccessToken(false, true);
+  await getGoogleDriveAccessToken(false, "consent");
+}
+
+export async function reconnectGoogleDrive(): Promise<void> {
+  activeToken = null;
+  tokenRequestPromise = null;
+  await getGoogleDriveAccessToken(true, "select_account");
 }
 
 export async function uploadFileToGoogleDrive(
@@ -164,9 +172,20 @@ export async function uploadFileToGoogleDrive(
 }
 
 export async function downloadFileFromGoogleDrive(fileId: string): Promise<Blob> {
-  const response = await driveFetch(
-    `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media`,
-  );
+  let response: Response;
+  try {
+    response = await driveFetch(
+      `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/file not found/i.test(message) || /not found/i.test(message) || message.includes("(404)")) {
+      throw new Error(
+        "Файл Google Drive не знайдено або він недоступний для підключеного Google-акаунта. Підключіть той Google-акаунт, у якому збережено файл, і спробуйте ще раз.",
+      );
+    }
+    throw error;
+  }
   return response.blob();
 }
 
@@ -514,21 +533,21 @@ function parseXhrHeaders(rawHeaders: string): Headers {
   return headers;
 }
 
-async function getGoogleDriveAccessToken(forceRefresh = false, interactive = true): Promise<string> {
+async function getGoogleDriveAccessToken(forceRefresh = false, prompt: GoogleDrivePrompt = "consent"): Promise<string> {
   if (!forceRefresh) {
     if (activeToken && activeToken.expiresAt > Date.now() + 60_000) {
       return activeToken.accessToken;
     }
   }
   if (tokenRequestPromise) return tokenRequestPromise;
-  tokenRequestPromise = requestGoogleDriveAccessToken(interactive)
+  tokenRequestPromise = requestGoogleDriveAccessToken(prompt)
     .finally(() => {
       tokenRequestPromise = null;
     });
   return tokenRequestPromise;
 }
 
-async function requestGoogleDriveAccessToken(interactive: boolean): Promise<string> {
+async function requestGoogleDriveAccessToken(prompt: GoogleDrivePrompt): Promise<string> {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
   if (!clientId) {
     throw new Error("У налаштуваннях застосунку не вказано VITE_GOOGLE_CLIENT_ID.");
@@ -575,7 +594,7 @@ async function requestGoogleDriveAccessToken(interactive: boolean): Promise<stri
       },
     });
     client.requestAccessToken({
-      prompt: interactive || !hasGoogleDriveConnectionHint() ? "consent" : "",
+      prompt: prompt || (!hasGoogleDriveConnectionHint() ? "consent" : ""),
     });
   });
 }

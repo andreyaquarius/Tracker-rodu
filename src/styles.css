@@ -1677,6 +1677,12 @@ tbody tr:hover { background: #fbfaf5; }
   gap: 14px;
   color: #ffd7d2;
 }
+.workspace-viewer-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
 .workspace-viewer-actions {
   padding: 12px 16px;
   display: flex;
