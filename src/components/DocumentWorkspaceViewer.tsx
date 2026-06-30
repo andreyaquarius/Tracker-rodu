@@ -178,7 +178,9 @@ export function DocumentWorkspaceViewer({
   useEffect(() => {
     return () => {
       for (const preview of previewCacheRef.current.values()) {
-        URL.revokeObjectURL(preview.url);
+        if (preview.revokeOnClose) {
+          URL.revokeObjectURL(preview.url);
+        }
       }
       previewCacheRef.current.clear();
       previewPromisesRef.current.clear();
@@ -488,7 +490,29 @@ export function DocumentWorkspaceViewer({
     setPreviewReloadKey((value) => value + 1);
   };
 
-  const fallbackToHostedPreview = () => {
+  const retryImagePreview = async () => {
+    const cached = previewCacheRef.current.get(activeScan.id);
+    if (cached?.blob && !blobUrl.startsWith("data:")) {
+      try {
+        const dataUrl = await blobToDataUrl(cached.blob);
+        const previousUrl = cached.url;
+        previewCacheRef.current.set(activeScan.id, {
+          ...cached,
+          url: dataUrl,
+          revokeOnClose: false,
+        });
+        if (cached.revokeOnClose) {
+          URL.revokeObjectURL(previousUrl);
+        }
+        setError("");
+        setKind("image");
+        setBlobUrl(dataUrl);
+        return;
+      } catch {
+        // Fall through to the hosted preview below.
+      }
+    }
+
     const hostedPreviewUrl = hostedFilePreviewUrl(activeScan);
     if (!hostedPreviewUrl) {
       setError("Файл завантажився, але браузер не зміг показати його у внутрішньому переглядачі. Спробуйте відкрити джерело або завантажити файл.");
@@ -899,7 +923,7 @@ export function DocumentWorkspaceViewer({
               src={blobUrl}
               alt={activeScan.name}
               draggable={false}
-              onError={fallbackToHostedPreview}
+              onError={() => void retryImagePreview()}
             />
             {cropRect ? (
               <span
@@ -1107,6 +1131,22 @@ function hostedFilePreviewUrl(scan: ScanAttachment): string {
   } catch {
     return "";
   }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Не вдалося підготувати зображення для внутрішнього перегляду."));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result.startsWith("data:")) {
+        reject(new Error("Браузер не повернув зображення для внутрішнього перегляду."));
+        return;
+      }
+      resolve(result);
+    };
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function loadPdfJs(): Promise<PdfJsModule> {
