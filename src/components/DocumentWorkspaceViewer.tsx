@@ -488,6 +488,19 @@ export function DocumentWorkspaceViewer({
     setPreviewReloadKey((value) => value + 1);
   };
 
+  const fallbackToHostedPreview = () => {
+    const hostedPreviewUrl = hostedFilePreviewUrl(activeScan);
+    if (!hostedPreviewUrl) {
+      setError("Файл завантажився, але браузер не зміг показати його у внутрішньому переглядачі. Спробуйте відкрити джерело або завантажити файл.");
+      return;
+    }
+    setError("");
+    setSelectionMode(false);
+    setCropRect(null);
+    setKind("web");
+    setBlobUrl(hostedPreviewUrl);
+  };
+
   const goToPreviousPage = () => {
     if (isInteractivePdf && pdfPageCount > 1) {
       setSelectionMode(false);
@@ -886,9 +899,7 @@ export function DocumentWorkspaceViewer({
               src={blobUrl}
               alt={activeScan.name}
               draggable={false}
-              onError={() => {
-                setError("Файл завантажився, але браузер не зміг показати його у внутрішньому переглядачі. Спробуйте відкрити джерело або завантажити файл.");
-              }}
+              onError={fallbackToHostedPreview}
             />
             {cropRect ? (
               <span
@@ -1080,6 +1091,21 @@ function previewMimeTypeFromExtension(extension: string): string {
       return "text/html";
     default:
       return "";
+  }
+}
+
+function hostedFilePreviewUrl(scan: ScanAttachment): string {
+  if (scan.storage === "google-drive" && scan.storagePath) {
+    return `https://drive.google.com/file/d/${encodeURIComponent(scan.storagePath)}/preview`;
+  }
+  const target = scan.webViewLink || scan.storagePath;
+  if (!target) return "";
+  try {
+    const url = new URL(target);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    return url.href;
+  } catch {
+    return "";
   }
 }
 
