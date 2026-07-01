@@ -917,8 +917,37 @@ execute function public.family_tree_sync_legacy_relation();
 
 -- Backfill existing data once so the future tree graph is available without
 -- requiring users to manually reopen and save old records.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_trigger
+    where tgrelid = 'public.persons'::regclass
+      and tgname = 'persons_require_research_scope'
+      and not tgisinternal
+  ) then
+    execute 'alter table public.persons disable trigger persons_require_research_scope';
+  end if;
+end;
+$$;
+
 update public.persons
-set full_name = full_name;
+set full_name = full_name
+where research_id is not null;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_trigger
+    where tgrelid = 'public.persons'::regclass
+      and tgname = 'persons_require_research_scope'
+      and not tgisinternal
+  ) then
+    execute 'alter table public.persons enable trigger persons_require_research_scope';
+  end if;
+end;
+$$;
 
 update public.person_relations
 set relation_type = relation_type;
