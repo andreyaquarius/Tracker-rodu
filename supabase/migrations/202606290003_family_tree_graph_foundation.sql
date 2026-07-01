@@ -572,7 +572,7 @@ do $$
 declare
   table_name text;
 begin
-  foreach table_name in array [
+  foreach table_name in array array[
     'family_trees',
     'family_tree_persons',
     'family_groups',
@@ -630,7 +630,7 @@ do $$
 declare
   table_name text;
 begin
-  foreach table_name in array [
+  foreach table_name in array array[
     'family_trees',
     'family_groups',
     'partner_relationships',
