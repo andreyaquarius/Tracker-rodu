@@ -6,6 +6,7 @@ import type {
   Person,
   PersonEventType,
   PersonGender,
+  PersonPrivacyStatus,
   PersonStatus,
   Research,
 } from "../types";
@@ -29,6 +30,12 @@ const statuses: PersonStatus[] = [
   "гіпотетична",
   "сумнівна",
   "спростована",
+];
+const privacyStatusOptions: Array<{ value: PersonPrivacyStatus; label: string }> = [
+  { value: "private", label: "Приватна" },
+  { value: "project", label: "У межах проєкту" },
+  { value: "public", label: "Публічна" },
+  { value: "confidential", label: "Конфіденційна" },
 ];
 
 type PersonDraft = Omit<Person, "id" | "createdAt" | "updatedAt">;
@@ -97,6 +104,8 @@ function emptyPerson(initialFullName = "", researchId = ""): PersonDraft {
     religion: "",
     occupation: "",
     status: "гіпотетична",
+    isLiving: false,
+    privacyStatus: "private",
     notes: "",
     birthScans: [],
     marriageScans: [],
@@ -193,6 +202,8 @@ export function PersonFormModal({
           religion: person.religion,
           occupation: person.occupation,
           status: person.status,
+          isLiving: person.isLiving ?? false,
+          privacyStatus: person.privacyStatus ?? "private",
           notes: person.notes,
           birthScans: person.birthScans ?? [],
           marriageScans: person.marriageScans ?? [],
@@ -363,6 +374,25 @@ export function PersonFormModal({
             <span>Стать</span>
             <select value={form.gender} onChange={(event) => update("gender", event.target.value as PersonGender)}>
               {genders.map((gender) => <option key={gender}>{gender}</option>)}
+            </select>
+          </label>
+          <label className="form-checkbox-label">
+            <input
+              type="checkbox"
+              checked={form.isLiving}
+              onChange={(event) => update("isLiving", event.target.checked)}
+            />
+            <span>Жива особа</span>
+          </label>
+          <label>
+            <span>Приватність у дереві</span>
+            <select
+              value={form.privacyStatus}
+              onChange={(event) => update("privacyStatus", event.target.value as PersonPrivacyStatus)}
+            >
+              {privacyStatusOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </label>
           <label className="field-wide">

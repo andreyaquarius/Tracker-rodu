@@ -181,6 +181,8 @@ export const standardLabels: Record<CollectionKey, Record<string, string>> = {
     religion: "Віросповідання",
     occupation: "Професія або заняття",
     status: "Статус",
+    isLiving: "Жива особа",
+    privacyStatus: "Приватність у дереві",
     notes: "Нотатки",
   },
 };
@@ -455,6 +457,7 @@ function formatEntityValue(db: AppDatabase, key: string, value: unknown): Workbo
   if (value === null || value === undefined || value === "") return "";
   if (typeof value === "boolean") return value ? "Так" : "Ні";
   if (typeof value === "number") return value;
+  if (key === "privacyStatus") return personPrivacyStatusLabel(String(value));
   if (key === "researchId") return db.researches.find((item) => item.id === value)?.title ?? String(value);
   if (key === "documentId") return db.documents.find((item) => item.id === value)?.title ?? String(value);
   if (key === "personIds") return formatIds(value, (id) => personName(db.persons.find((item) => item.id === id)));
@@ -474,6 +477,20 @@ function formatEntityValue(db: AppDatabase, key: string, value: unknown): Workbo
   }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function personPrivacyStatusLabel(value: string): string {
+  switch (value) {
+    case "project":
+      return "У межах проєкту";
+    case "public":
+      return "Публічна";
+    case "confidential":
+      return "Конфіденційна";
+    case "private":
+    default:
+      return "Приватна";
+  }
 }
 
 function formatCustomSectionValue(

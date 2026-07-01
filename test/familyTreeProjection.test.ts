@@ -35,6 +35,8 @@ function person(id: string, overrides: Partial<Person> = {}): Person {
     socialStatus: "",
     religion: "",
     occupation: "",
+    isLiving: false,
+    privacyStatus: "private",
     notes: "",
     birthScans: [],
     marriageScans: [],

@@ -405,6 +405,8 @@ export interface GedcomImportEventDraft {
 export interface GedcomImportPersonDraft {
   xref: string;
   gender: GedcomImportGender;
+  isLiving: boolean;
+  privacyStatus: FamilyTreePrivacyStatus;
   names: GedcomImportNameDraft[];
   events: GedcomImportEventDraft[];
   fams: string[];

@@ -38,6 +38,8 @@ type PersonRow = {
   social_status: string;
   religion: string;
   occupation: string;
+  is_living: boolean;
+  privacy_status: string;
   notes: string;
   custom_fields: unknown;
   created_at: string;
@@ -65,7 +67,7 @@ type PersonScanGroups = {
 };
 
 const PERSON_SELECT =
-  "id, project_id, research_id, status, gender, surname, given_name, patronymic, full_name, name_variants, surname_variants, birth_date, birth_year_from, birth_year_to, birth_place, marriage_date, marriage_place, death_date, death_year_from, death_year_to, death_place, residence_places, social_status, religion, occupation, notes, custom_fields, created_at, updated_at";
+  "id, project_id, research_id, status, gender, surname, given_name, patronymic, full_name, name_variants, surname_variants, birth_date, birth_year_from, birth_year_to, birth_place, marriage_date, marriage_place, death_date, death_year_from, death_year_to, death_place, residence_places, social_status, religion, occupation, is_living, privacy_status, notes, custom_fields, created_at, updated_at";
 const RELATION_SELECT =
   "id, project_id, person_id, related_person_id, relation_type, status, evidence_text, notes, created_at, updated_at";
 const SCANS_KEY = "__trackerRoduPersonScans";
@@ -128,6 +130,8 @@ function personFromRow(row: PersonRow): Person {
     socialStatus: row.social_status,
     religion: row.religion,
     occupation: row.occupation,
+    isLiving: row.is_living ?? false,
+    privacyStatus: normalizePersonPrivacyStatus(row.privacy_status),
     notes: row.notes,
     ...scans,
     customFields,
@@ -171,6 +175,8 @@ function personToRow(projectId: string, person: Person, researchIds: Set<string>
     social_status: person.socialStatus,
     religion: person.religion,
     occupation: person.occupation,
+    is_living: person.isLiving ?? false,
+    privacy_status: normalizePersonPrivacyStatus(person.privacyStatus),
     notes: person.notes,
     custom_fields: {
       ...stripInternalGeoFields(person.customFields ?? {}),
@@ -185,6 +191,10 @@ function personToRow(projectId: string, person: Person, researchIds: Set<string>
     created_at: person.createdAt,
     updated_at: person.updatedAt,
   };
+}
+
+function normalizePersonPrivacyStatus(value: unknown): Person["privacyStatus"] {
+  return value === "project" || value === "public" || value === "confidential" ? value : "private";
 }
 
 function relationFromRow(row: RelationRow): PersonRelation {
