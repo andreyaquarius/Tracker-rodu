@@ -69,6 +69,21 @@ test("uses GEDCOM PEDI to preserve adoptive parent-child semantics", () => {
   assert.equal(draft.parentChildRelationships[0].pedigree, "adopted");
 });
 
+test("preserves GEDCOM privacy restriction metadata on imported people", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Private /Person/",
+    "1 RESN confidential",
+    "1 _LIVING Y",
+    "0 TRLR",
+  ].join("\n"));
+
+  const person = draft.people[0];
+  assert.equal(person.privacyStatus, "confidential");
+  assert.equal(person.isLiving, true);
+});
+
 test("reports families that reference missing people", () => {
   const draft = buildGedcomImportDraft([
     "0 HEAD",

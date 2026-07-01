@@ -341,6 +341,7 @@ export type PersonStatus =
   | "гіпотетична"
   | "сумнівна"
   | "спростована";
+export type PersonPrivacyStatus = "private" | "project" | "public" | "confidential";
 
 export interface Person extends BaseEntity {
   researchId: EntityId;
@@ -366,6 +367,8 @@ export interface Person extends BaseEntity {
   religion: string;
   occupation: string;
   status: PersonStatus;
+  isLiving: boolean;
+  privacyStatus: PersonPrivacyStatus;
   notes: string;
   birthScans: ScanAttachment[];
   marriageScans: ScanAttachment[];

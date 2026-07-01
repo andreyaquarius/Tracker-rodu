@@ -123,16 +123,32 @@ function personDraftFromRecord(parseResult: GedcomParseResult, record: GedcomRec
       familyXref: line.value,
       pedigree: normalizePedigree(childValue(parseResult.lines, line, "PEDI")),
     }));
+  const privacyStatus = gedcomResnToPrivacyStatus(childValueByTag(childLines, "RESN"));
+  const isLiving = gedcomLivingValue(childValueByTag(childLines, "LIVING") || childValueByTag(childLines, "_LIVING") || childValueByTag(childLines, "LIVN"));
 
   return {
     xref: record.pointer ?? "",
     gender: gedcomSexToGender(childValueByTag(childLines, "SEX")),
+    isLiving,
+    privacyStatus,
     names: names.length ? names : [blankNameDraft()],
     events,
     fams,
     famc,
     rawLineNumber: record.lineNumber,
   };
+}
+
+function gedcomResnToPrivacyStatus(value: string): "private" | "project" | "public" | "confidential" {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "confidential" || normalized === "locked") return "confidential";
+  if (normalized === "privacy") return "private";
+  return "project";
+}
+
+function gedcomLivingValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "y" || normalized === "yes" || normalized === "true" || normalized === "1";
 }
 
 function familyDraftFromRecord(parseResult: GedcomParseResult, record: GedcomRecord): GedcomImportFamilyDraft {

@@ -20,6 +20,8 @@ export interface FamilyTreeProjectionNode {
   events: FamilyTreePersonTimelineEvent[];
   gender: Person["gender"];
   status: Person["status"];
+  isLiving: boolean;
+  privacyStatus: Person["privacyStatus"];
   hasDates: boolean;
   hasPlaces: boolean;
 }
@@ -176,6 +178,8 @@ export function personToProjectionNode(projectId: string, person: Person): Famil
     events,
     gender: person.gender,
     status: person.status,
+    isLiving: person.isLiving ?? false,
+    privacyStatus: person.privacyStatus ?? "private",
     hasDates,
     hasPlaces,
   };

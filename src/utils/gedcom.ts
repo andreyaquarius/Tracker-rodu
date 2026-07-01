@@ -182,6 +182,8 @@ function addIndividual(
 
   addLine(lines, 0, "INDI", "", personXref);
   addName(lines, node);
+  const privacyRestriction = gedcomPrivacyRestriction(node);
+  if (privacyRestriction) addLine(lines, 1, "RESN", privacyRestriction);
 
   for (const name of node.names.filter((name) => !name.isPrimary)) {
     addLine(lines, 1, "NAME", formatGedcomName(name.givenName, name.patronymic, name.surname, name.fullName));
@@ -215,6 +217,12 @@ function addIndividual(
       if (edge.evidenceStatus !== "unknown") addLine(lines, 2, "NOTE", `Evidence: ${edge.evidenceStatus}`);
     }
   }
+}
+
+function gedcomPrivacyRestriction(node: FamilyTreeProjectionNode): "privacy" | "confidential" | "" {
+  if (node.privacyStatus === "confidential") return "confidential";
+  if (node.isLiving || node.privacyStatus === "private") return "privacy";
+  return "";
 }
 
 function addName(lines: string[], node: FamilyTreeProjectionNode): void {

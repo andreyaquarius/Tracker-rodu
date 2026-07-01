@@ -689,6 +689,8 @@ function PersonOverview({
     ["Дослідження", research?.title || (person.researchId ? "Недоступне дослідження" : "Без прив’язки")],
     ["Статус", person.status],
     ["Стать", person.gender],
+    ["Жива особа", person.isLiving ? "так" : "ні"],
+    ["Приватність у дереві", personPrivacyStatusLabel(person.privacyStatus)],
     ["Прізвище", person.surname],
     ["Ім’я", person.givenName],
     ["По батькові", person.patronymic],
@@ -759,6 +761,20 @@ function PersonOverview({
       />
     </div>
   );
+}
+
+function personPrivacyStatusLabel(value: Person["privacyStatus"]): string {
+  switch (value) {
+    case "project":
+      return "у межах проєкту";
+    case "public":
+      return "публічна";
+    case "confidential":
+      return "конфіденційна";
+    case "private":
+    default:
+      return "приватна";
+  }
 }
 
 function LinkedRecordsSection({

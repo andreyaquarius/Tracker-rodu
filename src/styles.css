@@ -985,6 +985,20 @@ tbody tr:hover { background: #fbfaf5; }
 .details-actions { margin: 24px -24px -24px; padding: 15px 24px; display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .field-wide { grid-column: 1 / -1; }
+.form-checkbox-label {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  min-height: 44px;
+  padding-top: 18px;
+}
+
+.form-checkbox-label input {
+  height: 18px;
+  margin: 0;
+  width: 18px;
+}
 .checkbox-field { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
 .checkbox-field input { width: 18px; min-height: 18px; }
 .checkbox-field span { margin: 0; }

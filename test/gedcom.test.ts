@@ -37,6 +37,8 @@ function person(id: string, overrides: Partial<Person> = {}): Person {
     socialStatus: "",
     religion: "",
     occupation: "",
+    isLiving: false,
+    privacyStatus: "private",
     notes: "",
     birthScans: [],
     marriageScans: [],
@@ -104,6 +106,7 @@ test("exports projection to GEDCOM individuals and families", () => {
 
   assert.match(result.text, /0 HEAD/);
   assert.match(result.text, /1 CHAR UTF-8/);
+  assert.match(result.text, /1 RESN privacy/);
   assert.match(result.text, new RegExp(`0 ${escapeRegExp(result.individualXrefs.child)} INDI`));
   assert.match(result.text, /1 NAME .*\/Гурський\//);
   assert.match(result.text, /1 BIRT\n2 DATE 6 JUN 1896\n2 PLAC Трубіївка/);

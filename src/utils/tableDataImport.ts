@@ -367,7 +367,8 @@ function personFieldType(key: string): FieldConfig["type"] {
   if (key === "researchId") return "research";
   if (["birthDate", "marriageDate", "deathDate"].includes(key)) return "date";
   if (["birthYearFrom", "birthYearTo", "deathYearFrom", "deathYearTo"].includes(key)) return "number";
-  if (["gender", "status"].includes(key)) return "select";
+  if (key === "isLiving") return "checkbox";
+  if (["gender", "status", "privacyStatus"].includes(key)) return "select";
   if (["residencePlaces", "notes"].includes(key)) return "textarea";
   return "text";
 }
@@ -375,6 +376,7 @@ function personFieldType(key: string): FieldConfig["type"] {
 function personFieldOptions(key: string): string[] | undefined {
   if (key === "gender") return ["невідомо", "чоловік", "жінка"];
   if (key === "status") return ["доведена", "частково доведена", "гіпотетична", "сумнівна", "спростована"];
+  if (key === "privacyStatus") return ["private", "project", "public", "confidential"];
   return undefined;
 }
 
@@ -498,6 +500,7 @@ function coerceFieldValue(
   if (field.type === "number") return value.replace(/\s+/g, "");
   if (field.type === "date") return normalizeDateValue(value);
   if (field.type === "select") {
+    if (field.key === "privacyStatus") return normalizePersonPrivacyImportValue(value, rowNumber, warnings);
     if (!field.options?.length || field.options.includes(value)) return value;
     warnings.push(`Рядок ${rowNumber}: значення «${value}» не входить до списку для поля «${field.label}».`);
     return "";
@@ -514,6 +517,30 @@ function coerceFieldValue(
       .filter((participant): participant is FindingParticipant => Boolean(participant));
   }
   return value;
+}
+
+function normalizePersonPrivacyImportValue(value: string, rowNumber: number, warnings: string[]): string {
+  const normalized = normalizeLabel(value);
+  const mapping: Record<string, string> = {
+    private: "private",
+    приватна: "private",
+    приватний: "private",
+    project: "project",
+    "у межах проєкту": "project",
+    "в межах проєкту": "project",
+    проєкт: "project",
+    проект: "project",
+    public: "public",
+    публічна: "public",
+    публічний: "public",
+    confidential: "confidential",
+    конфіденційна: "confidential",
+    конфіденційний: "confidential",
+  };
+  const mapped = mapping[normalized];
+  if (mapped) return mapped;
+  warnings.push(`Рядок ${rowNumber}: значення «${value}» не входить до списку для поля «Приватність у дереві».`);
+  return "private";
 }
 
 function coerceCustomValue(definition: CustomFieldDefinition, value: string): CustomFieldValue {
