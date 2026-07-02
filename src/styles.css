@@ -3360,6 +3360,35 @@ tbody tr:hover { background: #fbfaf5; }
     font-size: 15px;
   }
   .help-topbar-button span { display: none; }
+  .announcement-popover {
+    position: fixed;
+    top: 64px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - 84px);
+    padding: 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border-radius: 12px;
+    box-sizing: border-box;
+  }
+  .announcement-popover-header {
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .announcement-popover-header strong {
+    font-size: 19px;
+  }
+  .announcement-item {
+    padding: 11px;
+  }
+  .announcement-item strong,
+  .announcement-item p,
+  .announcement-item a {
+    overflow-wrap: anywhere;
+  }
   .topbar .button-secondary { padding: 8px 10px; font-size: 10px; }
   .topbar-brand { display: none; }
   .stat-grid, .backup-grid { grid-template-columns: 1fr; }
