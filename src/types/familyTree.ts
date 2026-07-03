@@ -317,6 +317,138 @@ export interface FamilyTreeGraphIssue {
   relationshipIds?: EntityId[];
 }
 
+export type FamilyTreeGraphMode = "family" | "ancestors" | "descendants";
+
+export type FamilyTreeGraphIssueCode =
+  | "selfRelationship"
+  | "duplicateParentChild"
+  | "biologicalCycle"
+  | "repeatedAncestor"
+  | "missingPreferredParentSet"
+  | "privateLivingPersonVisible"
+  | "missingRootPerson"
+  | "missingTree"
+  | (string & {});
+
+export type FamilyTreeEdgeVisibility = "visible" | "faded" | "hidden";
+
+export interface FamilyTreeGraphQuery {
+  projectId: EntityId;
+  treeId?: EntityId;
+  rootPersonId?: EntityId;
+  mode: FamilyTreeGraphMode;
+  maxDepth?: number;
+  includeAssociations?: boolean;
+  includeDisproven?: boolean;
+  includePrivateLiving?: boolean;
+  problemsMode?: boolean;
+}
+
+export interface FamilyTreeEdgeStyleDto {
+  lineStyle: Extract<FamilyTreeLineStyle, "solid" | "dashed" | "dotted">;
+  visibility: FamilyTreeEdgeVisibility;
+  marker?: "warning" | "disproven";
+}
+
+export interface FamilyTreeOccurrenceDto {
+  id: string;
+  personId: EntityId;
+  mode: FamilyTreeGraphMode;
+  path: EntityId[];
+  generation: number;
+  depth: number;
+  duplicateIndex: number;
+  isRepeated: boolean;
+  familyGroupId?: EntityId | null;
+  parentSetId?: EntityId | null;
+  layout?: {
+    x: number;
+    y: number;
+    isCollapsed: boolean;
+  };
+}
+
+export interface FamilyTreeNodeDto {
+  personId: EntityId;
+  displayName: string;
+  primaryName: FamilyTreePersonName | null;
+  names: FamilyTreePersonName[];
+  events: FamilyTreePersonTimelineEvent[];
+  gender: string;
+  status: string;
+  isLiving: boolean;
+  privacyStatus: FamilyTreePrivacyStatus;
+  redacted: boolean;
+  memberRole?: FamilyTreePersonRole;
+  occurrenceIds: string[];
+}
+
+export interface FamilyTreeEdgeDto {
+  id: string;
+  kind: FamilyTreeEdgeKind;
+  relationshipId: EntityId;
+  fromPersonId: EntityId;
+  toPersonId: EntityId;
+  fromOccurrenceId?: string;
+  toOccurrenceId?: string;
+  relationshipType: string;
+  evidenceStatus: EvidenceStatus;
+  confidence: number;
+  isBloodline?: boolean;
+  parentSetId?: EntityId | null;
+  familyGroupId?: EntityId | null;
+  sourceDocumentId?: EntityId | null;
+  sourceFindingId?: EntityId | null;
+  style: FamilyTreeEdgeStyleDto;
+  metadata: Record<string, unknown>;
+}
+
+export interface FamilyTreeGroupDto {
+  id: EntityId;
+  treeId: EntityId;
+  groupType: FamilyGroupType | ParentSetType;
+  label: string;
+  primaryPartnerIds: EntityId[];
+  partnerIds: EntityId[];
+  parentIds: EntityId[];
+  childIds: EntityId[];
+  memberIds: EntityId[];
+  parentSetIds: EntityId[];
+  metadata: Record<string, unknown>;
+}
+
+export interface FamilyTreeIssueDto {
+  code: FamilyTreeGraphIssueCode;
+  severity: FamilyTreeGraphIssue["severity"];
+  message: string;
+  personIds: EntityId[];
+  relationshipIds: EntityId[];
+  occurrenceIds: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface FamilyTreeGraphDto {
+  projectId: EntityId;
+  treeId: EntityId;
+  mode: FamilyTreeGraphMode;
+  rootPersonId: EntityId | null;
+  tree: FamilyTree | null;
+  nodes: FamilyTreeNodeDto[];
+  occurrences: FamilyTreeOccurrenceDto[];
+  edges: FamilyTreeEdgeDto[];
+  groups: FamilyTreeGroupDto[];
+  issues: FamilyTreeIssueDto[];
+  stats: {
+    persons: number;
+    occurrences: number;
+    edges: number;
+    groups: number;
+    issues: number;
+    repeatedPersons: number;
+    hiddenDisprovenEdges: number;
+  };
+}
+
 export interface FamilyTreeGraphEdgeIntent {
   kind: FamilyTreeEdgeKind;
   fromPersonId: EntityId;
