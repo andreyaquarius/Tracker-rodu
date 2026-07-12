@@ -303,6 +303,34 @@ export async function listProjectPeople(projectId: string): Promise<{
   };
 }
 
+export async function getProjectPerson(
+  projectId: string,
+  personId: string,
+): Promise<Person | null> {
+  const { data, error } = await getSupabaseClient()
+    .from("persons")
+    .select(PERSON_SELECT)
+    .eq("project_id", projectId)
+    .eq("id", personId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? personFromRow(data as PersonRow) : null;
+}
+
+export async function getProjectPersonRelation(
+  projectId: string,
+  relationId: string,
+): Promise<PersonRelation | null> {
+  const { data, error } = await getSupabaseClient()
+    .from("person_relations")
+    .select(RELATION_SELECT)
+    .eq("project_id", projectId)
+    .eq("id", relationId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? relationFromRow(data as RelationRow) : null;
+}
+
 export async function importProjectPeople(
   projectId: string,
   persons: Person[],

@@ -234,6 +234,159 @@ export async function listProjectAnalysisRecords(projectId: string): Promise<{
   };
 }
 
+export async function listPersonAnalysisRecords(
+  projectId: string,
+  personId: string,
+): Promise<{
+  hypotheses: Hypothesis[];
+  archiveRequests: ArchiveRequest[];
+}> {
+  const client = getSupabaseClient();
+  const [hypothesisLinksResult, requestLinksResult] = await Promise.all([
+    client
+      .from("hypothesis_links")
+      .select("hypothesis_id")
+      .eq("project_id", projectId)
+      .eq("target_type", "person")
+      .eq("target_id", personId),
+    client
+      .from("archive_request_persons")
+      .select("archive_request_id")
+      .eq("project_id", projectId)
+      .eq("person_id", personId),
+  ]);
+  if (hypothesisLinksResult.error) throw hypothesisLinksResult.error;
+  if (requestLinksResult.error) throw requestLinksResult.error;
+
+  const hypothesisIds = [...new Set(
+    (hypothesisLinksResult.data as Array<{ hypothesis_id: string }>).map(
+      (row) => row.hypothesis_id,
+    ),
+  )];
+  const requestIds = [...new Set(
+    (requestLinksResult.data as Array<{ archive_request_id: string }>).map(
+      (row) => row.archive_request_id,
+    ),
+  )];
+  const [hypothesesResult, allHypothesisLinksResult, requestsResult, allRequestPersonsResult] =
+    await Promise.all([
+      hypothesisIds.length
+        ? client
+            .from("hypotheses")
+            .select(HYPOTHESIS_SELECT)
+            .eq("project_id", projectId)
+            .in("id", hypothesisIds)
+            .order("updated_at", { ascending: false })
+            .order("id", { ascending: true })
+        : Promise.resolve({ data: [] as HypothesisRow[], error: null }),
+      hypothesisIds.length
+        ? client
+            .from("hypothesis_links")
+            .select("hypothesis_id, target_type, target_id")
+            .eq("project_id", projectId)
+            .in("hypothesis_id", hypothesisIds)
+        : Promise.resolve({ data: [] as HypothesisLinkRow[], error: null }),
+      requestIds.length
+        ? client
+            .from("archive_requests")
+            .select(ARCHIVE_REQUEST_SELECT)
+            .eq("project_id", projectId)
+            .in("id", requestIds)
+            .order("updated_at", { ascending: false })
+            .order("id", { ascending: true })
+        : Promise.resolve({ data: [] as ArchiveRequestRow[], error: null }),
+      requestIds.length
+        ? client
+            .from("archive_request_persons")
+            .select("archive_request_id, person_id")
+            .eq("project_id", projectId)
+            .in("archive_request_id", requestIds)
+        : Promise.resolve({ data: [] as ArchiveRequestPersonRow[], error: null }),
+    ]);
+  if (hypothesesResult.error) throw hypothesesResult.error;
+  if (allHypothesisLinksResult.error) throw allHypothesisLinksResult.error;
+  if (requestsResult.error) throw requestsResult.error;
+  if (allRequestPersonsResult.error) throw allRequestPersonsResult.error;
+
+  const linksByHypothesis = new Map<string, HypothesisLinkRow[]>();
+  for (const row of allHypothesisLinksResult.data as HypothesisLinkRow[]) {
+    linksByHypothesis.set(row.hypothesis_id, [
+      ...(linksByHypothesis.get(row.hypothesis_id) ?? []),
+      row,
+    ]);
+  }
+  const personsByRequest = new Map<string, string[]>();
+  for (const row of allRequestPersonsResult.data as ArchiveRequestPersonRow[]) {
+    personsByRequest.set(row.archive_request_id, [
+      ...(personsByRequest.get(row.archive_request_id) ?? []),
+      row.person_id,
+    ]);
+  }
+
+  return {
+    hypotheses: (hypothesesResult.data as HypothesisRow[]).map((row) =>
+      hypothesisFromRow(row, linksByHypothesis.get(row.id) ?? []),
+    ),
+    archiveRequests: (requestsResult.data as ArchiveRequestRow[]).map((row) =>
+      archiveRequestFromRow(row, personsByRequest.get(row.id) ?? []),
+    ),
+  };
+}
+
+export async function getProjectHypothesis(
+  projectId: string,
+  hypothesisId: string,
+): Promise<Hypothesis | null> {
+  const client = getSupabaseClient();
+  const [hypothesisResult, linksResult] = await Promise.all([
+    client
+      .from("hypotheses")
+      .select(HYPOTHESIS_SELECT)
+      .eq("project_id", projectId)
+      .eq("id", hypothesisId)
+      .maybeSingle(),
+    client
+      .from("hypothesis_links")
+      .select("hypothesis_id, target_type, target_id")
+      .eq("project_id", projectId)
+      .eq("hypothesis_id", hypothesisId),
+  ]);
+  if (hypothesisResult.error) throw hypothesisResult.error;
+  if (linksResult.error) throw linksResult.error;
+  if (!hypothesisResult.data) return null;
+  return hypothesisFromRow(
+    hypothesisResult.data as HypothesisRow,
+    linksResult.data as HypothesisLinkRow[],
+  );
+}
+
+export async function getProjectArchiveRequest(
+  projectId: string,
+  requestId: string,
+): Promise<ArchiveRequest | null> {
+  const client = getSupabaseClient();
+  const [requestResult, personResult] = await Promise.all([
+    client
+      .from("archive_requests")
+      .select(ARCHIVE_REQUEST_SELECT)
+      .eq("project_id", projectId)
+      .eq("id", requestId)
+      .maybeSingle(),
+    client
+      .from("archive_request_persons")
+      .select("person_id")
+      .eq("project_id", projectId)
+      .eq("archive_request_id", requestId),
+  ]);
+  if (requestResult.error) throw requestResult.error;
+  if (personResult.error) throw personResult.error;
+  if (!requestResult.data) return null;
+  return archiveRequestFromRow(
+    requestResult.data as ArchiveRequestRow,
+    (personResult.data as Array<{ person_id: string }>).map((row) => row.person_id),
+  );
+}
+
 async function replaceHypothesisLinks(
   projectId: string,
   hypothesis: Hypothesis,

@@ -327,6 +327,7 @@ export interface ActivityLogEntry {
   text: string;
   module: ActivityModule;
   relatedId: EntityId;
+  mutationEntityId?: EntityId;
 }
 
 export interface Hypothesis extends BaseEntity {

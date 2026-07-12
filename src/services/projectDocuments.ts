@@ -197,6 +197,34 @@ export async function listProjectDocuments(projectId: string): Promise<{
   };
 }
 
+export async function getProjectDocument(
+  projectId: string,
+  documentId: string,
+): Promise<DocumentRecord | null> {
+  const { data, error } = await getSupabaseClient()
+    .from("documents")
+    .select(DOCUMENT_SELECT)
+    .eq("project_id", projectId)
+    .eq("id", documentId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? documentFromRow(data as DocumentRow) : null;
+}
+
+export async function getProjectYearMatrixRecord(
+  projectId: string,
+  recordId: string,
+): Promise<YearMatrixRecord | null> {
+  const { data, error } = await getSupabaseClient()
+    .from("year_matrix")
+    .select(YEAR_MATRIX_SELECT)
+    .eq("project_id", projectId)
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? matrixFromRow(data as YearMatrixRow) : null;
+}
+
 export async function importProjectDocuments(
   projectId: string,
   documents: DocumentRecord[],

@@ -10,27 +10,34 @@ import {
   createGlobalSearchIndex,
   type HighlightRange,
 } from "../utils/globalSearch";
+import {
+  searchProjectRecords,
+  type ProjectSearchResult,
+} from "../services/projectSearch";
 
 export function DashboardPage({
   db,
   stats,
   dashboardTasks,
+  projectId,
   onNavigate,
   onOpenSearchResult,
-  onRequestSearchData,
 }: {
   db: AppDatabase;
   stats: ProjectDashboardStats;
   dashboardTasks: ProjectDashboardTask[];
+  projectId?: string;
   onNavigate: (page: PageKey) => void;
   onOpenSearchResult: (page: PageKey, query: string, entityId?: string) => void;
-  onRequestSearchData: () => void;
 }) {
   const [globalQuery, setGlobalQuery] = useState("");
+  const [remoteResults, setRemoteResults] = useState<ProjectSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const [showAllActivity, setShowAllActivity] = useState(false);
   const deferredGlobalQuery = useDeferredValue(globalQuery);
   const searchedQuery = deferredGlobalQuery.trim();
-  const hasSearchQuery = searchedQuery.length >= 2;
+  const hasSearchQuery = searchedQuery.length >= 3;
   const statCards = [
     ["Дослідження", stats.researches, "researches" as PageKey],
     ["Документи", stats.documents, "documents" as PageKey],
@@ -59,12 +66,18 @@ export function DashboardPage({
   // can contain tens of thousands of people and findings, and the dashboard
   // should remain instant when the search box is not being used.
   const globalSearchIndex = useMemo(
-    () => hasSearchQuery ? createGlobalSearchIndex(db) : null,
-    [db, hasSearchQuery],
+    () => !projectId && hasSearchQuery ? createGlobalSearchIndex(db) : null,
+    [db, hasSearchQuery, projectId],
   );
   const globalResults = useMemo(
-    () => globalSearchIndex?.search(searchedQuery) ?? [],
-    [globalSearchIndex, searchedQuery],
+    () => projectId
+      ? remoteResults.map((result) => ({
+          ...result,
+          titleMatches: [] as HighlightRange[],
+          descriptionMatches: [] as HighlightRange[],
+        }))
+      : globalSearchIndex?.search(searchedQuery) ?? [],
+    [globalSearchIndex, projectId, remoteResults, searchedQuery],
   );
   const groupedResults = useMemo(
     () => Object.entries(
@@ -77,10 +90,39 @@ export function DashboardPage({
   );
 
   useEffect(() => {
-    if (globalQuery.trim().length < 2) return;
-    const timer = window.setTimeout(onRequestSearchData, 300);
-    return () => window.clearTimeout(timer);
-  }, [globalQuery, onRequestSearchData]);
+    if (!projectId || searchedQuery.length < 3) {
+      setRemoteResults([]);
+      setSearchLoading(false);
+      setSearchError("");
+      return;
+    }
+
+    let active = true;
+    setRemoteResults([]);
+    setSearchLoading(true);
+    setSearchError("");
+    const timer = window.setTimeout(() => {
+      void searchProjectRecords(projectId, searchedQuery)
+        .then((results) => {
+          if (active) setRemoteResults(results);
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          setRemoteResults([]);
+          setSearchError(
+            error instanceof Error ? error.message : "Не вдалося виконати пошук.",
+          );
+        })
+        .finally(() => {
+          if (active) setSearchLoading(false);
+        });
+    }, 300);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [projectId, searchedQuery]);
 
   return (
     <>
@@ -100,7 +142,9 @@ export function DashboardPage({
             <h2>Знайдіть будь-який запис</h2>
           </div>
           {hasSearchQuery ? (
-            <span className="global-result-count">{globalResults.length} результатів</span>
+            <span className="global-result-count">
+              {searchLoading ? "Пошук…" : `${globalResults.length} результатів`}
+            </span>
           ) : null}
         </div>
         <label className="global-search-input">
@@ -120,7 +164,11 @@ export function DashboardPage({
           </div>
         </label>
         {hasSearchQuery ? (
-          globalResults.length ? (
+          searchLoading ? (
+            <div className="global-search-empty">Шукаємо в базі даних…</div>
+          ) : searchError ? (
+            <div className="global-search-empty">{searchError}</div>
+          ) : globalResults.length ? (
             <div className="global-search-results">
               {groupedResults.map(([label, results]) => (
                 <section key={label}>
@@ -161,7 +209,7 @@ export function DashboardPage({
             <div className="global-search-empty">За запитом «{searchedQuery}» нічого не знайдено.</div>
           )
         ) : (
-          <p className="global-search-hint">Введіть щонайменше 2 символи. Пошук охоплює всі робочі розділи.</p>
+          <p className="global-search-hint">Введіть щонайменше 3 символи. Пошук виконується на сервері без завантаження всього проєкту.</p>
         )}
       </section>
 

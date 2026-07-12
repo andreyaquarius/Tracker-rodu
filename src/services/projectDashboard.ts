@@ -24,6 +24,22 @@ export interface ProjectDashboardTask {
   priority: string;
 }
 
+export interface ProjectDashboardLoadOptions {
+  force?: boolean;
+}
+
+type ProjectDashboardPayload = {
+  stats: ProjectDashboardStats;
+  tasks: ProjectDashboardTask[];
+};
+
+const DASHBOARD_CACHE_TTL_MS = 20_000;
+const dashboardCache = new Map<string, {
+  expiresAt: number;
+  value: ProjectDashboardPayload;
+}>();
+const dashboardRequests = new Map<string, Promise<ProjectDashboardPayload>>();
+
 const EMPTY_STATS: ProjectDashboardStats = {
   researches: 0,
   documents: 0,
@@ -46,10 +62,33 @@ function numberValue(value: unknown): number {
 
 export async function loadProjectDashboard(
   projectId: string,
-): Promise<{
-  stats: ProjectDashboardStats;
-  tasks: ProjectDashboardTask[];
-}> {
+  options: ProjectDashboardLoadOptions = {},
+): Promise<ProjectDashboardPayload> {
+  const cached = dashboardCache.get(projectId);
+  if (!options.force && cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const activeRequest = dashboardRequests.get(projectId);
+  if (activeRequest) return activeRequest;
+
+  const request = fetchProjectDashboard(projectId);
+  dashboardRequests.set(projectId, request);
+  try {
+    const value = await request;
+    dashboardCache.set(projectId, {
+      expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS,
+      value,
+    });
+    return value;
+  } finally {
+    dashboardRequests.delete(projectId);
+  }
+}
+
+async function fetchProjectDashboard(
+  projectId: string,
+): Promise<ProjectDashboardPayload> {
   const client = getSupabaseClient();
   const [statsResult, tasksResult] = await Promise.all([
     client.rpc("get_dashboard_stats", { target_project_id: projectId }),
@@ -96,6 +135,14 @@ export async function loadProjectDashboard(
       priority: String(row.priority ?? ""),
     })),
   };
+}
+
+export function invalidateProjectDashboard(projectId?: string): void {
+  if (projectId) {
+    dashboardCache.delete(projectId);
+    return;
+  }
+  dashboardCache.clear();
 }
 
 export function emptyProjectDashboardStats(): ProjectDashboardStats {

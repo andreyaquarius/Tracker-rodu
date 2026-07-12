@@ -11,6 +11,14 @@ export type ProjectRealtimeGroup =
   | "custom"
   | "activity";
 
+export type ProjectRealtimeEntityChange = {
+  group: ProjectRealtimeGroup;
+  module: string;
+  action: string;
+  entityId: string;
+  details: Record<string, unknown>;
+};
+
 function groupForModule(module: string): ProjectRealtimeGroup | null {
   if (module === "researches") return "researches";
   if (module === "persons") return "people";
@@ -28,21 +36,34 @@ export function subscribeProjectRealtime(
   onGroupsChanged: (
     groups: Set<ProjectRealtimeGroup>,
     changedByOtherUser: boolean,
+    changes: ProjectRealtimeEntityChange[],
   ) => void,
 ): () => void {
   const client = getSupabaseClient();
   const channel: RealtimeChannel = client.channel(`project-activity:${projectId}`);
   const pending = new Set<ProjectRealtimeGroup>();
+  const pendingChanges = new Map<string, ProjectRealtimeEntityChange>();
   let timer: number | null = null;
 
-  const queue = (group: ProjectRealtimeGroup) => {
+  const queue = (
+    group: ProjectRealtimeGroup,
+    change?: ProjectRealtimeEntityChange,
+  ) => {
     pending.add(group);
+    if (change) {
+      pendingChanges.set(
+        `${change.module}:${change.entityId || change.action}`,
+        change,
+      );
+    }
     if (timer !== null) return;
     timer = window.setTimeout(() => {
       timer = null;
       const changed = new Set(pending);
+      const entityChanges = [...pendingChanges.values()];
       pending.clear();
-      onGroupsChanged(changed, true);
+      pendingChanges.clear();
+      onGroupsChanged(changed, true, entityChanges);
     }, 400);
   };
 
@@ -66,11 +87,22 @@ export function subscribeProjectRealtime(
         : {};
       const module = String(details.module ?? record.entity_type ?? "");
       const action = String(record.action ?? "");
+      const entityId = String(
+        details.entityId ?? details.relatedId ?? record.entity_id ?? "",
+      );
       if (action.startsWith("field_") || action.startsWith("section_")) {
-        queue("custom");
+        queue("custom", {
+          group: "custom",
+          module,
+          action,
+          entityId,
+          details,
+        });
       } else {
         const group = groupForModule(module);
-        if (group) queue(group);
+        if (group) {
+          queue(group, { group, module, action, entityId, details });
+        }
       }
       queue("activity");
     },
