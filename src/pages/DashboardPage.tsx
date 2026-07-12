@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { AppDatabase } from "../types";
 import type { PageKey } from "../components/Sidebar";
 import type {
@@ -28,6 +28,9 @@ export function DashboardPage({
 }) {
   const [globalQuery, setGlobalQuery] = useState("");
   const [showAllActivity, setShowAllActivity] = useState(false);
+  const deferredGlobalQuery = useDeferredValue(globalQuery);
+  const searchedQuery = deferredGlobalQuery.trim();
+  const hasSearchQuery = searchedQuery.length >= 2;
   const statCards = [
     ["Дослідження", stats.researches, "researches" as PageKey],
     ["Документи", stats.documents, "documents" as PageKey],
@@ -52,10 +55,16 @@ export function DashboardPage({
   const recentActivity = showAllActivity
     ? sortedActivity
     : sortedActivity.slice(0, 10);
-  const globalSearchIndex = useMemo(() => createGlobalSearchIndex(db), [db]);
+  // Building the full-text index is intentionally lazy. Large GEDCOM projects
+  // can contain tens of thousands of people and findings, and the dashboard
+  // should remain instant when the search box is not being used.
+  const globalSearchIndex = useMemo(
+    () => hasSearchQuery ? createGlobalSearchIndex(db) : null,
+    [db, hasSearchQuery],
+  );
   const globalResults = useMemo(
-    () => globalSearchIndex.search(globalQuery),
-    [globalQuery, globalSearchIndex],
+    () => globalSearchIndex?.search(searchedQuery) ?? [],
+    [globalSearchIndex, searchedQuery],
   );
   const groupedResults = useMemo(
     () => Object.entries(
@@ -68,9 +77,9 @@ export function DashboardPage({
   );
 
   useEffect(() => {
-    if (globalQuery.trim().length >= 2) {
-      onRequestSearchData();
-    }
+    if (globalQuery.trim().length < 2) return;
+    const timer = window.setTimeout(onRequestSearchData, 300);
+    return () => window.clearTimeout(timer);
   }, [globalQuery, onRequestSearchData]);
 
   return (
@@ -90,7 +99,7 @@ export function DashboardPage({
             <span className="eyebrow">Пошук по всьому застосунку</span>
             <h2>Знайдіть будь-який запис</h2>
           </div>
-          {globalQuery.trim().length >= 2 ? (
+          {hasSearchQuery ? (
             <span className="global-result-count">{globalResults.length} результатів</span>
           ) : null}
         </div>
@@ -110,7 +119,7 @@ export function DashboardPage({
             ) : null}
           </div>
         </label>
-        {globalQuery.trim().length >= 2 ? (
+        {hasSearchQuery ? (
           globalResults.length ? (
             <div className="global-search-results">
               {groupedResults.map(([label, results]) => (
@@ -123,7 +132,7 @@ export function DashboardPage({
                         key={`${result.module}-${result.id}`}
                         onClick={() => onOpenSearchResult(
                           result.page,
-                          globalQuery.trim(),
+                          searchedQuery,
                           result.entityId,
                         )}
                       >
@@ -149,7 +158,7 @@ export function DashboardPage({
               ))}
             </div>
           ) : (
-            <div className="global-search-empty">За запитом «{globalQuery.trim()}» нічого не знайдено.</div>
+            <div className="global-search-empty">За запитом «{searchedQuery}» нічого не знайдено.</div>
           )
         ) : (
           <p className="global-search-hint">Введіть щонайменше 2 символи. Пошук охоплює всі робочі розділи.</p>

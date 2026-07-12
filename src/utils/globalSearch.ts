@@ -46,6 +46,15 @@ interface SearchDocument {
   searchText: string;
 }
 
+interface SearchBuildContext {
+  researchById: Map<string, Research>;
+  documentById: Map<string, DocumentRecord>;
+  findingById: Map<string, Finding>;
+  personById: Map<string, Person>;
+  customFieldsByModule: Map<CustomFieldModule, CustomFieldDefinition[]>;
+  customRecordsBySection: Map<string, AppDatabase["customSectionRecords"]>;
+}
+
 export interface GlobalSearchIndex {
   search: (query: string) => GlobalSearchResult[];
 }
@@ -77,8 +86,11 @@ const fuseOptions: IFuseOptions<SearchDocument> = {
 
 export function createGlobalSearchIndex(db: AppDatabase): GlobalSearchIndex {
   const documents: SearchDocument[] = [];
+  const context = createSearchBuildContext(db);
   const addCollection = (collection: CollectionKey, items: AppEntity[]) => {
-    for (const entity of items) documents.push(createDocument(db, collection, entity));
+    for (const entity of items) {
+      documents.push(createDocument(context, collection, entity));
+    }
   };
 
   addCollection("researches", db.researches);
@@ -119,7 +131,7 @@ export function createGlobalSearchIndex(db: AppDatabase): GlobalSearchIndex {
         searchText: `${path} ${section.name} ${section.description} ${customSectionFieldSearchText(field)}`,
       });
     }
-    for (const record of db.customSectionRecords.filter((item) => item.sectionId === section.id)) {
+    for (const record of context.customRecordsBySection.get(section.id) ?? []) {
       documents.push({
         id: record.id,
         entityId: record.id,
@@ -167,15 +179,40 @@ export function createGlobalSearchIndex(db: AppDatabase): GlobalSearchIndex {
   };
 }
 
+function createSearchBuildContext(db: AppDatabase): SearchBuildContext {
+  const customFieldsByModule = new Map<CustomFieldModule, CustomFieldDefinition[]>();
+  for (const field of db.settings.customFields) {
+    const fields = customFieldsByModule.get(field.module);
+    if (fields) fields.push(field);
+    else customFieldsByModule.set(field.module, [field]);
+  }
+
+  const customRecordsBySection = new Map<string, AppDatabase["customSectionRecords"]>();
+  for (const record of db.customSectionRecords) {
+    const records = customRecordsBySection.get(record.sectionId);
+    if (records) records.push(record);
+    else customRecordsBySection.set(record.sectionId, [record]);
+  }
+
+  return {
+    researchById: new Map(db.researches.map((item) => [item.id, item])),
+    documentById: new Map(db.documents.map((item) => [item.id, item])),
+    findingById: new Map(db.findings.map((item) => [item.id, item])),
+    personById: new Map(db.persons.map((item) => [item.id, item])),
+    customFieldsByModule,
+    customRecordsBySection,
+  };
+}
+
 function createDocument(
-  db: AppDatabase,
+  context: SearchBuildContext,
   module: CollectionKey,
   entity: AppEntity,
 ): SearchDocument {
   const research = "researchId" in entity
-    ? db.researches.find((item) => item.id === entity.researchId)
+    ? context.researchById.get(entity.researchId)
     : undefined;
-  const relatedText = relationText(db, entity);
+  const relatedText = relationText(context, entity);
   const title = entityTitle(module, entity);
   const description = entityDescription(module, entity, research);
   return {
@@ -186,7 +223,7 @@ function createDocument(
     moduleLabel: moduleLabels[module],
     title,
     description,
-    searchText: `${flatten(entity)} ${customFieldValuesSearchText(db, module, entity)} ${research?.title ?? ""} ${relatedText}`.trim(),
+    searchText: `${flatten(entity)} ${customFieldValuesSearchText(context, module, entity)} ${research?.title ?? ""} ${relatedText}`.trim(),
   };
 }
 
@@ -204,15 +241,14 @@ function createCustomFieldDocument(field: CustomFieldDefinition): SearchDocument
 }
 
 function customFieldValuesSearchText(
-  db: AppDatabase,
+  context: SearchBuildContext,
   module: CustomFieldModule,
   entity: AppEntity,
 ): string {
   const values = (
     entity as unknown as { customFields?: Record<string, unknown> }
   ).customFields ?? {};
-  return db.settings.customFields
-    .filter((field) => field.module === module)
+  return (context.customFieldsByModule.get(module) ?? [])
     .map((field) => `${field.label} ${field.options.join(" ")} ${flatten(values[field.id])}`)
     .join(" ");
 }
@@ -342,19 +378,34 @@ function entityDescription(
   }
 }
 
-function relationText(db: AppDatabase, entity: AppEntity): string {
+function relationText(context: SearchBuildContext, entity: AppEntity): string {
   const record = entity as unknown as Record<string, unknown>;
   const ids = [
     typeof record.documentId === "string" ? record.documentId : "",
     ...(Array.isArray(record.documentIds) ? record.documentIds : []),
   ].filter((value): value is string => typeof value === "string" && Boolean(value));
-  const findingIds = Array.isArray(record.findingIds) ? record.findingIds : [];
-  const personIds = Array.isArray(record.personIds) ? record.personIds : [];
-  return [
-    ...db.documents.filter((item) => ids.includes(item.id)).map((item) => flatten(item)),
-    ...db.findings.filter((item) => findingIds.includes(item.id)).map((item) => flatten(item)),
-    ...db.persons.filter((item) => personIds.includes(item.id)).map((item) => flatten(item)),
-  ].join(" ");
+  const findingIds = Array.isArray(record.findingIds)
+    ? record.findingIds.filter((value): value is string => typeof value === "string" && Boolean(value))
+    : [];
+  const personIds = Array.isArray(record.personIds)
+    ? record.personIds.filter((value): value is string => typeof value === "string" && Boolean(value))
+    : [];
+  if (!ids.length && !findingIds.length && !personIds.length) return "";
+
+  const related: string[] = [];
+  for (const id of new Set(ids)) {
+    const item = context.documentById.get(id);
+    if (item) related.push(flatten(item));
+  }
+  for (const id of new Set(findingIds)) {
+    const item = context.findingById.get(id);
+    if (item) related.push(flatten(item));
+  }
+  for (const id of new Set(personIds)) {
+    const item = context.personById.get(id);
+    if (item) related.push(flatten(item));
+  }
+  return related.join(" ");
 }
 
 function flatten(value: unknown): string {
