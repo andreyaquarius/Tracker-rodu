@@ -5,6 +5,7 @@ import type {
   CustomSectionRecord,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import { saveOptionalProjectCache } from "../utils/projectCache";
 
 type DefinitionRow = {
   id: string;
@@ -321,6 +322,7 @@ export async function importProjectCustomStructure(
 }
 
 const CACHE_PREFIX = "tracker-rodu-project-custom-structure:";
+const CUSTOM_STRUCTURE_CACHE_MAX_CHARS = 500_000;
 
 export function loadProjectCustomStructureCache(projectId: string) {
   try {
@@ -342,9 +344,10 @@ export function saveProjectCustomStructureCache(
   sections: CustomSectionDefinition[],
   records: CustomSectionRecord[],
 ): void {
-  localStorage.setItem(
+  saveOptionalProjectCache(
     `${CACHE_PREFIX}${projectId}`,
-    JSON.stringify({ definitions, sections, records }),
+    { definitions, sections, records },
+    CUSTOM_STRUCTURE_CACHE_MAX_CHARS,
   );
 }
 

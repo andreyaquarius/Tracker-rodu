@@ -8,7 +8,7 @@ import type {
   PersonEvent,
   PersonEventType,
 } from "../types";
-import { createId } from "./id";
+import { createId } from "./id.ts";
 
 export const PERSON_EVENTS_META_KEY = "__trackerRoduPersonEvents";
 export const FINDING_GEO_META_KEY = "geo";
@@ -27,13 +27,31 @@ export const DEFAULT_GEO_MARKER_COLOR = GEO_MARKER_COLORS[0];
 const eventLabels: Record<PersonEventType, string> = {
   birth: "Народження",
   baptism: "Хрещення",
+  christening: "Хрещення",
   marriage: "Шлюб",
+  divorce: "Розлучення",
   residence: "Проживання",
+  census: "Перепис населення",
+  revision_list: "Ревізький сказ",
+  confession_list: "Сповідний розпис",
+  household_register: "Погосподарська книга",
+  immigration: "Імміграція",
+  emigration: "Еміграція",
   military: "Військова служба",
+  occupation: "Професія або заняття",
+  education: "Освіта",
+  nationality: "Національність",
   death: "Смерть",
   burial: "Поховання",
+  cremation: "Кремація",
+  probate: "Спадкова справа",
+  mention: "Згадка у джерелі",
   other: "Інша подія",
 };
+
+export const PERSON_EVENT_TYPES = Object.freeze(
+  Object.keys(eventLabels) as PersonEventType[],
+);
 
 export function personEventLabel(type: PersonEventType): string {
   return eventLabels[type] ?? eventLabels.other;
@@ -124,6 +142,10 @@ function normalizePersonEvent(value: unknown, personId: string): PersonEvent | n
     title: typeof record.title === "string" ? record.title : personEventLabel(type),
     date: typeof record.date === "string" && record.date ? record.date : null,
     placeName: typeof record.placeName === "string" && record.placeName ? record.placeName : null,
+    value: typeof record.value === "string" && record.value ? record.value : null,
+    age: typeof record.age === "string" && record.age ? record.age : null,
+    cause: typeof record.cause === "string" && record.cause ? record.cause : null,
+    address: typeof record.address === "string" && record.address ? record.address : null,
     geo: normalizeGeo(record.geo),
     notes: typeof record.notes === "string" && record.notes ? record.notes : null,
   };
@@ -135,10 +157,13 @@ export function normalizePersonEvents(value: unknown, person: Pick<Person, "id" 
         .map((item) => normalizePersonEvent(item, person.id))
         .filter((item): item is PersonEvent => Boolean(item))
     : [];
-  const byType = new Map(saved.map((event) => [event.type, event]));
-  const standard = standardPersonEvents(person).map((event) => {
-    const savedEvent = byType.get(event.type);
-    return savedEvent
+  const byType = groupPersonEventsByType(saved);
+  const consumed = new Set<PersonEvent>();
+  const standard = standardPersonEvents(person).flatMap((event) => {
+    if (event.type === "residence" && (byType.get("residence")?.length ?? 0) > 0) return [];
+    const savedEvent = byType.get(event.type)?.[0];
+    if (savedEvent) consumed.add(savedEvent);
+    return [savedEvent
       ? {
           ...savedEvent,
           id: event.id,
@@ -147,20 +172,23 @@ export function normalizePersonEvents(value: unknown, person: Pick<Person, "id" 
           date: event.date,
           placeName: event.placeName,
         }
-      : event;
+      : event];
   });
-  const standardTypes = new Set(standard.map((event) => event.type));
   return [
     ...standard,
-    ...saved.filter((event) => !standardTypes.has(event.type)),
+    ...saved.filter((event) => !consumed.has(event)),
   ];
 }
 
 export function syncPersonEventsFromFields(person: Person): PersonEvent[] {
-  const current = new Map((person.events ?? []).map((event) => [event.type, event]));
-  return standardPersonEvents(person).map((event) => {
-    const previous = current.get(event.type);
-    return previous
+  const currentEvents = person.events ?? [];
+  const current = groupPersonEventsByType(currentEvents);
+  const consumed = new Set<PersonEvent>();
+  const standard = standardPersonEvents(person).flatMap((event) => {
+    if (event.type === "residence" && (current.get("residence")?.length ?? 0) > 0) return [];
+    const previous = current.get(event.type)?.[0];
+    if (previous) consumed.add(previous);
+    return [previous
       ? {
           ...previous,
           id: event.id,
@@ -169,8 +197,22 @@ export function syncPersonEventsFromFields(person: Person): PersonEvent[] {
           date: event.date,
           placeName: event.placeName,
         }
-      : event;
+      : event];
   });
+  return [
+    ...standard,
+    ...currentEvents.filter((event) => !consumed.has(event)),
+  ];
+}
+
+function groupPersonEventsByType(events: PersonEvent[]): Map<PersonEventType, PersonEvent[]> {
+  const result = new Map<PersonEventType, PersonEvent[]>();
+  for (const event of events) {
+    const group = result.get(event.type) ?? [];
+    group.push(event);
+    result.set(event.type, group);
+  }
+  return result;
 }
 
 export function stripInternalGeoFields(values: CustomFieldValues): CustomFieldValues {

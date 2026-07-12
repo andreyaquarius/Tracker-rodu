@@ -22,13 +22,18 @@ export interface FamilyTreeProjectionNode {
   status: Person["status"];
   isLiving: boolean;
   privacyStatus: Person["privacyStatus"];
+  rootRelationshipLabel?: string;
   hasDates: boolean;
   hasPlaces: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface FamilyTreeProjectionEdge extends FamilyTreeGraphEdgeIntent {
   id: string;
-  source: "legacy_relation";
+  source: "legacy_relation" | "graph_edge";
+  parentSetId?: string | null;
+  familyGroupId?: string | null;
+  metadata?: Record<string, unknown>;
 }
 
 export interface FamilyTreeProjection {
@@ -182,6 +187,9 @@ export function personToProjectionNode(projectId: string, person: Person): Famil
     privacyStatus: person.privacyStatus ?? "private",
     hasDates,
     hasPlaces,
+    metadata: {
+      personProfile: person,
+    },
   };
 }
 
@@ -209,6 +217,21 @@ export function deriveFamilyTreePersonNames(projectId: string, person: Person): 
       fullName: value,
       originalText: value,
       evidenceStatus: "unknown",
+      createdAt,
+      updatedAt,
+    }));
+  }
+
+  const maidenSurname = person.maidenSurname?.trim() ?? "";
+  if (maidenSurname && maidenSurname !== person.surname.trim()) {
+    const fullName = [maidenSurname, person.givenName, person.patronymic].filter(Boolean).join(" ");
+    names.push(nameRecord(projectId, person, "maiden-surname", "birth", {
+      surname: maidenSurname,
+      givenName: person.givenName,
+      patronymic: person.patronymic,
+      fullName,
+      originalText: fullName || maidenSurname,
+      evidenceStatus: statusToEvidence(person.status),
       createdAt,
       updatedAt,
     }));
@@ -353,6 +376,10 @@ function eventFromPersonEvent(
     metadata: {
       source: "person_events",
       sourceEventId: event.id,
+      gedcomValue: event.value ?? "",
+      age: event.age ?? "",
+      cause: event.cause ?? "",
+      address: event.address ?? "",
     },
   });
 }
@@ -448,11 +475,25 @@ function mapPersonEventType(type: PersonEvent["type"]): FamilyTreePersonTimeline
   switch (type) {
     case "birth":
     case "baptism":
+    case "christening":
     case "marriage":
+    case "divorce":
     case "residence":
+    case "census":
+    case "revision_list":
+    case "confession_list":
+    case "household_register":
+    case "immigration":
+    case "emigration":
     case "military":
+    case "occupation":
+    case "education":
+    case "nationality":
     case "death":
     case "burial":
+    case "cremation":
+    case "probate":
+    case "mention":
       return type;
     case "other":
     default:

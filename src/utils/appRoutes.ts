@@ -9,6 +9,7 @@ import { customSectionKey } from "./sectionHierarchy";
 const pageSegments: Partial<Record<PageKey, string>> = {
   dashboard: "dashboard",
   map: "map",
+  familyTree: "rodove-derevo",
   researches: "researches",
   documents: "documents",
   archiveRequests: "archive-requests",

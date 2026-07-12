@@ -17,6 +17,9 @@ import { createId } from "./id";
 import { participantSummary, sortFindingParticipants } from "./findingParticipants";
 import { normalizeCustomFieldValues } from "./customFields";
 import { normalizeGeo, normalizePersonEvents, syncPersonEventsFromFields } from "./geo";
+import { normalizePersonGender } from "./personGender";
+import { normalizePersonRelation } from "./personRelation";
+import { normalizePersonStatus } from "./personStatus";
 
 export function createEmptyDatabase(): AppDatabase {
   return {
@@ -109,10 +112,18 @@ export function normalizeDatabase(value: unknown): AppDatabase {
   const persons = (Array.isArray(candidate.persons) ? candidate.persons : []).map((item) => {
     const person = {
       ...item,
+      status: normalizePersonStatus(item.status),
+      gender: normalizePersonGender(item.gender),
       birthScans: Array.isArray(item.birthScans) ? item.birthScans : [],
       marriageScans: Array.isArray(item.marriageScans) ? item.marriageScans : [],
       deathScans: Array.isArray(item.deathScans) ? item.deathScans : [],
       mentionScans: Array.isArray(item.mentionScans) ? item.mentionScans : [],
+      photos: Array.isArray(item.photos) ? item.photos : [],
+      primaryPhotoId: typeof item.primaryPhotoId === "string"
+        && Array.isArray(item.photos)
+        && item.photos.some((photo) => photo?.id === item.primaryPhotoId)
+          ? item.primaryPhotoId
+          : Array.isArray(item.photos) ? item.photos[0]?.id ?? "" : "",
       customFields: normalizeCustomFieldValues(item.customFields),
     };
     return {
@@ -144,7 +155,9 @@ export function normalizeDatabase(value: unknown): AppDatabase {
     hypotheses,
     archiveRequests,
     persons,
-    personRelations: Array.isArray(candidate.personRelations) ? candidate.personRelations : [],
+    personRelations: Array.isArray(candidate.personRelations)
+      ? candidate.personRelations.map(normalizePersonRelation)
+      : [],
     customSections,
     customSectionRecords,
     activityLog: Array.isArray(candidate.activityLog) ? candidate.activityLog : [],
@@ -334,21 +347,28 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
       responseScans: mapScans(item.responseScans),
       customFields: mapCustomFields("archiveRequests", item.customFields),
     })),
-    persons: source.persons.map((item) => ({
-      ...item,
-      id: mapRequired(persons, item.id),
-      researchId: mapReference(researches, item.researchId),
-      birthScans: mapScans(item.birthScans),
-      marriageScans: mapScans(item.marriageScans),
-      deathScans: mapScans(item.deathScans),
-      mentionScans: mapScans(item.mentionScans),
-      events: syncPersonEventsFromFields({
+    persons: source.persons.map((item) => {
+      const sourcePhotos = item.photos ?? [];
+      const photos = mapScans(sourcePhotos);
+      const primaryIndex = sourcePhotos.findIndex((photo) => photo.id === item.primaryPhotoId);
+      return {
         ...item,
         id: mapRequired(persons, item.id),
         researchId: mapReference(researches, item.researchId),
-      }),
-      customFields: mapCustomFields("persons", item.customFields),
-    })),
+        birthScans: mapScans(item.birthScans),
+        marriageScans: mapScans(item.marriageScans),
+        deathScans: mapScans(item.deathScans),
+        mentionScans: mapScans(item.mentionScans),
+        photos,
+        primaryPhotoId: photos[primaryIndex >= 0 ? primaryIndex : 0]?.id ?? "",
+        events: syncPersonEventsFromFields({
+          ...item,
+          id: mapRequired(persons, item.id),
+          researchId: mapReference(researches, item.researchId),
+        }),
+        customFields: mapCustomFields("persons", item.customFields),
+      };
+    }),
     personRelations: source.personRelations
       .filter(
         (item) => persons.has(item.personId) && persons.has(item.relatedPersonId),

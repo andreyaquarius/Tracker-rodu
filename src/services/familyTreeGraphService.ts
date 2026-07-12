@@ -14,6 +14,7 @@ import type {
   FamilyTreeNodeDto,
   FamilyTreeOccurrenceDto,
   FamilyTreePersonName,
+  FamilyTreePersonTimelineEvent,
   ParentChildRelationship,
   ParentChildRelationshipType,
   ParentSet,
@@ -32,6 +33,15 @@ type OccurrenceSeed = Omit<FamilyTreeOccurrenceDto, "duplicateIndex" | "isRepeat
 };
 
 type RelationshipKind = FamilyTreeEdgeDto["kind"];
+type GenealogicalDateValue = {
+  raw: string;
+  sortValue: number;
+  year: number;
+};
+type PersonLifeFacts = {
+  birth: GenealogicalDateValue | null;
+  death: GenealogicalDateValue | null;
+};
 
 const DEFAULT_DEPTH = 5;
 const NON_BIOLOGICAL_PARENT_TYPES = new Set<ParentChildRelationshipType>([
@@ -68,46 +78,65 @@ export function buildFamilyTreeGraphDto(
 
   const rootPersonId = resolveRootPersonId(query, data);
   if (!rootPersonId) {
-    baseIssues.push(issue("missingRootPerson", "warning", "Family tree has no root person."));
+    baseIssues.push(issue("missingRootPerson", "warning", "Для дерева ще не вибрано центральну особу."));
     return emptyGraphDto(query, treeId, data.tree, null, baseIssues);
   }
 
-  const maxDepth = Math.max(0, query.maxDepth ?? DEFAULT_DEPTH);
-  const visibleParentChildRelationships = data.parentChildRelationships
-    .filter((relationship) => relationshipIsVisible(relationship.evidenceStatus, query));
+  const maxDepth = query.unlimitedDepth ? Number.POSITIVE_INFINITY : Math.max(0, query.maxDepth ?? DEFAULT_DEPTH);
+  const maxDepthUp = query.unlimitedDepth ? maxDepth : Math.max(0, query.maxDepthUp ?? maxDepth);
+  const maxDepthDown = query.unlimitedDepth ? maxDepth : Math.max(0, query.maxDepthDown ?? maxDepth);
+  const visibleParentChildRelationships = normalizeParentChildRelationships(
+    data.parentChildRelationships
+      .filter((relationship) => relationshipIsVisible(relationship.evidenceStatus, query)),
+  );
   const visiblePartnerRelationships = data.partnerRelationships
     .filter((relationship) => relationshipIsVisible(relationship.evidenceStatus, query));
   const visibleAssociationRelationships = data.associationRelationships
     .filter((relationship) => relationshipIsVisible(relationship.evidenceStatus, query));
 
-  const occurrences = finalizeOccurrences(
-    createOccurrenceSeeds({
-      mode: query.mode,
-      rootPersonId,
-      maxDepth,
-      parentChildRelationships: visibleParentChildRelationships,
-      partnerRelationships: visiblePartnerRelationships,
-    }),
-    data.layoutPositions,
+  const occurrences = annotateHiddenRelativeCounts(
+    finalizeOccurrences(
+      createOccurrenceSeeds({
+        mode: query.mode,
+        rootPersonId,
+        maxDepth,
+        maxDepthUp,
+        maxDepthDown,
+        parentChildRelationships: visibleParentChildRelationships,
+        partnerRelationships: visiblePartnerRelationships,
+      }),
+      data.layoutPositions,
+    ),
+    query.mode,
+    visibleParentChildRelationships,
   );
   const occurrencePersonIds = new Set(occurrences.map((occurrence) => occurrence.personId));
   const occurrenceByPerson = firstOccurrenceByPerson(occurrences);
   const nodes = buildNodes(query, data, occurrencePersonIds, occurrences);
+  const availablePersons = buildNodes(
+    query,
+    data,
+    new Set(data.personProfiles.map((profile) => profile.id)),
+    occurrences,
+  ).sort((left, right) => left.displayName.localeCompare(right.displayName, "uk"));
   const edges = buildEdges({
     query,
     occurrences,
     occurrenceByPerson,
-    parentChildRelationships: data.parentChildRelationships,
-    partnerRelationships: data.partnerRelationships,
-    associationRelationships: query.includeAssociations ? data.associationRelationships : [],
+    parentChildRelationships: visibleParentChildRelationships,
+    partnerRelationships: visiblePartnerRelationships,
+    associationRelationships: query.includeAssociations ? visibleAssociationRelationships : [],
   });
   const groups = buildGroups(data, occurrencePersonIds);
   const issues = [
     ...baseIssues,
     ...validationIssues(data),
+    ...personWithoutNameIssues(data, occurrencePersonIds),
+    ...personDateConflictIssues(data, occurrencePersonIds, visibleParentChildRelationships, visiblePartnerRelationships),
+    ...potentialDuplicatePersonIssues(data, occurrencePersonIds),
+    ...biologicalParentConflictIssues(visibleParentChildRelationships, occurrencePersonIds),
     ...missingPreferredParentSetIssues(data.parentSets, occurrencePersonIds),
     ...repeatedAncestorIssues(query.mode, occurrences),
-    ...privateLivingPersonIssues(query, nodes),
     ...persistedIssues(data),
   ];
 
@@ -117,6 +146,7 @@ export function buildFamilyTreeGraphDto(
     mode: query.mode,
     rootPersonId,
     tree: data.tree,
+    availablePersons,
     nodes,
     occurrences,
     edges,
@@ -194,6 +224,7 @@ function emptyGraphDto(
     mode: query.mode,
     rootPersonId,
     tree,
+    availablePersons: [],
     nodes: [],
     occurrences: [],
     edges: [],
@@ -212,77 +243,243 @@ function emptyGraphDto(
 }
 
 function resolveRootPersonId(query: FamilyTreeGraphQuery, data: FamilyTreeGraphRepositoryData): EntityId | null {
-  if (query.rootPersonId) return query.rootPersonId;
-  if (data.tree?.rootPersonId) return data.tree.rootPersonId;
-  const rootMember = data.treePersons.find((person) => person.memberRole === "root");
+  const knownPersonIds = new Set([
+    ...data.personProfiles.map((profile) => profile.id),
+    ...data.treePersons.map((person) => person.personId),
+  ]);
+  if (query.rootPersonId && knownPersonIds.has(query.rootPersonId)) return query.rootPersonId;
+  const rootMember = stableRootTreeMember(data, knownPersonIds);
+  if (!query.rootPersonId && rootMember) return rootMember.personId;
+  if (data.tree?.rootPersonId && knownPersonIds.has(data.tree.rootPersonId)) return data.tree.rootPersonId;
   if (rootMember) return rootMember.personId;
-  return data.personProfiles[0]?.id ?? data.treePersons[0]?.personId ?? null;
+  return null;
+}
+
+function stableRootTreeMember(
+  data: FamilyTreeGraphRepositoryData,
+  knownPersonIds: Set<EntityId>,
+): FamilyTreeGraphRepositoryData["treePersons"][number] | null {
+  const rootMembers = data.treePersons
+    .filter((person) => person.memberRole === "root" && knownPersonIds.has(person.personId))
+    .sort((left, right) =>
+      left.displayOrder - right.displayOrder ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.personId.localeCompare(right.personId),
+    );
+  return rootMembers[0] ?? null;
 }
 
 function relationshipIsVisible(status: EvidenceStatus, query: FamilyTreeGraphQuery): boolean {
   return status !== "disproven" || query.includeDisproven === true || query.problemsMode === true;
 }
 
+function normalizeParentChildRelationships(
+  relationships: ParentChildRelationship[],
+): ParentChildRelationship[] {
+  const byPair = new Map<string, ParentChildRelationship>();
+  for (const relationship of relationships) {
+    const key = [relationship.parentId, relationship.childId].join(">");
+    const current = byPair.get(key);
+    if (!current || parentChildDisplayPriority(relationship) > parentChildDisplayPriority(current)) {
+      byPair.set(key, relationship);
+    }
+  }
+  return Array.from(byPair.values());
+}
+
+function parentChildDisplayPriority(relationship: ParentChildRelationship): number {
+  let score = 0;
+  if (relationship.isPrimaryForDisplay) score += 1000;
+  if (relationship.isBloodline) score += 500;
+  score += parentChildRelationshipTypePriority(relationship.relationshipType);
+  score += evidenceStatusPriority(relationship.evidenceStatus);
+  score += relationship.confidence;
+  if (relationship.parentRoleLabel !== "parent" && relationship.parentRoleLabel !== "custom") score += 25;
+  return score;
+}
+
+function parentChildRelationshipTypePriority(type: ParentChildRelationshipType): number {
+  switch (type) {
+    case "biological":
+    case "birth_parent":
+    case "genetic_father":
+    case "genetic_mother":
+      return 300;
+    case "adoptive":
+    case "legal_parent":
+      return 220;
+    case "foster":
+    case "guardian":
+    case "social_parent":
+      return 180;
+    case "step":
+      return 160;
+    case "presumed":
+    case "unknown":
+      return 80;
+    case "other":
+      return 40;
+    default:
+      return 100;
+  }
+}
+
+function evidenceStatusPriority(status: EvidenceStatus): number {
+  switch (status) {
+    case "proven":
+      return 80;
+    case "likely":
+      return 60;
+    case "unknown":
+      return 30;
+    case "disputed":
+      return 10;
+    case "disproven":
+      return 0;
+    default:
+      return 0;
+  }
+}
+
 function createOccurrenceSeeds(input: {
   mode: FamilyTreeGraphMode;
   rootPersonId: EntityId;
   maxDepth: number;
+  maxDepthUp: number;
+  maxDepthDown: number;
   parentChildRelationships: ParentChildRelationship[];
   partnerRelationships: PartnerRelationship[];
 }): OccurrenceSeed[] {
   switch (input.mode) {
     case "ancestors":
-      return ancestorOccurrenceSeeds(input.rootPersonId, input.maxDepth, input.parentChildRelationships);
+      return ancestorOccurrenceSeeds(input.rootPersonId, input.maxDepthUp, input.parentChildRelationships);
     case "descendants":
       return descendantOccurrenceSeeds(
         input.rootPersonId,
-        input.maxDepth,
+        input.maxDepthDown,
         input.parentChildRelationships,
         input.partnerRelationships,
       );
     case "family":
     default:
-      return familyOccurrenceSeeds(input.rootPersonId, input.parentChildRelationships, input.partnerRelationships);
+      return familyOccurrenceSeeds(
+        input.rootPersonId,
+        input.maxDepthUp,
+        input.maxDepthDown,
+        input.parentChildRelationships,
+        input.partnerRelationships,
+      );
   }
 }
 
 function familyOccurrenceSeeds(
   rootPersonId: EntityId,
+  maxDepthUp: number,
+  maxDepthDown: number,
   parentChildRelationships: ParentChildRelationship[],
   partnerRelationships: PartnerRelationship[],
 ): OccurrenceSeed[] {
-  const personIds = new Set<EntityId>([rootPersonId]);
-  const rootParentSets = new Set<EntityId>();
-  for (const relationship of parentChildRelationships) {
-    if (relationship.childId === rootPersonId) personIds.add(relationship.parentId);
-    if (relationship.parentId === rootPersonId) {
-      personIds.add(relationship.childId);
-      rootParentSets.add(relationship.parentSetId);
-    }
-  }
-  for (const relationship of parentChildRelationships) {
-    if (rootParentSets.has(relationship.parentSetId)) personIds.add(relationship.parentId);
-  }
-  for (const relationship of partnerRelationships) {
-    if (relationship.personAId === rootPersonId) personIds.add(relationship.personBId);
-    if (relationship.personBId === rootPersonId) personIds.add(relationship.personAId);
-  }
-  return Array.from(personIds).map((personId) => occurrenceSeed("family", [personId], personId, generationForFamily(rootPersonId, personId, parentChildRelationships)));
+  const directAncestorSeeds = ancestorOccurrenceSeeds(rootPersonId, maxDepthUp, parentChildRelationships)
+    .map((seed) => ({
+      ...seed,
+      id: `occ:family:${seed.occurrenceKey}`,
+      mode: "family" as FamilyTreeGraphMode,
+    }));
+  const directAncestorPersonIds = new Set(directAncestorSeeds.map((seed) => seed.personId));
+  const connectedSeeds = connectedFamilyOccurrenceSeeds(
+    rootPersonId,
+    maxDepthUp,
+    maxDepthDown,
+    parentChildRelationships,
+    partnerRelationships,
+  );
+  return uniqueOccurrenceSeeds([
+    ...directAncestorSeeds,
+    ...connectedSeeds.filter((seed) =>
+      !(seed.generation <= 0 && directAncestorPersonIds.has(seed.personId)),
+    ),
+  ]).sort((left, right) => {
+    if (left.generation !== right.generation) return left.generation - right.generation;
+    return left.occurrenceKey.localeCompare(right.occurrenceKey, "uk");
+  });
 }
 
-function generationForFamily(
+function connectedFamilyOccurrenceSeeds(
   rootPersonId: EntityId,
-  personId: EntityId,
+  maxDepthUp: number,
+  maxDepthDown: number,
   parentChildRelationships: ParentChildRelationship[],
-): number {
-  if (personId === rootPersonId) return 0;
-  if (parentChildRelationships.some((relationship) => relationship.childId === rootPersonId && relationship.parentId === personId)) {
-    return -1;
+  partnerRelationships: PartnerRelationship[],
+): OccurrenceSeed[] {
+  const byChild = groupBy(parentChildRelationships, (relationship) => relationship.childId);
+  const byParent = groupBy(parentChildRelationships, (relationship) => relationship.parentId);
+  const generationByPerson = new Map<EntityId, number>([[rootPersonId, 0]]);
+  const pathByPerson = new Map<EntityId, EntityId[]>([[rootPersonId, [rootPersonId]]]);
+  const queue: EntityId[] = [rootPersonId];
+
+  const enqueue = (personId: EntityId, generation: number, path: EntityId[]) => {
+    if (generation < 0 ? -generation > maxDepthUp : generation > maxDepthDown) return;
+    const currentGeneration = generationByPerson.get(personId);
+    const currentPath = pathByPerson.get(personId);
+    const isCloser = currentGeneration === undefined || Math.abs(generation) < Math.abs(currentGeneration);
+    const isShorterSameGeneration = currentGeneration === generation && (!currentPath || path.length < currentPath.length);
+    if (!isCloser && !isShorterSameGeneration) return;
+    generationByPerson.set(personId, generation);
+    pathByPerson.set(personId, path);
+    queue.push(personId);
+  };
+
+  while (queue.length) {
+    const personId = queue.shift();
+    if (!personId) continue;
+    const generation = generationByPerson.get(personId) ?? 0;
+    const path = pathByPerson.get(personId) ?? [rootPersonId, personId];
+
+    for (const relationship of byChild.get(personId) ?? []) {
+      if (path.includes(relationship.parentId)) continue;
+      enqueue(relationship.parentId, generation - 1, [...path, relationship.parentId]);
+    }
+
+    for (const relationship of byParent.get(personId) ?? []) {
+      if (path.includes(relationship.childId)) continue;
+      enqueue(relationship.childId, generation + 1, [...path, relationship.childId]);
+    }
   }
-  if (parentChildRelationships.some((relationship) => relationship.parentId === rootPersonId && relationship.childId === personId)) {
-    return 1;
+
+  for (const relationship of partnerRelationships) {
+    const aGeneration = generationByPerson.get(relationship.personAId);
+    const bGeneration = generationByPerson.get(relationship.personBId);
+    if (aGeneration !== undefined && bGeneration === undefined) {
+      generationByPerson.set(relationship.personBId, aGeneration);
+      pathByPerson.set(relationship.personBId, [...(pathByPerson.get(relationship.personAId) ?? [rootPersonId]), relationship.personBId]);
+    } else if (bGeneration !== undefined && aGeneration === undefined) {
+      generationByPerson.set(relationship.personAId, bGeneration);
+      pathByPerson.set(relationship.personAId, [...(pathByPerson.get(relationship.personBId) ?? [rootPersonId]), relationship.personAId]);
+    }
   }
-  return 0;
+
+  return Array.from(generationByPerson.entries())
+    .sort(([leftPersonId, leftGeneration], [rightPersonId, rightGeneration]) => {
+      if (leftGeneration !== rightGeneration) return leftGeneration - rightGeneration;
+      const leftPath = pathByPerson.get(leftPersonId)?.join(">") ?? leftPersonId;
+      const rightPath = pathByPerson.get(rightPersonId)?.join(">") ?? rightPersonId;
+      return leftPath.localeCompare(rightPath, "uk");
+    })
+    .map(([personId, generation]) => occurrenceSeed(
+      "family",
+      pathByPerson.get(personId) ?? [rootPersonId, personId],
+      personId,
+      generation,
+    ));
+}
+
+function uniqueOccurrenceSeeds(seeds: OccurrenceSeed[]): OccurrenceSeed[] {
+  const result = new Map<string, OccurrenceSeed>();
+  for (const seed of seeds) {
+    const key = [seed.mode, seed.occurrenceKey, seed.personId].join("|");
+    if (!result.has(key)) result.set(key, seed);
+  }
+  return Array.from(result.values());
 }
 
 function descendantOccurrenceSeeds(
@@ -292,6 +489,8 @@ function descendantOccurrenceSeeds(
   partnerRelationships: PartnerRelationship[],
 ): OccurrenceSeed[] {
   const seeds: OccurrenceSeed[] = [];
+  const generationByPerson = new Map<EntityId, number>();
+  const pathByPerson = new Map<EntityId, EntityId[]>();
   const queue: Array<{ personId: EntityId; path: EntityId[]; depth: number }> = [
     { personId: rootPersonId, path: [rootPersonId], depth: 0 },
   ];
@@ -300,6 +499,8 @@ function descendantOccurrenceSeeds(
     const current = queue.shift();
     if (!current || visited.has(current.personId)) continue;
     visited.add(current.personId);
+    generationByPerson.set(current.personId, current.depth);
+    pathByPerson.set(current.personId, current.path);
     seeds.push(occurrenceSeed("descendants", current.path, current.personId, current.depth));
     if (current.depth >= maxDepth) continue;
     for (const relationship of parentChildRelationships.filter((item) => item.parentId === current.personId)) {
@@ -314,10 +515,14 @@ function descendantOccurrenceSeeds(
 
   for (const relationship of partnerRelationships) {
     if (visited.has(relationship.personAId) && !visited.has(relationship.personBId)) {
-      seeds.push(occurrenceSeed("descendants", [rootPersonId, relationship.personBId], relationship.personBId, 0));
+      const generation = generationByPerson.get(relationship.personAId) ?? 0;
+      const path = pathByPerson.get(relationship.personAId) ?? [rootPersonId, relationship.personAId];
+      seeds.push(occurrenceSeed("descendants", [...path, relationship.personBId], relationship.personBId, generation));
       visited.add(relationship.personBId);
     } else if (visited.has(relationship.personBId) && !visited.has(relationship.personAId)) {
-      seeds.push(occurrenceSeed("descendants", [rootPersonId, relationship.personAId], relationship.personAId, 0));
+      const generation = generationByPerson.get(relationship.personBId) ?? 0;
+      const path = pathByPerson.get(relationship.personBId) ?? [rootPersonId, relationship.personBId];
+      seeds.push(occurrenceSeed("descendants", [...path, relationship.personAId], relationship.personAId, generation));
       visited.add(relationship.personAId);
     }
   }
@@ -408,6 +613,38 @@ function finalizeOccurrences(
   });
 }
 
+function annotateHiddenRelativeCounts(
+  occurrences: FamilyTreeOccurrenceDto[],
+  mode: FamilyTreeGraphMode,
+  parentChildRelationships: ParentChildRelationship[],
+): FamilyTreeOccurrenceDto[] {
+  if (!occurrences.length) return occurrences;
+  const visiblePersonIds = new Set(occurrences.map((occurrence) => occurrence.personId));
+  const parentsByChild = groupBy(parentChildRelationships, (relationship) => relationship.childId);
+  const childrenByParent = groupBy(parentChildRelationships, (relationship) => relationship.parentId);
+  const showHiddenParents = mode === "ancestors" || mode === "family";
+  const showHiddenChildren = mode === "descendants" || mode === "family";
+
+  return occurrences.map((occurrence) => {
+    const hiddenParentsCount = showHiddenParents
+      ? unique((parentsByChild.get(occurrence.personId) ?? [])
+        .map((relationship) => relationship.parentId)
+        .filter((personId) => !visiblePersonIds.has(personId))).length
+      : 0;
+    const hiddenChildrenCount = showHiddenChildren
+      ? unique((childrenByParent.get(occurrence.personId) ?? [])
+        .map((relationship) => relationship.childId)
+        .filter((personId) => !visiblePersonIds.has(personId))).length
+      : 0;
+    if (!hiddenParentsCount && !hiddenChildrenCount) return occurrence;
+    return {
+      ...occurrence,
+      hiddenParentsCount: hiddenParentsCount || undefined,
+      hiddenChildrenCount: hiddenChildrenCount || undefined,
+    };
+  });
+}
+
 function firstOccurrenceByPerson(occurrences: FamilyTreeOccurrenceDto[]): Map<EntityId, FamilyTreeOccurrenceDto> {
   const result = new Map<EntityId, FamilyTreeOccurrenceDto>();
   for (const occurrence of occurrences) {
@@ -430,14 +667,14 @@ function buildNodes(
 
   return Array.from(personIds).map((personId) => {
     const profile = profileByPerson.get(personId);
-    const names = namesByPerson.get(personId) ?? [];
+    const names = withProfileDerivedNames(namesByPerson.get(personId) ?? [], profile);
     const primaryName = selectPrimaryName(names);
     const isLiving = profile?.isLiving ?? false;
     const privacyStatus = profile?.privacyStatus ?? "private";
     const redacted = isPrivateLivingPerson(isLiving, privacyStatus) && query.includePrivateLiving !== true;
     return {
       personId,
-      displayName: redacted ? "Private living person" : displayNameFor(profile, primaryName, personId),
+      displayName: redacted ? "Приватна жива особа" : displayNameFor(profile, primaryName, personId),
       primaryName,
       names: redacted ? [] : names,
       events: redacted ? [] : eventsByPerson.get(personId) ?? [],
@@ -448,6 +685,11 @@ function buildNodes(
       redacted,
       memberRole: treePersonByPerson.get(personId)?.memberRole,
       occurrenceIds: (occurrenceIdsByPerson.get(personId) ?? []).map((occurrence) => occurrence.id),
+      metadata: redacted || !profile
+        ? {}
+        : {
+            personProfile: profile,
+          },
     };
   });
 }
@@ -512,26 +754,38 @@ function buildEdges(input: {
 }
 
 function parentChildOccurrencePairs(
-  mode: FamilyTreeGraphMode,
+  _mode: FamilyTreeGraphMode,
   relationship: ParentChildRelationship,
   occurrences: FamilyTreeOccurrenceDto[],
   occurrenceByPerson: Map<EntityId, FamilyTreeOccurrenceDto>,
 ): Array<{ from: FamilyTreeOccurrenceDto; to: FamilyTreeOccurrenceDto } | null> {
-  if (mode !== "ancestors") {
-    const from = occurrenceByPerson.get(relationship.parentId);
-    const to = occurrenceByPerson.get(relationship.childId);
-    return from && to ? [{ from, to }] : [];
-  }
-
-  const byPath = new Map(occurrences.map((occurrence) => [occurrence.path.join(">"), occurrence]));
   const pairs: Array<{ from: FamilyTreeOccurrenceDto; to: FamilyTreeOccurrenceDto }> = [];
-  for (const parentOccurrence of occurrences.filter((occurrence) => occurrence.personId === relationship.parentId)) {
-    const childPath = parentOccurrence.path.slice(0, -1);
-    if (childPath.at(-1) !== relationship.childId) continue;
-    const childOccurrence = byPath.get(childPath.join(">"));
-    if (childOccurrence) pairs.push({ from: parentOccurrence, to: childOccurrence });
+  const parentOccurrences = occurrences.filter((occurrence) => occurrence.personId === relationship.parentId);
+  const childOccurrences = occurrences.filter((occurrence) => occurrence.personId === relationship.childId);
+  for (const parentOccurrence of parentOccurrences) {
+    for (const childOccurrence of childOccurrences) {
+      if (!areAdjacentParentChildOccurrences(parentOccurrence, childOccurrence, relationship)) continue;
+      pairs.push({ from: parentOccurrence, to: childOccurrence });
+    }
   }
-  return pairs;
+  if (pairs.length) return pairs;
+
+  const from = occurrenceByPerson.get(relationship.parentId);
+  const to = occurrenceByPerson.get(relationship.childId);
+  return from && to ? [{ from, to }] : [];
+}
+
+function areAdjacentParentChildOccurrences(
+  parentOccurrence: FamilyTreeOccurrenceDto,
+  childOccurrence: FamilyTreeOccurrenceDto,
+  relationship: ParentChildRelationship,
+): boolean {
+  return pathEquals(childOccurrence.path, [...parentOccurrence.path, relationship.childId]) ||
+    pathEquals(parentOccurrence.path, [...childOccurrence.path, relationship.parentId]);
+}
+
+function pathEquals(left: EntityId[], right: EntityId[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function edgeFromParentChild(
@@ -549,6 +803,7 @@ function edgeFromParentChild(
     fromOccurrenceId,
     toOccurrenceId,
     relationshipType: relationship.relationshipType,
+    parentRoleLabel: relationship.parentRoleLabel,
     evidenceStatus: relationship.evidenceStatus,
     confidence: relationship.confidence,
     isBloodline: relationship.isBloodline,
@@ -557,7 +812,13 @@ function edgeFromParentChild(
     sourceDocumentId: relationship.sourceDocumentId,
     sourceFindingId: relationship.sourceFindingId,
     style,
-    metadata: relationship.metadata,
+    metadata: {
+      ...relationship.metadata,
+      notes: relationship.notes,
+      privacyStatus: relationship.privacyStatus,
+      sourceDocumentId: relationship.sourceDocumentId,
+      sourceFindingId: relationship.sourceFindingId,
+    },
   };
 }
 
@@ -582,7 +843,18 @@ function edgeFromPartner(
     sourceDocumentId: relationship.sourceDocumentId,
     sourceFindingId: relationship.sourceFindingId,
     style,
-    metadata: relationship.metadata,
+    metadata: {
+      ...relationship.metadata,
+      status: relationship.status,
+      startDate: relationship.startDate,
+      startPlace: relationship.startPlace,
+      endDate: relationship.endDate,
+      endPlace: relationship.endPlace,
+      notes: relationship.notes,
+      privacyStatus: relationship.privacyStatus,
+      sourceDocumentId: relationship.sourceDocumentId,
+      sourceFindingId: relationship.sourceFindingId,
+    },
   };
 }
 
@@ -691,6 +963,216 @@ function mapGraphIssue(issueValue: FamilyTreeGraphIssue): FamilyTreeIssueDto {
   });
 }
 
+function personWithoutNameIssues(
+  data: FamilyTreeGraphRepositoryData,
+  includedPersonIds: Set<EntityId>,
+): FamilyTreeIssueDto[] {
+  const namesByPerson = groupBy(data.personNames, (name) => name.personId);
+  return data.personProfiles
+    .filter((profile) => includedPersonIds.has(profile.id))
+    .filter((profile) => {
+      const profileName = [profile.surname, profile.givenName, profile.patronymic, profile.fullName]
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join("");
+      const nameRecords = namesByPerson.get(profile.id) ?? [];
+      const hasNameRecord = nameRecords.some((name) =>
+        [name.fullName, name.originalText, name.surname, name.givenName, name.patronymic]
+          .map((part) => part.trim())
+          .some(Boolean),
+      );
+      return !profileName && !hasNameRecord;
+    })
+    .map((profile) => issue(
+      "personWithoutName",
+      "needs_review",
+      "Person has no name fields or name records.",
+      { personIds: [profile.id] },
+    ));
+}
+
+function personDateConflictIssues(
+  data: FamilyTreeGraphRepositoryData,
+  includedPersonIds: Set<EntityId>,
+  parentChildRelationships: ParentChildRelationship[],
+  partnerRelationships: PartnerRelationship[],
+): FamilyTreeIssueDto[] {
+  const issues: FamilyTreeIssueDto[] = [];
+  const eventsByPerson = groupBy(data.personTimelineEvents, (event) => event.personId);
+  const lifeFactsByPerson = new Map<EntityId, PersonLifeFacts>();
+  for (const personId of includedPersonIds) {
+    lifeFactsByPerson.set(personId, lifeFactsForPerson(eventsByPerson.get(personId) ?? []));
+  }
+
+  for (const [personId, facts] of lifeFactsByPerson) {
+    if (facts.birth?.sortValue != null && facts.death?.sortValue != null && facts.death.sortValue < facts.birth.sortValue) {
+      issues.push(issue(
+        "dateConflict",
+        "needs_review",
+        "Death date is earlier than birth date.",
+        {
+          personIds: [personId],
+          metadata: {
+            kind: "deathBeforeBirth",
+            birthDate: facts.birth.raw,
+            deathDate: facts.death.raw,
+          },
+        },
+      ));
+    }
+  }
+
+  for (const relationship of parentChildRelationships) {
+    if (!includedPersonIds.has(relationship.parentId) || !includedPersonIds.has(relationship.childId)) continue;
+    if (relationship.evidenceStatus === "disproven") continue;
+    const parentBirth = lifeFactsByPerson.get(relationship.parentId)?.birth;
+    const childBirth = lifeFactsByPerson.get(relationship.childId)?.birth;
+    if (parentBirth?.year == null || childBirth?.year == null) continue;
+    if (childBirth.year < parentBirth.year) {
+      issues.push(issue(
+        "parentAgeConflict",
+        "needs_review",
+        "Child appears to be older than parent.",
+        {
+          personIds: [relationship.childId, relationship.parentId],
+          relationshipIds: [relationship.id],
+          metadata: {
+            kind: "childOlderThanParent",
+            parentBirthYear: parentBirth.year,
+            childBirthYear: childBirth.year,
+          },
+        },
+      ));
+    }
+  }
+
+  for (const relationship of partnerRelationships) {
+    if (!includedPersonIds.has(relationship.personAId) || !includedPersonIds.has(relationship.personBId)) continue;
+    if (relationship.evidenceStatus === "disproven") continue;
+    const start = parseGenealogicalDate(relationship.startDate);
+    if (!start) continue;
+    const partnerBirths = [
+      lifeFactsByPerson.get(relationship.personAId)?.birth,
+      lifeFactsByPerson.get(relationship.personBId)?.birth,
+    ];
+    if (partnerBirths.some((birth) => birth?.sortValue != null && start.sortValue < birth.sortValue)) {
+      issues.push(issue(
+        "dateConflict",
+        "needs_review",
+        "Partner relationship date is earlier than a partner birth date.",
+        {
+          personIds: [relationship.personAId, relationship.personBId],
+          relationshipIds: [relationship.id],
+          metadata: {
+            kind: "relationshipBeforeBirth",
+            relationshipDate: relationship.startDate,
+          },
+        },
+      ));
+    }
+  }
+
+  return issues;
+}
+
+function potentialDuplicatePersonIssues(
+  data: FamilyTreeGraphRepositoryData,
+  includedPersonIds: Set<EntityId>,
+): FamilyTreeIssueDto[] {
+  const eventsByPerson = groupBy(data.personTimelineEvents, (event) => event.personId);
+  const namesByPerson = groupBy(data.personNames, (name) => name.personId);
+  const groups = new Map<string, EntityId[]>();
+
+  for (const profile of data.personProfiles) {
+    if (!includedPersonIds.has(profile.id)) continue;
+    const normalizedName = normalizePersonNameForDuplicate(profile, namesByPerson.get(profile.id) ?? []);
+    if (normalizedName.length < 5) continue;
+    const facts = lifeFactsForPerson(eventsByPerson.get(profile.id) ?? []);
+    const birthKey = facts.birth?.year != null ? String(facts.birth.year) : "unknown";
+    const key = `${normalizedName}|${birthKey}`;
+    groups.set(key, [...(groups.get(key) ?? []), profile.id]);
+  }
+
+  const issues: FamilyTreeIssueDto[] = [];
+  for (const [key, personIds] of groups) {
+    if (personIds.length < 2) continue;
+    const [nameKey, birthYear] = key.split("|");
+    issues.push(issue(
+      "potentialDuplicatePerson",
+      "needs_review",
+      "Several people have the same name and matching or missing birth year.",
+      {
+        personIds,
+        metadata: {
+          normalizedName: nameKey,
+          birthYear,
+        },
+      },
+    ));
+  }
+  return issues;
+}
+
+function biologicalParentConflictIssues(
+  relationships: ParentChildRelationship[],
+  includedPersonIds: Set<EntityId>,
+): FamilyTreeIssueDto[] {
+  const issues: FamilyTreeIssueDto[] = [];
+  const relationshipsByChild = groupBy(
+    relationships.filter((relationship) =>
+      includedPersonIds.has(relationship.childId) &&
+      relationship.evidenceStatus !== "disproven" &&
+      isBiologicalParentRelationship(relationship),
+    ),
+    (relationship) => relationship.childId,
+  );
+
+  for (const [childId, childRelationships] of relationshipsByChild) {
+    const fathers = childRelationships.filter((relationship) => parentRoleSide(relationship) === "father");
+    const mothers = childRelationships.filter((relationship) => parentRoleSide(relationship) === "mother");
+    if (fathers.length > 1) {
+      issues.push(issue(
+        "multipleBiologicalFathers",
+        "needs_review",
+        "Child has more than one biological father relationship.",
+        {
+          personIds: unique([childId, ...fathers.map((relationship) => relationship.parentId)]),
+          relationshipIds: fathers.map((relationship) => relationship.id),
+        },
+      ));
+    }
+    if (mothers.length > 1) {
+      issues.push(issue(
+        "multipleBiologicalMothers",
+        "needs_review",
+        "Child has more than one biological mother relationship.",
+        {
+          personIds: unique([childId, ...mothers.map((relationship) => relationship.parentId)]),
+          relationshipIds: mothers.map((relationship) => relationship.id),
+        },
+      ));
+    }
+  }
+
+  return issues;
+}
+
+function isBiologicalParentRelationship(relationship: ParentChildRelationship): boolean {
+  return relationship.isBloodline ||
+    relationship.relationshipType === "biological" ||
+    relationship.relationshipType === "birth_parent" ||
+    relationship.relationshipType === "genetic_father" ||
+    relationship.relationshipType === "genetic_mother";
+}
+
+function parentRoleSide(relationship: ParentChildRelationship): "father" | "mother" | "parent" {
+  if (relationship.relationshipType === "genetic_father") return "father";
+  if (relationship.relationshipType === "genetic_mother") return "mother";
+  if (["father", "stepfather", "adoptive_father"].includes(relationship.parentRoleLabel)) return "father";
+  if (["mother", "stepmother", "adoptive_mother"].includes(relationship.parentRoleLabel)) return "mother";
+  return "parent";
+}
+
 function missingPreferredParentSetIssues(
   parentSets: ParentSet[],
   includedPersonIds: Set<EntityId>,
@@ -702,7 +1184,7 @@ function missingPreferredParentSetIssues(
     issues.push(issue(
       "missingPreferredParentSet",
       "needs_review",
-      "Child has several parent sets, but none is preferred for display.",
+      "Для дитини вказано кілька варіантів батьківства, але не позначено, яких батьків показувати основними.",
       { personIds: [childId], relationshipIds: sets.map((set) => set.id) },
     ));
   }
@@ -729,21 +1211,6 @@ function repeatedAncestorIssues(
     ));
   }
   return issues;
-}
-
-function privateLivingPersonIssues(
-  query: FamilyTreeGraphQuery,
-  nodes: FamilyTreeNodeDto[],
-): FamilyTreeIssueDto[] {
-  if (query.includePrivateLiving !== true) return [];
-  return nodes
-    .filter((node) => isPrivateLivingPerson(node.isLiving, node.privacyStatus) && !node.redacted)
-    .map((node) => issue(
-      "privateLivingPersonVisible",
-      "warning",
-      "Private living person is visible in this graph response.",
-      { personIds: [node.personId], occurrenceIds: node.occurrenceIds },
-    ));
 }
 
 function persistedIssues(data: FamilyTreeGraphRepositoryData): FamilyTreeIssueDto[] {
@@ -783,8 +1250,105 @@ function countRepeatedPersons(occurrences: FamilyTreeOccurrenceDto[]): number {
     .length;
 }
 
+function lifeFactsForPerson(events: FamilyTreePersonTimelineEvent[]): PersonLifeFacts {
+  return {
+    birth: firstDateValue(events, ["birth", "baptism", "christening"]),
+    death: firstDateValue(events, ["death", "burial", "cremation"]),
+  };
+}
+
+function firstDateValue(
+  events: FamilyTreePersonTimelineEvent[],
+  eventTypes: string[],
+): GenealogicalDateValue | null {
+  for (const event of events) {
+    if (!eventTypes.includes(event.eventType)) continue;
+    const parsed = parseGenealogicalDate(event.eventDate || event.dateFrom || event.dateText);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function parseGenealogicalDate(value: string): GenealogicalDateValue | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const iso = raw.match(/\b(1[0-9]{3}|20[0-9]{2})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])\b/);
+  if (iso) {
+    const year = Number(iso[1]);
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    return { raw, year, sortValue: year * 10000 + month * 100 + day };
+  }
+
+  const dotted = raw.match(/\b(0?[1-9]|[12][0-9]|3[01])[./](0?[1-9]|1[0-2])[./](1[0-9]{3}|20[0-9]{2})\b/);
+  if (dotted) {
+    const day = Number(dotted[1]);
+    const month = Number(dotted[2]);
+    const year = Number(dotted[3]);
+    return { raw, year, sortValue: year * 10000 + month * 100 + day };
+  }
+
+  const yearOnly = raw.match(/\b(1[0-9]{3}|20[0-9]{2})\b/);
+  if (!yearOnly) return null;
+  const year = Number(yearOnly[1]);
+  return { raw, year, sortValue: year * 10000 };
+}
+
+function normalizePersonNameForDuplicate(
+  profile: FamilyTreePersonProfile,
+  names: FamilyTreePersonName[],
+): string {
+  const nameRecord = names.find((name) => name.isPrimary || name.isPreferred) ?? names[0] ?? null;
+  const source = nameRecord?.fullName || nameRecord?.originalText || profile.fullName ||
+    [profile.surname, profile.givenName, profile.patronymic].filter(Boolean).join(" ");
+  return source
+    .toLocaleLowerCase("uk")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 function selectPrimaryName(names: FamilyTreePersonName[]): FamilyTreePersonName | null {
   return names.find((name) => name.isPrimary) ?? names.find((name) => name.isPreferred) ?? names[0] ?? null;
+}
+
+function withProfileDerivedNames(
+  names: FamilyTreePersonName[],
+  profile: FamilyTreePersonProfile | undefined,
+): FamilyTreePersonName[] {
+  const maidenSurname = profile?.maidenSurname?.trim() ?? "";
+  if (!profile || !maidenSurname || maidenSurname === profile.surname.trim()) return names;
+  if (names.some((name) => name.nameType === "birth" && name.surname.trim() === maidenSurname)) return names;
+  const fullName = [maidenSurname, profile.givenName, profile.patronymic]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ");
+  return [
+    ...names,
+    {
+      id: `profile-maiden-name:${profile.id}`,
+      projectId: profile.projectId,
+      personId: profile.id,
+      nameType: "birth",
+      languageCode: "uk",
+      scriptCode: "Cyrl",
+      surname: maidenSurname,
+      givenName: profile.givenName,
+      patronymic: profile.patronymic,
+      fullName,
+      originalText: fullName || maidenSurname,
+      isPrimary: false,
+      isPreferred: false,
+      evidenceStatus: "unknown",
+      confidence: 0,
+      sourceDocumentId: null,
+      sourceFindingId: null,
+      notes: "",
+      metadata: { source: "persons.custom_fields.maidenSurname" },
+      createdAt: "",
+      updatedAt: "",
+    },
+  ];
 }
 
 function displayNameFor(

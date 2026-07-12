@@ -1,0 +1,23 @@
+const PERSON_STATUS_LABELS: Record<string, string> = {
+  "доведена": "доведена",
+  "частково доведена": "частково доведена",
+  "гіпотетична": "гіпотетична",
+  "сумнівна": "сумнівна",
+  "спростована": "спростована",
+  "proven": "доведена",
+  "likely": "частково доведена",
+  "hypothetical": "гіпотетична",
+  "disputed": "сумнівна",
+  "disproven": "спростована",
+  "РґРѕРІРµРґРµРЅР°": "доведена",
+  "С‡Р°СЃС‚РєРѕРІРѕ РґРѕРІРµРґРµРЅР°": "частково доведена",
+  "РіС–РїРѕС‚РµС‚РёС‡РЅР°": "гіпотетична",
+  "СЃСѓРјРЅС–РІРЅР°": "сумнівна",
+  "СЃРїСЂРѕСЃС‚РѕРІР°РЅР°": "спростована",
+};
+
+export function personStatusLabel(value: string | null | undefined): string {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return "не вказано";
+  return PERSON_STATUS_LABELS[normalized] ?? normalized;
+}

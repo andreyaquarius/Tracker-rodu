@@ -11,6 +11,11 @@ import {
   type AdminSubscriptionRow,
 } from "../services/subscriptionService";
 import {
+  adminSetFamilyTreeFeatureAccess,
+  loadAdminFamilyTreeFeatureAccess,
+  type FamilyTreeFeatureAccessUser,
+} from "../services/familyTreeFeatureAccess";
+import {
   adminDeleteAnnouncement,
   adminSaveAnnouncement,
   loadAdminAnnouncements,
@@ -75,9 +80,13 @@ export function SubscriptionPage({
   const [plans, setPlans] = useState<Array<{ plan: SubscriptionPlan; limits: PlanLimit[] }>>([]);
   const [adminRows, setAdminRows] = useState<AdminSubscriptionRow[]>([]);
   const [featureFlags, setFeatureFlags] = useState<AppFeatureFlag[]>([]);
+  const [familyTreeAccessUsers, setFamilyTreeAccessUsers] = useState<
+    FamilyTreeFeatureAccessUser[]
+  >([]);
   const [adminAnnouncements, setAdminAnnouncements] = useState<AppAnnouncement[]>([]);
   const [announcementsError, setAnnouncementsError] = useState("");
   const [featureFlagsError, setFeatureFlagsError] = useState("");
+  const [familyTreeAccessError, setFamilyTreeAccessError] = useState("");
   const [pageError, setPageError] = useState("");
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelMessage, setCancelMessage] = useState("");
@@ -85,6 +94,7 @@ export function SubscriptionPage({
   const refreshPage = async () => {
     setPageError("");
     setFeatureFlagsError("");
+    setFamilyTreeAccessError("");
     setAnnouncementsError("");
     try {
       const nextPlans = await loadSubscriptionPlans();
@@ -92,6 +102,16 @@ export function SubscriptionPage({
       if (context?.isAdmin) {
         const nextAdminRows = await loadAdminSubscriptions();
         setAdminRows(nextAdminRows);
+        try {
+          const nextAccessUsers = await loadAdminFamilyTreeFeatureAccess();
+          setFamilyTreeAccessUsers(nextAccessUsers);
+          setFamilyTreeAccessError("");
+        } catch {
+          setFamilyTreeAccessUsers([]);
+          setFamilyTreeAccessError(
+            "Контроль доступу до родового дерева ще не налаштований у базі. Застосуйте міграцію 202607120002_family_tree_feature_access.sql.",
+          );
+        }
         try {
           const nextAnnouncements = await loadAdminAnnouncements();
           setAdminAnnouncements(nextAnnouncements);
@@ -290,6 +310,11 @@ export function SubscriptionPage({
           <AdminFeatureFlags
             flags={featureFlags}
             loadError={featureFlagsError}
+            onChanged={refreshPage}
+          />
+          <AdminFamilyTreeAccess
+            users={familyTreeAccessUsers}
+            loadError={familyTreeAccessError}
             onChanged={refreshPage}
           />
           <AdminSubscriptions rows={adminRows} onChanged={refreshPage} />
@@ -618,6 +643,116 @@ function AdminFeatureFlags({ flags, loadError, onChanged }: {
         ))}
         {!flags.length && !loadError ? (
           <div className="empty-inline">Немає доступних перемикачів функцій.</div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function AdminFamilyTreeAccess({ users, loadError, onChanged }: {
+  users: FamilyTreeFeatureAccessUser[];
+  loadError: string;
+  onChanged: () => Promise<void>;
+}) {
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [busyUserId, setBusyUserId] = useState("");
+  const [error, setError] = useState("");
+  const availableUsers = users.filter((user) => !user.isAdmin && !user.isEnabled);
+  const enabledUsers = users.filter((user) => user.isEnabled);
+
+  useEffect(() => {
+    if (selectedUserId && !availableUsers.some((user) => user.userId === selectedUserId)) {
+      setSelectedUserId("");
+    }
+  }, [selectedUserId, availableUsers.map((user) => user.userId).join("|")]);
+
+  const updateAccess = async (userId: string, isEnabled: boolean) => {
+    setBusyUserId(userId);
+    setError("");
+    try {
+      await adminSetFamilyTreeFeatureAccess({ userId, isEnabled });
+      setSelectedUserId("");
+      await onChanged();
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Не вдалося змінити доступ до родового дерева.",
+      );
+    } finally {
+      setBusyUserId("");
+    }
+  };
+
+  return (
+    <section className="subscription-admin-section feature-flags-section">
+      <div className="section-heading">
+        <div>
+          <h2>Тестувальники родового дерева</h2>
+          <p>
+            Доступ охоплює модуль «Родове дерево», імпорт і експорт GEDCOM.
+            Участь у конкретному проєкті перевіряється окремо.
+          </p>
+        </div>
+      </div>
+      {loadError ? <div className="alert alert-notice">{loadError}</div> : null}
+      {error ? <div className="alert alert-error">{error}</div> : null}
+      {!loadError ? (
+        <div className="subscription-admin-filters family-tree-access-form">
+          <label>
+            <span>Зареєстрований користувач</span>
+            <select
+              value={selectedUserId}
+              onChange={(event) => setSelectedUserId(event.target.value)}
+            >
+              <option value="">Оберіть користувача</option>
+              {availableUsers.map((user) => (
+                <option value={user.userId} key={user.userId}>
+                  {user.displayName ? `${user.displayName} — ` : ""}{user.email}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={!selectedUserId || Boolean(busyUserId)}
+            onClick={() => void updateAccess(selectedUserId, true)}
+          >
+            {busyUserId === selectedUserId ? "Надаємо…" : "Надати доступ"}
+          </button>
+        </div>
+      ) : null}
+      <div className="feature-flag-list">
+        {enabledUsers.map((user) => (
+          <article className="feature-flag-item" key={user.userId}>
+            <div>
+              <h3>{user.displayName || user.email}</h3>
+              <p>{user.email}</p>
+              <small>
+                {user.isAdmin
+                  ? "Адміністратор — постійний доступ"
+                  : user.grantedAt
+                    ? `Доступ надано ${formatDate(user.grantedAt)}`
+                    : "Запрошений тестувальник"}
+              </small>
+            </div>
+            {user.isAdmin ? (
+              <span className="status-pill">Власник</span>
+            ) : (
+              <button
+                type="button"
+                className="button button-secondary danger"
+                disabled={busyUserId === user.userId}
+                onClick={() => void updateAccess(user.userId, false)}
+              >
+                {busyUserId === user.userId ? "Вимикаємо…" : "Забрати доступ"}
+              </button>
+            )}
+          </article>
+        ))}
+        {!enabledUsers.length && !loadError ? (
+          <div className="empty-inline">Тестувальників ще не додано.</div>
         ) : null}
       </div>
     </section>

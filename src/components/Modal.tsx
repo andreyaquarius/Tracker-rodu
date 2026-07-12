@@ -8,12 +8,18 @@ import {
   type ReactNode,
 } from "react";
 import { useWorkspaceWindowFrame } from "./WorkspaceWindows";
+import {
+  DESKTOP_SIDEBAR_WIDTH,
+  SIDEBAR_LAYOUT_CHANGE_EVENT,
+} from "../utils/sidebarPreference";
 
 interface ModalProps {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
   mode?: "dialog" | "window";
+  fullscreen?: boolean;
   minimizable?: boolean;
   stackIndex?: number;
   dockIndex?: number;
@@ -23,7 +29,6 @@ interface ModalProps {
 type ModalPosition = { left: number; top: number };
 
 const DESKTOP_MODAL_BREAKPOINT = 850;
-const DESKTOP_SIDEBAR_WIDTH = 340;
 const MODAL_MARGIN = 18;
 const MODAL_CASCADE_STEP = 26;
 const MODAL_BASE_Z_INDEX = 100;
@@ -37,7 +42,9 @@ export function Modal({
   title,
   children,
   onClose,
+  className = "",
   mode = "dialog",
+  fullscreen = false,
   minimizable = mode === "window",
   stackIndex = 0,
   dockIndex = 0,
@@ -48,6 +55,8 @@ export function Modal({
   const resolvedDockIndex = frame?.dockIndex ?? dockIndex;
   const titleId = useId();
   const modalRef = useRef<HTMLElement | null>(null);
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
   const initialStackIndexRef = useRef(resolvedStackIndex);
   const [position, setPosition] = useState<ModalPosition | null>(null);
   const [localMinimized, setLocalMinimized] = useState(false);
@@ -77,6 +86,7 @@ export function Modal({
     setPosition(initialPosition);
 
     const handleResize = () => {
+      if (fullscreenRef.current) return;
       if (!isDraggableModalViewport()) {
         setPosition(null);
         return;
@@ -85,9 +95,33 @@ export function Modal({
       setPosition((current) => clampModalPosition(current ?? initialPosition, nextRect.width, nextRect.height));
     };
 
+    const handleSidebarLayoutChange = () => {
+      if (fullscreenRef.current || !isDraggableModalViewport()) return;
+      const nextRect = modal.getBoundingClientRect();
+      setPosition(centerModalInWorkspace(
+        nextRect.width,
+        nextRect.height,
+        initialStackIndexRef.current,
+      ));
+    };
+
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    window.addEventListener(SIDEBAR_LAYOUT_CHANGE_EVENT, handleSidebarLayoutChange);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener(SIDEBAR_LAYOUT_CHANGE_EVENT, handleSidebarLayoutChange);
+    };
   }, []);
+
+  useEffect(() => {
+    if (fullscreen || !isDraggableModalViewport()) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    const rect = modal.getBoundingClientRect();
+    setPosition((current) => current
+      ? clampModalPosition(current, rect.width, rect.height)
+      : current);
+  }, [fullscreen]);
 
   const focusWindow = () => {
     if (frame) {
@@ -98,7 +132,7 @@ export function Modal({
   };
 
   const startDrag = (event: PointerEvent<HTMLDivElement>) => {
-    if (!isDraggableModalViewport() || event.button !== 0) return;
+    if (fullscreen || !isDraggableModalViewport() || event.button !== 0) return;
     if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
 
     focusWindow();
@@ -176,7 +210,8 @@ export function Modal({
   }
 
   const zIndex = (mode === "window" ? WINDOW_BASE_Z_INDEX : MODAL_BASE_Z_INDEX) + resolvedStackIndex;
-  const modalStyle: CSSProperties = position
+  const positioned = Boolean(position) && !fullscreen;
+  const modalStyle: CSSProperties = position && !fullscreen
     ? { left: position.left, top: position.top, zIndex: zIndex + 1 }
     : { zIndex: zIndex + 1 };
 
@@ -189,7 +224,7 @@ export function Modal({
     >
       <section
         ref={modalRef}
-        className={`modal ${position ? "modal-draggable" : ""}`}
+        className={`modal ${className} ${fullscreen ? "modal-fullscreen" : ""} ${positioned ? "modal-draggable" : ""}`.trim()}
         style={modalStyle}
         role="dialog"
         aria-modal={mode === "dialog" ? true : undefined}
@@ -202,7 +237,7 @@ export function Modal({
         <div className="modal-header" onPointerDown={startDrag}>
           <h2 id={titleId}>{title}</h2>
           <div className="modal-window-controls">
-            {minimizable ? (
+            {minimizable && !fullscreen ? (
               <button
                 type="button"
                 className="icon-button"
@@ -230,7 +265,7 @@ function minimizedDockPosition(dockIndex: number): CSSProperties {
   }
 
   const isDesktop = window.innerWidth > DESKTOP_MODAL_BREAKPOINT;
-  const startLeft = isDesktop ? DESKTOP_SIDEBAR_WIDTH + MODAL_MARGIN : 8;
+  const startLeft = isDesktop ? desktopWorkspaceLeft() + MODAL_MARGIN : 8;
   const endMargin = isDesktop ? MODAL_MARGIN : 8;
   const availableWidth = Math.max(220, window.innerWidth - startLeft - endMargin);
   const cardWidth = Math.min(MINIMIZED_CARD_WIDTH, availableWidth);
@@ -251,7 +286,7 @@ function isDraggableModalViewport(): boolean {
 }
 
 function centerModalInWorkspace(width: number, height: number, stackIndex = 0): ModalPosition {
-  const minLeft = DESKTOP_SIDEBAR_WIDTH + MODAL_MARGIN;
+  const minLeft = desktopWorkspaceLeft() + MODAL_MARGIN;
   const maxLeft = Math.max(minLeft, window.innerWidth - width - MODAL_MARGIN);
   const cascadeOffset = (stackIndex % 6) * MODAL_CASCADE_STEP;
   const left = minLeft + Math.max(0, maxLeft - minLeft) / 2 + cascadeOffset;
@@ -260,7 +295,7 @@ function centerModalInWorkspace(width: number, height: number, stackIndex = 0): 
 }
 
 function clampModalPosition(position: ModalPosition, width: number, height: number): ModalPosition {
-  const minLeft = DESKTOP_SIDEBAR_WIDTH + MODAL_MARGIN;
+  const minLeft = desktopWorkspaceLeft() + MODAL_MARGIN;
   const maxLeft = Math.max(minLeft, window.innerWidth - width - MODAL_MARGIN);
   const minTop = MODAL_MARGIN;
   const maxTop = Math.max(minTop, window.innerHeight - height - MODAL_MARGIN);
@@ -269,4 +304,14 @@ function clampModalPosition(position: ModalPosition, width: number, height: numb
     left: Math.min(Math.max(minLeft, position.left), maxLeft),
     top: Math.min(Math.max(minTop, position.top), maxTop),
   };
+}
+
+function desktopWorkspaceLeft(): number {
+  if (typeof window === "undefined" || typeof document === "undefined") return DESKTOP_SIDEBAR_WIDTH;
+  const value = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue("--app-sidebar-width")
+    .trim();
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : DESKTOP_SIDEBAR_WIDTH;
 }

@@ -1,4 +1,4 @@
-import type { EntityId, GeoPoint } from "./index";
+import type { DocumentRecord, EntityId, Finding, GeoPoint } from "./index";
 
 export type FamilyTreePrivacyStatus = "private" | "project" | "public" | "confidential";
 export type EvidenceStatus = "proven" | "likely" | "disputed" | "disproven" | "unknown";
@@ -272,10 +272,13 @@ export type FamilyTreePersonTimelineEventType =
   | "census"
   | "revision_list"
   | "confession_list"
+  | "household_register"
   | "immigration"
   | "emigration"
   | "military"
   | "occupation"
+  | "education"
+  | "nationality"
   | "death"
   | "burial"
   | "cremation"
@@ -317,7 +320,7 @@ export interface FamilyTreeGraphIssue {
   relationshipIds?: EntityId[];
 }
 
-export type FamilyTreeGraphMode = "family" | "ancestors" | "descendants";
+export type FamilyTreeGraphMode = "family" | "ancestors" | "descendants" | "direct-line" | "compact";
 
 export type FamilyTreeGraphIssueCode =
   | "selfRelationship"
@@ -338,6 +341,11 @@ export interface FamilyTreeGraphQuery {
   rootPersonId?: EntityId;
   mode: FamilyTreeGraphMode;
   maxDepth?: number;
+  unlimitedDepth?: boolean;
+  /** Окрема глибина поколінь угору (family-режим); типово maxDepth. */
+  maxDepthUp?: number;
+  /** Окрема глибина поколінь униз (family-режим); типово maxDepth. */
+  maxDepthDown?: number;
   includeAssociations?: boolean;
   includeDisproven?: boolean;
   includePrivateLiving?: boolean;
@@ -359,6 +367,10 @@ export interface FamilyTreeOccurrenceDto {
   depth: number;
   duplicateIndex: number;
   isRepeated: boolean;
+  hiddenParentsCount?: number;
+  hiddenChildrenCount?: number;
+  hiddenSideBranchesCount?: number;
+  sideBranchesExpanded?: boolean;
   familyGroupId?: EntityId | null;
   parentSetId?: EntityId | null;
   layout?: {
@@ -381,6 +393,8 @@ export interface FamilyTreeNodeDto {
   redacted: boolean;
   memberRole?: FamilyTreePersonRole;
   occurrenceIds: string[];
+  /** Full, non-rendering profile data used by archival formats such as GEDCOM. */
+  metadata?: Record<string, unknown>;
 }
 
 export interface FamilyTreeEdgeDto {
@@ -392,6 +406,7 @@ export interface FamilyTreeEdgeDto {
   fromOccurrenceId?: string;
   toOccurrenceId?: string;
   relationshipType: string;
+  parentRoleLabel?: ParentRoleLabel;
   evidenceStatus: EvidenceStatus;
   confidence: number;
   isBloodline?: boolean;
@@ -433,6 +448,7 @@ export interface FamilyTreeGraphDto {
   mode: FamilyTreeGraphMode;
   rootPersonId: EntityId | null;
   tree: FamilyTree | null;
+  availablePersons: FamilyTreeNodeDto[];
   nodes: FamilyTreeNodeDto[];
   occurrences: FamilyTreeOccurrenceDto[];
   edges: FamilyTreeEdgeDto[];
@@ -471,6 +487,11 @@ export interface GedcomExportOptions {
   createdAt?: Date | string;
   gedcomVersion?: "5.5.1" | "7.0";
   includeAssociations?: boolean;
+  rootPersonId?: EntityId;
+  /** Raw imported records used to retain vendor extensions, citations and media. */
+  preservedRecords?: GedcomPreservedRecord[];
+  documents?: DocumentRecord[];
+  findings?: Finding[];
 }
 
 export interface GedcomExportResult {
@@ -526,12 +547,72 @@ export interface GedcomImportNameDraft {
   originalText: string;
 }
 
+export interface GedcomPreservedLine {
+  level: number;
+  pointer: string | null;
+  tag: string;
+  value: string;
+}
+
+export interface GedcomPreservedRecord {
+  order: number;
+  pointer: string | null;
+  tag: string;
+  value: string;
+  lines: GedcomPreservedLine[];
+  /** Filled after persistence for records mapped to a Tracker entity. */
+  internalId?: EntityId;
+  internalTable?: string;
+}
+
+export interface GedcomImportCitationDraft {
+  sourceXref: string;
+  page: string;
+  eventType: string;
+  role: string;
+  quality: string;
+  dataDate: string;
+  text: string;
+  notes: string;
+}
+
+export interface GedcomImportMediaDraft {
+  file: string;
+  format: string;
+  title: string;
+  fileSize: string;
+  photoRin: string;
+  isPrimary: boolean;
+  isPersonalPhoto: boolean;
+}
+
+export interface GedcomImportSourceDraft {
+  xref: string;
+  title: string;
+  author: string;
+  publication: string;
+  text: string;
+  sourceType: string;
+  mediaType: string;
+  rin: string;
+}
+
 export interface GedcomImportEventDraft {
   eventType: FamilyTreePersonTimelineEventType;
+  /** Original GEDCOM tag and value are kept separately from TYPE. */
+  tag?: string;
+  value?: string;
+  title?: string;
   eventDate: string;
   dateText: string;
   placeName: string;
+  geo: GeoPoint | null;
   notes: string;
+  age?: string;
+  cause?: string;
+  address?: string;
+  citations?: GedcomImportCitationDraft[];
+  media?: GedcomImportMediaDraft[];
 }
 
 export interface GedcomImportPersonDraft {
@@ -546,6 +627,15 @@ export interface GedcomImportPersonDraft {
     familyXref: string;
     pedigree: "birth" | "adopted" | "foster" | "sealing" | "other" | null;
   }>;
+  notes?: string;
+  nationality?: string;
+  religion?: string;
+  education?: string[];
+  rin?: string;
+  uid?: string;
+  vitalStatus?: "living" | "deceased" | "unknown";
+  citations?: GedcomImportCitationDraft[];
+  media?: GedcomImportMediaDraft[];
   rawLineNumber: number;
 }
 
@@ -554,6 +644,10 @@ export interface GedcomImportFamilyDraft {
   partnerXrefs: string[];
   childXrefs: string[];
   events: GedcomImportEventDraft[];
+  notes?: string;
+  rin?: string;
+  uid?: string;
+  citations?: GedcomImportCitationDraft[];
   rawLineNumber: number;
 }
 
@@ -564,6 +658,7 @@ export interface GedcomImportParentChildDraft {
   relationshipType: ParentChildRelationshipType;
   parentRoleLabel: ParentRoleLabel;
   pedigree: "birth" | "adopted" | "foster" | "sealing" | "other" | null;
+  notes?: string;
 }
 
 export interface GedcomImportPartnerDraft {
@@ -573,13 +668,19 @@ export interface GedcomImportPartnerDraft {
   relationshipType: PartnerRelationshipType;
   eventDate: string;
   placeName: string;
+  endDate?: string;
+  endPlaceName?: string;
+  notes?: string;
 }
 
 export interface GedcomImportDraft {
+  rootPersonXref?: string;
   people: GedcomImportPersonDraft[];
   families: GedcomImportFamilyDraft[];
   parentChildRelationships: GedcomImportParentChildDraft[];
   partnerRelationships: GedcomImportPartnerDraft[];
+  sources?: GedcomImportSourceDraft[];
+  preservedRecords?: GedcomPreservedRecord[];
   unmappedRecords: GedcomRecord[];
   summary: GedcomSummary;
   warnings: FamilyTreeGraphIssue[];

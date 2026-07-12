@@ -84,6 +84,93 @@ test("preserves GEDCOM privacy restriction metadata on imported people", () => {
   assert.equal(person.isLiving, true);
 });
 
+test("infers living people from MyHeritage privacy restriction when no death is present", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Living /Private/",
+    "1 RESN privacy",
+    "0 @I2@ INDI",
+    "1 NAME Deceased /Private/",
+    "1 RESN privacy",
+    "1 DEAT Y",
+    "0 @I3@ INDI",
+    "1 NAME Explicit /Notliving/",
+    "1 RESN privacy",
+    "1 _LIVING N",
+    "0 TRLR",
+  ].join("\n"));
+
+  assert.equal(draft.people.find((person) => person.xref === "@I1@")?.isLiving, true);
+  assert.equal(draft.people.find((person) => person.xref === "@I2@")?.isLiving, false);
+  assert.equal(draft.people.find((person) => person.xref === "@I3@")?.isLiving, false);
+});
+
+test("does not treat GEDCOM DEAT N as a death event", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Living /Marker/",
+    "1 RESN privacy",
+    "1 DEAT N",
+    "0 TRLR",
+  ].join("\n"));
+
+  const person = draft.people[0];
+  assert.equal(person.isLiving, true);
+  assert.equal(person.events.some((event) => event.eventType === "death"), false);
+});
+
+test("reads MyHeritage-style married surname extension", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Hanna /Birth/",
+    "2 TYPE birth",
+    "1 _MARNM Hanna /Married/",
+    "2 GIVN Hanna",
+    "2 SURN Married",
+    "0 TRLR",
+  ].join("\n"));
+
+  const person = draft.people[0];
+  assert.equal(person.names.some((name) => name.nameType === "birth" && name.surname === "Birth"), true);
+  assert.equal(person.names.some((name) => name.nameType === "married" && name.surname === "Married"), true);
+});
+
+test("reads MyHeritage married surname nested under NAME", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Hanna /Birth/",
+    "2 GIVN Hanna",
+    "2 SURN Birth",
+    "2 _MARNM Married",
+    "0 TRLR",
+  ].join("\n"));
+
+  const person = draft.people[0];
+  const marriedName = person.names.find((name) => name.nameType === "married");
+  assert.equal(marriedName?.surname, "Married");
+  assert.equal(marriedName?.givenName, "Hanna");
+  assert.equal(marriedName?.fullName, "Hanna Married");
+});
+
+test("reads maiden name type as birth surname", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Hanna /Maiden/",
+    "2 TYPE maiden",
+    "1 _MARNM Hanna /Married/",
+    "0 TRLR",
+  ].join("\n"));
+
+  const person = draft.people[0];
+  assert.equal(person.names.some((name) => name.nameType === "birth" && name.surname === "Maiden"), true);
+  assert.equal(person.names.some((name) => name.nameType === "married" && name.surname === "Married"), true);
+});
+
 test("reports families that reference missing people", () => {
   const draft = buildGedcomImportDraft([
     "0 HEAD",
@@ -111,4 +198,50 @@ test("keeps unsupported top-level records as unmapped records", () => {
   assert.equal(draft.people.length, 1);
   assert.equal(draft.unmappedRecords.length, 1);
   assert.equal(draft.unmappedRecords[0].tag, "RESN");
+});
+
+test("reads saved central person marker from GEDCOM header", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "1 _TRK_ROOT @I2@",
+    "0 @I1@ INDI",
+    "1 NAME First /Person/",
+    "0 @I2@ INDI",
+    "1 NAME Root /Person/",
+    "0 TRLR",
+  ].join("\n"));
+
+  assert.equal(draft.rootPersonXref, "@I2@");
+});
+
+test("builds a large GEDCOM import draft without quadratic child-line scans", () => {
+  const peopleCount = 3_000;
+  const lines = ["0 HEAD", "1 CHAR UTF-8"];
+  for (let index = 1; index <= peopleCount; index += 1) {
+    lines.push(
+      `0 @I${index}@ INDI`,
+      `1 NAME Given${index} /Birth${index}/`,
+      `2 GIVN Given${index}`,
+      `2 SURN Birth${index}`,
+      `2 _MARNM Married${index}`,
+      "1 BIRT",
+      `2 DATE ${1800 + (index % 200)}`,
+      `2 PLAC Place ${index % 25}`,
+      `2 NOTE Source note ${index}`,
+      "3 CONC  continued",
+    );
+  }
+  lines.push("0 TRLR");
+
+  const startedAt = performance.now();
+  const draft = buildGedcomImportDraft(lines.join("\n"));
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(draft.people.length, peopleCount);
+  assert.equal(draft.people[peopleCount - 1]?.events[0]?.notes, `Source note ${peopleCount}continued`);
+  assert.equal(
+    draft.people[peopleCount - 1]?.names.some((name) => name.nameType === "married" && name.surname === `Married${peopleCount}`),
+    true,
+  );
+  assert.ok(elapsedMs < 5_000, `Expected near-linear GEDCOM import, received ${elapsedMs.toFixed(0)} ms.`);
 });

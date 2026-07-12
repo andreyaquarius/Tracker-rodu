@@ -36,6 +36,9 @@ import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
 import { PersonsPage } from "./pages/PersonsPage";
 import { MapPage } from "./pages/MapPage";
+import { FamilyTreePage } from "./pages/FamilyTreePage";
+import { shouldUseProductionFamilyTreeRenderer } from "./utils/familyTreeRendererFlag";
+import { FamilyTreeErrorBoundary } from "./components/familyTree/FamilyTreeErrorBoundary";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
 import { GeneHelpRequestModal } from "./components/GeneHelpRequestModal";
@@ -77,6 +80,11 @@ import {
   subscriptionErrorCode,
   subscriptionErrorMessage,
 } from "./services/subscriptionService";
+import {
+  assertFamilyTreeFeatureAccess,
+  loadMyFamilyTreeFeatureAccess,
+} from "./services/familyTreeFeatureAccess";
+import { resolveFamilyTreeFeatureAccess } from "./utils/familyTreeFeatureAccess";
 import type { PlanLimitKey, UpgradeReason } from "./types/subscription";
 import {
   clearProjectResearchCache,
@@ -170,6 +178,21 @@ import { assertProjectRecordUnchanged } from "./services/projectConflicts";
 import { deleteScanFile, setProjectAttachmentTarget } from "./services/scanStorage";
 import { clearGoogleDriveSession } from "./services/googleDriveStorage";
 import { clearAllProjectCaches } from "./utils/projectCache";
+import { databaseStatementTimeoutMessage } from "./utils/databaseErrors";
+import {
+  GedcomImportStageError,
+  toGedcomImportStageError,
+  type GedcomImportStage,
+} from "./utils/gedcomImportDiagnostics";
+import {
+  reconcileGedcomImportForRetry,
+  type GedcomImportReconciliationPayload,
+  type GedcomImportReconciliationResult,
+} from "./utils/gedcomImportReconciliation.ts";
+import {
+  ALL_PROJECT_DATA_GROUPS,
+  dataGroupsForPage,
+} from "./utils/projectDataGroups";
 import { createActivityEntries } from "./utils/activityLog";
 import {
   emptyProjectDashboardStats,
@@ -300,21 +323,6 @@ function applyHomeSeo(): void {
   upsertMetaName("twitter:image", SITE_IMAGE_URL);
 }
 
-type ProjectDataGroup =
-  | "researches"
-  | "people"
-  | "documents"
-  | "work"
-  | "analysis";
-
-const ALL_PROJECT_DATA_GROUPS: ProjectDataGroup[] = [
-  "researches",
-  "people",
-  "documents",
-  "work",
-  "analysis",
-];
-
 const researchScopedCollections: ReadonlySet<CollectionKey> = new Set([
   "documents",
   "yearMatrix",
@@ -334,28 +342,6 @@ const standardSectionQuotaKeys: Record<string, string> = {
   findings: "findings",
   hypotheses: "hypotheses",
 };
-
-function dataGroupsForPage(page: PageKey): Set<ProjectDataGroup> {
-  if (page === "map") return new Set(["researches", "people", "documents", "work"]);
-  if (page === "researches") return new Set(["researches"]);
-  if (page === "documents") return new Set(["researches", "documents"]);
-  if (page === "archiveRequests") {
-    return new Set(["researches", "people", "analysis"]);
-  }
-  if (page === "yearMatrix") {
-    return new Set(["researches", "documents", "work"]);
-  }
-  if (page === "tasks" || page === "findings") {
-    return new Set(["researches", "people", "documents", "work"]);
-  }
-  if (page === "hypotheses" || page === "persons" || page === "backup") {
-    return new Set(ALL_PROJECT_DATA_GROUPS);
-  }
-  if (page.startsWith("custom:")) {
-    return new Set(ALL_PROJECT_DATA_GROUPS);
-  }
-  return new Set();
-}
 
 function chooseWorkspace(
   items: SupabaseWorkspace[],
@@ -419,6 +405,7 @@ function projectAttachmentFields(
     fields.marriageScans = scanList(record.marriageScans);
     fields.deathScans = scanList(record.deathScans);
     fields.mentionScans = scanList(record.mentionScans);
+    fields.photos = scanList(record.photos);
   }
   if (collection === "archiveRequests") {
     fields.requestScans = scanList(record.requestScans);
@@ -496,6 +483,10 @@ export default function App() {
   const [scanViewer, setScanViewer] = useState<ActiveDocumentScanViewer | null>(null);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
+  const [familyTreeFeatureAccess, setFamilyTreeFeatureAccess] = useState({
+    allowed: false,
+    loading: true,
+  });
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
@@ -555,6 +546,11 @@ export default function App() {
   const lastPreparedUserRef = useRef<string | null>(null);
   const activeWorkspaceIdRef = useRef<string | null>(null);
   const automaticProjectBackupRef = useRef<string | null>(null);
+  const hydratedWorkspaceRef = useRef<string | null>(null);
+  const peopleLoadRef = useRef<{
+    projectId: string;
+    promise: ReturnType<typeof listProjectPeople>;
+  } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const syncedPreferencesRef = useRef<{
     projectId: string;
@@ -583,6 +579,40 @@ export default function App() {
       active = false;
     };
   }, [account?.id, route.kind]);
+
+  useEffect(() => {
+    let active = true;
+    if (!account || route.kind === "public") {
+      setFamilyTreeFeatureAccess({ allowed: false, loading: false });
+      return () => {
+        active = false;
+      };
+    }
+
+    setFamilyTreeFeatureAccess({ allowed: false, loading: true });
+    void loadMyFamilyTreeFeatureAccess()
+      .then((allowed) => {
+        if (active) setFamilyTreeFeatureAccess({ allowed, loading: false });
+      })
+      .catch(() => {
+        // Private beta access is deliberately fail-closed if the entitlement
+        // service is unavailable or its database migration is not installed.
+        if (active) setFamilyTreeFeatureAccess({ allowed: false, loading: false });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [account?.id, route.kind]);
+
+  // The application owner must never be locked out while the private-beta
+  // entitlement migration is being rolled out. Server-side SQL grants app
+  // administrators the same unconditional access.
+  const canUseFamilyTreeFeature = resolveFamilyTreeFeatureAccess({
+    isAppAdmin: subscriptionAccess.isAdmin,
+    serverAllowed: familyTreeFeatureAccess.allowed,
+    serverLoading: familyTreeFeatureAccess.loading,
+  });
 
   const canOpenGeneHelp = subscriptionAccess.isAdmin || featureFlags.genehelp_public === true;
   const canCreateProjectRecords = !workspace || subscriptionAccess.canCreateProjectRecords;
@@ -650,8 +680,18 @@ export default function App() {
     if (workspace && searchDataProjectId === workspace.projectId) {
       return new Set(ALL_PROJECT_DATA_GROUPS);
     }
-    return dataGroupsForPage(page);
-  }, [page, searchDataProjectId, workspace]);
+    const groups = dataGroupsForPage(page);
+    if (page === "persons" && peopleReadyForProject === workspace?.projectId) {
+      groups.add("work");
+      groups.add("analysis");
+    }
+    return groups;
+  }, [page, peopleReadyForProject, searchDataProjectId, workspace]);
+  const shouldLoadResearches = requestedDataGroups.has("researches");
+  const shouldLoadPeople = requestedDataGroups.has("people");
+  const shouldLoadDocuments = requestedDataGroups.has("documents");
+  const shouldLoadWork = requestedDataGroups.has("work");
+  const shouldLoadAnalysis = requestedDataGroups.has("analysis");
 
   useEffect(() => {
     if (route.kind === "public") {
@@ -670,6 +710,8 @@ export default function App() {
 
   const describeError = useCallback((error: unknown, fallback: string) => {
     if (subscriptionErrorCode(error)) return subscriptionErrorMessage(error);
+    const timeoutMessage = databaseStatementTimeoutMessage(error);
+    if (timeoutMessage) return timeoutMessage;
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === "object" && error !== null) {
       const message = "message" in error ? String(error.message ?? "") : "";
@@ -941,6 +983,26 @@ export default function App() {
   }, [canCreateProjectRecords, workspace?.projectId, workspace?.projectName]);
 
   useEffect(() => {
+    const projectId = workspace?.projectId ?? null;
+    if (hydratedWorkspaceRef.current === projectId) return;
+    hydratedWorkspaceRef.current = projectId;
+    setProjectResearches([]);
+    setProjectPersons([]);
+    setProjectPersonRelations([]);
+    setProjectDocuments([]);
+    setProjectYearMatrix([]);
+    setProjectTasks([]);
+    setProjectFindings([]);
+    setProjectHypotheses([]);
+    setProjectArchiveRequests([]);
+    setResearchesReadyForProject(null);
+    setPeopleReadyForProject(null);
+    setDocumentsReadyForProject(null);
+    setWorkRecordsReadyForProject(null);
+    setAnalysisReadyForProject(null);
+  }, [workspace?.projectId]);
+
+  useEffect(() => {
     if (!workspace || !account) {
       setProjectPreferencesReadyFor(null);
       return;
@@ -1099,13 +1161,11 @@ export default function App() {
       return;
     }
 
+    if (!shouldLoadResearches) return;
     const projectId = workspace.projectId;
+    if (researchesReadyForProject === projectId) return;
     const cached = loadProjectResearchCache(projectId);
     setProjectResearches(cached);
-    if (!requestedDataGroups.has("researches")) {
-      setResearchesReadyForProject(null);
-      return;
-    }
 
     let active = true;
     setResearchesReadyForProject(null);
@@ -1134,7 +1194,13 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [account, describeError, notify, requestedDataGroups, workspace]);
+  }, [
+    account,
+    describeError,
+    notify,
+    shouldLoadResearches,
+    workspace,
+  ]);
 
   useEffect(() => {
     if (!workspace || !account) {
@@ -1143,30 +1209,41 @@ export default function App() {
       setPeopleReadyForProject(null);
       return;
     }
+    if (!shouldLoadPeople) return;
     const projectId = workspace.projectId;
+    if (peopleReadyForProject === projectId) return;
     const cached = loadProjectPeopleCache(projectId);
     setProjectPersons(cached.persons);
     setProjectPersonRelations(cached.relations);
-    if (!requestedDataGroups.has("people")) {
-      setPeopleReadyForProject(null);
-      return;
-    }
 
     let active = true;
     setPeopleReadyForProject(null);
     const fallbackPersons = cached.persons;
     const fallbackRelations = cached.relations;
 
-    void (async () => {
-      try {
-        const remote = await listProjectPeople(projectId);
-
-        if (!active) return;
+    let load = peopleLoadRef.current?.projectId === projectId
+      ? peopleLoadRef.current.promise
+      : null;
+    if (!load) {
+      load = listProjectPeople(projectId).then((remote) => {
         saveProjectPeopleCache(projectId, remote.persons, remote.relations);
+        return remote;
+      });
+      peopleLoadRef.current = { projectId, promise: load };
+      const clearInFlight = () => {
+        if (peopleLoadRef.current?.promise === load) peopleLoadRef.current = null;
+      };
+      void load.then(clearInFlight, clearInFlight);
+    }
+
+    void load
+      .then((remote) => {
+        if (!active) return;
         setProjectPersons(remote.persons);
         setProjectPersonRelations(remote.relations);
         setPeopleReadyForProject(projectId);
-      } catch (error) {
+      })
+      .catch((error: unknown) => {
         if (!active) return;
         notify(
           describeError(
@@ -1177,8 +1254,7 @@ export default function App() {
           ),
           true,
         );
-      }
-    })();
+      });
 
     return () => {
       active = false;
@@ -1187,7 +1263,7 @@ export default function App() {
     account,
     describeError,
     notify,
-    requestedDataGroups,
+    shouldLoadPeople,
     workspace,
   ]);
 
@@ -1198,14 +1274,12 @@ export default function App() {
       setDocumentsReadyForProject(null);
       return;
     }
+    if (!shouldLoadDocuments) return;
     const projectId = workspace.projectId;
+    if (documentsReadyForProject === projectId) return;
     const cached = loadProjectDocumentsCache(projectId);
     setProjectDocuments(cached.documents);
     setProjectYearMatrix(cached.yearMatrix);
-    if (!requestedDataGroups.has("documents")) {
-      setDocumentsReadyForProject(null);
-      return;
-    }
 
     let active = true;
     setDocumentsReadyForProject(null);
@@ -1242,7 +1316,7 @@ export default function App() {
     account,
     describeError,
     notify,
-    requestedDataGroups,
+    shouldLoadDocuments,
     workspace,
   ]);
 
@@ -1253,14 +1327,12 @@ export default function App() {
       setWorkRecordsReadyForProject(null);
       return;
     }
+    if (!shouldLoadWork) return;
     const projectId = workspace.projectId;
+    if (workRecordsReadyForProject === projectId) return;
     const cached = loadProjectWorkRecordsCache(projectId);
     setProjectTasks(cached.tasks);
     setProjectFindings(cached.findings);
-    if (!requestedDataGroups.has("work")) {
-      setWorkRecordsReadyForProject(null);
-      return;
-    }
 
     let active = true;
     setWorkRecordsReadyForProject(null);
@@ -1297,7 +1369,7 @@ export default function App() {
     account,
     describeError,
     notify,
-    requestedDataGroups,
+    shouldLoadWork,
     workspace,
   ]);
 
@@ -1308,14 +1380,12 @@ export default function App() {
       setAnalysisReadyForProject(null);
       return;
     }
+    if (!shouldLoadAnalysis) return;
     const projectId = workspace.projectId;
+    if (analysisReadyForProject === projectId) return;
     const cached = loadProjectAnalysisRecordsCache(projectId);
     setProjectHypotheses(cached.hypotheses);
     setProjectArchiveRequests(cached.archiveRequests);
-    if (!requestedDataGroups.has("analysis")) {
-      setAnalysisReadyForProject(null);
-      return;
-    }
 
     let active = true;
     setAnalysisReadyForProject(null);
@@ -1356,7 +1426,7 @@ export default function App() {
     account,
     describeError,
     notify,
-    requestedDataGroups,
+    shouldLoadAnalysis,
     workspace,
   ]);
 
@@ -2608,7 +2678,7 @@ export default function App() {
       void deleteEntityScanFiles("findings", localFinding, activeDb)
         .then(() => app.deleteEntity("findings", id))
         .catch((error: unknown) => {
-          notify(describeError(error, "РќРµ РІРґР°Р»РѕСЃСЏ РІРёРґР°Р»РёС‚Рё С„Р°Р№Р»Рё Р·РЅР°С…С–РґРєРё Р· Google Drive."), true);
+          notify(describeError(error, "Не вдалося видалити файли знахідки з Google Drive."), true);
         });
       return;
     }
@@ -3022,6 +3092,140 @@ export default function App() {
       throw new Error(describeError(error, "Не вдалося зберегти імпортовані записи."));
     }
   };
+  const importGedcomRecords = async (
+    input: GedcomImportReconciliationPayload,
+  ): Promise<GedcomImportReconciliationResult | void> => {
+    if (!input.people.length) return;
+    if (workspace && !subscriptionAccess.isAdmin) {
+      await assertFamilyTreeFeatureAccess();
+    }
+    validateResearchScope("persons", input.personRecords);
+    validateResearchScope("documents", input.documents);
+    if (!workspace) {
+      const reconciled = reconcileGedcomImportForRetry(input, {
+        people: activeDb.persons,
+        documents: activeDb.documents,
+        relations: activeDb.personRelations,
+        findings: activeDb.findings,
+      });
+      app.setDatabase((current) => ({
+        ...current,
+        persons: mergeImportedRecords(reconciled.people, current.persons),
+        documents: mergeImportedRecords(reconciled.documents, current.documents),
+        personRelations: mergeImportedRecords(reconciled.relations, current.personRelations),
+        findings: mergeImportedRecords(reconciled.findings, current.findings),
+      }));
+      return reconciled;
+    }
+    if (workspace.role === "viewer") {
+      throw new Error("У цьому проєкті у вас є лише право перегляду.");
+    }
+    const projectId = workspace.projectId;
+    const researchIds = new Set(projectResearches.map((research) => research.id));
+    const [storedPeople, storedDocuments, storedWorkRecords] = await Promise.all([
+      listProjectPeople(projectId),
+      listProjectDocuments(projectId),
+      listProjectWorkRecords(projectId),
+    ]);
+    const reconciled = reconcileGedcomImportForRetry(input, {
+      people: storedPeople.persons,
+      documents: storedDocuments.documents,
+      relations: storedPeople.relations,
+      findings: storedWorkRecords.findings,
+    });
+    const storedPersonIds = new Set(storedPeople.persons.map((person) => person.id));
+    const storedDocumentIds = new Set(storedDocuments.documents.map((document) => document.id));
+    const storedFindingIds = new Set(storedWorkRecords.findings.map((finding) => finding.id));
+    const storedRelationIds = new Set(storedPeople.relations.map((relation) => relation.id));
+    const hasNewPeople = reconciled.people.some((person) => !storedPersonIds.has(person.id));
+    const hasNewDocuments = reconciled.documents.some((document) => !storedDocumentIds.has(document.id));
+    const hasNewFindings = reconciled.findings.some((finding) => !storedFindingIds.has(finding.id));
+    const hasNewRelations = reconciled.relations.some((relation) => !storedRelationIds.has(relation.id));
+    if ((hasNewPeople || hasNewDocuments || hasNewFindings || hasNewRelations) && !canCreateProjectRecords) {
+      throw new Error("Імпорт нових записів заблокований поточним тарифом.");
+    }
+    if (hasNewPeople && !canCreateStandardSection(standardSectionQuotaKeys.persons)) {
+      throw new Error("Досягнуто ліміт записів у розділі осіб.");
+    }
+    if (hasNewFindings && !canCreateStandardSection(standardSectionQuotaKeys.findings)) {
+      throw new Error("Досягнуто ліміт записів у розділі знахідок.");
+    }
+    if (hasNewDocuments && !canCreateStandardSection(standardSectionQuotaKeys.documents)) {
+      throw new Error("Досягнуто ліміт записів у розділі документів.");
+    }
+
+    const nextDocuments = mergeImportedRecords(reconciled.documents, storedDocuments.documents);
+    const documentIds = new Set(nextDocuments.map((document) => document.id));
+    const nextPersons = mergeImportedRecords(reconciled.people, storedPeople.persons);
+    const nextRelations = mergeImportedRecords(reconciled.relations, storedPeople.relations);
+    const nextFindings = mergeImportedRecords(reconciled.findings, storedWorkRecords.findings);
+    const runPersistenceStage = async (
+      stage: GedcomImportStage,
+      fallback: string,
+      counts: Record<string, number>,
+      action: () => Promise<void>,
+    ) => {
+      try {
+        await action();
+      } catch (error) {
+        const stageError = toGedcomImportStageError(
+          stage,
+          error,
+          describeError(error, fallback),
+        );
+        console.error("GEDCOM import persistence stage failed", {
+          projectId,
+          stage,
+          counts,
+          error,
+        });
+        throw stageError;
+      }
+    };
+    try {
+      await runPersistenceStage(
+        "people-relations",
+        "Не вдалося зберегти осіб і родинні зв’язки.",
+        { people: reconciled.people.length, relations: reconciled.relations.length },
+        () => importProjectPeople(projectId, reconciled.people, reconciled.relations, researchIds),
+      );
+      if (reconciled.documents.length) {
+        await runPersistenceStage(
+          "documents",
+          "Не вдалося зберегти джерела і документи.",
+          { documents: reconciled.documents.length },
+          () => importProjectDocuments(projectId, reconciled.documents, [], researchIds),
+        );
+      }
+      if (reconciled.findings.length) {
+        await runPersistenceStage(
+          "findings",
+          "Не вдалося зберегти події і знахідки.",
+          { findings: reconciled.findings.length },
+          () => importProjectWorkRecords(
+            projectId,
+            [],
+            reconciled.findings,
+            researchIds,
+            documentIds,
+            new Set(nextPersons.map((person) => person.id)),
+          ),
+        );
+      }
+      setProjectPersons(nextPersons);
+      setProjectPersonRelations(nextRelations);
+      if (reconciled.documents.length) setProjectDocuments(nextDocuments);
+      if (reconciled.findings.length) setProjectFindings(nextFindings);
+      saveProjectPeopleCache(projectId, nextPersons, nextRelations);
+      if (reconciled.documents.length) saveProjectDocumentsCache(projectId, nextDocuments, storedDocuments.yearMatrix);
+      if (reconciled.findings.length) saveProjectWorkRecordsCache(projectId, storedWorkRecords.tasks, nextFindings);
+      void subscriptionAccess.refreshSubscription();
+      return reconciled;
+    } catch (error) {
+      if (error instanceof GedcomImportStageError) throw error;
+      throw new Error(describeError(error, "Не вдалося зберегти GEDCOM-імпорт."));
+    }
+  };
   const deleteFor = (collection: CollectionKey) => (id: string) => {
     if (collection === "researches") removeResearch(id);
     else if (collection === "documents") removeDocument(id);
@@ -3033,6 +3237,10 @@ export default function App() {
     else app.deleteEntity(collection, id);
   };
   const navigate = (nextPage: PageKey) => {
+    if (nextPage === "familyTree" && !canUseFamilyTreeFeature) {
+      notify("Модуль «Родове дерево» доступний лише запрошеним тестувальникам.", true);
+      return;
+    }
     setModuleSearch("");
     setOpenEntityId("");
     setCreateRequest(null);
@@ -4012,6 +4220,62 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
           />
         );
+      case "familyTree":
+        if (!canUseFamilyTreeFeature) {
+          return (
+            <section className="panel empty-state">
+              <strong>
+                {familyTreeFeatureAccess.loading
+                  ? "Перевіряємо доступ до родового дерева…"
+                  : "Модуль «Родове дерево» поки доступний лише запрошеним тестувальникам."}
+              </strong>
+              {!familyTreeFeatureAccess.loading ? (
+                <p>Адміністратор може надати доступ зареєстрованому користувачу у розділі тарифів.</p>
+              ) : null}
+            </section>
+          );
+        }
+        return (
+          <FamilyTreeErrorBoundary>
+            <FamilyTreePage
+              projectId={workspace?.projectId}
+              db={activeDb}
+              persons={activeDb.persons}
+              relations={activeDb.personRelations}
+              researches={activeDb.researches}
+              documents={activeDb.documents}
+              findings={activeDb.findings}
+              tasks={activeDb.tasks}
+              hypotheses={activeDb.hypotheses}
+              archiveRequests={activeDb.archiveRequests}
+              customFieldDefinitions={activeDb.settings.customFields}
+              onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
+              onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
+              canAddCustomField={canCreateCustomField}
+              customFieldLimitMessage={customFieldLimitMessage}
+              onSavePerson={savePerson}
+              onImportRecords={importTableRecords}
+              onImportGedcom={importGedcomRecords}
+              onSaveEntity={(collection, entity) => saveFor(collection)(entity)}
+              onSaveRelation={saveRelation}
+              onDeleteRelation={deleteRelation}
+              onOpenRelated={openRelatedRecord}
+              onCreateRelated={createRelatedRecord}
+              onOpenScanViewer={openScanViewer}
+              canCreateRelated={(relatedPage) => relatedPage === "researches"
+                ? canCreateResearchRecord
+                : canCreateStandardSection(standardSectionQuotaKeys[relatedPage])}
+              readOnly={readOnly}
+              canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
+              researchRequired={researchRequiredByPlan}
+              onOpenPerson={(personId) => openRelatedRecord("persons", personId)}
+              useProductionRenderer={shouldUseProductionFamilyTreeRenderer(
+                featureFlags,
+                import.meta.env.DEV,
+              )}
+            />
+          </FamilyTreeErrorBoundary>
+        );
       case "researches":
       case "documents":
       case "archiveRequests":
@@ -4080,6 +4344,7 @@ export default function App() {
         return (
           <PersonsPage
             db={activeDb}
+            projectId={workspace?.projectId}
             persons={activeDb.persons}
             relations={activeDb.personRelations}
             researches={activeDb.researches}
@@ -4098,6 +4363,7 @@ export default function App() {
             initialOpenPersonId={openEntityId}
             onSavePerson={savePerson}
             onImportRecords={importTableRecords}
+            onImportGedcom={importGedcomRecords}
             onDeletePerson={deletePerson}
             onSaveRelation={saveRelation}
             onDeleteRelation={deleteRelation}
@@ -4107,6 +4373,7 @@ export default function App() {
             canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
             projectName={workspace?.projectName}
             researchRequired={researchRequiredByPlan}
+            canUseGedcom={canUseFamilyTreeFeature}
           />
         );
       case "yearMatrix":
@@ -4226,6 +4493,7 @@ export default function App() {
           if (canOpenGeneHelp) setGeneHelpOpen(true);
         }}
         showGeneHelp={canOpenGeneHelp}
+        showFamilyTree={canUseFamilyTreeFeature}
         customSections={activeDb.customSections}
         account={account}
         workspace={workspace}

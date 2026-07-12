@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clearAllProjectCaches, PROJECT_CACHE_PREFIX } from "../src/utils/projectCache.ts";
+import {
+  clearAllProjectCaches,
+  PROJECT_CACHE_PREFIX,
+  saveOptionalProjectCache,
+} from "../src/utils/projectCache.ts";
 
 function makeStorage(initial: Record<string, string>) {
   const map = new Map(Object.entries(initial));
@@ -13,6 +17,12 @@ function makeStorage(initial: Record<string, string>) {
     },
     removeItem(key: string) {
       map.delete(key);
+    },
+    setItem(key: string, value: string) {
+      map.set(key, value);
+    },
+    get(key: string) {
+      return map.get(key);
     },
     has(key: string) {
       return map.has(key);
@@ -42,4 +52,56 @@ test("removes all project cache keys and keeps unrelated keys", () => {
 
 test("is a no-op when storage is unavailable", () => {
   assert.equal(clearAllProjectCaches(undefined), 0);
+});
+
+test("optional cache writes a payload within its size budget", () => {
+  const storage = makeStorage({});
+  const key = `${PROJECT_CACHE_PREFIX}people:abc`;
+
+  assert.equal(saveOptionalProjectCache(key, { persons: [{ id: "1" }] }, 1_000, storage), true);
+  assert.equal(storage.get(key), JSON.stringify({ persons: [{ id: "1" }] }));
+});
+
+test("optional cache drops only its own oversized entry", () => {
+  const key = `${PROJECT_CACHE_PREFIX}documents:abc`;
+  const storage = makeStorage({
+    [key]: "stale",
+    "unrelated-key": "keep me",
+  });
+
+  assert.equal(saveOptionalProjectCache(key, { text: "too large" }, 5, storage), false);
+  assert.equal(storage.has(key), false);
+  assert.equal(storage.get("unrelated-key"), "keep me");
+});
+
+test("optional cache swallows quota errors and removes its stale entry", () => {
+  const key = `${PROJECT_CACHE_PREFIX}documents:abc`;
+  const storage = makeStorage({ [key]: "stale" });
+  storage.setItem = () => {
+    throw new DOMException("quota", "QuotaExceededError");
+  };
+
+  assert.equal(saveOptionalProjectCache(key, { documents: [] }, 1_000, storage), false);
+  assert.equal(storage.has(key), false);
+});
+
+test("optional cache removes computed layouts and retries once after quota", () => {
+  const key = `${PROJECT_CACHE_PREFIX}documents:abc`;
+  const layoutKey = "family-tree-layout:tree:root:ancestors:old-signature";
+  const storage = makeStorage({
+    [layoutKey]: "large disposable projection",
+    "tracker-rodu-auth-token": "keep auth",
+  });
+  const originalSetItem = storage.setItem.bind(storage);
+  let attempts = 0;
+  storage.setItem = (candidate, value) => {
+    attempts += 1;
+    if (storage.has(layoutKey)) throw new DOMException("quota", "QuotaExceededError");
+    originalSetItem(candidate, value);
+  };
+
+  assert.equal(saveOptionalProjectCache(key, { documents: [] }, 1_000, storage), true);
+  assert.equal(attempts, 2);
+  assert.equal(storage.has(layoutKey), false);
+  assert.equal(storage.get("tracker-rodu-auth-token"), "keep auth");
 });

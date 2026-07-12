@@ -1,6 +1,12 @@
 node_modules/
 dist/
 .npm-cache/
+.pnpm-store/
+.tools/
+.claude/
+.vite-dev*.log
+supabase/.branches/
+supabase/.temp/
 .env
 .env.local
 .env.*.local

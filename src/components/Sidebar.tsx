@@ -14,6 +14,7 @@ import { SectionIcon } from "./SectionIcon";
 export type StandardPageKey =
   | "dashboard"
   | "map"
+  | "familyTree"
   | CustomFieldModule
   | "backup"
   | "subscription"
@@ -22,12 +23,13 @@ export type StandardPageKey =
 export type PageKey = StandardPageKey | `custom:${string}`;
 
 const mainItems: Array<{
-  key: "dashboard" | "map" | CustomFieldModule;
+  key: "dashboard" | "map" | "familyTree" | CustomFieldModule;
   label: string;
   icon: NavigationIconName;
 }> = [
   { key: "dashboard", label: "Панель огляду", icon: "dashboard" },
   { key: "map", label: "Карта", icon: "map" },
+  { key: "familyTree", label: "Родове дерево", icon: "tree" },
   { key: "researches", label: "Дослідження", icon: "compass" },
   { key: "documents", label: "Документи", icon: "file-text" },
   { key: "archiveRequests", label: "Запити в архів", icon: "archive" },
@@ -47,6 +49,7 @@ const systemItems: Array<{ key: StandardPageKey; label: string; icon: Navigation
 type NavigationIconName =
   | "dashboard"
   | "map"
+  | "tree"
   | "compass"
   | "file-text"
   | "archive"
@@ -74,6 +77,17 @@ function NavigationIcon({ icon }: { icon: NavigationIconName }) {
       <>
         <path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3z" />
         <path d="M9 3v15M15 6v15" />
+      </>
+    ),
+    tree: (
+      <>
+        <path d="M12 3v6" />
+        <path d="M6 14v5M18 14v5" />
+        <path d="M12 9c0 3-6 2-6 5" />
+        <path d="M12 9c0 3 6 2 6 5" />
+        <rect x="8.5" y="2" width="7" height="5" rx="1.5" />
+        <rect x="2.5" y="17" width="7" height="5" rx="1.5" />
+        <rect x="14.5" y="17" width="7" height="5" rx="1.5" />
       </>
     ),
     compass: (
@@ -181,9 +195,12 @@ interface SidebarProps {
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
   showGeneHelp: boolean;
+  showFamilyTree: boolean;
   customSections: CustomSectionDefinition[];
   open: boolean;
   onClose: () => void;
+  desktopCollapsed: boolean;
+  onToggleDesktopCollapsed: () => void;
 }
 
 export function Sidebar({
@@ -192,9 +209,12 @@ export function Sidebar({
   onOpenProjects,
   onOpenGeneHelp,
   showGeneHelp,
+  showFamilyTree,
   customSections,
   open,
   onClose,
+  desktopCollapsed,
+  onToggleDesktopCollapsed,
 }: SidebarProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const activeAncestors = useMemo(() => {
@@ -282,7 +302,16 @@ export function Sidebar({
       {open ? (
         <button className="sidebar-scrim" aria-label="Закрити меню" onClick={onClose} />
       ) : null}
-      <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
+      <aside className={`sidebar ${open ? "sidebar-open" : ""} ${desktopCollapsed ? "sidebar-desktop-hidden" : ""}`}>
+        <button
+          type="button"
+          className="sidebar-collapse-control"
+          onClick={onToggleDesktopCollapsed}
+          aria-label="Згорнути ліве меню"
+          title="Згорнути ліве меню"
+        >
+          <span aria-hidden="true">‹</span>
+        </button>
         <button
           type="button"
           className="brand"
@@ -299,7 +328,8 @@ export function Sidebar({
         </button>
         <nav>
           {mainItems.map((item) => {
-            if (item.key === "dashboard" || item.key === "map") {
+            if (item.key === "familyTree" && !showFamilyTree) return null;
+            if (item.key === "dashboard" || item.key === "map" || item.key === "familyTree") {
               return (
                 <button
                   type="button"

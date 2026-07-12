@@ -62,7 +62,9 @@ export function ScanAttachmentsEditor({
   const [attachingDriveFile, setAttachingDriveFile] = useState(false);
   const [showPages, setShowPages] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
+  const [replacementScan, setReplacementScan] = useState<ScanAttachment | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replacementInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -198,6 +200,72 @@ export function ScanAttachmentsEditor({
     }
   };
 
+  const saveExternalCopyToDrive = async (scan: ScanAttachment) => {
+    if (uploadBlockedMessage) {
+      setError(uploadBlockedMessage);
+      return;
+    }
+    setUploading(true);
+    setError("");
+    try {
+      const blob = await getScanBlob(scan);
+      const file = new File([blob], scan.name || "gedcom-photo", {
+        type: blob.type || scan.mimeType || "application/octet-stream",
+      });
+      const uploaded = await saveScan(file, policy, { driveFolderPath });
+      const replacement = uploadedReplacement(scan, uploaded);
+      onChange(scans.map((item) => item.id === scan.id ? replacement : item));
+    } catch (copyError) {
+      setError(
+        copyError instanceof Error
+          ? `Не вдалося зберегти копію у Google Drive. ${copyError.message}`
+          : "Не вдалося зберегти копію у Google Drive. Перевірте доступність зовнішнього посилання.",
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const chooseMissingLocalReplacement = (scan: ScanAttachment) => {
+    if (uploadBlockedMessage) {
+      setError(uploadBlockedMessage);
+      return;
+    }
+    if (!driveReady) {
+      setError("Дочекайтеся підготовки Google Drive і спробуйте ще раз.");
+      return;
+    }
+    if (!isGoogleDriveAuthorized()) {
+      setDriveConnected(false);
+      setError("Спочатку підключіть Google Drive кнопкою над списком фотографій.");
+      return;
+    }
+    setError("");
+    setReplacementScan(scan);
+    replacementInputRef.current?.click();
+  };
+
+  const replaceMissingLocalFile = async (file: File | undefined) => {
+    const scan = replacementScan;
+    setReplacementScan(null);
+    if (!scan || !file) return;
+    setUploading(true);
+    setError("");
+    try {
+      const uploaded = await saveScan(file, policy, { driveFolderPath });
+      const replacement = uploadedReplacement(scan, uploaded);
+      onChange(scans.map((item) => item.id === scan.id ? replacement : item));
+    } catch (replacementError) {
+      setError(
+        replacementError instanceof Error
+          ? `Не вдалося зберегти вибране фото у Google Drive. ${replacementError.message}`
+          : "Не вдалося зберегти вибране фото у Google Drive.",
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <fieldset className="scan-picker field-wide">
       <div className="scan-picker-heading">
@@ -245,6 +313,17 @@ export function ScanAttachmentsEditor({
             event.target.value = "";
           }}
         />
+        <input
+          ref={replacementInputRef}
+          className="scan-file-input"
+          type="file"
+          accept={accept}
+          disabled={uploading}
+          onChange={(event) => {
+            void replaceMissingLocalFile(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       {uploadProgress ? <ScanUploadProgress progress={uploadProgress} /> : null}
@@ -265,6 +344,21 @@ export function ScanAttachmentsEditor({
               scanGroup={previewableScans.includes(scan) ? previewableScans : [scan]}
               onDelete={() => void remove(scan)}
               onPreview={onPreview}
+              onSaveExternalCopy={
+                policy === "person-photo"
+                && scan.sourceKind === "gedcom"
+                && scan.storage === "external-url"
+                && scan.availability !== "missing-local"
+                  ? () => void saveExternalCopyToDrive(scan)
+                  : undefined
+              }
+              onReplaceMissingLocal={
+                policy === "person-photo"
+                && scan.sourceKind === "gedcom"
+                && scan.availability === "missing-local"
+                  ? () => chooseMissingLocalReplacement(scan)
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -281,6 +375,16 @@ export function ScanAttachmentsEditor({
       ) : null}
     </fieldset>
   );
+}
+
+function uploadedReplacement(scan: ScanAttachment, uploaded: ScanAttachment): ScanAttachment {
+  return {
+    ...uploaded,
+    id: scan.id,
+    sourceKind: scan.sourceKind,
+    sourceReference: scan.sourceReference || scan.storagePath,
+    availability: "available",
+  };
 }
 
 function ScanUploadProgress({ progress }: { progress: UploadProgressState }) {
@@ -541,15 +645,20 @@ function ScanRow({
   scanGroup,
   onDelete,
   onPreview,
+  onSaveExternalCopy,
+  onReplaceMissingLocal,
 }: {
   scan: ScanAttachment;
   scanGroup?: ScanAttachment[];
   onDelete?: () => void;
   onPreview?: (scan: ScanAttachment, scans?: ScanAttachment[]) => void;
+  onSaveExternalCopy?: () => void;
+  onReplaceMissingLocal?: () => void;
 }) {
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<ScanPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const unavailable = scan.availability === "missing-local";
 
   useEffect(() => {
     return () => {
@@ -604,22 +713,39 @@ function ScanRow({
         <div className="scan-file-info">
           <strong>{scan.name}</strong>
           <small>
-            {scan.storage === "external-url"
+            {unavailable
+              ? "Локальний файл GEDCOM недоступний"
+              : scan.storage === "external-url"
               ? storageLabel(scan)
               : `${formatFileSize(scan.size)} · ${storageLabel(scan)}`}
           </small>
+          {unavailable && scan.statusMessage ? <em>{scan.statusMessage}</em> : null}
           {error ? <em>{error}</em> : null}
         </div>
         <div className="scan-actions">
-          <button type="button" className="text-button" onClick={() => void previewScan()}>
-            {previewLoading ? "Відкриття…" : "Переглянути"}
-          </button>
-          <button type="button" className="text-button" onClick={() => void run(() => openScan(scan))}>
-            {scan.storage === "external-url" ? "Відкрити джерело" : "Google Drive"}
-          </button>
-          {scan.storage !== "external-url" ? (
+          {!unavailable ? (
+            <>
+              <button type="button" className="text-button" onClick={() => void previewScan()}>
+                {previewLoading ? "Відкриття…" : "Переглянути"}
+              </button>
+              <button type="button" className="text-button" onClick={() => void run(() => openScan(scan))}>
+                {scan.storage === "external-url" ? "Відкрити джерело" : "Google Drive"}
+              </button>
+            </>
+          ) : null}
+          {!unavailable && scan.storage !== "external-url" ? (
             <button type="button" className="text-button" onClick={() => void run(() => downloadScan(scan))}>
               Завантажити
+            </button>
+          ) : null}
+          {onSaveExternalCopy ? (
+            <button type="button" className="text-button" onClick={onSaveExternalCopy}>
+              Зберегти копію у Google Drive
+            </button>
+          ) : null}
+          {onReplaceMissingLocal ? (
+            <button type="button" className="text-button" onClick={onReplaceMissingLocal}>
+              Вибрати локальний файл і зберегти у Google Drive
             </button>
           ) : null}
           {onDelete ? (
@@ -927,6 +1053,7 @@ function previewKind(scan: ScanAttachment, blob: Blob): ScanPreview["kind"] | nu
 }
 
 function isPreviewableAttachment(scan: ScanAttachment): boolean {
+  if (scan.availability === "missing-local") return false;
   const mimeType = (scan.mimeType || "").toLocaleLowerCase();
   const extension = scan.name.split(".").pop()?.toLocaleLowerCase() ?? "";
   return (

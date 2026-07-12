@@ -8,7 +8,7 @@ import {
   assertAllowedRegistrationEmail,
   normalizeEmailForAuth,
   registrationBlockMessage,
-} from "../utils/authRestrictions";
+} from "../utils/authRestrictions.ts";
 
 export interface SupabaseAccount {
   id: string;
@@ -61,6 +61,49 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && publishableKey);
 // Keep route-level reads from exhausting PostgREST when a page needs several
 // related tables at once. The realtime websocket does not use this fetch queue.
 const MAX_CONCURRENT_REQUESTS = 4;
+
+const PROJECT_DATA_DELETE_TABLES = [
+  "legacy_person_relation_graph_edges",
+  "ai_hypothesis_reviews",
+  "family_tree_research_issues",
+  "tree_layout_positions",
+  "gedcom_xref_maps",
+  "gedcom_import_batches",
+  "family_tree_merge_history",
+  "person_timeline_events",
+  "person_names",
+  "association_relationships",
+  "parent_child_relationships",
+  "parent_sets",
+  "partner_relationships",
+  "family_group_members",
+  "family_groups",
+  "family_tree_persons",
+  "family_trees",
+  "finding_participants",
+  "task_persons",
+  "archive_request_persons",
+  "hypothesis_links",
+  "record_links",
+  "custom_records",
+  "custom_section_fields",
+  "custom_field_definitions",
+  "custom_sections",
+  "attachments",
+  "activity_log",
+  "year_matrix",
+  "tasks",
+  "findings",
+  "hypotheses",
+  "archive_requests",
+  "person_relations",
+  "documents",
+  "persons",
+  "researches",
+  "project_invitations",
+] as const;
+// project_members is intentionally omitted here: project deletion RLS checks owner
+// membership, and the membership rows cascade after the projects row is deleted.
 
 function createConcurrencyLimitedFetch(maxConcurrent: number): typeof fetch {
   let active = 0;
@@ -401,9 +444,35 @@ export async function createSupabaseWorkspace(
 
 export async function deleteSupabaseWorkspace(projectId: string): Promise<SupabaseWorkspace[]> {
   const client = requireSupabase();
+  await deleteSupabaseWorkspaceData(projectId);
   const { error } = await client.from("projects").delete().eq("id", projectId);
   if (error) throw new Error(asErrorMessage(error, "Не вдалося видалити проєкт."));
   return waitForWorkspaceRemoval(projectId);
+}
+
+async function deleteSupabaseWorkspaceData(projectId: string): Promise<void> {
+  const client = requireSupabase();
+  for (const table of PROJECT_DATA_DELETE_TABLES) {
+    const { error } = await client.from(table).delete().eq("project_id", projectId);
+    if (error) {
+      if (isMissingProjectCleanupTableError(error)) continue;
+      throw new Error(asErrorMessage(error, "Не вдалося видалити дані проєкту."));
+    }
+  }
+}
+
+function isMissingProjectCleanupTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? String(error.code ?? "") : "";
+  const message = "message" in error ? String(error.message ?? "") : "";
+  const details = "details" in error ? String(error.details ?? "") : "";
+  const text = `${message} ${details}`.toLocaleLowerCase();
+  return code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    text.includes("does not exist") ||
+    text.includes("schema cache");
 }
 
 export async function renameSupabaseWorkspace(

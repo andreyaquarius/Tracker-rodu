@@ -1,0 +1,481 @@
+.ft-root {
+  /* Public theme hooks default to the Tracker design system. */
+  --ft-bg: var(--cream, #f4f2ea);
+  --ft-panel: var(--paper, #fffdf8);
+  --ft-card: var(--paper, #fffdf8);
+  --ft-ink: var(--green-950, #102f2a);
+  --ft-muted: var(--muted, #4f5f5a);
+  --ft-border: var(--line, #deddd5);
+  --ft-accent: var(--green-800, #22574d);
+  --ft-accent-soft: var(--green-100, #dce9e2);
+  --ft-warm-accent: var(--amber, #c98b34);
+  --ft-danger: var(--red, #b84e49);
+  --ft-shadow: var(--shadow, 0 16px 38px rgba(25, 53, 46, 0.08));
+  --ft-edge-structure: rgba(54, 70, 65, 0.88);
+  --ft-edge-partnership: rgba(34, 75, 67, 0.92);
+  --ft-edge-continuation: rgba(157, 116, 52, 0.42);
+  --ft-edge-continuation-node: rgba(157, 116, 52, 0.58);
+  --ft-edge-generation: rgba(79, 95, 90, 0.11);
+  --ft-edge-generation-label: rgba(79, 95, 90, 0.7);
+  --ft-edge-junction: rgba(54, 70, 65, 0.84);
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 540px;
+  height: 100%;
+  overflow: hidden;
+  color: var(--ft-ink);
+  background: var(--ft-bg);
+  font-family: inherit;
+}
+
+.ft-root button {
+  font: inherit;
+}
+
+.ft-toolbar {
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ft-border);
+  background: var(--ft-panel);
+  box-shadow: 0 6px 22px rgba(25, 53, 46, 0.06);
+  backdrop-filter: blur(12px);
+}
+
+.ft-toolbar button,
+.ft-semantic-list button {
+  min-height: 34px;
+  border: 1px solid var(--ft-border);
+  border-radius: 9px;
+  padding: 6px 10px;
+  color: var(--ft-ink);
+  background: var(--ft-card);
+  cursor: pointer;
+}
+
+.ft-toolbar button:hover,
+.ft-semantic-list button:hover {
+  border-color: var(--ft-accent);
+  background: var(--ft-accent-soft);
+}
+
+.ft-toolbar button:focus-visible,
+.ft-person-card button:focus-visible,
+.ft-continuation:focus-visible,
+.ft-family-continuation:focus-visible,
+.ft-placeholder:focus-visible,
+.ft-semantic-list button:focus-visible {
+  outline: 3px solid rgba(34, 87, 77, 0.3);
+  outline-offset: 2px;
+}
+
+.ft-toolbar-status {
+  min-width: 150px;
+  margin-right: auto;
+  color: var(--ft-muted);
+  font-size: 13px;
+}
+
+.ft-viewport {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  background:
+    radial-gradient(circle at 50% 0, rgba(34, 87, 77, 0.1), transparent 36rem),
+    linear-gradient(90deg, rgba(25, 53, 46, 0.055) 1px, transparent 1px),
+    linear-gradient(rgba(25, 53, 46, 0.055) 1px, transparent 1px),
+    var(--ft-bg);
+  background-size: auto, 32px 32px, 32px 32px, auto;
+}
+
+.ft-viewport:active {
+  cursor: grabbing;
+}
+
+.ft-edge-canvas,
+.ft-card-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.ft-edge-canvas {
+  pointer-events: none;
+}
+
+.ft-card-layer {
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ft-card-position {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  pointer-events: auto;
+  will-change: transform;
+}
+
+.ft-person-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 2px solid #a5a1a0;
+  border-radius: 14px;
+  background: var(--ft-card);
+  box-shadow:
+    0 9px 23px rgba(25, 53, 46, 0.12),
+    0 2px 5px rgba(25, 53, 46, 0.07);
+}
+
+.ft-person-card[data-sex="male"] {
+  border-color: #6f9abc;
+}
+
+.ft-person-card[data-sex="female"] {
+  border-color: #bb7ca0;
+}
+
+.ft-person-card[data-sex="other"] {
+  border-color: var(--ft-warm-accent);
+}
+
+.ft-person-card[data-reference="true"] {
+  border-style: dashed;
+  background: var(--ft-panel);
+}
+
+.ft-person-card[data-selected="true"] {
+  border-color: var(--ft-accent);
+  box-shadow:
+    0 0 0 4px rgba(34, 87, 77, 0.18),
+    0 10px 25px rgba(25, 53, 46, 0.13);
+}
+
+.ft-card-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  border: 0;
+  padding: 7px 8px 4px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ft-avatar {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--ft-border);
+  border-radius: 50%;
+  color: var(--ft-accent);
+  background: linear-gradient(145deg, var(--ft-panel), var(--ft-accent-soft));
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.ft-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.ft-card-copy {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  max-height: 66px;
+  gap: 2px;
+  overflow: hidden;
+  text-align: center;
+}
+
+.ft-card-copy strong,
+.ft-card-copy small {
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.ft-card-copy strong {
+  display: -webkit-box;
+  font-size: 12px;
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.ft-card-copy small {
+  display: -webkit-box;
+  color: var(--ft-muted);
+  font-size: 10px;
+  line-height: 1.15;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.ft-card-actions {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  border-top: 1px solid var(--ft-border);
+}
+
+.ft-card-actions button {
+  min-height: 34px;
+  border: 0;
+  color: var(--ft-accent);
+  background: var(--ft-card);
+  cursor: pointer;
+}
+
+.ft-card-actions button + button {
+  border-left: 1px solid var(--ft-border);
+}
+
+.ft-card-actions button:hover {
+  background: var(--ft-accent-soft);
+}
+
+.ft-repeat-badge,
+.ft-reference-label {
+  position: absolute;
+  z-index: 2;
+  border: 1px solid rgba(34, 87, 77, 0.22);
+  border-radius: 999px;
+  color: var(--ft-accent);
+  background: var(--ft-accent-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ft-repeat-badge {
+  top: 7px;
+  right: 7px;
+  padding: 3px 6px;
+}
+
+.ft-reference-label {
+  left: 7px;
+  bottom: 41px;
+  padding: 2px 5px;
+}
+
+.ft-continuation,
+.ft-family-continuation,
+.ft-convergence-portal,
+.ft-placeholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 2px dashed var(--ft-warm-accent);
+  color: var(--ft-accent);
+  background: var(--ft-panel);
+  cursor: pointer;
+  box-shadow: 0 5px 15px rgba(25, 53, 46, 0.08);
+}
+
+.ft-convergence-portal {
+  padding: 0;
+  border: 1.5px dashed var(--ft-accent);
+  border-radius: 50%;
+  color: var(--ft-accent);
+  background:
+    radial-gradient(circle at 35% 30%, #fff 0 22%, transparent 23%),
+    var(--ft-accent-soft);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.ft-convergence-portal:hover,
+.ft-convergence-portal:focus-visible {
+  border-style: solid;
+  background: var(--ft-card);
+  box-shadow: 0 0 0 4px rgba(34, 87, 77, 0.16);
+}
+
+.ft-continuation {
+  border: 1.25px dashed var(--ft-edge-continuation-node);
+  border-radius: 50%;
+  color: var(--ft-muted);
+  font-size: 15px;
+  opacity: 0.82;
+  box-shadow: 0 3px 10px rgba(25, 53, 46, 0.05);
+}
+
+.ft-family-continuation {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 1.5px dashed var(--ft-warm-accent);
+  border-radius: 50%;
+  color: var(--ft-accent);
+  background: color-mix(in srgb, var(--ft-panel) 94%, transparent);
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(25, 53, 46, 0.09);
+}
+
+.ft-family-continuation:hover,
+.ft-family-continuation:focus-visible {
+  border-color: var(--ft-accent);
+  background: var(--ft-accent-soft);
+}
+
+.ft-family-continuation[aria-expanded="true"] {
+  border-style: solid;
+  border-color: var(--ft-accent);
+  background: var(--ft-accent-soft);
+}
+
+.ft-family-continuation small {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 18px;
+  border-radius: 999px;
+  padding: 2px 5px;
+  color: #fff;
+  background: var(--ft-accent);
+  font-size: 9px;
+  line-height: 1.1;
+}
+
+.ft-continuation:hover,
+.ft-continuation:focus-visible {
+  border-color: var(--ft-warm-accent);
+  opacity: 1;
+}
+
+.ft-continuation[aria-expanded="true"] {
+  border-style: solid;
+  border-color: var(--ft-accent);
+  color: var(--ft-accent);
+  background: var(--ft-accent-soft);
+  opacity: 1;
+}
+
+.ft-continuation small {
+  position: absolute;
+  transform: translate(11px, -11px);
+  border-radius: 999px;
+  padding: 1px 4px;
+  color: #fff;
+  background: var(--ft-accent);
+  font-size: 9px;
+}
+
+.ft-placeholder {
+  align-content: center;
+  gap: 4px;
+  border-radius: 12px;
+  font-size: 18px;
+}
+
+.ft-placeholder small {
+  display: none;
+}
+
+.ft-semantic-list {
+  overflow: auto;
+  padding: 22px clamp(16px, 5vw, 64px) 64px;
+  background: var(--ft-card);
+}
+
+.ft-semantic-list h2 {
+  margin: 0 0 18px;
+  font-size: 20px;
+}
+
+.ft-semantic-list section {
+  margin-top: 20px;
+}
+
+.ft-semantic-list h3 {
+  color: var(--ft-accent);
+  font-size: 15px;
+}
+
+.ft-semantic-list ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ft-semantic-list button {
+  width: 100%;
+  text-align: left;
+}
+
+.ft-semantic-person-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+
+.ft-semantic-list .ft-semantic-descendants,
+.ft-semantic-list .ft-semantic-collapse {
+  width: auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .ft-root {
+    min-height: 440px;
+  }
+
+  .ft-toolbar {
+    overflow-x: auto;
+  }
+
+  .ft-toolbar-status {
+    position: sticky;
+    left: 0;
+    padding-right: 10px;
+    background: var(--ft-panel);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ft-root *,
+  .ft-root *::before,
+  .ft-root *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

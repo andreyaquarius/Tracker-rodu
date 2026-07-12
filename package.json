@@ -8,9 +8,15 @@
     "build": "tsc --noEmit && vite build --configLoader runner",
     "preview": "vite preview --configLoader runner",
     "lint": "tsc --noEmit --pretty false",
+    "typecheck": "tsc --noEmit --pretty false",
     "test": "node --test \"test/**/*.test.ts\"",
+    "test:integration": "node --test \"test/integration/**/*.test.ts\"",
+    "test:db": "supabase test db",
+    "test:e2e": "node --test \"test/e2e/**/*.test.ts\"",
+    "benchmark:family-tree": "node --test test/familyTreePerformance.test.ts",
     "functions:serve:index-finding": "supabase functions serve index-finding-fragment --env-file .env.functions.local --no-verify-jwt",
-    "verify:pages": "node scripts/verify-pages-build.mjs"
+    "verify:pages": "node scripts/verify-pages-build.mjs",
+    "qa:family-tree": "node scripts/family-tree-visual-qa.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.0",

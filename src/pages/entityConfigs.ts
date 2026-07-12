@@ -265,7 +265,12 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
     fields: [
       researchField,
       { key: "documentId", label: "Пов’язаний документ", type: "document", wide: true },
-      { key: "findingType", label: "Тип знахідки", type: "select", options: ["народження", "шлюб", "смерть", "згадка", "посімейний список", "сповідний розпис", "ревізія", "перепис", "інвентар", "судова справа", "військовий документ", "інше"] },
+      { key: "findingType", label: "Тип знахідки", type: "select", options: [
+        "народження", "хрещення", "шлюб", "розлучення", "смерть", "поховання", "згадка",
+        "професія", "освіта", "національність", "імміграція", "еміграція",
+        "посімейний список", "погосподарська книга", "сповідний розпис", "ревізія", "перепис",
+        "інвентар", "судова справа", "спадкова справа", "військовий документ", "джерело", "інше",
+      ] },
       { key: "eventDate", label: "Дата події", type: "date" },
       { key: "personsText", label: "Особа або особи — сирий текст", type: "textarea", wide: true },
       { key: "personIds", label: "Пов’язані особи", type: "persons", wide: true },

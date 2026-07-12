@@ -19,6 +19,10 @@ test("keeps ISO dates as storage format", () => {
   assert.deepEqual(normalizeFlexibleDateInput("1852-02-08"), { value: "1852-02-08" });
 });
 
+test("accepts year-only dates for incomplete genealogical facts", () => {
+  assert.deepEqual(normalizeFlexibleDateInput("1852"), { value: "1852" });
+});
+
 test("rejects ambiguous or impossible dates", () => {
   assert.equal(Boolean(normalizeFlexibleDateInput("08.02.52").error), true);
   assert.equal(Boolean(normalizeFlexibleDateInput("31.02.1852").error), true);
@@ -26,5 +30,6 @@ test("rejects ambiguous or impossible dates", () => {
 
 test("formats stored dates for display", () => {
   assert.equal(formatFlexibleDateForDisplay("1852-02-08"), "08.02.1852");
+  assert.equal(formatFlexibleDateForDisplay("1852"), "1852");
   assert.equal(formatFlexibleDateForDisplay(""), "");
 });
