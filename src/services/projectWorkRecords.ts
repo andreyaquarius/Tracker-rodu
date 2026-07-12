@@ -20,7 +20,10 @@ import {
   withImportPhase,
   type ImportPhaseProgressOptions,
 } from "../utils/importBatches.ts";
-import { selectRowsInParallel } from "../utils/pagedRows.ts";
+import {
+  selectRowsByCursor,
+  selectRowsInParallel,
+} from "../utils/pagedRows.ts";
 
 type TaskRow = {
   id: string;
@@ -268,20 +271,26 @@ export async function listProjectWorkRecords(projectId: string): Promise<{
         SELECT_BATCH_SIZE,
         1,
       ),
-      selectRowsInParallel<FindingRow>(
+      selectRowsByCursor<FindingRow>(
         () => client.from("findings").select(FINDING_SELECT).eq("project_id", projectId)
-          .order("updated_at", { ascending: false }).order("id", { ascending: true }),
+          .order("id", { ascending: true }),
+        "id",
+        (row) => row.id,
         SELECT_BATCH_SIZE,
-        1,
       ),
-      selectRowsInParallel<FindingParticipantRow>(
+      selectRowsByCursor<FindingParticipantRow>(
         () => client.from("finding_participants")
           .select("id, finding_id, person_id, name, role, notes")
-          .eq("project_id", projectId).order("created_at", { ascending: true }).order("id", { ascending: true }),
+          .eq("project_id", projectId).order("id", { ascending: true }),
+        "id",
+        (row) => row.id,
         SELECT_BATCH_SIZE,
-        1,
       ),
     ]);
+
+  findingRows.sort((left, right) =>
+    right.updated_at.localeCompare(left.updated_at) || left.id.localeCompare(right.id)
+  );
 
   const taskPersonMap = new Map<string, string[]>();
   for (const row of taskPersonRows) {

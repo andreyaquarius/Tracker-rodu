@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dataGroupsForPage } from "../src/utils/projectDataGroups.ts";
-import { selectRowsInParallel } from "../src/utils/pagedRows.ts";
+import {
+  selectRowsByCursor,
+  selectRowsInParallel,
+} from "../src/utils/pagedRows.ts";
 
 test("persons page hydrates card data without loading the document collection", () => {
   const groups = dataGroupsForPage("persons");
@@ -61,4 +64,51 @@ test("a heavy table can serialize its 2,480-row pages to avoid statement bursts"
   assert.deepEqual(requestedRanges, [[0, 999], [1_000, 1_999], [2_000, 2_999]]);
   assert.equal(new Set(rows).size, 2_480);
   assert.equal(rows[2_479], 2_479);
+});
+
+test("reads large collections by a stable cursor without SQL offsets", async () => {
+  const source = Array.from({ length: 2_505 }, (_, index) => ({
+    id: String(index + 1).padStart(5, "0"),
+  }));
+  const requestedCursors: Array<string | null> = [];
+
+  const rows = await selectRowsByCursor(
+    () => {
+      let cursor: string | null = null;
+      return {
+        gt(_column: string, value: string) {
+          cursor = value;
+          return this;
+        },
+        async limit(count: number) {
+          requestedCursors.push(cursor);
+          const start = cursor === null
+            ? 0
+            : source.findIndex((row) => row.id === cursor) + 1;
+          return { data: source.slice(start, start + count), error: null };
+        },
+      };
+    },
+    "id",
+    (row) => row.id,
+    1_000,
+  );
+
+  assert.deepEqual(rows, source);
+  assert.deepEqual(requestedCursors, [null, "01000", "02000"]);
+});
+
+test("rejects a cursor page that cannot advance", async () => {
+  await assert.rejects(
+    selectRowsByCursor(
+      () => ({
+        gt() { return this; },
+        async limit() { return { data: [{ id: "" }], error: null }; },
+      }),
+      "id",
+      (row) => row.id,
+      1,
+    ),
+    /did not advance/,
+  );
 });

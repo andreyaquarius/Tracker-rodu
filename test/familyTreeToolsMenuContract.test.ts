@@ -165,7 +165,10 @@ test("production tree reuses the real GEDCOM importer and exports the complete t
 
 test("App wires existing import callbacks into the production tree module", () => {
   assert.match(familyTreePage, /onImportRecords\?: \(collection: "persons"/);
-  assert.match(familyTreePage, /onImportGedcom\?: \(input:/);
+  assert.match(
+    familyTreePage,
+    /onImportGedcom\?: \([\s\S]*?input: GedcomImportReconciliationPayload,[\s\S]*?options\?: GedcomImportExecutionOptions,/,
+  );
   assert.match(
     app,
     /case "familyTree":[\s\S]*?<FamilyTreePage[\s\S]*?onImportRecords=\{importTableRecords\}[\s\S]*?onImportGedcom=\{importGedcomRecords\}/,
