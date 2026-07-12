@@ -1,0 +1,362 @@
+﻿import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import type { AppEntity, DocumentRecord, Finding, Person, PersonRelation } from "../types";
+import type { FamilyTreeGraphIssue, GedcomPreservedRecord } from "../types/familyTree";
+import { buildGedcomAppImport } from "../utils/gedcomAppImport";
+import { decodeGedcomBytes } from "../utils/gedcomEncoding";
+import { buildGedcomImportDraft } from "../utils/gedcomImport";
+import type {
+  GedcomImportReconciliationPayload,
+  GedcomImportReconciliationResult,
+} from "../utils/gedcomImportReconciliation.ts";
+import {
+  toGedcomImportStageError,
+  type GedcomImportStage,
+} from "../utils/gedcomImportDiagnostics";
+import { buildGedcomImportReport, formatGedcomImportReport, type GedcomImportReport } from "../utils/gedcomImportReport";
+import { Modal } from "./Modal";
+
+export interface GedcomImportArchivePayload {
+  gedcomVersion: string;
+  records: GedcomPreservedRecord[];
+  personIdByXref: Record<string, string>;
+  warnings: FamilyTreeGraphIssue[];
+}
+
+interface GedcomImportButtonProps {
+  inputId?: string;
+  hideTrigger?: boolean;
+  defaultResearchId?: string;
+  researchRequired?: boolean;
+  onImportPersons: (records: AppEntity[]) => Promise<void>;
+  onImportGedcom?: (
+    input: GedcomImportReconciliationPayload,
+  ) => Promise<GedcomImportReconciliationResult | void>;
+  onSaveRelation: (relation: PersonRelation) => Promise<PersonRelation | null> | PersonRelation | null | void;
+  onCreateFamilyTree?: (input: {
+    fileName: string;
+    people: Person[];
+    relations: PersonRelation[];
+    rootPersonId?: string;
+    archive: GedcomImportArchivePayload;
+  }) => Promise<void>;
+}
+
+type GedcomImportPreview = {
+  fileName: string;
+  people: Person[];
+  personRecords: AppEntity[];
+  documents: DocumentRecord[];
+  relations: PersonRelation[];
+  findings: Finding[];
+  warnings: string[];
+  report: GedcomImportReport;
+  rootPersonId: string;
+  archive: GedcomImportArchivePayload;
+  importSourceKey: string;
+};
+
+type GedcomImportProgress = {
+  step: string;
+  percent: number;
+  detail: string;
+} | null;
+
+export function GedcomImportButton({
+  inputId,
+  hideTrigger = false,
+  defaultResearchId = "",
+  researchRequired = false,
+  onImportPersons,
+  onImportGedcom,
+  onSaveRelation,
+  onCreateFamilyTree,
+}: GedcomImportButtonProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<GedcomImportPreview | null>(null);
+  const [progress, setProgress] = useState<GedcomImportProgress>(null);
+  const rootCandidates = useMemo(
+    () => preview ? sortRootCandidates(preview.people, preview.relations) : [],
+    [preview],
+  );
+
+  const selectFile = () => {
+    if (!busy) inputRef.current?.click();
+  };
+
+  const importFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (researchRequired && !defaultResearchId) {
+      window.alert("Перед імпортом GEDCOM оберіть дослідження у фільтрі або створіть одне дослідження в проєкті.");
+      return;
+    }
+
+    let activeStage: GedcomImportStage = "read-file";
+    try {
+      setProgress({ step: "Читаємо файл", percent: 10, detail: file.name });
+      const bytes = await file.arrayBuffer();
+      activeStage = "parse-file";
+      const draft = buildGedcomImportDraft(decodeGedcomBytes(bytes));
+      setProgress({ step: "Готуємо записи", percent: 35, detail: "Розбираємо осіб, сімʼї та звʼязки з GEDCOM." });
+      activeStage = "prepare-records";
+      const built = buildGedcomAppImport(draft, { defaultResearchId });
+      if (!built.people.length) {
+        throw new Error("У файлі GEDCOM не знайдено жодної особи для імпорту.");
+      }
+
+      const report = buildGedcomImportReport(draft, built);
+      const candidates = sortRootCandidates(built.people, built.relations);
+      const rootPersonId = built.rootPersonId && built.people.some((person) => person.id === built.rootPersonId)
+        ? built.rootPersonId
+        : candidates[0]?.id ?? built.people[0]?.id ?? "";
+      setPreview({
+        fileName: file.name,
+        people: built.people,
+        personRecords: built.personRecords,
+        documents: built.documents,
+        relations: built.relations,
+        findings: built.findings,
+        warnings: built.warnings,
+        report,
+        rootPersonId,
+        archive: {
+          gedcomVersion: draft.summary.gedcomVersion ?? "5.5.1",
+          records: built.preservedRecords,
+          personIdByXref: built.personIdByXref,
+          warnings: draft.warnings,
+        },
+        importSourceKey: built.importSourceKey,
+      });
+      setProgress(null);
+    } catch (error) {
+      const stageError = toGedcomImportStageError(activeStage, error);
+      console.error("GEDCOM import preview stage failed", {
+        fileName: file.name,
+        fileSize: file.size,
+        stage: stageError.stage,
+        error,
+      });
+      setProgress(null);
+      window.alert(stageError.message);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!preview) return;
+    setBusy(true);
+    setProgress({
+      step: "Зберігаємо осіб і звʼязки",
+      percent: 45,
+      detail: `Осіб: ${preview.people.length}, джерел: ${preview.documents.length}, звʼязків: ${preview.relations.length}, знахідок: ${preview.findings.length}.`,
+    });
+    let activeStage: GedcomImportStage = "people-relations";
+    try {
+      let committed: GedcomImportReconciliationPayload = {
+        people: preview.people,
+        personRecords: preview.personRecords,
+        documents: preview.documents,
+        relations: preview.relations,
+        findings: preview.findings,
+        rootPersonId: preview.rootPersonId,
+        personIdByXref: preview.archive.personIdByXref,
+        importSourceKey: preview.importSourceKey,
+      };
+      if (onImportGedcom) {
+        const reconciled = await onImportGedcom(committed);
+        if (reconciled) committed = reconciled;
+      } else {
+        await onImportPersons(preview.personRecords);
+        for (const relation of preview.relations) {
+          await onSaveRelation(relation);
+        }
+      }
+      setProgress({
+        step: onCreateFamilyTree ? "Створюємо дерево" : "Завершуємо імпорт",
+        percent: onCreateFamilyTree ? 75 : 90,
+        detail: onCreateFamilyTree ? "Формуємо учасників дерева та родинні звʼязки." : "Оновлюємо дані проєкту.",
+      });
+      if (onCreateFamilyTree) {
+        activeStage = "create-tree";
+        await onCreateFamilyTree({
+          fileName: preview.fileName,
+          people: committed.people,
+          relations: committed.relations,
+          rootPersonId: committed.rootPersonId,
+          archive: {
+            ...preview.archive,
+            personIdByXref: committed.personIdByXref,
+          },
+        });
+      }
+      setProgress({ step: "Імпорт завершено", percent: 100, detail: "Дані збережено." });
+      window.alert([
+        "Імпорт GEDCOM завершено.",
+        formatGedcomImportReport(preview.report),
+      ].join("\n"));
+      setPreview(null);
+    } catch (error) {
+      const stageError = toGedcomImportStageError(activeStage, error);
+      console.error("GEDCOM import commit stage failed", {
+        fileName: preview.fileName,
+        stage: stageError.stage,
+        counts: {
+          people: preview.people.length,
+          documents: preview.documents.length,
+          relations: preview.relations.length,
+          findings: preview.findings.length,
+        },
+        error,
+      });
+      window.alert(stageError.message);
+    } finally {
+      setProgress(null);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <input
+        id={inputId}
+        ref={inputRef}
+        type="file"
+        accept=".ged,.gedcom,text/plain"
+        hidden
+        onChange={(event) => void importFile(event)}
+      />
+      {!hideTrigger ? (
+        <button
+          type="button"
+          className="button button-secondary"
+          disabled={busy}
+          onClick={selectFile}
+        >
+          {busy ? "Імпортуємо GEDCOM..." : "Імпорт GEDCOM"}
+        </button>
+      ) : null}
+      {preview ? (
+        <Modal
+          title="Імпорт GEDCOM"
+          className="gedcom-import-modal"
+          onClose={() => !busy && setPreview(null)}
+        >
+          <div className="gedcom-import-dialog-body">
+            <div className="gedcom-import-preview">
+            <div>
+              <span className="eyebrow">Файл</span>
+              <h3>{preview.fileName}</h3>
+            </div>
+            <label>
+              <span>Центральна особа для дерева</span>
+              <select
+                value={preview.rootPersonId}
+                disabled={busy || !onCreateFamilyTree}
+                onChange={(event) => setPreview((current) => current ? { ...current, rootPersonId: event.target.value } : current)}
+              >
+                {rootCandidates.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {personOptionLabel(person)}
+                  </option>
+                ))}
+              </select>
+              <small>
+                Від цієї особи буде збережено центр дерева після імпорту. Якщо треба, оберіть себе або іншу фокусну особу.
+              </small>
+            </label>
+            <pre>{formatGedcomImportReport(preview.report)}</pre>
+            {progress ? (
+              <div className="gedcom-import-progress" aria-live="polite">
+                <div className="gedcom-import-progress__header">
+                  <strong>{progress.step}</strong>
+                  <span>{Math.round(progress.percent)}%</span>
+                </div>
+                <div className="gedcom-import-progress__bar">
+                  <span style={{ width: `${Math.max(5, Math.min(100, progress.percent))}%` }} />
+                </div>
+                <small>{progress.detail}</small>
+              </div>
+            ) : null}
+            {preview.warnings.length ? (
+              <div className="gedcom-import-warnings">
+                <strong>Попередження: {preview.warnings.length}</strong>
+                {preview.warnings.slice(0, 5).map((warning, index) => (
+                  <small key={`${warning}-${index}`}>{warning}</small>
+                ))}
+              </div>
+            ) : null}
+            </div>
+            <div className="details-actions">
+              <button type="button" className="button button-secondary" disabled={busy} onClick={() => setPreview(null)}>
+                Скасувати
+              </button>
+              <button type="button" className="button button-primary" disabled={busy || !preview.rootPersonId} onClick={() => void confirmImport()}>
+                {busy ? "Імпортуємо..." : onCreateFamilyTree ? "Імпортувати і створити дерево" : "Імпортувати"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+    </>
+  );
+}
+
+function sortRootCandidates(people: Person[], relations: PersonRelation[]): Person[] {
+  const childCounts = new Map<string, number>();
+  const parentCounts = new Map<string, number>();
+  for (const relation of relations) {
+    const type = relation.relationType.toLocaleLowerCase("uk");
+    if (isParentRelationLabel(type)) {
+      parentCounts.set(relation.personId, (parentCounts.get(relation.personId) ?? 0) + 1);
+      childCounts.set(relation.relatedPersonId, (childCounts.get(relation.relatedPersonId) ?? 0) + 1);
+    }
+    if (isChildRelationLabel(type)) {
+      childCounts.set(relation.personId, (childCounts.get(relation.personId) ?? 0) + 1);
+      parentCounts.set(relation.relatedPersonId, (parentCounts.get(relation.relatedPersonId) ?? 0) + 1);
+    }
+  }
+
+  return [...people].sort((first, second) => {
+    const scoreDiff = rootCandidateScore(second, childCounts, parentCounts) - rootCandidateScore(first, childCounts, parentCounts);
+    if (scoreDiff !== 0) return scoreDiff;
+    return personDisplayName(first).localeCompare(personDisplayName(second), "uk");
+  });
+}
+
+function rootCandidateScore(person: Person, childCounts: Map<string, number>, parentCounts: Map<string, number>): number {
+  const birthYear = yearFromDateText(person.birthDate);
+  return (
+    (person.isLiving ? 1000 : 0) +
+    (birthYear ? Math.min(Math.max(birthYear - 1800, 0), 250) : 0) +
+    (parentCounts.get(person.id) ?? 0) * 15 -
+    (childCounts.get(person.id) ?? 0) * 4
+  );
+}
+
+function isParentRelationLabel(type: string): boolean {
+  return ["бать", "мат", "parent", "father", "mother", "р±р°с‚", "рјр°с‚"].some((part) => type.includes(part));
+}
+
+function isChildRelationLabel(type: string): boolean {
+  return ["син", "донь", "дит", "child", "son", "daughter", "сѓсђ", "рґрѕрЅ", "рґрё"].some((part) => type.includes(part));
+}
+
+function personOptionLabel(person: Person): string {
+  const birthYear = yearFromDateText(person.birthDate);
+  const deathYear = yearFromDateText(person.deathDate);
+  const years = [birthYear ? `нар. ${birthYear}` : "", deathYear ? `пом. ${deathYear}` : ""]
+    .filter(Boolean)
+    .join(", ");
+  return `${personDisplayName(person)}${years ? ` (${years})` : ""}`;
+}
+
+function personDisplayName(person: Person): string {
+  return person.fullName || [person.surname, person.givenName, person.patronymic].filter(Boolean).join(" ") || "Особа без імені";
+}
+
+function yearFromDateText(value: string): number | null {
+  const match = value.match(/\b(1[0-9]{3}|20[0-9]{2})\b/);
+  return match ? Number(match[1]) : null;
+}

@@ -1,10 +1,15 @@
-import type { Person } from "../types";
+import type { DocumentRecord, Finding, Person } from "../types";
 import type {
+  FamilyTreeGraphDto,
   FamilyTreeGraphIssue,
+  FamilyTreePersonName,
+  FamilyTreePersonTimelineEvent,
   GedcomExportOptions,
   GedcomExportResult,
   GedcomLine,
   GedcomParseResult,
+  GedcomPreservedLine,
+  GedcomPreservedRecord,
   GedcomRecord,
   GedcomSummary,
 } from "../types/familyTree";
@@ -13,6 +18,19 @@ import type {
   FamilyTreeProjectionEdge,
   FamilyTreeProjectionNode,
 } from "./familyTreeProjection.ts";
+import { familyTreeKinshipLabel } from "./familyTreeKinship.ts";
+import {
+  GEDCOM_CITATIONS_CUSTOM_FIELD,
+  GEDCOM_EDUCATION_CUSTOM_FIELD,
+  GEDCOM_MEDIA_CUSTOM_FIELD,
+  GEDCOM_NATIONALITY_CUSTOM_FIELD,
+  GEDCOM_RAW_RECORD_CUSTOM_FIELD,
+  GEDCOM_RIN_CUSTOM_FIELD,
+  GEDCOM_UID_CUSTOM_FIELD,
+  GEDCOM_VITAL_STATUS_CUSTOM_FIELD,
+  GEDCOM_XREF_CUSTOM_FIELD,
+  parseGedcomMetadata,
+} from "./gedcomMetadata.ts";
 
 type GedcomFamily = {
   key: string;
@@ -22,6 +40,13 @@ type GedcomFamily = {
   marriageDate: string;
   marriagePlace: string;
   sourceEdgeIds: string[];
+  familyGroupId: string | null;
+  relationshipType: string;
+  endDate: string;
+  endPlace: string;
+  notes: string;
+  evidenceStatus: string;
+  confidence: number;
 };
 
 const GEDCOM_MONTHS: Record<string, string> = {
@@ -39,22 +64,39 @@ const GEDCOM_MONTHS: Record<string, string> = {
   "12": "DEC",
 };
 
+export function exportFamilyTreeGraphToGedcom(
+  graph: FamilyTreeGraphDto,
+  options: GedcomExportOptions = {},
+): GedcomExportResult {
+  return exportFamilyTreeProjectionToGedcom(graphToProjection(graph), {
+    ...options,
+    rootPersonId: options.rootPersonId ?? graph.rootPersonId ?? undefined,
+  });
+}
+
 export function exportFamilyTreeProjectionToGedcom(
   projection: FamilyTreeProjection,
   options: GedcomExportOptions = {},
 ): GedcomExportResult {
   const warnings: FamilyTreeGraphIssue[] = [];
-  const individualXrefs = buildIndividualXrefs(projection.nodes);
+  const preservedRecords = collectPreservedRecords(projection.nodes, options.preservedRecords ?? []);
+  const individualXrefs = buildIndividualXrefs(projection.nodes, preservedRecords);
+  const documentSourceXrefs = buildDocumentSourceXrefs(options.documents ?? [], preservedRecords);
   const families = buildGedcomFamilies(projection, warnings);
-  const familyXrefs = Object.fromEntries(families.map((family, index) => [family.key, `@F${index + 1}@`]));
+  const familyXrefs = buildFamilyXrefs(families, preservedRecords, individualXrefs);
   const familyPointersByPerson = buildFamilyPointersByPerson(families, familyXrefs);
   const lines: string[] = [];
   const sourceName = options.sourceName || "Treker Rodu";
   const submitterXref = "@SUB1@";
   const createdAt = options.createdAt ? new Date(options.createdAt) : new Date();
+  const rootPersonId = options.rootPersonId && individualXrefs[options.rootPersonId]
+    ? options.rootPersonId
+    : projection.nodes[0]?.personId;
+  const rootXref = rootPersonId ? individualXrefs[rootPersonId] : "";
 
   addLine(lines, 0, "HEAD");
   addLine(lines, 1, "SOUR", sanitizeGedcomValue(sourceName));
+  addPreservedOriginalHeaderSource(lines, preservedRecords.find((record) => record.tag === "HEAD"));
   addLine(lines, 1, "DEST", "ANY");
   addLine(lines, 1, "DATE", formatGedcomDate(createdAt.toISOString().slice(0, 10)));
   addLine(lines, 1, "CHAR", "UTF-8");
@@ -62,21 +104,49 @@ export function exportFamilyTreeProjectionToGedcom(
   addLine(lines, 2, "VERS", options.gedcomVersion ?? "5.5.1");
   addLine(lines, 2, "FORM", "LINEAGE-LINKED");
   addLine(lines, 1, "SUBM", submitterXref);
+  if (rootXref) {
+    addLine(lines, 1, "_ROOT", rootXref);
+    addLine(lines, 1, "_TRK_ROOT", rootXref);
+  }
+  addPreservedHeaderExtensions(lines, preservedRecords.find((record) => record.tag === "HEAD"));
 
   for (const node of projection.nodes) {
-    addIndividual(lines, node, individualXrefs, familyPointersByPerson, projection.associationEdges, options);
+    addIndividual(
+      lines,
+      node,
+      individualXrefs,
+      familyPointersByPerson,
+      projection.associationEdges,
+      options,
+      preservedPersonRecord(node.personId, individualXrefs, preservedRecords),
+      documentSourceXrefs,
+    );
   }
 
   for (const family of families) {
-    addFamily(lines, family, familyXrefs[family.key], individualXrefs, warnings);
+    addFamily(
+      lines,
+      family,
+      familyXrefs[family.key],
+      individualXrefs,
+      warnings,
+      preservedRecords.find((record) => record.tag === "FAM" && record.pointer === familyXrefs[family.key]),
+    );
   }
+
+  addPreservedTopLevelRecords(lines, preservedRecords, new Set([
+    ...Object.values(individualXrefs),
+    ...Object.values(familyXrefs),
+    submitterXref,
+  ]));
+  addDocumentSourceRecords(lines, options.documents ?? [], documentSourceXrefs, preservedRecords);
 
   addLine(lines, 0, "SUBM", "", submitterXref);
   addLine(lines, 1, "NAME", sanitizeGedcomValue(options.submitterName || sourceName));
   addLine(lines, 0, "TRLR");
 
   return {
-    text: `${lines.join("\n")}\n`,
+    text: `${lines.join("\r\n")}\r\n`,
     individualXrefs,
     familyXrefs,
     warnings,
@@ -147,7 +217,11 @@ export function summarizeGedcom(parseResult: GedcomParseResult): GedcomSummary {
 }
 
 export function formatGedcomDate(value: string): string {
-  const trimmed = value.trim();
+  const original = value.trim();
+  if (/^\d{4}-(?:xx|\d{2})(?:-(?:xx|\d{2}))?$/i.test(original) && /xx/i.test(original)) {
+    return sanitizeGedcomValue(original);
+  }
+  const trimmed = normalizeGedcomTextDate(original);
   if (!trimmed) return "";
 
   const exact = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -169,6 +243,133 @@ export function formatGedcomDate(value: string): string {
   return sanitizeGedcomValue(trimmed);
 }
 
+function normalizeGedcomTextDate(value: string): string {
+  const months: Record<string, string> = {
+    СІЧ: "JAN", ЯНВ: "JAN", ЛЮТ: "FEB", ФЕВ: "FEB", БЕР: "MAR", МАР: "MAR",
+    КВІ: "APR", АПР: "APR", ТРА: "MAY", МАЙ: "MAY", ЧЕР: "JUN", ИЮН: "JUN",
+    ЛИП: "JUL", ИЮЛ: "JUL", СЕР: "AUG", АВГ: "AUG", ВЕР: "SEP", СЕН: "SEP",
+    ЖОВ: "OCT", ОКТ: "OCT", ЛИС: "NOV", НОЯ: "NOV", ГРУ: "DEC", ДЕК: "DEC",
+  };
+  return value
+    .toLocaleUpperCase("uk")
+    .replace(/\b(СІЧ|ЯНВ|ЛЮТ|ФЕВ|БЕР|МАР|КВІ|АПР|ТРА|МАЙ|ЧЕР|ИЮН|ЛИП|ИЮЛ|СЕР|АВГ|ВЕР|СЕН|ЖОВ|ОКТ|ЛИС|НОЯ|ГРУ|ДЕК)\b/gu, (month) => months[month] ?? month)
+    .replace(/\s+(?:І|И)\s+/gu, " AND ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function graphToProjection(graph: FamilyTreeGraphDto): FamilyTreeProjection {
+  const graphNodes = graph.rootPersonId
+    ? [...graph.nodes].sort((left, right) => {
+      if (left.personId === graph.rootPersonId) return -1;
+      if (right.personId === graph.rootPersonId) return 1;
+      return 0;
+    })
+    : graph.nodes;
+  const occurrenceByPersonId = new Map<string, FamilyTreeGraphDto["occurrences"][number]>();
+  for (const occurrence of graph.occurrences) {
+    const current = occurrenceByPersonId.get(occurrence.personId);
+    if (!current || occurrence.personId === graph.rootPersonId || Math.abs(occurrence.generation) < Math.abs(current.generation)) {
+      occurrenceByPersonId.set(occurrence.personId, occurrence);
+    }
+  }
+  const nodes: FamilyTreeProjectionNode[] = graphNodes.map((node) => {
+    const primaryName = node.primaryName ?? node.names[0] ?? fallbackName(graph.projectId, node.personId, node.displayName);
+    const occurrence = occurrenceByPersonId.get(node.personId);
+    const events = mergeProfileEvents(graph.projectId, node.personId, node.events, node.metadata);
+    return {
+      personId: node.personId,
+      researchId: "",
+      displayName: node.displayName,
+      primaryName,
+      names: node.names.length ? node.names : [primaryName],
+      events,
+      gender: node.gender as Person["gender"],
+      status: node.status as Person["status"],
+      isLiving: node.isLiving,
+      privacyStatus: node.privacyStatus,
+      rootRelationshipLabel: occurrence ? familyTreeKinshipLabel(graph, occurrence, node) : undefined,
+      hasDates: events.some((event) => event.eventDate || event.dateFrom || event.dateTo || event.dateText),
+      hasPlaces: events.some((event) => event.placeName),
+      metadata: node.metadata,
+    };
+  });
+  const personIds = new Set(nodes.map((node) => node.personId));
+  const edges: FamilyTreeProjectionEdge[] = graph.edges
+    .filter((edge) => personIds.has(edge.fromPersonId) && personIds.has(edge.toPersonId))
+    .map((edge) => ({
+      id: edge.id,
+      source: "graph_edge",
+      kind: edge.kind,
+      fromPersonId: edge.fromPersonId,
+      toPersonId: edge.toPersonId,
+      relationshipType: edge.relationshipType as FamilyTreeProjectionEdge["relationshipType"],
+      parentRoleLabel: edge.parentRoleLabel,
+      parentSetId: edge.parentSetId,
+      familyGroupId: edge.familyGroupId,
+      parentSetType: edge.metadata?.parentSetType as FamilyTreeProjectionEdge["parentSetType"] ?? parentSetTypeFromRelationship(edge.relationshipType),
+      evidenceStatus: edge.evidenceStatus,
+      confidence: edge.confidence,
+      isBloodline: edge.isBloodline,
+      lineStyle: edge.style.lineStyle,
+      legacyRelationId: edge.relationshipId,
+      metadata: edge.metadata,
+    }));
+  return {
+    projectId: graph.projectId,
+    treeId: graph.treeId,
+    nodes,
+    edges,
+    parentChildEdges: edges.filter((edge) => edge.kind === "parent_child"),
+    partnerEdges: edges.filter((edge) => edge.kind === "partner"),
+    associationEdges: edges.filter((edge) => edge.kind === "association"),
+    issues: graph.issues.map((issue) => ({
+      severity: issue.severity,
+      code: issue.code,
+      message: issue.message,
+      personIds: issue.personIds,
+      relationshipIds: issue.relationshipIds,
+    })),
+    stats: {
+      persons: nodes.length,
+      connectedPersons: new Set(edges.flatMap((edge) => [edge.fromPersonId, edge.toPersonId])).size,
+      isolatedPersons: nodes.filter((node) =>
+        !edges.some((edge) => edge.fromPersonId === node.personId || edge.toPersonId === node.personId),
+      ).length,
+      parentChildEdges: edges.filter((edge) => edge.kind === "parent_child").length,
+      partnerEdges: edges.filter((edge) => edge.kind === "partner").length,
+      associationEdges: edges.filter((edge) => edge.kind === "association").length,
+      skippedLegacyRelations: 0,
+    },
+  };
+}
+
+function fallbackName(projectId: string, personId: string, displayName: string): FamilyTreePersonName {
+  return {
+    id: `gedcom-name-${personId}`,
+    projectId,
+    personId,
+    nameType: "primary",
+    languageCode: "uk",
+    scriptCode: "Cyrl",
+    surname: "",
+    givenName: "",
+    patronymic: "",
+    fullName: displayName,
+    originalText: displayName,
+    isPrimary: true,
+    isPreferred: true,
+    evidenceStatus: "unknown",
+    confidence: 0,
+    sourceDocumentId: null,
+    sourceFindingId: null,
+    notes: "",
+    metadata: {},
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
 function addIndividual(
   lines: string[],
   node: FamilyTreeProjectionNode,
@@ -176,34 +377,98 @@ function addIndividual(
   familyPointersByPerson: Map<string, { fams: string[]; famc: Array<{ xref: string; pedi: string | null }> }>,
   associationEdges: FamilyTreeProjectionEdge[],
   options: GedcomExportOptions,
+  preservedRecord?: GedcomPreservedRecord,
+  documentSourceXrefs: Record<string, string> = {},
 ): void {
   const personXref = individualXrefs[node.personId];
   const pointers = familyPointersByPerson.get(node.personId);
+  const profile = personProfile(node);
 
   addLine(lines, 0, "INDI", "", personXref);
-  addName(lines, node);
+  const primaryExportName = primaryGedcomNameForExport(node);
+  const preservedNames = directSubtrees(preservedRecord).filter((subtree) => subtree[0]?.tag === "NAME");
+  if (preservedNames.length) {
+    for (const subtree of preservedNames) addPreservedSubtree(lines, subtree);
+  } else {
+    addName(lines, primaryExportName);
+    if (primaryExportName.nameType !== "primary") {
+      addLine(lines, 2, "TYPE", gedcomNameType(primaryExportName.nameType));
+    }
+    addNameMetadata(lines, primaryExportName);
+  }
   const privacyRestriction = gedcomPrivacyRestriction(node);
   if (privacyRestriction) addLine(lines, 1, "RESN", privacyRestriction);
+  if (!preservedRecord) {
+    addLine(lines, 1, "_TRK_PRIVACY", node.privacyStatus);
+    const explicitVitalStatus = customFieldString(profile, GEDCOM_VITAL_STATUS_CUSTOM_FIELD);
+    if (explicitVitalStatus === "living" || (!explicitVitalStatus && node.isLiving)) addLine(lines, 1, "_LIVING", "Y");
+    if (explicitVitalStatus === "deceased") addLine(lines, 1, "_LIVING", "N");
+  }
+  if (node.rootRelationshipLabel) {
+    addLine(lines, 1, "_RELTOROOT", node.rootRelationshipLabel);
+    addLine(lines, 1, "NOTE", `Спорідненість до центральної особи: ${node.rootRelationshipLabel}`);
+  }
 
-  for (const name of node.names.filter((name) => !name.isPrimary)) {
-    addLine(lines, 1, "NAME", formatGedcomName(name.givenName, name.patronymic, name.surname, name.fullName));
-    addLine(lines, 2, "TYPE", gedcomNameType(name.nameType));
-    if (name.originalText && name.originalText !== name.fullName) {
-      addMultiline(lines, 2, "NOTE", `Original spelling: ${name.originalText}`);
+  if (!preservedNames.length) {
+    for (const name of node.names.filter((name) => name.id !== primaryExportName.id && !name.isPrimary)) {
+      addName(lines, name);
+      addLine(lines, 2, "TYPE", gedcomNameType(name.nameType));
+      addNameMetadata(lines, name);
+      if (name.originalText && name.originalText !== name.fullName) {
+        addMultiline(lines, 2, "NOTE", `Original spelling: ${name.originalText}`);
+      }
     }
   }
 
   const sex = genderToGedcomSex(node.gender);
   if (sex) addLine(lines, 1, "SEX", sex);
+  if (sex === "F" && !preservedNames.length) addMarriedName(lines, node, Boolean(pointers?.fams.length));
 
+  const rawEventCounts = directSubtrees(preservedRecord)
+    .filter((subtree) => GEDCOM_INDIVIDUAL_EVENT_TAGS.has(subtree[0]?.tag ?? ""))
+    .reduce((counts, subtree) => counts.set(subtree[0].tag, (counts.get(subtree[0].tag) ?? 0) + 1), new Map<string, number>());
+  const skippedRawEventCounts = new Map<string, number>();
   for (const event of node.events) {
-    addEvent(lines, event.eventType, event.eventDate || event.dateText, event.placeName, event.title || event.notes);
+    const tag = eventTypeToGedcomTag(event.eventType);
+    const alreadySkipped = skippedRawEventCounts.get(tag) ?? 0;
+    if (tag && alreadySkipped < (rawEventCounts.get(tag) ?? 0)) {
+      skippedRawEventCounts.set(tag, alreadySkipped + 1);
+      continue;
+    }
+    addEvent(
+      lines,
+      event.eventType,
+      event.eventDate || event.dateText,
+      event.placeName,
+      [event.title, event.notes].filter(Boolean).join("\n"),
+      event.geo,
+      event,
+    );
+  }
+  const vitalStatus = customFieldString(profile, GEDCOM_VITAL_STATUS_CUSTOM_FIELD);
+  if (
+    !node.isLiving
+    && vitalStatus !== "unknown"
+    && !node.events.some((event) => event.eventType === "death")
+    && !hasDirectTag(preservedRecord, "DEAT")
+  ) {
+    addLine(lines, 1, "DEAT", "Y");
   }
 
+  addMappedPersonProfile(lines, profile, preservedRecord);
+  addPreservedIndividualExtensions(lines, preservedRecord, currentPrimaryPersonPhotoPath(profile));
+  addFindingCitations(lines, node.personId, options.findings ?? [], documentSourceXrefs, preservedRecord);
+
+  const rawFams = new Set(rawDirectValues(preservedRecord, "FAMS"));
+  const rawFamc = new Set(rawDirectValues(preservedRecord, "FAMC"));
+  for (const subtree of directSubtrees(preservedRecord).filter((subtree) => ["FAMS", "FAMC"].includes(subtree[0]?.tag ?? ""))) {
+    addPreservedSubtree(lines, subtree);
+  }
   for (const fams of pointers?.fams ?? []) {
-    addLine(lines, 1, "FAMS", fams);
+    if (!rawFams.has(fams)) addLine(lines, 1, "FAMS", fams);
   }
   for (const famc of pointers?.famc ?? []) {
+    if (rawFamc.has(famc.xref)) continue;
     addLine(lines, 1, "FAMC", famc.xref);
     if (famc.pedi) addLine(lines, 2, "PEDI", famc.pedi);
   }
@@ -221,16 +486,48 @@ function addIndividual(
 
 function gedcomPrivacyRestriction(node: FamilyTreeProjectionNode): "privacy" | "confidential" | "" {
   if (node.privacyStatus === "confidential") return "confidential";
-  if (node.isLiving || node.privacyStatus === "private") return "privacy";
+  if (node.isLiving) return "privacy";
   return "";
 }
 
-function addName(lines: string[], node: FamilyTreeProjectionNode): void {
-  const name = node.primaryName;
+function primaryGedcomNameForExport(node: FamilyTreeProjectionNode): FamilyTreePersonName {
+  if (genderToGedcomSex(node.gender) !== "F") return node.primaryName;
+  return node.names.find((name) => name.nameType === "birth" && name.surname.trim()) ?? node.primaryName;
+}
+
+function addName(lines: string[], name: FamilyTreePersonName): void {
   addLine(lines, 1, "NAME", formatGedcomName(name.givenName, name.patronymic, name.surname, name.fullName));
   if (name.givenName) addLine(lines, 2, "GIVN", sanitizeGedcomValue(name.givenName));
   if (name.surname) addLine(lines, 2, "SURN", sanitizeGedcomValue(name.surname));
   if (name.patronymic) addLine(lines, 2, "_PATR", sanitizeGedcomValue(name.patronymic));
+}
+
+function addNameMetadata(lines: string[], name: FamilyTreePersonName): void {
+  if (name.languageCode) addLine(lines, 2, "_LANG", name.languageCode);
+  if (name.scriptCode) addLine(lines, 2, "_SCRIPT", name.scriptCode);
+  if (name.isPreferred) addLine(lines, 2, "_PREFERRED", "Y");
+  if (name.evidenceStatus !== "unknown") addLine(lines, 2, "_EVIDENCE", name.evidenceStatus);
+  if (Number.isFinite(name.confidence) && name.confidence > 0) addLine(lines, 2, "_CONFIDENCE", String(name.confidence));
+  if (name.sourceDocumentId) addLine(lines, 2, "_TRK_SOURCE_DOCUMENT", name.sourceDocumentId);
+  if (name.sourceFindingId) addLine(lines, 2, "_TRK_SOURCE_FINDING", name.sourceFindingId);
+  if (name.notes) addMultiline(lines, 2, "NOTE", name.notes);
+}
+
+function addMarriedName(lines: string[], node: FamilyTreeProjectionNode, hasSpouseFamily: boolean): void {
+  const marriedName = node.names.find((name) => name.nameType === "married") ?? node.primaryName;
+  const marriedSurname = marriedName.surname.trim();
+  if (!marriedSurname) return;
+  const hasMaidenName = node.names.some((name) => name.nameType === "birth" && name.surname.trim());
+  if (!hasSpouseFamily && !hasMaidenName && marriedName.nameType !== "married") return;
+  addLine(lines, 1, "_MARNM", formatGedcomName(
+    marriedName.givenName,
+    marriedName.patronymic,
+    marriedName.surname,
+    marriedName.fullName,
+  ));
+  if (marriedName.givenName) addLine(lines, 2, "GIVN", sanitizeGedcomValue(marriedName.givenName));
+  if (marriedName.surname) addLine(lines, 2, "SURN", sanitizeGedcomValue(marriedName.surname));
+  if (marriedName.patronymic) addLine(lines, 2, "_PATR", sanitizeGedcomValue(marriedName.patronymic));
 }
 
 function addEvent(
@@ -239,14 +536,40 @@ function addEvent(
   dateText: string,
   placeName: string,
   note: string,
+  geo?: FamilyTreePersonTimelineEvent["geo"],
+  eventMetadata?: FamilyTreePersonTimelineEvent,
 ): void {
   const tag = eventTypeToGedcomTag(eventType);
   if (!tag) return;
-  addLine(lines, 1, tag);
+  const originalValue = stringValue(eventMetadata?.metadata?.gedcomValue);
+  addLine(lines, 1, tag, originalValue);
   if (dateText) addLine(lines, 2, "DATE", formatGedcomDate(dateText));
   if (placeName) addLine(lines, 2, "PLAC", sanitizeGedcomValue(placeName));
-  if (tag === "EVEN" && eventType !== "other") addLine(lines, 2, "TYPE", sanitizeGedcomValue(eventType));
+  if (placeName && geo?.latitude != null && geo.longitude != null) {
+    addLine(lines, 3, "MAP");
+    addLine(lines, 4, "LATI", formatGedcomCoordinate(geo.latitude, "N", "S"));
+    addLine(lines, 4, "LONG", formatGedcomCoordinate(geo.longitude, "E", "W"));
+  }
+  if (tag === "EVEN") {
+    const eventTitle = eventMetadata?.title?.trim();
+    if (eventTitle || eventType !== "other") {
+      addLine(lines, 2, "TYPE", sanitizeGedcomValue(eventTitle || eventType));
+    }
+  }
+  const eventAge = stringValue(eventMetadata?.metadata?.age);
+  const eventCause = stringValue(eventMetadata?.metadata?.cause);
+  const eventAddress = stringValue(eventMetadata?.metadata?.address);
+  if (eventAge) addLine(lines, 2, "AGE", sanitizeGedcomValue(eventAge));
+  if (eventCause) addLine(lines, 2, "CAUS", sanitizeGedcomValue(eventCause));
+  if (eventAddress && eventAddress !== placeName) addLine(lines, 2, "ADDR", sanitizeGedcomValue(eventAddress));
   if (note) addMultiline(lines, 2, "NOTE", note);
+  if (eventMetadata?.eventRole) addLine(lines, 2, "_ROLE", eventMetadata.eventRole);
+  if (eventMetadata && eventMetadata.evidenceStatus !== "unknown") addLine(lines, 2, "_EVIDENCE", eventMetadata.evidenceStatus);
+  if (eventMetadata && Number.isFinite(eventMetadata.confidence) && eventMetadata.confidence > 0) {
+    addLine(lines, 2, "_CONFIDENCE", String(eventMetadata.confidence));
+  }
+  if (eventMetadata?.sourceDocumentId) addLine(lines, 2, "_TRK_SOURCE_DOCUMENT", eventMetadata.sourceDocumentId);
+  if (eventMetadata?.sourceFindingId) addLine(lines, 2, "_TRK_SOURCE_FINDING", eventMetadata.sourceFindingId);
 }
 
 function addFamily(
@@ -255,6 +578,7 @@ function addFamily(
   familyXref: string,
   individualXrefs: Record<string, string>,
   warnings: FamilyTreeGraphIssue[],
+  preservedRecord?: GedcomPreservedRecord,
 ): void {
   addLine(lines, 0, "FAM", "", familyXref);
   const partners = family.partnerIds.filter((personId) => individualXrefs[personId]);
@@ -267,21 +591,617 @@ function addFamily(
     });
   }
 
-  if (partners[0]) addLine(lines, 1, "HUSB", individualXrefs[partners[0]]);
-  if (partners[1]) addLine(lines, 1, "WIFE", individualXrefs[partners[1]]);
-  if (family.marriageDate || family.marriagePlace) {
+  const rawHusb = new Set(rawDirectValues(preservedRecord, "HUSB"));
+  const rawWife = new Set(rawDirectValues(preservedRecord, "WIFE"));
+  const rawPartner = new Set(rawDirectValues(preservedRecord, "PARTNER"));
+  for (const subtree of directSubtrees(preservedRecord).filter((subtree) => ["HUSB", "WIFE", "PARTNER"].includes(subtree[0]?.tag ?? ""))) {
+    addPreservedSubtree(lines, subtree);
+  }
+  if (partners[0] && !rawHusb.has(individualXrefs[partners[0]]) && !rawPartner.has(individualXrefs[partners[0]])) {
+    addLine(lines, 1, "HUSB", individualXrefs[partners[0]]);
+  }
+  if (partners[1] && !rawWife.has(individualXrefs[partners[1]]) && !rawPartner.has(individualXrefs[partners[1]])) {
+    addLine(lines, 1, "WIFE", individualXrefs[partners[1]]);
+  }
+  if ((family.marriageDate || family.marriagePlace) && !hasDirectTag(preservedRecord, "MARR")) {
     addLine(lines, 1, "MARR");
     if (family.marriageDate) addLine(lines, 2, "DATE", formatGedcomDate(family.marriageDate));
     if (family.marriagePlace) addLine(lines, 2, "PLAC", sanitizeGedcomValue(family.marriagePlace));
   }
+  if ((family.endDate || family.endPlace || family.relationshipType === "divorced") && !hasDirectTag(preservedRecord, "DIV")) {
+    addLine(lines, 1, "DIV", family.relationshipType === "divorced" && !family.endDate && !family.endPlace ? "Y" : "");
+    if (family.endDate) addLine(lines, 2, "DATE", formatGedcomDate(family.endDate));
+    if (family.endPlace) addLine(lines, 2, "PLAC", family.endPlace);
+  }
+  if (family.notes && !hasDirectTag(preservedRecord, "NOTE")) addMultiline(lines, 1, "NOTE", family.notes);
+  if (!preservedRecord) {
+    if (family.relationshipType && family.relationshipType !== "unknown") addLine(lines, 1, "_TRK_RELATIONSHIP_TYPE", family.relationshipType);
+    if (family.evidenceStatus && family.evidenceStatus !== "unknown") addLine(lines, 1, "_EVIDENCE", family.evidenceStatus);
+    if (Number.isFinite(family.confidence) && family.confidence > 0) addLine(lines, 1, "_CONFIDENCE", String(family.confidence));
+    if (family.familyGroupId) addLine(lines, 1, "_TRK_FAMILY_GROUP", family.familyGroupId);
+  }
+  const rawChildren = new Set(rawDirectValues(preservedRecord, "CHIL"));
+  for (const subtree of directSubtrees(preservedRecord).filter((subtree) => subtree[0]?.tag === "CHIL")) {
+    addPreservedSubtree(lines, subtree);
+  }
   for (const childId of family.childIds) {
     const childXref = individualXrefs[childId];
-    if (childXref) addLine(lines, 1, "CHIL", childXref);
+    if (childXref && !rawChildren.has(childXref)) addLine(lines, 1, "CHIL", childXref);
+  }
+  addPreservedFamilyExtensions(lines, preservedRecord);
+}
+
+function buildIndividualXrefs(
+  nodes: FamilyTreeProjectionNode[],
+  preservedRecords: GedcomPreservedRecord[],
+): Record<string, string> {
+  const reserved = new Set(preservedRecords.map((record) => record.pointer).filter((value): value is string => Boolean(value)));
+  const assigned = new Set<string>();
+  const result: Record<string, string> = {};
+  let next = 1;
+  for (const node of nodes) {
+    const profile = personProfile(node);
+    const candidate = [
+      preservedRecords.find((record) => record.tag === "INDI" && record.internalId === node.personId)?.pointer,
+      customFieldString(profile, GEDCOM_XREF_CUSTOM_FIELD),
+      parseGedcomMetadata<GedcomPreservedRecord | null>(
+        customFieldString(profile, GEDCOM_RAW_RECORD_CUSTOM_FIELD),
+        null,
+      )?.pointer,
+    ].find((value) => validGedcomXref(value) && !assigned.has(value!));
+    if (candidate) {
+      result[node.personId] = candidate;
+      assigned.add(candidate);
+      continue;
+    }
+    let generated = `@I${next++}@`;
+    while (reserved.has(generated) || assigned.has(generated)) generated = `@I${next++}@`;
+    result[node.personId] = generated;
+    assigned.add(generated);
+  }
+  return result;
+}
+
+function buildFamilyXrefs(
+  families: GedcomFamily[],
+  preservedRecords: GedcomPreservedRecord[],
+  individualXrefs: Record<string, string>,
+): Record<string, string> {
+  const rawFamilies = preservedRecords.filter((record) => record.tag === "FAM" && validGedcomXref(record.pointer));
+  const reserved = new Set(preservedRecords.map((record) => record.pointer).filter((value): value is string => Boolean(value)));
+  const used = new Set<string>();
+  const result: Record<string, string> = {};
+  let next = 1;
+  for (const family of families) {
+    const partnerXrefs = family.partnerIds.map((id) => individualXrefs[id]).filter(Boolean).sort();
+    const childXrefs = family.childIds.map((id) => individualXrefs[id]).filter(Boolean).sort();
+    const candidates = rawFamilies
+      .filter((record) => record.pointer && !used.has(record.pointer))
+      .map((record) => ({
+        record,
+        partners: rawFamilyValues(record, ["HUSB", "WIFE", "PARTNER"]).sort(),
+        children: rawFamilyValues(record, ["CHIL"]).sort(),
+      }))
+      .filter((candidate) => arrayEquals(candidate.partners, partnerXrefs))
+      .sort((left, right) => familyMatchScore(right.children, childXrefs) - familyMatchScore(left.children, childXrefs));
+    const matched = candidates[0];
+    if (matched?.record.pointer) {
+      result[family.key] = matched.record.pointer;
+      used.add(matched.record.pointer);
+      continue;
+    }
+    let generated = `@F${next++}@`;
+    while (reserved.has(generated) || used.has(generated)) generated = `@F${next++}@`;
+    result[family.key] = generated;
+    used.add(generated);
+  }
+  return result;
+}
+
+function buildDocumentSourceXrefs(
+  documents: DocumentRecord[],
+  preservedRecords: GedcomPreservedRecord[],
+): Record<string, string> {
+  const reserved = new Set(preservedRecords.map((record) => record.pointer).filter((value): value is string => Boolean(value)));
+  const assigned = new Set<string>();
+  const result: Record<string, string> = {};
+  let next = 1;
+  for (const document of documents) {
+    const importedXref = typeof document.customFields?.__gedcomSourceXref === "string"
+      ? document.customFields.__gedcomSourceXref
+      : "";
+    if (validGedcomXref(importedXref) && !assigned.has(importedXref)) {
+      result[document.id] = importedXref;
+      assigned.add(importedXref);
+      continue;
+    }
+    let generated = `@S_TRK${next++}@`;
+    while (reserved.has(generated) || assigned.has(generated)) generated = `@S_TRK${next++}@`;
+    result[document.id] = generated;
+    assigned.add(generated);
+  }
+  return result;
+}
+
+function addDocumentSourceRecords(
+  lines: string[],
+  documents: DocumentRecord[],
+  sourceXrefs: Record<string, string>,
+  preservedRecords: GedcomPreservedRecord[],
+): void {
+  const preservedSourcePointers = new Set(preservedRecords
+    .filter((record) => record.tag === "SOUR")
+    .map((record) => record.pointer)
+    .filter((value): value is string => Boolean(value)));
+  for (const document of documents) {
+    const xref = sourceXrefs[document.id];
+    if (!xref || preservedSourcePointers.has(xref)) continue;
+    addLine(lines, 0, "SOUR", "", xref);
+    addLine(lines, 1, "TITL", document.title || `Документ ${document.id}`);
+    if (document.archive) addLine(lines, 1, "AUTH", document.archive);
+    if (document.notes) addMultiline(lines, 1, "PUBL", document.notes);
+    if (document.description) addMultiline(lines, 1, "TEXT", document.description);
+    if (document.documentType) addLine(lines, 1, "_TYPE", document.documentType);
+    if (document.url || document.file) addLine(lines, 1, "_URL", document.url || document.file);
+    if (document.fund) addLine(lines, 1, "_ARCHIVE_REF", document.fund);
+    addLine(lines, 1, "_TRK_ID", document.id);
+    for (const scan of document.scans ?? []) {
+      addLine(lines, 1, "OBJE");
+      addLine(lines, 2, "FILE", scan.storagePath || scan.webViewLink || scan.name);
+      if (scan.mimeType) addLine(lines, 2, "FORM", scan.mimeType.split("/").at(-1) ?? scan.mimeType);
+      if (scan.name) addLine(lines, 2, "TITL", scan.name);
+    }
   }
 }
 
-function buildIndividualXrefs(nodes: FamilyTreeProjectionNode[]): Record<string, string> {
-  return Object.fromEntries(nodes.map((node, index) => [node.personId, `@I${index + 1}@`]));
+function addFindingCitations(
+  lines: string[],
+  personId: string,
+  findings: Finding[],
+  sourceXrefs: Record<string, string>,
+  preservedRecord?: GedcomPreservedRecord,
+): void {
+  const rawCitationKeys = new Set(directSubtrees(preservedRecord)
+    .filter((subtree) => subtree[0]?.tag === "SOUR")
+    .map((subtree) => `${subtree[0]?.value ?? ""}|${subtree.find((line) => line.level === 2 && line.tag === "PAGE")?.value ?? ""}`));
+  for (const finding of findings.filter((item) => item.personIds?.includes(personId))) {
+    const sourceXref = sourceXrefs[finding.documentId];
+    const custom = finding.customFields ?? {};
+    const importedCitation = parseGedcomMetadata<{ quality?: string } | null>(
+      typeof custom.__gedcomCitation === "string" ? custom.__gedcomCitation : "",
+      null,
+    );
+    if (preservedRecord && (custom.__gedcomCitation || custom.__gedcomEventDescription)) continue;
+    if (sourceXref) {
+      const page = finding.page || finding.file;
+      if (rawCitationKeys.has(`${sourceXref}|${page}`)) continue;
+      addLine(lines, 1, "SOUR", sourceXref);
+      if (page) addLine(lines, 2, "PAGE", page);
+      const eventType = finding.findingType || finding.summary;
+      if (eventType) addLine(lines, 2, "EVEN", eventType);
+      if (finding.eventDate || finding.transcription || finding.description) {
+        addLine(lines, 2, "DATA");
+        if (finding.eventDate) addLine(lines, 3, "DATE", formatGedcomDate(finding.eventDate));
+        if (finding.transcription || finding.description) addMultiline(lines, 3, "TEXT", finding.transcription || finding.description);
+      }
+      const quality = importedCitation?.quality || findingReliabilityToQuay(finding.reliability);
+      if (quality) addLine(lines, 2, "QUAY", quality);
+      if (finding.notes) addMultiline(lines, 2, "NOTE", finding.notes);
+      continue;
+    }
+    const description = finding.transcription || finding.description || finding.summary;
+    if (!description) continue;
+    addLine(lines, 1, "EVEN");
+    addLine(lines, 2, "TYPE", finding.findingType || "Research finding");
+    if (finding.eventDate) addLine(lines, 2, "DATE", formatGedcomDate(finding.eventDate));
+    if (finding.place) addLine(lines, 2, "PLAC", finding.place);
+    addMultiline(lines, 2, "NOTE", description);
+    addLine(lines, 2, "_TRK_FINDING_ID", finding.id);
+  }
+}
+
+function findingReliabilityToQuay(value: string): string {
+  const normalized = value.toLocaleLowerCase("uk");
+  if (normalized.includes("первин") || normalized.includes("надійн")) return "3";
+  if (normalized.includes("вторин") || normalized.includes("імовір")) return "2";
+  if (normalized.includes("сумнів")) return "1";
+  if (normalized.includes("ненадійн")) return "0";
+  return "";
+}
+
+function preservedPersonRecord(
+  personId: string,
+  individualXrefs: Record<string, string>,
+  records: GedcomPreservedRecord[],
+): GedcomPreservedRecord | undefined {
+  return records.find((record) => record.tag === "INDI" && (
+    record.internalId === personId || record.pointer === individualXrefs[personId]
+  ));
+}
+
+function rawFamilyValues(record: GedcomPreservedRecord, tags: string[]): string[] {
+  const accepted = new Set(tags);
+  return directSubtrees(record)
+    .filter((subtree) => accepted.has(subtree[0]?.tag ?? ""))
+    .map((subtree) => subtree[0]?.value ?? "")
+    .filter(Boolean);
+}
+
+function rawDirectValues(record: GedcomPreservedRecord | undefined, tag: string): string[] {
+  return directSubtrees(record)
+    .filter((subtree) => subtree[0]?.tag === tag)
+    .map((subtree) => subtree[0]?.value ?? "")
+    .filter(Boolean);
+}
+
+function familyMatchScore(left: string[], right: string[]): number {
+  const matches = left.filter((value) => right.includes(value)).length;
+  return matches * 10 - Math.abs(left.length - right.length) + (arrayEquals(left, right) ? 1000 : 0);
+}
+
+function arrayEquals(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function validGedcomXref(value: unknown): boolean {
+  return typeof value === "string" && /^@[^@\s]+@$/.test(value);
+}
+
+const GEDCOM_INDIVIDUAL_EVENT_TAGS = new Set([
+  "BIRT", "BAPM", "CHR", "DEAT", "BURI", "CREM", "RESI", "CENS", "OCCU", "EDUC", "IMMI", "EMIG", "PROB", "EVEN",
+]);
+
+function collectPreservedRecords(
+  nodes: FamilyTreeProjectionNode[],
+  archived: GedcomPreservedRecord[],
+): GedcomPreservedRecord[] {
+  const records = archived.map((record) => ({ ...record, lines: record.lines.map((line) => ({ ...line })) }));
+  const existingPersonIds = new Set(records
+    .filter((record) => record.tag === "INDI" && record.internalId)
+    .map((record) => record.internalId));
+  const existingPointers = new Set(records.map((record) => record.pointer).filter(Boolean));
+  for (const node of nodes) {
+    if (existingPersonIds.has(node.personId)) continue;
+    const raw = parseGedcomMetadata<GedcomPreservedRecord | null>(
+      customFieldString(personProfile(node), GEDCOM_RAW_RECORD_CUSTOM_FIELD),
+      null,
+    );
+    if (!raw?.lines?.length || raw.tag !== "INDI") continue;
+    if (raw.pointer && existingPointers.has(raw.pointer)) continue;
+    records.push({ ...raw, internalId: node.personId, internalTable: "persons" });
+    if (raw.pointer) existingPointers.add(raw.pointer);
+  }
+  return records.sort((left, right) => left.order - right.order);
+}
+
+function directSubtrees(record?: GedcomPreservedRecord): GedcomPreservedLine[][] {
+  if (!record?.lines?.length) return [];
+  const result: GedcomPreservedLine[][] = [];
+  let current: GedcomPreservedLine[] = [];
+  for (const line of record.lines.slice(1)) {
+    if (line.level === 1) {
+      if (current.length) result.push(current);
+      current = [line];
+    } else if (current.length) {
+      current.push(line);
+    }
+  }
+  if (current.length) result.push(current);
+  return result;
+}
+
+function hasDirectTag(record: GedcomPreservedRecord | undefined, tag: string): boolean {
+  return directSubtrees(record).some((subtree) => subtree[0]?.tag === tag);
+}
+
+function addPreservedIndividualExtensions(
+  lines: string[],
+  record?: GedcomPreservedRecord,
+  currentPrimaryPhotoPath = "",
+): void {
+  const regenerated = new Set([
+    "NAME", "_MARNM", "SEX", "RESN", "LIVING", "_LIVING", "LIVN", "FAMS", "FAMC", "ASSO", "_RELTOROOT",
+  ]);
+  for (const subtree of directSubtrees(record)) {
+    if (regenerated.has(subtree[0]?.tag ?? "")) continue;
+    if (subtree[0]?.tag === "OBJE" && currentPrimaryPhotoPath) {
+      addReconciledPreservedMediaSubtree(lines, subtree, currentPrimaryPhotoPath);
+    } else {
+      addPreservedSubtree(lines, subtree);
+    }
+  }
+}
+
+function addReconciledPreservedMediaSubtree(
+  lines: string[],
+  subtree: GedcomPreservedLine[],
+  currentPrimaryPhotoPath: string,
+): void {
+  const baseLevel = subtree[0]?.level ?? 1;
+  let skippedMarkerLevel: number | null = null;
+  for (const line of subtree) {
+    if (skippedMarkerLevel !== null) {
+      if (line.level > skippedMarkerLevel) continue;
+      skippedMarkerLevel = null;
+    }
+    if (line.level === baseLevel + 1 && line.tag === "_PRIM_CUTOUT") {
+      skippedMarkerLevel = line.level;
+      continue;
+    }
+    addPreservedLine(lines, line);
+  }
+  if (preservedMediaSubtreePath(subtree) === currentPrimaryPhotoPath) {
+    addLine(lines, baseLevel + 1, "_PRIM_CUTOUT", "Y");
+  }
+}
+
+function addPreservedFamilyExtensions(lines: string[], record?: GedcomPreservedRecord): void {
+  const regenerated = new Set(["HUSB", "WIFE", "PARTNER", "CHIL"]);
+  for (const subtree of directSubtrees(record)) {
+    if (regenerated.has(subtree[0]?.tag ?? "")) continue;
+    addPreservedSubtree(lines, subtree);
+  }
+}
+
+function addPreservedHeaderExtensions(lines: string[], record?: GedcomPreservedRecord): void {
+  const regenerated = new Set(["SOUR", "DEST", "DATE", "CHAR", "GEDC", "SUBM", "_ROOT", "_TRK_ROOT"]);
+  for (const subtree of directSubtrees(record)) {
+    if (regenerated.has(subtree[0]?.tag ?? "")) continue;
+    addPreservedSubtree(lines, subtree);
+  }
+}
+
+function addPreservedOriginalHeaderSource(lines: string[], record?: GedcomPreservedRecord): void {
+  const source = directSubtrees(record).find((subtree) => subtree[0]?.tag === "SOUR");
+  if (!source?.length) return;
+  addLine(lines, 1, "_TRK_ORIGINAL_SOUR", source[0].value);
+  for (const line of source.slice(1)) addPreservedLine(lines, line);
+}
+
+function addPreservedTopLevelRecords(
+  lines: string[],
+  records: GedcomPreservedRecord[],
+  usedPointers: Set<string>,
+): void {
+  const regenerated = new Set(["HEAD", "SUBM", "TRLR"]);
+  for (const record of records) {
+    if (regenerated.has(record.tag)) continue;
+    if (record.pointer && usedPointers.has(record.pointer)) continue;
+    for (const line of record.lines) addPreservedLine(lines, line);
+  }
+}
+
+function addPreservedSubtree(lines: string[], subtree: GedcomPreservedLine[]): void {
+  for (const line of subtree) addPreservedLine(lines, line);
+}
+
+function addPreservedLine(lines: string[], line: GedcomPreservedLine): void {
+  addLine(lines, line.level, line.tag, line.value, line.pointer ?? "");
+}
+
+function personProfile(node: FamilyTreeProjectionNode): Record<string, unknown> {
+  return asRecord(asRecord(node.metadata).personProfile);
+}
+
+function customFields(profile: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(profile.customFields);
+}
+
+function customFieldString(profile: Record<string, unknown>, key: string): string {
+  const value = customFields(profile)[key];
+  return typeof value === "string" ? value : "";
+}
+
+function addMappedPersonProfile(
+  lines: string[],
+  profile: Record<string, unknown>,
+  preservedRecord?: GedcomPreservedRecord,
+): void {
+  if (!Object.keys(profile).length) return;
+  const note = profileNoteForExport(stringValue(profile.notes));
+  if (note && !hasDirectTag(preservedRecord, "NOTE")) addMultiline(lines, 1, "NOTE", note);
+  if (stringValue(profile.religion) && !hasDirectTag(preservedRecord, "RELI")) addLine(lines, 1, "RELI", stringValue(profile.religion));
+  if (stringValue(profile.occupation) && !hasDirectTag(preservedRecord, "OCCU")) addLine(lines, 1, "OCCU", stringValue(profile.occupation));
+  if (stringValue(profile.socialStatus) && !hasDirectTag(preservedRecord, "CAST")) addLine(lines, 1, "CAST", stringValue(profile.socialStatus));
+
+  const nationality = customFieldString(profile, GEDCOM_NATIONALITY_CUSTOM_FIELD);
+  if (nationality && !hasDirectTag(preservedRecord, "NATI")) addLine(lines, 1, "NATI", nationality);
+  const education = parseGedcomMetadata<string[]>(customFieldString(profile, GEDCOM_EDUCATION_CUSTOM_FIELD), []);
+  if (!hasDirectTag(preservedRecord, "EDUC")) {
+    for (const item of education) if (item) addLine(lines, 1, "EDUC", item);
+  }
+  const rin = customFieldString(profile, GEDCOM_RIN_CUSTOM_FIELD);
+  const uid = customFieldString(profile, GEDCOM_UID_CUSTOM_FIELD);
+  if (rin && !hasDirectTag(preservedRecord, "RIN")) addLine(lines, 1, "RIN", rin);
+  if (uid && !hasDirectTag(preservedRecord, "_UID")) addLine(lines, 1, "_UID", uid);
+
+  addProfileMedia(lines, profile, preservedRecord);
+  addTrackerCustomFields(lines, profile);
+}
+
+function addProfileMedia(
+  lines: string[],
+  profile: Record<string, unknown>,
+  preservedRecord?: GedcomPreservedRecord,
+): void {
+  const scans = asRecord(customFields(profile).__trackerRoduPersonScans);
+  const collections = [
+    ...Object.values(scans),
+    profile.birthScans,
+    profile.marriageScans,
+    profile.deathScans,
+    profile.mentionScans,
+    profile.photos,
+  ];
+  const primaryPhotoId = stringValue(profile.primaryPhotoId);
+  const seenIds = new Set<string>();
+  const seenPaths = preservedPersonMediaPaths(preservedRecord);
+  for (const value of collections) {
+    if (!Array.isArray(value)) continue;
+    for (const raw of value) {
+      const scan = asRecord(raw);
+      const path = scanExportPath(scan);
+      const identity = stringValue(scan.id);
+      if (!path || seenPaths.has(path) || (identity && seenIds.has(identity))) continue;
+      seenPaths.add(path);
+      if (identity) seenIds.add(identity);
+      addLine(lines, 1, "OBJE");
+      addLine(lines, 2, "FILE", path);
+      const mimeType = stringValue(scan.mimeType);
+      if (mimeType) addLine(lines, 2, "FORM", mimeType.split("/").at(-1) ?? mimeType);
+      if (stringValue(scan.name)) addLine(lines, 2, "TITL", stringValue(scan.name));
+      if (Number.isFinite(Number(scan.size)) && Number(scan.size) > 0) addLine(lines, 2, "_FILESIZE", String(scan.size));
+      if (primaryPhotoId && stringValue(scan.id) === primaryPhotoId) addLine(lines, 2, "_PRIM_CUTOUT", "Y");
+    }
+  }
+}
+
+function currentPrimaryPersonPhotoPath(profile: Record<string, unknown>): string {
+  const photos = Array.isArray(profile.photos) ? profile.photos : [];
+  const primaryPhotoId = stringValue(profile.primaryPhotoId);
+  const primary = photos
+    .map(asRecord)
+    .find((scan) => stringValue(scan.id) === primaryPhotoId);
+  return primary ? scanExportPath(primary) : "";
+}
+
+function scanExportPath(scan: Record<string, unknown>): string {
+  return stringValue(scan.storage) === "google-drive"
+    ? stringValue(scan.webViewLink) || stringValue(scan.storagePath)
+    : stringValue(scan.sourceReference)
+      || stringValue(scan.webViewLink)
+      || stringValue(scan.storagePath);
+}
+
+function preservedPersonMediaPaths(record?: GedcomPreservedRecord): Set<string> {
+  const paths = new Set<string>();
+  for (const subtree of directSubtrees(record)) {
+    if (subtree[0]?.tag !== "OBJE") continue;
+    const baseLevel = subtree[0].level;
+    for (let index = 1; index < subtree.length; index += 1) {
+      const line = subtree[index];
+      if (line.level !== baseLevel + 1 || line.tag !== "FILE") continue;
+      const path = preservedMediaSubtreePath(subtree, index);
+      if (path) paths.add(path);
+    }
+  }
+  return paths;
+}
+
+function preservedMediaSubtreePath(subtree: GedcomPreservedLine[], fileIndex?: number): string {
+  const baseLevel = subtree[0]?.level ?? 1;
+  const index = fileIndex ?? subtree.findIndex((line) => line.level === baseLevel + 1 && line.tag === "FILE");
+  if (index < 0) return "";
+  const fileLine = subtree[index];
+  let path = fileLine.value;
+  for (let continuation = index + 1; continuation < subtree.length; continuation += 1) {
+    const next = subtree[continuation];
+    if (next.level !== fileLine.level + 1 || next.tag !== "CONC") break;
+    path += next.value;
+  }
+  return path;
+}
+
+function addTrackerCustomFields(lines: string[], profile: Record<string, unknown>): void {
+  const ignored = new Set([
+    "__trackerRoduPersonScans", "__trackerRoduPersonEvents", "__trackerRoduMaidenSurname",
+    GEDCOM_XREF_CUSTOM_FIELD, GEDCOM_RAW_RECORD_CUSTOM_FIELD, GEDCOM_RIN_CUSTOM_FIELD,
+    GEDCOM_UID_CUSTOM_FIELD, GEDCOM_VITAL_STATUS_CUSTOM_FIELD, GEDCOM_NATIONALITY_CUSTOM_FIELD,
+    GEDCOM_EDUCATION_CUSTOM_FIELD, GEDCOM_CITATIONS_CUSTOM_FIELD, GEDCOM_MEDIA_CUSTOM_FIELD,
+  ]);
+  for (const [key, value] of Object.entries(customFields(profile))) {
+    if (ignored.has(key) || value === "" || value === null || value === undefined) continue;
+    addLine(lines, 1, "EVEN");
+    addLine(lines, 2, "TYPE", `Tracker field: ${key}`);
+    addMultiline(lines, 2, "NOTE", typeof value === "string" ? value : JSON.stringify(value));
+    addLine(lines, 2, "_TRK_FIELD_KEY", key);
+  }
+}
+
+function profileNoteForExport(value: string): string {
+  return value
+    .split(/\r?\n/)
+    .filter((line) => !/^Імпортовано з GEDCOM\. Початковий ідентифікатор:/u.test(line.trim()))
+    .join("\n")
+    .trim();
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function stringMetadata(metadata: Record<string, unknown> | undefined, key: string): string {
+  return stringValue(metadata?.[key]);
+}
+
+function formatGedcomCoordinate(value: number, positive: string, negative: string): string {
+  return `${value < 0 ? negative : positive}${Math.abs(value).toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}`;
+}
+
+function mergeProfileEvents(
+  projectId: string,
+  personId: string,
+  canonical: FamilyTreePersonTimelineEvent[],
+  nodeMetadata: Record<string, unknown> | undefined,
+): FamilyTreePersonTimelineEvent[] {
+  const profile = asRecord(asRecord(nodeMetadata).personProfile);
+  const saved = customFields(profile).__trackerRoduPersonEvents;
+  if (!Array.isArray(saved)) return canonical;
+  const result = [...canonical];
+  const seen = new Set(result.map(eventIdentity));
+  for (const [index, value] of saved.entries()) {
+    const event = asRecord(value);
+    const type = timelineEventType(stringValue(event.type), stringValue(event.title));
+    const mapped: FamilyTreePersonTimelineEvent = {
+      id: stringValue(event.id) || `profile-event-${personId}-${index}`,
+      projectId,
+      personId,
+      eventType: type,
+      title: stringValue(event.title),
+      eventDate: stringValue(event.date),
+      dateFrom: "",
+      dateTo: "",
+      dateText: stringValue(event.date),
+      placeName: stringValue(event.placeName),
+      geo: asRecord(event.geo) as unknown as FamilyTreePersonTimelineEvent["geo"],
+      eventRole: "subject",
+      evidenceStatus: "unknown",
+      confidence: 0,
+      sourceDocumentId: null,
+      sourceFindingId: null,
+      notes: stringValue(event.notes),
+      metadata: { source: "persons.custom_fields.__trackerRoduPersonEvents" },
+      createdAt: "",
+      updatedAt: "",
+    };
+    const identity = eventIdentity(mapped);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    result.push(mapped);
+  }
+  return result;
+}
+
+function timelineEventType(type: string, title: string): FamilyTreePersonTimelineEvent["eventType"] {
+  const supported = new Set<FamilyTreePersonTimelineEvent["eventType"]>([
+    "birth", "baptism", "christening", "marriage", "divorce", "residence", "census", "revision_list",
+    "confession_list", "household_register", "immigration", "emigration", "military", "occupation",
+    "education", "nationality", "death", "burial", "cremation", "probate", "mention", "other",
+  ]);
+  if (supported.has(type as FamilyTreePersonTimelineEvent["eventType"])) return type as FamilyTreePersonTimelineEvent["eventType"];
+  const normalizedTitle = title.toLocaleLowerCase("uk");
+  if (normalizedTitle.includes("перепис")) return "census";
+  if (normalizedTitle.includes("освіт")) return "other";
+  if (normalizedTitle.includes("профес")) return "occupation";
+  return "other";
+}
+
+function eventIdentity(event: FamilyTreePersonTimelineEvent): string {
+  return [event.eventType, event.eventDate || event.dateText, event.placeName, event.notes].join("|");
 }
 
 function buildGedcomFamilies(
@@ -290,32 +1210,51 @@ function buildGedcomFamilies(
 ): GedcomFamily[] {
   const families = new Map<string, GedcomFamily>();
   const partnerFamilyByPair = new Map<string, string>();
+  const partnerFamilyByGroup = new Map<string, string>();
 
   for (const edge of projection.partnerEdges) {
     const pair = sortedPairKey(edge.fromPersonId, edge.toPersonId);
-    const key = `partner:${pair}`;
+    const key = edge.familyGroupId ? `group:${edge.familyGroupId}` : `partner:${pair}`;
     partnerFamilyByPair.set(pair, key);
+    if (edge.familyGroupId) partnerFamilyByGroup.set(edge.familyGroupId, key);
     const family = getFamily(families, key);
     family.partnerIds = sortPartnerIds([edge.fromPersonId, edge.toPersonId], projection);
+    family.familyGroupId = edge.familyGroupId ?? null;
+    family.relationshipType = String(edge.relationshipType);
+    family.evidenceStatus = edge.evidenceStatus;
+    family.confidence = edge.confidence;
+    family.marriageDate = stringMetadata(edge.metadata, "startDate");
+    family.marriagePlace = stringMetadata(edge.metadata, "startPlace");
+    family.endDate = stringMetadata(edge.metadata, "endDate");
+    family.endPlace = stringMetadata(edge.metadata, "endPlace");
+    family.notes = stringMetadata(edge.metadata, "notes");
     family.sourceEdgeIds.push(edge.id);
   }
 
-  const parentEdgesByChild = new Map<string, FamilyTreeProjectionEdge[]>();
+  const parentEdgesBySet = new Map<string, FamilyTreeProjectionEdge[]>();
   for (const edge of projection.parentChildEdges) {
-    const edges = parentEdgesByChild.get(edge.toPersonId) ?? [];
+    const setKey = parentFamilySetKey(edge);
+    const edges = parentEdgesBySet.get(setKey) ?? [];
     edges.push(edge);
-    parentEdgesByChild.set(edge.toPersonId, edges);
+    parentEdgesBySet.set(setKey, edges);
   }
 
-  for (const [childId, edges] of parentEdgesByChild.entries()) {
+  for (const edges of parentEdgesBySet.values()) {
+    const childId = edges[0]?.toPersonId;
+    if (!childId) continue;
     const parentIds = unique(edges.map((edge) => edge.fromPersonId));
     if (!parentIds.length) continue;
     const pair = parentIds.length === 2 ? sortedPairKey(parentIds[0], parentIds[1]) : "";
-    const key = pair && partnerFamilyByPair.has(pair)
-      ? partnerFamilyByPair.get(pair)!
-      : `parents:${parentIds.slice().sort().join("+")}:${edges[0].parentSetType ?? "unknown"}`;
+    const groupKey = edges[0].familyGroupId ? partnerFamilyByGroup.get(edges[0].familyGroupId) : undefined;
+    const key = groupKey
+      ?? (pair && partnerFamilyByPair.has(pair)
+        ? partnerFamilyByPair.get(pair)!
+        : `parents:${edges[0].parentSetType ?? edges[0].relationshipType ?? "unknown"}:${parentIds.slice().sort().join("+")}`);
     const family = getFamily(families, key);
     family.partnerIds = sortPartnerIds(unique([...family.partnerIds, ...parentIds]), projection);
+    family.familyGroupId = family.familyGroupId ?? edges[0].familyGroupId ?? null;
+    if (family.evidenceStatus === "unknown") family.evidenceStatus = edges[0].evidenceStatus;
+    if (!family.confidence) family.confidence = edges[0].confidence;
     family.childIds = unique([...family.childIds, childId]);
     family.childPedigree[childId] = relationTypeToPedigree(String(edges[0].relationshipType));
     family.sourceEdgeIds.push(...edges.map((edge) => edge.id));
@@ -344,6 +1283,13 @@ function getFamily(families: Map<string, GedcomFamily>, key: string): GedcomFami
     marriageDate: "",
     marriagePlace: "",
     sourceEdgeIds: [],
+    familyGroupId: null,
+    relationshipType: "unknown",
+    endDate: "",
+    endPlace: "",
+    notes: "",
+    evidenceStatus: "unknown",
+    confidence: 0,
   };
   families.set(key, created);
   return created;
@@ -419,8 +1365,13 @@ function addLine(lines: string[], level: number, tag: string, value = "", pointe
   const parts = [String(level)];
   if (pointer) parts.push(pointer);
   parts.push(tag);
-  if (value) parts.push(sanitizeGedcomValue(value));
-  lines.push(parts.join(" "));
+  const prefix = parts.join(" ");
+  const sanitized = value ? sanitizeGedcomValue(value) : "";
+  const chunks = splitGedcomValue(sanitized, Math.max(40, 240 - prefix.length - 1));
+  lines.push(chunks[0] ? `${prefix} ${chunks[0]}` : prefix);
+  for (const continuation of chunks.slice(1)) {
+    lines.push(`${level + 1} CONC ${continuation}`);
+  }
 }
 
 function addMultiline(lines: string[], level: number, tag: string, value: string): void {
@@ -432,7 +1383,29 @@ function addMultiline(lines: string[], level: number, tag: string, value: string
 }
 
 function sanitizeGedcomValue(value: string): string {
-  return value.replace(/\r/g, "").replace(/[^\S\n]+/g, " ").trim();
+  const normalized = value.replace(/\r/g, "").replace(/[^\S\n]+/g, " ").trim();
+  if (validGedcomXref(normalized)) return normalized;
+  return normalized.replace(/(?<!@)@(?!@)/g, "@@");
+}
+
+function splitGedcomValue(value: string, maxBytes: number): string[] {
+  if (!value) return [""];
+  const chunks: string[] = [];
+  const encoder = new TextEncoder();
+  let chunk = "";
+  let chunkBytes = 0;
+  for (const codePoint of value.replace(/\n/g, " ")) {
+    const bytes = encoder.encode(codePoint).length;
+    if (chunk && chunkBytes + bytes > maxBytes) {
+      chunks.push(chunk);
+      chunk = "";
+      chunkBytes = 0;
+    }
+    chunk += codePoint;
+    chunkBytes += bytes;
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.length ? chunks : [""];
 }
 
 function formatGedcomName(givenName: string, patronymic: string, surname: string, fallback: string): string {
@@ -463,8 +1436,8 @@ function gedcomNameType(nameType: string): string {
 
 function genderToGedcomSex(gender: Person["gender"]): "M" | "F" | "U" | "" {
   const value = String(gender).toLocaleLowerCase("uk");
-  if (value.includes("чолов") || value.includes("male") || value.includes("С‡РѕР»".toLocaleLowerCase("uk"))) return "M";
   if (value.includes("жін") || value.includes("female") || value.includes("Р¶С–РЅ".toLocaleLowerCase("uk"))) return "F";
+  if (value.includes("чолов") || value.includes("male") || value.includes("С‡РѕР»".toLocaleLowerCase("uk"))) return "M";
   if (value.includes("невідом") || value.includes("unknown")) return "U";
   return "";
 }
@@ -485,15 +1458,30 @@ function eventTypeToGedcomTag(eventType: string): string {
       return "RESI";
     case "occupation":
       return "OCCU";
-    case "military":
+    case "education":
+      return "EDUC";
+    case "nationality":
+      return "NATI";
     case "census":
+      return "CENS";
+    case "immigration":
+      return "IMMI";
+    case "emigration":
+      return "EMIG";
+    case "cremation":
+      return "CREM";
+    case "probate":
+      return "PROB";
+    case "military":
     case "revision_list":
     case "confession_list":
+    case "household_register":
     case "mention":
     case "other":
       return "EVEN";
     case "marriage":
     case "divorce":
+      return "EVEN";
     default:
       return "";
   }
@@ -513,6 +1501,43 @@ function relationTypeToPedigree(relationshipType: string): "birth" | "adopted" |
     default:
       return "other";
   }
+}
+
+function parentSetTypeFromRelationship(relationshipType: string): FamilyTreeProjectionEdge["parentSetType"] {
+  switch (relationshipType) {
+    case "biological":
+    case "birth_parent":
+      return "biological";
+    case "genetic_father":
+    case "genetic_mother":
+      return "genetic";
+    case "adoptive":
+      return "adoptive";
+    case "foster":
+      return "foster";
+    case "step":
+      return "step";
+    case "guardian":
+      return "guardian";
+    case "social_parent":
+      return "social";
+    case "legal_parent":
+      return "legal";
+    case "presumed":
+    case "unknown":
+      return "unknown";
+    case "other":
+      return "other";
+    default:
+      return undefined;
+  }
+}
+
+function parentFamilySetKey(edge: FamilyTreeProjectionEdge): string {
+  return [
+    edge.toPersonId,
+    edge.parentSetId || edge.parentSetType || edge.relationshipType || "unknown",
+  ].join(":");
 }
 
 function sortPartnerIds(personIds: string[], projection: FamilyTreeProjection): string[] {

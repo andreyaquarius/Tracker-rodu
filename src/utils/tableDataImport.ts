@@ -456,6 +456,8 @@ function buildRecordFromRow({
     record.marriageScans = [];
     record.deathScans = [];
     record.mentionScans = [];
+    record.photos = [];
+    record.primaryPhotoId = "";
   }
 
   const missingRequired = fields

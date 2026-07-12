@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { CustomSectionDefinition } from "../types";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
 import { Sidebar, type PageKey } from "./Sidebar";
@@ -7,6 +7,13 @@ import { HelpCenter } from "./HelpCenter";
 import { GoogleDriveConnectionButton } from "./GoogleDriveConnectionButton";
 import { TopBar } from "./TopBar";
 import { WorkspaceWindowsProvider } from "./WorkspaceWindows";
+import {
+  browserLocalStorage,
+  DESKTOP_SIDEBAR_WIDTH,
+  readSidebarCollapsed,
+  SIDEBAR_LAYOUT_CHANGE_EVENT,
+  writeSidebarCollapsed,
+} from "../utils/sidebarPreference";
 
 interface LayoutProps {
   page: PageKey | null;
@@ -14,6 +21,7 @@ interface LayoutProps {
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
   showGeneHelp: boolean;
+  showFamilyTree: boolean;
   customSections: CustomSectionDefinition[];
   account: SupabaseAccount | null;
   workspace: SupabaseWorkspace | null;
@@ -32,18 +40,43 @@ interface LayoutProps {
 
 export function Layout(props: LayoutProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    readSidebarCollapsed(browserLocalStorage()),
+  );
+
+  useEffect(() => {
+    writeSidebarCollapsed(browserLocalStorage(), sidebarCollapsed);
+
+    document.documentElement.style.setProperty(
+      "--app-sidebar-width",
+      sidebarCollapsed ? "0px" : `${DESKTOP_SIDEBAR_WIDTH}px`,
+    );
+    document.body.classList.toggle("sidebar-desktop-collapsed", sidebarCollapsed);
+    window.dispatchEvent(new Event(SIDEBAR_LAYOUT_CHANGE_EVENT));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("sidebar-desktop-collapsed");
+      document.documentElement.style.removeProperty("--app-sidebar-width");
+    };
+  }, []);
+
   return (
     <WorkspaceWindowsProvider scopeKey={props.workspace?.projectId ?? "no-project"}>
-      <div className="app-shell">
+      <div className={`app-shell ${sidebarCollapsed ? "app-shell-sidebar-collapsed" : ""}`}>
         <Sidebar
           page={props.page}
           onNavigate={props.onNavigate}
           onOpenProjects={props.onOpenProjects}
           onOpenGeneHelp={props.onOpenGeneHelp}
           showGeneHelp={props.showGeneHelp}
+          showFamilyTree={props.showFamilyTree}
           customSections={props.customSections}
           open={menuOpen}
           onClose={() => setMenuOpen(false)}
+          desktopCollapsed={sidebarCollapsed}
+          onToggleDesktopCollapsed={() => setSidebarCollapsed((current) => !current)}
         />
         <div className="main-shell">
           <TopBar
@@ -51,6 +84,8 @@ export function Layout(props: LayoutProps) {
             workspace={props.workspace}
             workspaces={props.workspaces}
             onMenu={() => setMenuOpen(true)}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
             onSignInAccount={props.onSignInAccount}
             onSignOutAccount={props.onSignOutAccount}
             onSwitchWorkspace={props.onSwitchWorkspace}
@@ -68,7 +103,7 @@ export function Layout(props: LayoutProps) {
               </>
             )}
           />
-          <main className="page">{props.children}</main>
+          <main className={props.page === "familyTree" ? "page family-tree-page" : "page"}>{props.children}</main>
         </div>
       </div>
     </WorkspaceWindowsProvider>

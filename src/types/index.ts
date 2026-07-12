@@ -19,6 +19,11 @@ export interface ScanAttachment {
   driveModifiedTime?: string;
   driveRevisionId?: string;
   deleteOnRemove?: boolean;
+  /** Imported GEDCOM can reference a local file that the browser cannot read. */
+  availability?: "available" | "missing-local";
+  sourceKind?: "gedcom";
+  sourceReference?: string;
+  statusMessage?: string;
 }
 
 export type GeoSource = "search" | "map_click" | "import" | "unknown";
@@ -52,11 +57,25 @@ export interface DocumentFragmentSelection {
 export type PersonEventType =
   | "birth"
   | "baptism"
+  | "christening"
   | "marriage"
+  | "divorce"
   | "residence"
+  | "census"
+  | "revision_list"
+  | "confession_list"
+  | "household_register"
+  | "immigration"
+  | "emigration"
   | "military"
+  | "occupation"
+  | "education"
+  | "nationality"
   | "death"
   | "burial"
+  | "cremation"
+  | "probate"
+  | "mention"
   | "other";
 
 export interface PersonEvent {
@@ -66,6 +85,14 @@ export interface PersonEvent {
   title?: string;
   date?: string | null;
   placeName?: string | null;
+  /** Original fact value, for example an occupation, military unit or book number. */
+  value?: string | null;
+  /** Age written in the source at the time of the event. */
+  age?: string | null;
+  /** Cause recorded for death or another event. */
+  cause?: string | null;
+  /** Detailed address when it is more precise than the event place. */
+  address?: string | null;
   geo?: GeoPoint | null;
   notes?: string | null;
 }
@@ -346,6 +373,7 @@ export type PersonPrivacyStatus = "private" | "project" | "public" | "confidenti
 export interface Person extends BaseEntity {
   researchId: EntityId;
   surname: string;
+  maidenSurname: string;
   givenName: string;
   patronymic: string;
   fullName: string;
@@ -374,6 +402,9 @@ export interface Person extends BaseEntity {
   marriageScans: ScanAttachment[];
   deathScans: ScanAttachment[];
   mentionScans: ScanAttachment[];
+  /** Photo metadata only; image bytes remain in Google Drive or at an external URL. */
+  photos?: ScanAttachment[];
+  primaryPhotoId?: EntityId;
   events: PersonEvent[];
   customFields: CustomFieldValues;
 }
@@ -430,6 +461,17 @@ export interface PersonRelation extends BaseEntity {
   status: PersonRelationStatus;
   evidenceText: string;
   notes: string;
+  /** Import-only structured metadata; canonical graph creation persists it. */
+  gedcomMetadata?: {
+    familyXref: string;
+    startDate?: string;
+    startPlace?: string;
+    endDate?: string;
+    endPlace?: string;
+    eventType?: string;
+    pedigree?: string | null;
+    rawNotes?: string;
+  };
 }
 
 export interface AppSettings {

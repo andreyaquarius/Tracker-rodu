@@ -4,6 +4,7 @@ export type HelpGuideKey =
   | "workspace-intro"
   | "dashboard"
   | "map"
+  | "familyTree"
   | "researches"
   | "documents"
   | "archiveRequests"
@@ -47,6 +48,7 @@ export const fullHelpTourKeys: HelpGuideKey[] = [
   "archiveRequests",
   "yearMatrix",
   "map",
+  "familyTree",
   "backup",
   "settings",
   "subscription",
@@ -107,6 +109,26 @@ export const helpGuides: Record<HelpGuideKey, HelpGuide> = {
       {
         title: "Відкривайте записи",
         text: "Натисніть маркер або запис у списку праворуч, щоб перейти до пов'язаного запису.",
+      },
+    ],
+  },
+  familyTree: {
+    key: "familyTree",
+    section: "Родове дерево",
+    title: "Родове дерево",
+    intro: "Розділ показує родинні зв'язки між особами на основі підготовленої графової моделі.",
+    steps: [
+      {
+        title: "Оберіть фокусну особу",
+        text: "Почніть з людини, навколо якої потрібно побачити родину, предків або нащадків.",
+      },
+      {
+        title: "Перемикайте режим дерева",
+        text: "Режими родини, предків і нащадків показують різні зрізи тих самих зв'язків без дублювання профілю особи.",
+      },
+      {
+        title: "Перевіряйте попередження",
+        text: "Панель проблем підсвічує повторних предків, сумнівні зв'язки та інші місця, які варто перевірити за джерелами.",
       },
     ],
   },
@@ -315,5 +337,5 @@ export function helpGuideKeyForPage(page: PageKey | null): HelpGuideKey {
 }
 
 export function helpGuideForPage(page: PageKey | null): HelpGuide {
-  return helpGuides[helpGuideKeyForPage(page)];
+  return helpGuides[helpGuideKeyForPage(page)] ?? helpGuides["workspace-intro"];
 }

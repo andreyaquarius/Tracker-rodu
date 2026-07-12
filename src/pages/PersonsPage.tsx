@@ -4,6 +4,7 @@ import type {
   AppDatabase,
   AppEntity,
   ArchiveRequest,
+  DocumentRecord,
   CustomFieldDefinition,
   Finding,
   Hypothesis,
@@ -21,15 +22,31 @@ import { ScanAttachmentsView } from "../components/ScanAttachments";
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import type { PageKey } from "../components/Sidebar";
-import { deleteScanFile } from "../services/scanStorage";
+import { deleteScanFile, getScanPreviewSource } from "../services/scanStorage";
 import { CustomFieldsView } from "../components/CustomFields";
 import { normalizeCustomFieldValues } from "../utils/customFields";
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
 import { exportPersonsToExcel } from "../utils/excelExport";
 import { TableDataImportButton } from "../components/TableDataImportButton";
+import { GedcomImportButton } from "../components/GedcomImportButton";
 import { PaginationControls } from "../components/PaginationControls";
 import { usePagination } from "../hooks/usePagination";
 import { useWorkspaceWindows } from "../components/WorkspaceWindows";
+import { createFamilyTreeFromLegacyImport } from "../services/familyTreeMutationService";
+import type {
+  GedcomImportReconciliationPayload,
+  GedcomImportReconciliationResult,
+} from "../utils/gedcomImportReconciliation.ts";
+import {
+  PERSON_RELATION_TYPES,
+  normalizePersonRelation,
+} from "../utils/personRelation";
+import {
+  isPhotoReferenceAvailable,
+  primaryPersonPhoto,
+} from "../utils/personPhotos.ts";
+import { PersonEventsView } from "../components/PersonEventsView.tsx";
+import { personEducation, personNationality } from "../utils/personStandardFields.ts";
 
 type PersonTab =
   | "overview"
@@ -63,6 +80,7 @@ export function PersonsPage({
   initialOpenPersonId = "",
   onSavePerson,
   onImportRecords,
+  onImportGedcom,
   onDeletePerson,
   onSaveRelation,
   onDeleteRelation,
@@ -71,9 +89,12 @@ export function PersonsPage({
   readOnly = false,
   canCreate = true,
   researchRequired = false,
+  canUseGedcom = false,
+  projectId,
   projectName = "Трекер Роду",
 }: {
   db: AppDatabase;
+  projectId?: string;
   persons: Person[];
   relations: PersonRelation[];
   researches: Research[];
@@ -90,8 +111,9 @@ export function PersonsPage({
   initialOpenPersonId?: string;
   onSavePerson: (person: Person) => void;
   onImportRecords: (collection: "persons", records: AppEntity[]) => Promise<void>;
+  onImportGedcom?: (input: GedcomImportReconciliationPayload) => Promise<GedcomImportReconciliationResult | void>;
   onDeletePerson: (id: string) => void;
-  onSaveRelation: (relation: PersonRelation) => void;
+  onSaveRelation: (relation: PersonRelation) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onDeleteRelation: (id: string) => void;
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
@@ -99,6 +121,7 @@ export function PersonsPage({
   canCreate?: boolean;
   projectName?: string;
   researchRequired?: boolean;
+  canUseGedcom?: boolean;
 }) {
   const canCreateRecords = !readOnly && canCreate;
   const [search, setSearch] = useState(initialSearch);
@@ -221,36 +244,62 @@ export function PersonsPage({
     });
   };
 
+  const searchablePersons = useMemo(() => persons.map((person) => ({
+    person,
+    searchText: normalize([
+      person.fullName,
+      person.surname,
+      person.givenName,
+      person.patronymic,
+      person.nameVariants,
+      person.surnameVariants,
+      person.birthPlace,
+      person.marriagePlace,
+      person.deathPlace,
+      person.residencePlaces,
+      personNationality(person),
+      personEducation(person).join(" "),
+      ...(person.events ?? []).flatMap((event) => [
+        event.title,
+        event.value,
+        event.date,
+        event.placeName,
+        event.age,
+        event.cause,
+        event.address,
+        event.notes,
+      ]),
+      person.notes,
+    ].join(" ")),
+    places: normalize(personPlaces(person)),
+    surnames: normalize(`${person.surname} ${person.surnameVariants}`),
+  })), [persons]);
   const filtered = useMemo(() => {
+    if (
+      !search &&
+      !researchFilter &&
+      !statusFilter &&
+      !genderFilter &&
+      !placeFilter &&
+      !surnameFilter
+    ) {
+      return persons;
+    }
     const query = normalize(search);
     const place = normalize(placeFilter);
     const surname = normalize(surnameFilter);
-    return persons.filter((person) => {
-      const searchText = normalize([
-        person.fullName,
-        person.surname,
-        person.givenName,
-        person.patronymic,
-        person.nameVariants,
-        person.surnameVariants,
-        person.birthPlace,
-        person.marriagePlace,
-        person.deathPlace,
-        person.residencePlaces,
-        person.notes,
-      ].join(" "));
-      const places = normalize(personPlaces(person));
-      const surnames = normalize(`${person.surname} ${person.surnameVariants}`);
-      return (
+    return searchablePersons.filter(({ person, searchText, places, surnames }) => (
         (!query || searchText.includes(query)) &&
         (!researchFilter || person.researchId === researchFilter) &&
         (!statusFilter || person.status === statusFilter) &&
         (!genderFilter || person.gender === genderFilter) &&
         (!place || places.includes(place)) &&
         (!surname || surnames.includes(surname))
-      );
-    });
-  }, [genderFilter, persons, placeFilter, researchFilter, search, statusFilter, surnameFilter]);
+      )).map(({ person }) => person);
+  }, [genderFilter, persons, placeFilter, researchFilter, search, searchablePersons, statusFilter, surnameFilter]);
+  const findingCounts = useMemo(() => linkedCountByPerson(findings), [findings]);
+  const taskCounts = useMemo(() => linkedCountByPerson(tasks), [tasks]);
+  const hypothesisCounts = useMemo(() => linkedCountByPerson(hypotheses), [hypotheses]);
   const paginationResetKey = [
     search,
     researchFilter,
@@ -269,6 +318,7 @@ export function PersonsPage({
         ...(person.marriageScans ?? []),
         ...(person.deathScans ?? []),
         ...(person.mentionScans ?? []),
+        ...(person.photos ?? []),
         ...customAttachmentScans(person.customFields, customFieldDefinitions),
       ];
       await Promise.allSettled(scans.map((scan) => deleteScanFile(scan)));
@@ -314,6 +364,24 @@ export function PersonsPage({
               fields={[]}
               customFieldDefinitions={customFieldDefinitions}
               onImport={(records) => onImportRecords("persons", records)}
+            />
+          ) : null}
+          {canCreateRecords && canUseGedcom ? (
+            <GedcomImportButton
+              defaultResearchId={researchFilter || (researches.length === 1 ? researches[0].id : "")}
+              researchRequired={researchRequired}
+              onImportPersons={(records) => onImportRecords("persons", records)}
+              onImportGedcom={onImportGedcom}
+              onSaveRelation={onSaveRelation}
+              onCreateFamilyTree={projectId ? async ({ fileName, people, relations, rootPersonId }) => {
+                await createFamilyTreeFromLegacyImport({
+                  projectId,
+                  title: `GEDCOM: ${fileName}`,
+                  persons: people,
+                  relations,
+                  rootPersonId,
+                });
+              } : undefined}
             />
           ) : null}
           {canCreateRecords ? (
@@ -397,9 +465,9 @@ export function PersonsPage({
                       <td data-label="Роки життя">{lifeYears(person)}</td>
                       <td data-label="Основні місця">{personPlaces(person) || "—"}</td>
                       <td data-label="Статус"><span className="status-pill">{person.status}</span></td>
-                      <td data-label="Знахідки">{linkedCount(findings, person.id)}</td>
-                      <td data-label="Завдання">{linkedCount(tasks, person.id)}</td>
-                      <td data-label="Гіпотези">{linkedCount(hypotheses, person.id)}</td>
+                      <td data-label="Знахідки">{findingCounts.get(person.id) ?? 0}</td>
+                      <td data-label="Завдання">{taskCounts.get(person.id) ?? 0}</td>
+                      <td data-label="Гіпотези">{hypothesisCounts.get(person.id) ?? 0}</td>
                       <td data-label="Дії" className="row-actions" onClick={(event) => event.stopPropagation()}>
                         <button className="icon-button" title="Переглянути" onClick={() => openViewWindow(person)}>◉</button>
                         {!readOnly ? (
@@ -465,7 +533,7 @@ function customAttachmentScans(
     .flatMap(([, value]) => value as ScanAttachment[]);
 }
 
-function PersonCardModal({
+export function PersonCardModal({
   db,
   person,
   persons,
@@ -500,7 +568,7 @@ function PersonCardModal({
   archiveRequests: ArchiveRequest[];
   onClose: () => void;
   onEdit?: () => void;
-  onSaveRelation: (relation: PersonRelation) => void;
+  onSaveRelation: (relation: PersonRelation) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onDeleteRelation: (id: string) => void;
   onOpenRelated: (page: PageKey, entityId: string) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
@@ -516,8 +584,9 @@ function PersonCardModal({
   const linkedTasks = tasks.filter((item) => item.personIds?.includes(person.id));
   const linkedHypotheses = hypotheses.filter((item) => item.personIds?.includes(person.id));
   const linkedArchiveRequests = archiveRequests.filter((item) => item.personIds?.includes(person.id));
-  const linkedRelations = relations.filter(
-    (item) => item.personId === person.id || item.relatedPersonId === person.id,
+  const linkedRelationItems = useMemo(
+    () => personRelationDisplayItems(relations, person.id),
+    [person.id, relations],
   );
   const tabs: Array<[PersonTab, string, number?]> = [
     ["overview", "Огляд"],
@@ -525,7 +594,7 @@ function PersonCardModal({
     ["tasks", "Завдання", linkedTasks.length],
     ["hypotheses", "Гіпотези", linkedHypotheses.length],
     ["archiveRequests", "Запити в архів", linkedArchiveRequests.length],
-    ["relations", "Зв’язки", linkedRelations.length],
+    ["relations", "Зв’язки", linkedRelationItems.length],
     ["notes", "Нотатки"],
   ];
 
@@ -607,9 +676,9 @@ function PersonCardModal({
                   <button className="button button-secondary" onClick={() => setRelationFormOpen(true)}>+ Додати зв’язок</button>
                 ) : null}
               </div>
-              {linkedRelations.length ? (
+              {linkedRelationItems.length ? (
                 <div className="relation-list">
-                  {linkedRelations.map((relation) => {
+                  {linkedRelationItems.map(({ relation, duplicateIds }) => {
                     const otherId = relation.personId === person.id ? relation.relatedPersonId : relation.personId;
                     const other = persons.find((item) => item.id === otherId);
                     const displayedRelationType = relationTypeForPerson(relation, person.id, other);
@@ -635,7 +704,9 @@ function PersonCardModal({
                             className="icon-button danger"
                             title="Видалити зв’язок"
                             onClick={() => {
-                              if (window.confirm("Видалити цей зв’язок?")) onDeleteRelation(relation.id);
+                              if (window.confirm("Видалити цей зв’язок?")) {
+                                [relation.id, ...duplicateIds].forEach(onDeleteRelation);
+                              }
                             }}
                           >×</button>
                         ) : null}
@@ -692,6 +763,7 @@ function PersonOverview({
     ["Жива особа", person.isLiving ? "так" : "ні"],
     ["Приватність у дереві", personPrivacyStatusLabel(person.privacyStatus)],
     ["Прізвище", person.surname],
+    ["Дівоче прізвище", person.maidenSurname],
     ["Ім’я", person.givenName],
     ["По батькові", person.patronymic],
     ["Повне ім’я", person.fullName],
@@ -703,24 +775,40 @@ function PersonOverview({
     ["Місце народження", person.birthPlace],
     ["Дата шлюбу", displayDate(person.marriageDate)],
     ["Місце шлюбу", person.marriagePlace],
-    ["Дата смерті", displayDate(person.deathDate)],
-    ["Рік смерті від", person.deathYearFrom],
-    ["Рік смерті до", person.deathYearTo],
-    ["Місце смерті", person.deathPlace],
+    ...(!person.isLiving ? [
+      ["Дата смерті", displayDate(person.deathDate)],
+      ["Рік смерті від", person.deathYearFrom],
+      ["Рік смерті до", person.deathYearTo],
+      ["Місце смерті", person.deathPlace],
+    ] : []),
     ["Місця проживання", person.residencePlaces],
     ["Соціальний статус", person.socialStatus],
     ["Віросповідання", person.religion],
     ["Професія або заняття", person.occupation],
+    ["Національність", personNationality(person)],
+    ["Освіта", personEducation(person).join("; ")],
   ];
   const findingsWithFiles = findings.filter((finding) => finding.scans?.length);
+  const photos = person.photos ?? [];
   return (
     <div className="details-grid">
+      {photos.length ? (
+        <div className="detail-item detail-wide person-photo-section">
+          <span>Фотографії</span>
+          <PersonPrimaryPhoto person={person} />
+          <ScanAttachmentsView scans={photos} />
+        </div>
+      ) : null}
       {values.map(([label, value]) => (
         <div className="detail-item" key={label}>
           <span>{label}</span>
           <div className="detail-text">{value || "—"}</div>
         </div>
       ))}
+      <div className="detail-item detail-wide">
+        <span>Інші життєві події та факти</span>
+        <PersonEventsView events={person.events ?? []} />
+      </div>
       <div className="detail-item detail-wide">
         <span>Нотатки</span>
         <div className="detail-text">{person.notes || "—"}</div>
@@ -759,6 +847,66 @@ function PersonOverview({
         definitions={customFieldDefinitions}
         values={normalizeCustomFieldValues(person.customFields)}
       />
+    </div>
+  );
+}
+
+function PersonPrimaryPhoto({ person }: { person: Person }) {
+  const photo = primaryPersonPhoto(person.photos, person.primaryPhotoId);
+  const [source, setSource] = useState<{ url: string; revoke: boolean } | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    let currentUrl = "";
+    let revoke = false;
+    setSource(null);
+    setError("");
+    if (!photo || !isPhotoReferenceAvailable(photo)) {
+      if (photo?.statusMessage) setError(photo.statusMessage);
+      return () => undefined;
+    }
+    void getScanPreviewSource(photo)
+      .then((preview) => {
+        if (!active) {
+          if (preview.revokeOnClose) URL.revokeObjectURL(preview.url);
+          return;
+        }
+        if (preview.kind !== "image") {
+          setError("Головне фото не є підтримуваним зображенням.");
+          if (preview.revokeOnClose) URL.revokeObjectURL(preview.url);
+          return;
+        }
+        currentUrl = preview.url;
+        revoke = preview.revokeOnClose;
+        setSource({ url: preview.url, revoke: preview.revokeOnClose });
+      })
+      .catch((loadError) => {
+        if (active) setError(loadError instanceof Error ? loadError.message : "Не вдалося відкрити головне фото.");
+      });
+    return () => {
+      active = false;
+      if (revoke && currentUrl) URL.revokeObjectURL(currentUrl);
+    };
+  }, [photo]);
+
+  return (
+    <div className="person-primary-photo">
+      {source ? (
+        <img
+          src={source.url}
+          alt={`Головне фото: ${personDisplayName(person)}`}
+          onError={() => {
+            if (source.revoke) URL.revokeObjectURL(source.url);
+            setSource(null);
+            setError(
+              "Фото більше недоступне за початковим посиланням. Відкрийте редагування особи та завантажте файл або збережіть доступну копію у Google Drive.",
+            );
+          }}
+        />
+      ) : (
+        <div className="person-primary-photo-placeholder">{error || "Завантаження фото…"}</div>
+      )}
     </div>
   );
 }
@@ -867,42 +1015,7 @@ function LinkedRecords({
 }
 
 const personRelationTypeOptions: PersonRelationType[] = [
-  "батько",
-  "мати",
-  "батько або мати",
-  "чоловік",
-  "дружина",
-  "подружжя",
-  "дитина",
-  "син",
-  "донька",
-  "брат",
-  "сестра",
-  "брат або сестра",
-  "хрещений",
-  "хрещена",
-  "хрещеник",
-  "хрещениця",
-  "вітчим",
-  "мачуха",
-  "пасинок",
-  "падчерка",
-  "опікун",
-  "підопічний",
-  "усиновлювач",
-  "усиновлена дитина",
-  "свідок",
-  "поручитель",
-  "священник",
-  "духовна особа",
-  "посадова особа",
-  "повитуха",
-  "особа, яка повідомила",
-  "голова господарства",
-  "член господарства",
-  "наймит або служник",
-  "родич",
-  "інше",
+  ...PERSON_RELATION_TYPES,
 ];
 
 function RelationFormModal({
@@ -946,7 +1059,7 @@ function RelationFormModal({
     });
   };
   return (
-    <Modal title="Додати зв’язок" onClose={onClose}>
+    <Modal title="Додати зв’язок" className="person-relation-modal" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <RelationPersonPicker
@@ -1122,13 +1235,49 @@ function personDisplayName(person: Person): string {
   return person.fullName || [person.surname, person.givenName, person.patronymic].filter(Boolean).join(" ") || "Особа без імені";
 }
 
+type PersonRelationDisplayItem = {
+  relation: PersonRelation;
+  duplicateIds: string[];
+};
+
+function personRelationDisplayItems(relations: PersonRelation[], personId: string): PersonRelationDisplayItem[] {
+  const result: PersonRelationDisplayItem[] = [];
+  const spousePairs = new Map<string, PersonRelationDisplayItem>();
+
+  for (const rawRelation of relations) {
+    const relation = normalizePersonRelation(rawRelation);
+    if (relation.personId !== personId && relation.relatedPersonId !== personId) continue;
+    if (!isSpouseRelationType(relation.relationType)) {
+      result.push({ relation, duplicateIds: [] });
+      continue;
+    }
+
+    const otherId = relation.personId === personId ? relation.relatedPersonId : relation.personId;
+    const pairKey = ["spouse", ...[personId, otherId].sort()].join(":");
+    const existing = spousePairs.get(pairKey);
+    if (existing) {
+      existing.duplicateIds.push(relation.id);
+      continue;
+    }
+
+    const item = { relation, duplicateIds: [] };
+    spousePairs.set(pairKey, item);
+    result.push(item);
+  }
+
+  return result;
+}
+
 function relationTypeForPerson(
   relation: PersonRelation,
   currentPersonId: string,
   otherPerson?: Person,
 ): string {
+  if (isSpouseRelationType(relation.relationType)) {
+    return spouseRelationTypeForRelatedPerson(otherPerson?.gender, relation.relationType);
+  }
   if (relation.personId === currentPersonId) {
-    return relation.relationType;
+    return directParentRelationTypeForRelatedPerson(relation.relationType, otherPerson?.gender) ?? relation.relationType;
   }
 
   switch (relation.relationType) {
@@ -1200,6 +1349,31 @@ function relationTypeForPerson(
   }
 }
 
+function isSpouseRelationType(value: PersonRelationType): boolean {
+  return value === "чоловік" || value === "дружина" || value === "подружжя";
+}
+
+function directParentRelationTypeForRelatedPerson(
+  relationType: PersonRelationType,
+  relatedGender: Person["gender"] | undefined,
+): string | null {
+  if (relationType === "батько") return "Батько";
+  if (relationType === "мати") return "Мати";
+  if (relationType !== "батько або мати") return null;
+  if (relatedGender === "чоловік") return "Батько";
+  if (relatedGender === "жінка") return "Мати";
+  return "Батько або мати";
+}
+
+function spouseRelationTypeForRelatedPerson(
+  relatedGender: Person["gender"] | undefined,
+  fallback: PersonRelationType,
+): string {
+  if (relatedGender === "чоловік") return "чоловік";
+  if (relatedGender === "жінка") return "дружина";
+  return fallback === "чоловік" || fallback === "дружина" ? fallback : "подружжя";
+}
+
 function lifeYears(person: Person): string {
   const birth = person.birthDate?.slice(0, 4) || yearRange(person.birthYearFrom, person.birthYearTo);
   const death = person.deathDate?.slice(0, 4) || yearRange(person.deathYearFrom, person.deathYearTo);
@@ -1229,8 +1403,14 @@ function personPlaces(person: Person): string {
   ].map((item) => item.trim()).filter(Boolean))].join(", ");
 }
 
-function linkedCount(records: Array<{ personIds?: string[] }>, personId: string): number {
-  return records.filter((record) => record.personIds?.includes(personId)).length;
+function linkedCountByPerson(records: Array<{ personIds?: string[] }>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    for (const personId of new Set(record.personIds ?? [])) {
+      counts.set(personId, (counts.get(personId) ?? 0) + 1);
+    }
+  }
+  return counts;
 }
 
 function normalize(value: string): string {

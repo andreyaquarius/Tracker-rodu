@@ -5,6 +5,7 @@ import type {
   ScanAttachment,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import { saveOptionalProjectCache } from "../utils/projectCache";
 
 type HypothesisRow = {
   id: string;
@@ -479,6 +480,7 @@ export async function deleteProjectHypothesisTargetLinks(
 }
 
 const CACHE_PREFIX = "tracker-rodu-project-analysis-records:";
+const ANALYSIS_RECORDS_CACHE_MAX_CHARS = 500_000;
 
 export function loadProjectAnalysisRecordsCache(projectId: string): {
   hypotheses: Hypothesis[];
@@ -509,9 +511,10 @@ export function saveProjectAnalysisRecordsCache(
   hypotheses: Hypothesis[],
   archiveRequests: ArchiveRequest[],
 ): void {
-  localStorage.setItem(
+  saveOptionalProjectCache(
     `${CACHE_PREFIX}${projectId}`,
-    JSON.stringify({ hypotheses, archiveRequests }),
+    { hypotheses, archiveRequests },
+    ANALYSIS_RECORDS_CACHE_MAX_CHARS,
   );
 }
 

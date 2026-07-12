@@ -423,7 +423,7 @@ export function CrudPage({
       } catch (error) {
         window.alert(error instanceof Error
           ? error.message
-          : "РќРµ РІРґР°Р»РѕСЃСЏ РІРёРґР°Р»РёС‚Рё С„Р°Р№Р»Рё Р· Google Drive.");
+          : "Не вдалося видалити файли з Google Drive.");
       }
     }
   };
@@ -848,7 +848,7 @@ function missingArchiveReferenceLabels(
     .map((field) => field.label);
 }
 
-function EntityDetailsModal({
+export function EntityDetailsModal({
   config,
   db,
   entity,
@@ -1236,7 +1236,7 @@ function formatEntityDate(value: string): string {
   }).format(new Date(value));
 }
 
-function EntityModal({
+export function EntityModal({
   config,
   db,
   entity,

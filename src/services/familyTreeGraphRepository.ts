@@ -25,8 +25,27 @@ export interface FamilyTreePersonProfile {
   givenName: string;
   patronymic: string;
   fullName: string;
+  maidenSurname: string;
   isLiving: boolean;
   privacyStatus: FamilyTreePrivacyStatus;
+  nameVariants: string;
+  surnameVariants: string;
+  birthDate: string;
+  birthYearFrom: string;
+  birthYearTo: string;
+  birthPlace: string;
+  marriageDate: string;
+  marriagePlace: string;
+  deathDate: string;
+  deathYearFrom: string;
+  deathYearTo: string;
+  deathPlace: string;
+  residencePlaces: string;
+  socialStatus: string;
+  religion: string;
+  occupation: string;
+  notes: string;
+  customFields: Record<string, unknown>;
 }
 
 export interface TreeLayoutPosition {
@@ -110,6 +129,24 @@ type PersonProfileRow = {
   given_name: string;
   patronymic: string;
   full_name: string;
+  name_variants: string;
+  surname_variants: string;
+  birth_date: string;
+  birth_year_from: string;
+  birth_year_to: string;
+  birth_place: string;
+  marriage_date: string;
+  marriage_place: string;
+  death_date: string;
+  death_year_from: string;
+  death_year_to: string;
+  death_place: string;
+  residence_places: string;
+  social_status: string;
+  religion: string;
+  occupation: string;
+  notes: string;
+  custom_fields: unknown;
   is_living: boolean | null;
   privacy_status: string | null;
 };
@@ -308,7 +345,7 @@ const FAMILY_TREE_SELECT =
 const FAMILY_TREE_PERSON_SELECT =
   "project_id, tree_id, person_id, member_role, display_order, notes, created_at";
 const PERSON_PROFILE_SELECT =
-  "id, project_id, research_id, gender, status, surname, given_name, patronymic, full_name, is_living, privacy_status";
+  "id, project_id, research_id, gender, status, surname, given_name, patronymic, full_name, name_variants, surname_variants, birth_date, birth_year_from, birth_year_to, birth_place, marriage_date, marriage_place, death_date, death_year_from, death_year_to, death_place, residence_places, social_status, religion, occupation, notes, custom_fields, is_living, privacy_status";
 const FAMILY_GROUP_SELECT =
   "id, project_id, tree_id, group_type, display_label, primary_partner_1_id, primary_partner_2_id, metadata, created_at, updated_at";
 const FAMILY_GROUP_MEMBER_SELECT =
@@ -329,6 +366,13 @@ const PERSON_NAME_SELECT =
   "id, project_id, person_id, name_type, language_code, script_code, surname, given_name, patronymic, full_name, original_text, is_primary, is_preferred, evidence_status, confidence, source_document_id, source_finding_id, notes, metadata, created_at, updated_at";
 const PERSON_TIMELINE_EVENT_SELECT =
   "id, project_id, person_id, event_type, title, event_date, date_from, date_to, date_text, place_name, geo, event_role, evidence_status, confidence, source_document_id, source_finding_id, notes, metadata, created_at, updated_at";
+const MAIDEN_SURNAME_KEY = "__trackerRoduMaidenSurname";
+const SELECT_BATCH_SIZE = 1000;
+const IN_FILTER_BATCH_SIZE = 400;
+
+type RangeRequest<T> = {
+  range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>;
+};
 
 export async function readFamilyTreeGraphData(query: {
   projectId: EntityId;
@@ -350,102 +394,110 @@ export async function readFamilyTreeGraphData(query: {
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
-  if (treeResult.error) throw treeResult.error;
+  if (treeResult.error) {
+    if (isMissingFamilyTreeTableError(treeResult.error)) return emptyRepositoryData();
+    throw treeResult.error;
+  }
   const tree = treeResult.data ? treeFromRow(treeResult.data as FamilyTreeRow) : null;
   if (!tree) return emptyRepositoryData();
 
   const treeId = tree.id;
   const [
-    treePersonsResult,
-    groupsResult,
-    groupMembersResult,
-    partnerRelationshipsResult,
-    parentSetsResult,
-    parentChildRelationshipsResult,
-    associationRelationshipsResult,
-    layoutPositionsResult,
-    researchIssuesResult,
+    treePersonRows,
+    groupRows,
+    groupMemberRows,
+    partnerRelationshipRows,
+    parentSetRows,
+    parentChildRelationshipRows,
+    associationRelationshipRows,
+    layoutPositionRows,
+    researchIssueRows,
   ] = await Promise.all([
-    client
-      .from("family_tree_persons")
-      .select(FAMILY_TREE_PERSON_SELECT)
-      .eq("project_id", query.projectId)
-      .eq("tree_id", treeId)
-      .order("display_order", { ascending: true }),
-    client
-      .from("family_groups")
-      .select(FAMILY_GROUP_SELECT)
-      .eq("project_id", query.projectId)
-      .eq("tree_id", treeId)
-      .order("created_at", { ascending: true }),
-    client
-      .from("family_group_members")
-      .select(FAMILY_GROUP_MEMBER_SELECT)
-      .eq("project_id", query.projectId)
-      .order("display_order", { ascending: true }),
-    client
-      .from("partner_relationships")
-      .select(PARTNER_RELATIONSHIP_SELECT)
-      .eq("project_id", query.projectId)
-      .eq("tree_id", treeId),
-    client
-      .from("parent_sets")
-      .select(PARENT_SET_SELECT)
-      .eq("project_id", query.projectId)
-      .eq("tree_id", treeId)
-      .order("display_order", { ascending: true }),
-    client
-      .from("parent_child_relationships")
-      .select(PARENT_CHILD_RELATIONSHIP_SELECT)
-      .eq("project_id", query.projectId)
-      .eq("tree_id", treeId),
-    client
-      .from("association_relationships")
-      .select(ASSOCIATION_RELATIONSHIP_SELECT)
-      .eq("project_id", query.projectId)
-      .eq("tree_id", treeId),
-    client
-      .from("tree_layout_positions")
-      .select(TREE_LAYOUT_POSITION_SELECT)
-      .eq("project_id", query.projectId)
-      .eq("tree_id", treeId),
-    client
-      .from("family_tree_research_issues")
-      .select(RESEARCH_ISSUE_SELECT)
-      .eq("project_id", query.projectId)
-      .eq("tree_id", treeId)
-      .neq("status", "resolved")
-      .order("created_at", { ascending: false }),
+    selectAllRows<FamilyTreePersonRow>(
+      client
+        .from("family_tree_persons")
+        .select(FAMILY_TREE_PERSON_SELECT)
+        .eq("project_id", query.projectId)
+        .eq("tree_id", treeId)
+        .order("display_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+    ),
+    selectAllRows<FamilyGroupRow>(
+      client
+        .from("family_groups")
+        .select(FAMILY_GROUP_SELECT)
+        .eq("project_id", query.projectId)
+        .eq("tree_id", treeId)
+        .order("created_at", { ascending: true }),
+    ),
+    selectAllRows<FamilyGroupMemberRow>(
+      client
+        .from("family_group_members")
+        .select(FAMILY_GROUP_MEMBER_SELECT)
+        .eq("project_id", query.projectId)
+        .order("display_order", { ascending: true }),
+    ),
+    selectAllRows<PartnerRelationshipRow>(
+      client
+        .from("partner_relationships")
+        .select(PARTNER_RELATIONSHIP_SELECT)
+        .eq("project_id", query.projectId)
+        .eq("tree_id", treeId),
+    ),
+    selectAllRows<ParentSetRow>(
+      client
+        .from("parent_sets")
+        .select(PARENT_SET_SELECT)
+        .eq("project_id", query.projectId)
+        .eq("tree_id", treeId)
+        .order("display_order", { ascending: true }),
+    ),
+    selectAllRows<ParentChildRelationshipRow>(
+      client
+        .from("parent_child_relationships")
+        .select(PARENT_CHILD_RELATIONSHIP_SELECT)
+        .eq("project_id", query.projectId)
+        .eq("tree_id", treeId),
+    ),
+    selectAllRows<AssociationRelationshipRow>(
+      client
+        .from("association_relationships")
+        .select(ASSOCIATION_RELATIONSHIP_SELECT)
+        .eq("project_id", query.projectId)
+        .eq("tree_id", treeId),
+    ),
+    selectAllRows<TreeLayoutPositionRow>(
+      client
+        .from("tree_layout_positions")
+        .select(TREE_LAYOUT_POSITION_SELECT)
+        .eq("project_id", query.projectId)
+        .eq("tree_id", treeId),
+    ),
+    selectAllRows<ResearchIssueRow>(
+      client
+        .from("family_tree_research_issues")
+        .select(RESEARCH_ISSUE_SELECT)
+        .eq("project_id", query.projectId)
+        .eq("tree_id", treeId)
+        .neq("status", "resolved")
+        .order("created_at", { ascending: false }),
+    ),
   ]);
 
-  for (const result of [
-    treePersonsResult,
-    groupsResult,
-    groupMembersResult,
-    partnerRelationshipsResult,
-    parentSetsResult,
-    parentChildRelationshipsResult,
-    associationRelationshipsResult,
-    layoutPositionsResult,
-    researchIssuesResult,
-  ]) {
-    if (result.error) throw result.error;
-  }
-
-  const treePersons = ((treePersonsResult.data ?? []) as FamilyTreePersonRow[]).map(treePersonFromRow);
-  const groups = ((groupsResult.data ?? []) as FamilyGroupRow[]).map(familyGroupFromRow);
-  const groupMembers = ((groupMembersResult.data ?? []) as FamilyGroupMemberRow[])
+  const treePersons = treePersonRows.map(treePersonFromRow);
+  const groups = groupRows.map(familyGroupFromRow);
+  const groupMembers = groupMemberRows
     .filter((member) => groups.some((group) => group.id === member.family_group_id))
     .map(familyGroupMemberFromRow);
-  const partnerRelationships = ((partnerRelationshipsResult.data ?? []) as PartnerRelationshipRow[])
+  const partnerRelationships = partnerRelationshipRows
     .map(partnerRelationshipFromRow);
-  const parentSets = ((parentSetsResult.data ?? []) as ParentSetRow[]).map(parentSetFromRow);
-  const parentChildRelationships = ((parentChildRelationshipsResult.data ?? []) as ParentChildRelationshipRow[])
+  const parentSets = parentSetRows.map(parentSetFromRow);
+  const parentChildRelationships = parentChildRelationshipRows
     .map(parentChildRelationshipFromRow);
-  const associationRelationships = ((associationRelationshipsResult.data ?? []) as AssociationRelationshipRow[])
+  const associationRelationships = associationRelationshipRows
     .map(associationRelationshipFromRow);
-  const layoutPositions = ((layoutPositionsResult.data ?? []) as TreeLayoutPositionRow[]).map(layoutPositionFromRow);
-  const researchIssues = ((researchIssuesResult.data ?? []) as ResearchIssueRow[]).map(researchIssueFromRow);
+  const layoutPositions = layoutPositionRows.map(layoutPositionFromRow);
+  const researchIssues = researchIssueRows.map(researchIssueFromRow);
 
   const personIds = collectPersonIds({
     tree,
@@ -459,10 +511,12 @@ export async function readFamilyTreeGraphData(query: {
     layoutPositions,
     researchIssues,
   });
-  const [personProfiles, personNames, personTimelineEvents] = await Promise.all([
-    readPersonProfiles(query.projectId, personIds),
-    readPersonNames(query.projectId, personIds),
-    readPersonTimelineEvents(query.projectId, personIds),
+  const personProfiles = await readPersonProfiles(query.projectId);
+  const allPersonIds = personProfiles.map((profile) => profile.id);
+  const relatedPersonIds = mergePersonIds(personIds, allPersonIds);
+  const [personNames, personTimelineEvents] = await Promise.all([
+    readPersonNames(query.projectId, relatedPersonIds),
+    readPersonTimelineEvents(query.projectId, relatedPersonIds),
   ]);
 
   return {
@@ -500,29 +554,43 @@ function emptyRepositoryData(): FamilyTreeGraphRepositoryData {
   };
 }
 
-async function readPersonProfiles(projectId: EntityId, personIds: EntityId[]): Promise<FamilyTreePersonProfile[]> {
-  if (!personIds.length) return [];
-  const { data, error } = await getSupabaseClient()
-    .from("persons")
-    .select(PERSON_PROFILE_SELECT)
-    .eq("project_id", projectId)
-    .in("id", personIds);
-  if (error) throw error;
-  return ((data ?? []) as PersonProfileRow[]).map(personProfileFromRow);
+async function readPersonProfiles(projectId: EntityId, personIds?: EntityId[]): Promise<FamilyTreePersonProfile[]> {
+  const client = getSupabaseClient();
+  const chunks = personIds?.length ? chunkArray(personIds, IN_FILTER_BATCH_SIZE) : [null];
+  const rows = (await Promise.all(chunks.map((chunk) => {
+    let request = client
+      .from("persons")
+      .select(PERSON_PROFILE_SELECT)
+      .eq("project_id", projectId)
+      .order("surname", { ascending: true })
+      .order("given_name", { ascending: true })
+      .order("patronymic", { ascending: true });
+    if (chunk) request = request.in("id", chunk);
+    return selectAllRows<PersonProfileRow>(request);
+  }))).flat();
+  return rows.map(personProfileFromRow);
+}
+
+function mergePersonIds(primary: EntityId[], secondary: EntityId[]): EntityId[] {
+  return Array.from(new Set([...primary, ...secondary]));
 }
 
 async function readPersonNames(projectId: EntityId, personIds: EntityId[]): Promise<FamilyTreePersonName[]> {
   if (!personIds.length) return [];
-  const { data, error } = await getSupabaseClient()
-    .from("person_names")
-    .select(PERSON_NAME_SELECT)
-    .eq("project_id", projectId)
-    .in("person_id", personIds)
-    .order("is_primary", { ascending: false })
-    .order("is_preferred", { ascending: false })
-    .order("created_at", { ascending: true });
-  if (error) throw error;
-  return ((data ?? []) as PersonNameRow[]).map(personNameFromRow);
+  const client = getSupabaseClient();
+  const rows = (await Promise.all(chunkArray(personIds, IN_FILTER_BATCH_SIZE).map((chunk) =>
+    selectAllRows<PersonNameRow>(
+      client
+        .from("person_names")
+        .select(PERSON_NAME_SELECT)
+        .eq("project_id", projectId)
+        .in("person_id", chunk)
+        .order("is_primary", { ascending: false })
+        .order("is_preferred", { ascending: false })
+        .order("created_at", { ascending: true }),
+    ),
+  ))).flat();
+  return rows.map(personNameFromRow);
 }
 
 async function readPersonTimelineEvents(
@@ -530,15 +598,65 @@ async function readPersonTimelineEvents(
   personIds: EntityId[],
 ): Promise<FamilyTreePersonTimelineEvent[]> {
   if (!personIds.length) return [];
-  const { data, error } = await getSupabaseClient()
-    .from("person_timeline_events")
-    .select(PERSON_TIMELINE_EVENT_SELECT)
-    .eq("project_id", projectId)
-    .in("person_id", personIds)
-    .order("event_date", { ascending: true })
-    .order("created_at", { ascending: true });
-  if (error) throw error;
-  return ((data ?? []) as PersonTimelineEventRow[]).map(personTimelineEventFromRow);
+  const client = getSupabaseClient();
+  const rows = (await Promise.all(chunkArray(personIds, IN_FILTER_BATCH_SIZE).map((chunk) =>
+    selectAllRows<PersonTimelineEventRow>(
+      client
+        .from("person_timeline_events")
+        .select(PERSON_TIMELINE_EVENT_SELECT)
+        .eq("project_id", projectId)
+        .in("person_id", chunk)
+        .order("event_date", { ascending: true })
+        .order("created_at", { ascending: true }),
+    ),
+  ))).flat();
+  return rows.map(personTimelineEventFromRow);
+}
+
+async function selectAllRows<T>(request: RangeRequest<T>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += SELECT_BATCH_SIZE) {
+    const to = from + SELECT_BATCH_SIZE - 1;
+    const { data, error } = await request.range(from, to);
+    if (error) {
+      if (isMissingFamilyTreeTableError(error)) return [];
+      throw error;
+    }
+    const batch = data ?? [];
+    rows.push(...batch);
+    if (batch.length < SELECT_BATCH_SIZE) break;
+  }
+  return rows;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function isMissingFamilyTreeTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? String(error.code ?? "") : "";
+  const message = "message" in error ? String(error.message ?? "") : "";
+  const details = "details" in error ? String(error.details ?? "") : "";
+  const text = `${message} ${details}`.toLowerCase();
+  return code === "42P01" ||
+    code === "PGRST205" ||
+    text.includes("family_trees") ||
+    text.includes("family_tree_persons") ||
+    text.includes("family_groups") ||
+    text.includes("family_group_members") ||
+    text.includes("partner_relationships") ||
+    text.includes("parent_sets") ||
+    text.includes("parent_child_relationships") ||
+    text.includes("association_relationships") ||
+    text.includes("tree_layout_positions") ||
+    text.includes("family_tree_research_issues") ||
+    text.includes("person_names") ||
+    text.includes("person_timeline_events");
 }
 
 function collectPersonIds(input: {
@@ -640,6 +758,7 @@ function treePersonFromRow(row: FamilyTreePersonRow): FamilyTreePerson {
 }
 
 function personProfileFromRow(row: PersonProfileRow): FamilyTreePersonProfile {
+  const customFields = asRecord(row.custom_fields);
   return {
     id: row.id,
     projectId: row.project_id,
@@ -650,8 +769,27 @@ function personProfileFromRow(row: PersonProfileRow): FamilyTreePersonProfile {
     givenName: row.given_name,
     patronymic: row.patronymic,
     fullName: row.full_name,
+    maidenSurname: typeof customFields[MAIDEN_SURNAME_KEY] === "string" ? customFields[MAIDEN_SURNAME_KEY] : "",
     isLiving: row.is_living ?? false,
     privacyStatus: asPrivacyStatus(row.privacy_status),
+    nameVariants: row.name_variants,
+    surnameVariants: row.surname_variants,
+    birthDate: row.birth_date,
+    birthYearFrom: row.birth_year_from,
+    birthYearTo: row.birth_year_to,
+    birthPlace: row.birth_place,
+    marriageDate: row.marriage_date,
+    marriagePlace: row.marriage_place,
+    deathDate: row.death_date,
+    deathYearFrom: row.death_year_from,
+    deathYearTo: row.death_year_to,
+    deathPlace: row.death_place,
+    residencePlaces: row.residence_places,
+    socialStatus: row.social_status,
+    religion: row.religion,
+    occupation: row.occupation,
+    notes: row.notes,
+    customFields,
   };
 }
 

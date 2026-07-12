@@ -18,7 +18,7 @@ import {
 } from "./googleDriveStorage";
 
 export const MAX_ATTACHMENT_SIZE_MB = 25;
-export type AttachmentPolicy = "all" | "finding" | "archive-request" | "document";
+export type AttachmentPolicy = "all" | "finding" | "archive-request" | "document" | "person-photo";
 const MAX_FILE_SIZE = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024;
 const GOOGLE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 const imageExtensions = new Set(["jpg", "jpeg", "png", "webp", "gif", "bmp", "svg", "tif", "tiff"]);
@@ -77,7 +77,9 @@ export async function saveScan(
   options: SaveScanOptions = {},
 ): Promise<ScanAttachment> {
   const supported =
-    policy === "finding"
+    policy === "person-photo"
+      ? isSupportedPersonPhoto(file)
+      : policy === "finding"
       ? isSupportedFindingAttachment(file)
       : policy === "archive-request"
         ? isSupportedArchiveRequestAttachment(file)
@@ -138,7 +140,7 @@ export async function inspectAttachmentReference(
   if (isGoogleDriveReference(fileReference)) {
     return inspectGoogleDriveAttachment(fileReference, policy);
   }
-  return inspectExternalUrlAttachment(fileReference);
+  return inspectExternalUrlAttachment(fileReference, policy);
 }
 
 export async function attachAttachmentReference(
@@ -149,7 +151,7 @@ export async function attachAttachmentReference(
   if (isGoogleDriveReference(fileReference)) {
     return attachGoogleDriveReference(fileReference, policy, range);
   }
-  return [externalUrlToAttachment(fileReference)];
+  return [externalUrlToAttachment(fileReference, policy)];
 }
 
 export async function inspectGoogleDriveAttachment(
@@ -246,9 +248,13 @@ function driveFileToAttachment(file: GoogleDriveFileMetadata): ScanAttachment {
   };
 }
 
-function inspectExternalUrlAttachment(fileReference: string): DriveAttachmentPreview {
+function inspectExternalUrlAttachment(
+  fileReference: string,
+  policy: AttachmentPolicy,
+): DriveAttachmentPreview {
   const url = externalDocumentUrl(fileReference);
   const metadata = externalUrlMetadata(url);
+  ensureExternalUrlMatchesPolicy(metadata, policy);
   return {
     kind: "file",
     source: "external-url",
@@ -262,9 +268,13 @@ function inspectExternalUrlAttachment(fileReference: string): DriveAttachmentPre
   };
 }
 
-function externalUrlToAttachment(fileReference: string): ScanAttachment {
+function externalUrlToAttachment(
+  fileReference: string,
+  policy: AttachmentPolicy,
+): ScanAttachment {
   const url = externalDocumentUrl(fileReference);
   const metadata = externalUrlMetadata(url);
+  ensureExternalUrlMatchesPolicy(metadata, policy);
   return {
     id: createId(),
     name: metadata.name,
@@ -303,6 +313,7 @@ function rangeDriveFiles(
 }
 
 export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
+  assertScanAvailable(scan);
   if (scan.storage === "external-url") {
     const target = sanitizeWebUrl(scan.webViewLink || scan.storagePath);
     if (!target) throw new Error("Зовнішнє посилання має некоректний або небезпечний формат.");
@@ -350,12 +361,18 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
     });
   } catch {
     throw new Error(
-      "Це джерело не дозволяє Трекеру Роду прочитати файл напряму. Відкрийте джерело в новій вкладці або збережіть копію у ваш Google Drive.",
+      "Браузер не дозволив прочитати файл із цього сайту (CORS) або посилання вже недійсне. Відкрийте джерело в новій вкладці, завантажте зображення вручну й додайте його кнопкою «Додати файли».",
     );
   }
 
   if (response.status === 401 || response.status === 403) {
+    const expiryMessage = externalLinkExpiryMessage(target);
+    if (expiryMessage) throw new Error(expiryMessage);
     throw new Error("Файл потребує авторизації на зовнішньому сайті або доступ до нього заборонено.");
+  }
+  if (response.status === 404) {
+    const expiryMessage = externalLinkExpiryMessage(target);
+    if (expiryMessage) throw new Error(expiryMessage);
   }
   if (!response.ok) {
     throw new Error(`Не вдалося завантажити зовнішній файл (${response.status}).`);
@@ -373,6 +390,27 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
   }
 
   return blob;
+}
+
+function externalLinkExpiryMessage(target: string): string {
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return "";
+  }
+  const rawExpiry = ["e", "exp", "expires", "expiry", "expiration"]
+    .map((key) => url.searchParams.get(key))
+    .find((value): value is string => Boolean(value));
+  if (!rawExpiry) return "";
+  const numeric = Number(rawExpiry);
+  const expiryMs = Number.isFinite(numeric)
+    ? numeric * (numeric < 10_000_000_000 ? 1000 : 1)
+    : Date.parse(rawExpiry);
+  if (Number.isFinite(expiryMs) && expiryMs <= Date.now()) {
+    return "Строк дії зовнішнього посилання на фото закінчився. Відкрийте джерело, завантажте фото вручну та додайте його у Google Drive кнопкою «Додати файли».";
+  }
+  return "Зовнішній сайт відхилив тимчасове посилання на фото. Воно могло стати недійсним раніше зазначеного строку; завантажте фото вручну й додайте його у Google Drive.";
 }
 
 async function cacheScanBlob(scan: ScanAttachment, blob: Blob): Promise<void> {
@@ -394,6 +432,7 @@ function scanBlobCacheKey(scan: ScanAttachment): string {
 }
 
 export async function getScanPreviewSource(scan: ScanAttachment): Promise<ScanPreviewSource> {
+  assertScanAvailable(scan);
   if (scan.storage === "external-url") {
     const target = sanitizeWebUrl(scan.webViewLink || scan.storagePath);
     if (!target) throw new Error("Зовнішнє посилання має некоректний або небезпечний формат.");
@@ -413,6 +452,7 @@ export async function getScanPreviewSource(scan: ScanAttachment): Promise<ScanPr
 }
 
 export async function openScan(scan: ScanAttachment): Promise<void> {
+  assertScanAvailable(scan);
   if (scan.storage === "external-url") {
     const target = sanitizeWebUrl(scan.webViewLink || scan.storagePath);
     if (!target) throw new Error("Зовнішнє посилання має некоректний або небезпечний формат.");
@@ -632,11 +672,33 @@ function isSupportedAttachmentMetadata(
   policy: AttachmentPolicy,
 ): boolean {
   const fileLike = { name, type: mimeType } as File;
-  return policy === "finding"
+  return policy === "person-photo"
+    ? isSupportedPersonPhoto(fileLike)
+    : policy === "finding"
     ? isSupportedFindingAttachment(fileLike)
     : policy === "archive-request"
       ? isSupportedArchiveRequestAttachment(fileLike)
       : isSupportedAttachment(fileLike);
+}
+
+function ensureExternalUrlMatchesPolicy(
+  metadata: { name: string; mimeType: string },
+  policy: AttachmentPolicy,
+): void {
+  if (policy === "person-photo" && !isSupportedPersonPhoto({
+    name: metadata.name,
+    type: metadata.mimeType,
+  })) {
+    throw new Error("Посилання на фото має вести на зображення JPG, PNG, WebP, GIF, BMP, SVG або TIFF.");
+  }
+}
+
+function assertScanAvailable(scan: ScanAttachment): void {
+  if (scan.availability !== "missing-local") return;
+  throw new Error(
+    scan.statusMessage
+      || "Локальний файл із GEDCOM недоступний. Виберіть його вручну та завантажте у Google Drive.",
+  );
 }
 
 function isMissingStoredFileError(error: unknown): boolean {
@@ -725,4 +787,9 @@ function isSupportedAttachment(file: File): boolean {
       "aac", "ogg", "opus", "flac", "wma", "webm",
     ].includes(extension)
   );
+}
+
+function isSupportedPersonPhoto(file: Pick<File, "name" | "type">): boolean {
+  const extension = file.name.split(".").pop()?.toLocaleLowerCase() ?? "";
+  return file.type.startsWith("image/") || imageExtensions.has(extension);
 }

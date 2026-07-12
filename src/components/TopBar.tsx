@@ -7,6 +7,8 @@ interface TopBarProps {
   workspace: SupabaseWorkspace | null;
   workspaces: SupabaseWorkspace[];
   onMenu: () => void;
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
   onSignInAccount: () => void;
   onSignOutAccount: () => void;
   onSwitchWorkspace: (projectId: string) => void;
@@ -30,6 +32,8 @@ export function TopBar({
   workspace,
   workspaces,
   onMenu,
+  sidebarCollapsed,
+  onToggleSidebar,
   onSignInAccount,
   onSignOutAccount,
   onSwitchWorkspace,
@@ -58,6 +62,28 @@ export function TopBar({
     <header className="topbar">
       <button className="mobile-menu" onClick={onMenu} aria-label="Відкрити меню">
         ☰
+      </button>
+      <button
+        type="button"
+        className="desktop-sidebar-toggle"
+        onClick={onToggleSidebar}
+        aria-label={sidebarCollapsed ? "Розгорнути ліве меню" : "Згорнути ліве меню"}
+        title={sidebarCollapsed ? "Розгорнути ліве меню" : "Згорнути ліве меню"}
+        aria-pressed={sidebarCollapsed}
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16" />
+          <path d={sidebarCollapsed ? "m13 9 3 3-3 3" : "m16 9-3 3 3 3"} />
+        </svg>
       </button>
       <div className="topbar-brand">
         <span>Робочий простір для генеалогічного дослідження</span>

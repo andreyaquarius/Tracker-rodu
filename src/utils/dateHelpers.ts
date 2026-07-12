@@ -38,6 +38,13 @@ export function normalizeFlexibleDateInput(input: string): FlexibleDateInputResu
   const value = input.trim();
   if (!value) return { value: "" };
 
+  const yearOnlyMatch = value.match(/^(\d{4})$/);
+  if (yearOnlyMatch) {
+    const year = Number(yearOnlyMatch[1]);
+    if (year >= 1 && year <= 9999) return { value: yearOnlyMatch[1] };
+    return { value: "", error: "Рік має бути в межах 0001–9999." };
+  }
+
   const isoMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   const localMatch = value.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
   const dashedLocalMatch = value.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
@@ -46,7 +53,7 @@ export function normalizeFlexibleDateInput(input: string): FlexibleDateInputResu
   if (!match) {
     return {
       value: "",
-      error: "Введіть дату у форматі дд.мм.рррр, дд/мм/рррр або рррр-мм-дд.",
+      error: "Введіть рік або дату у форматі дд.мм.рррр, дд/мм/рррр чи рррр-мм-дд.",
     };
   }
 
@@ -64,6 +71,7 @@ export function normalizeFlexibleDateInput(input: string): FlexibleDateInputResu
 export function formatFlexibleDateForDisplay(input: string): string {
   const normalized = normalizeFlexibleDateInput(input);
   if (normalized.error || !normalized.value) return input;
+  if (/^\d{4}$/.test(normalized.value)) return normalized.value;
   const [year, month, day] = normalized.value.split("-");
   return `${day}.${month}.${year}`;
 }

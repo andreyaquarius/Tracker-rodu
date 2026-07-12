@@ -1,5 +1,6 @@
 import type { CustomFieldValues, Research } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import { saveOptionalProjectCache } from "../utils/projectCache";
 
 type ResearchRow = {
   id: string;
@@ -112,6 +113,7 @@ export async function deleteProjectResearch(projectId: string, researchId: strin
 }
 
 const CACHE_PREFIX = "tracker-rodu-project-researches:";
+const RESEARCH_CACHE_MAX_CHARS = 250_000;
 
 export function loadProjectResearchCache(projectId: string): Research[] {
   try {
@@ -125,7 +127,11 @@ export function loadProjectResearchCache(projectId: string): Research[] {
 }
 
 export function saveProjectResearchCache(projectId: string, researches: Research[]): void {
-  localStorage.setItem(`${CACHE_PREFIX}${projectId}`, JSON.stringify(researches));
+  saveOptionalProjectCache(
+    `${CACHE_PREFIX}${projectId}`,
+    researches,
+    RESEARCH_CACHE_MAX_CHARS,
+  );
 }
 
 export function clearProjectResearchCache(projectId: string): void {

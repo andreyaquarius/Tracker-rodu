@@ -9,6 +9,9 @@ import type {
 import { getSupabaseClient } from "./supabaseAuth";
 import { FINDING_GEO_META_KEY, normalizeGeo, stripInternalGeoFields } from "../utils/geo";
 import { sortFindingParticipants } from "../utils/findingParticipants";
+import { saveOptionalProjectCache } from "../utils/projectCache";
+import { chunkFindingImportRows, chunkImportRows } from "../utils/importBatches.ts";
+import { selectRowsInParallel } from "../utils/pagedRows.ts";
 
 type TaskRow = {
   id: string;
@@ -76,6 +79,9 @@ const TASK_SELECT =
 const FINDING_SELECT =
   "id, project_id, research_id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields, created_at, updated_at";
 const FINDING_META_KEY = "__trackerRoduFindingMeta";
+const IMPORT_REFERENCE_BATCH_ITEMS = 100;
+const IMPORT_REFERENCE_BATCH_BYTES = 20_000;
+const SELECT_BATCH_SIZE = 1_000;
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -236,39 +242,41 @@ export async function listProjectWorkRecords(projectId: string): Promise<{
   findings: Finding[];
 }> {
   const client = getSupabaseClient();
-  const [tasksResult, taskPersonsResult, findingsResult, participantsResult] =
+  const [taskRows, taskPersonRows, findingRows, participantRows] =
     await Promise.all([
-      client
-        .from("tasks")
-        .select(TASK_SELECT)
-        .eq("project_id", projectId)
-        .order("updated_at", { ascending: false }),
-      client
-        .from("task_persons")
-        .select("task_id, person_id")
-        .eq("project_id", projectId),
-      client
-        .from("findings")
-        .select(FINDING_SELECT)
-        .eq("project_id", projectId)
-        .order("updated_at", { ascending: false }),
-      client
-        .from("finding_participants")
-        .select("id, finding_id, person_id, name, role, notes")
-        .eq("project_id", projectId)
-        .order("created_at", { ascending: true }),
+      selectRowsInParallel<TaskRow>(
+        () => client.from("tasks").select(TASK_SELECT).eq("project_id", projectId)
+          .order("updated_at", { ascending: false }).order("id", { ascending: true }),
+        SELECT_BATCH_SIZE,
+        1,
+      ),
+      selectRowsInParallel<TaskPersonRow>(
+        () => client.from("task_persons").select("task_id, person_id").eq("project_id", projectId)
+          .order("task_id", { ascending: true }).order("person_id", { ascending: true }),
+        SELECT_BATCH_SIZE,
+        1,
+      ),
+      selectRowsInParallel<FindingRow>(
+        () => client.from("findings").select(FINDING_SELECT).eq("project_id", projectId)
+          .order("updated_at", { ascending: false }).order("id", { ascending: true }),
+        SELECT_BATCH_SIZE,
+        1,
+      ),
+      selectRowsInParallel<FindingParticipantRow>(
+        () => client.from("finding_participants")
+          .select("id, finding_id, person_id, name, role, notes")
+          .eq("project_id", projectId).order("created_at", { ascending: true }).order("id", { ascending: true }),
+        SELECT_BATCH_SIZE,
+        1,
+      ),
     ]);
-  if (tasksResult.error) throw tasksResult.error;
-  if (taskPersonsResult.error) throw taskPersonsResult.error;
-  if (findingsResult.error) throw findingsResult.error;
-  if (participantsResult.error) throw participantsResult.error;
 
   const taskPersonMap = new Map<string, string[]>();
-  for (const row of taskPersonsResult.data as TaskPersonRow[]) {
+  for (const row of taskPersonRows) {
     taskPersonMap.set(row.task_id, [...(taskPersonMap.get(row.task_id) ?? []), row.person_id]);
   }
   const participantMap = new Map<string, FindingParticipant[]>();
-  for (const row of participantsResult.data as FindingParticipantRow[]) {
+  for (const row of participantRows) {
     const participant: FindingParticipant = {
       id: row.id,
       name: row.name,
@@ -282,10 +290,10 @@ export async function listProjectWorkRecords(projectId: string): Promise<{
   }
 
   return {
-    tasks: (tasksResult.data as TaskRow[]).map((row) =>
+    tasks: taskRows.map((row) =>
       taskFromRow(row, taskPersonMap.get(row.id) ?? []),
     ),
-    findings: (findingsResult.data as FindingRow[]).map((row) =>
+    findings: findingRows.map((row) =>
       findingFromRow(row, participantMap.get(row.id) ?? []),
     ),
   };
@@ -406,6 +414,69 @@ async function replaceFindingParticipants(
   if (error) throw error;
 }
 
+async function replaceImportedTaskPersons(
+  client: ReturnType<typeof getSupabaseClient>,
+  projectId: string,
+  tasks: TaskRecord[],
+  validPersonIds: Set<string>,
+): Promise<void> {
+  const taskIds = tasks.map((task) => task.id);
+  for (const batch of chunkImportRows(taskIds, {
+    maxItems: IMPORT_REFERENCE_BATCH_ITEMS,
+    maxBytes: IMPORT_REFERENCE_BATCH_BYTES,
+  })) {
+    const { error } = await client
+      .from("task_persons")
+      .delete()
+      .eq("project_id", projectId)
+      .in("task_id", batch);
+    if (error) throw error;
+  }
+
+  const rows = tasks.flatMap((task) =>
+    [...new Set(task.personIds)]
+      .filter((personId) => validPersonIds.has(personId))
+      .map((personId) => ({
+        project_id: projectId,
+        task_id: task.id,
+        person_id: personId,
+      })),
+  );
+  for (const batch of chunkImportRows(rows)) {
+    const { error } = await client.from("task_persons").insert(batch);
+    if (error) throw error;
+  }
+}
+
+async function replaceImportedFindingParticipants(
+  client: ReturnType<typeof getSupabaseClient>,
+  projectId: string,
+  findings: Finding[],
+): Promise<void> {
+  const findingIds = findings.map((finding) => finding.id);
+  for (const batch of chunkImportRows(findingIds, {
+    maxItems: IMPORT_REFERENCE_BATCH_ITEMS,
+    maxBytes: IMPORT_REFERENCE_BATCH_BYTES,
+  })) {
+    const { error } = await client
+      .from("finding_participants")
+      .delete()
+      .eq("project_id", projectId)
+      .in("finding_id", batch);
+    if (error) throw error;
+  }
+
+  const rows = findings.flatMap((finding) =>
+    finding.participants.map((participant) => participantToRow(projectId, finding.id, participant)),
+  );
+  for (const batch of chunkImportRows(rows)) {
+    const { error } = await client
+      .from("finding_participants")
+      .upsert(batch, { onConflict: "id" });
+    if (error) throw error;
+  }
+}
+
 export async function importProjectWorkRecords(
   projectId: string,
   tasks: TaskRecord[],
@@ -415,32 +486,25 @@ export async function importProjectWorkRecords(
   personIds: Set<string>,
 ): Promise<void> {
   const client = getSupabaseClient();
-  if (tasks.length) {
+  const taskRows = tasks.map((task) => taskToRow(projectId, task, researchIds, documentIds));
+  for (const batch of chunkImportRows(taskRows)) {
     const { error } = await client
       .from("tasks")
-      .upsert(
-        tasks.map((task) => taskToRow(projectId, task, researchIds, documentIds)),
-        { onConflict: "id" },
-      );
+      .upsert(batch, { onConflict: "id" });
     if (error) throw error;
-    for (const task of tasks) {
-      await replaceTaskPersons(projectId, task, personIds);
-    }
   }
-  if (findings.length) {
+  if (tasks.length) await replaceImportedTaskPersons(client, projectId, tasks, personIds);
+
+  const findingRows = findings.map((finding) =>
+    findingToRow(projectId, finding, researchIds, documentIds, personIds),
+  );
+  for (const batch of chunkFindingImportRows(findingRows)) {
     const { error } = await client
       .from("findings")
-      .upsert(
-        findings.map((finding) =>
-          findingToRow(projectId, finding, researchIds, documentIds, personIds),
-        ),
-        { onConflict: "id" },
-      );
+      .upsert(batch, { onConflict: "id" });
     if (error) throw error;
-    for (const finding of findings) {
-      await replaceFindingParticipants(projectId, finding);
-    }
   }
+  if (findings.length) await replaceImportedFindingParticipants(client, projectId, findings);
 }
 
 export async function saveProjectTask(
@@ -504,6 +568,7 @@ export async function deleteProjectFinding(
 }
 
 const CACHE_PREFIX = "tracker-rodu-project-work-records:";
+const WORK_RECORDS_CACHE_MAX_CHARS = 750_000;
 
 export function loadProjectWorkRecordsCache(projectId: string): {
   tasks: TaskRecord[];
@@ -527,9 +592,10 @@ export function saveProjectWorkRecordsCache(
   tasks: TaskRecord[],
   findings: Finding[],
 ): void {
-  localStorage.setItem(
+  saveOptionalProjectCache(
     `${CACHE_PREFIX}${projectId}`,
-    JSON.stringify({ tasks, findings }),
+    { tasks, findings },
+    WORK_RECORDS_CACHE_MAX_CHARS,
   );
 }
 

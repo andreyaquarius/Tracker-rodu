@@ -5,6 +5,8 @@ import type {
   YearMatrixRecord,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import { saveOptionalProjectCache } from "../utils/projectCache";
+import { chunkImportRows } from "../utils/importBatches.ts";
 
 type DocumentRow = {
   id: string;
@@ -196,24 +198,20 @@ export async function importProjectDocuments(
 ): Promise<void> {
   const client = getSupabaseClient();
   const documentIds = new Set(documents.map((document) => document.id));
-  if (documents.length) {
+  const documentRows = documents.map((document) => documentToRow(projectId, document, researchIds));
+  for (const batch of chunkImportRows(documentRows)) {
     const { error } = await client
       .from("documents")
-      .upsert(
-        documents.map((document) => documentToRow(projectId, document, researchIds)),
-        { onConflict: "id" },
-      );
+      .upsert(batch, { onConflict: "id" });
     if (error) throw error;
   }
-  if (yearMatrix.length) {
+  const yearMatrixRows = yearMatrix.map((record) =>
+    matrixToRow(projectId, record, researchIds, documentIds),
+  );
+  for (const batch of chunkImportRows(yearMatrixRows)) {
     const { error } = await client
       .from("year_matrix")
-      .upsert(
-        yearMatrix.map((record) =>
-          matrixToRow(projectId, record, researchIds, documentIds),
-        ),
-        { onConflict: "id" },
-      );
+      .upsert(batch, { onConflict: "id" });
     if (error) throw error;
   }
 }
@@ -294,6 +292,7 @@ export async function deleteProjectYearMatrixRecord(
 }
 
 const CACHE_PREFIX = "tracker-rodu-project-documents:";
+const DOCUMENTS_CACHE_MAX_CHARS = 750_000;
 
 export function loadProjectDocumentsCache(projectId: string): {
   documents: DocumentRecord[];
@@ -324,9 +323,10 @@ export function saveProjectDocumentsCache(
   documents: DocumentRecord[],
   yearMatrix: YearMatrixRecord[],
 ): void {
-  localStorage.setItem(
+  saveOptionalProjectCache(
     `${CACHE_PREFIX}${projectId}`,
-    JSON.stringify({ documents, yearMatrix }),
+    { documents, yearMatrix },
+    DOCUMENTS_CACHE_MAX_CHARS,
   );
 }
 
