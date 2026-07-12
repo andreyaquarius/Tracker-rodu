@@ -36,6 +36,7 @@ import type {
   SubscriptionPlan,
   SubscriptionStatus,
 } from "../types/subscription";
+import { filterFamilyTreeAccessCandidates } from "../utils/familyTreeFeatureAccess";
 
 interface SubscriptionPageProps {
   context: SubscriptionContext | null;
@@ -655,10 +656,17 @@ function AdminFamilyTreeAccess({ users, loadError, onChanged }: {
   onChanged: () => Promise<void>;
 }) {
   const [selectedUserId, setSelectedUserId] = useState("");
+  const [userQuery, setUserQuery] = useState("");
   const [busyUserId, setBusyUserId] = useState("");
   const [error, setError] = useState("");
   const availableUsers = users.filter((user) => !user.isAdmin && !user.isEnabled);
   const enabledUsers = users.filter((user) => user.isEnabled);
+  const matchingUsers = useMemo(
+    () => filterFamilyTreeAccessCandidates(users, userQuery),
+    [users, userQuery],
+  );
+  const visibleMatchingUsers = matchingUsers.slice(0, 12);
+  const selectedUser = availableUsers.find((user) => user.userId === selectedUserId) ?? null;
 
   useEffect(() => {
     if (selectedUserId && !availableUsers.some((user) => user.userId === selectedUserId)) {
@@ -672,6 +680,7 @@ function AdminFamilyTreeAccess({ users, loadError, onChanged }: {
     try {
       await adminSetFamilyTreeFeatureAccess({ userId, isEnabled });
       setSelectedUserId("");
+      setUserQuery("");
       await onChanged();
     } catch (updateError) {
       setError(
@@ -699,28 +708,77 @@ function AdminFamilyTreeAccess({ users, loadError, onChanged }: {
       {error ? <div className="alert alert-error">{error}</div> : null}
       {!loadError ? (
         <div className="subscription-admin-filters family-tree-access-form">
-          <label>
-            <span>Зареєстрований користувач</span>
-            <select
-              value={selectedUserId}
-              onChange={(event) => setSelectedUserId(event.target.value)}
-            >
-              <option value="">Оберіть користувача</option>
-              {availableUsers.map((user) => (
-                <option value={user.userId} key={user.userId}>
-                  {user.displayName ? `${user.displayName} — ` : ""}{user.email}
-                </option>
-              ))}
-            </select>
+          <label className="family-tree-access-search-field">
+            <span>Знайти користувача</span>
+            <input
+              type="search"
+              value={userQuery}
+              placeholder="Ім’я або email"
+              autoComplete="off"
+              aria-describedby="family-tree-access-search-status"
+              disabled={Boolean(busyUserId) || !availableUsers.length}
+              onChange={(event) => {
+                setUserQuery(event.target.value);
+                setSelectedUserId("");
+              }}
+            />
           </label>
+          <div className="family-tree-access-selected-user">
+            <span>Обраний користувач</span>
+            <div className="family-tree-access-selected-value">
+              {selectedUser ? (
+                <>
+                  <strong>{selectedUser.displayName || selectedUser.email}</strong>
+                  {selectedUser.displayName ? <small>{selectedUser.email}</small> : null}
+                </>
+              ) : (
+                <strong className="muted-text">Не обрано</strong>
+              )}
+            </div>
+          </div>
           <button
             type="button"
             className="button button-primary"
             disabled={!selectedUserId || Boolean(busyUserId)}
             onClick={() => void updateAccess(selectedUserId, true)}
           >
-            {busyUserId === selectedUserId ? "Надаємо…" : "Надати доступ"}
+            {busyUserId ? "Зберігаємо…" : "Надати доступ"}
           </button>
+          <div className="family-tree-access-search-panel">
+            <div
+              id="family-tree-access-search-status"
+              className="family-tree-access-search-status"
+              role="status"
+              aria-live="polite"
+            >
+              {!availableUsers.length
+                ? "Усі зареєстровані користувачі вже мають доступ."
+                : !userQuery.trim()
+                  ? "Введіть ім’я або email користувача."
+                  : !matchingUsers.length
+                    ? "Користувачів не знайдено."
+                    : matchingUsers.length > visibleMatchingUsers.length
+                      ? `Знайдено ${matchingUsers.length}. Показано перші ${visibleMatchingUsers.length}.`
+                      : `Знайдено: ${matchingUsers.length}.`}
+            </div>
+            {userQuery.trim() && visibleMatchingUsers.length ? (
+              <div className="family-tree-access-search-results">
+                {visibleMatchingUsers.map((user) => (
+                  <button
+                    type="button"
+                    key={user.userId}
+                    className={`family-tree-access-search-result${selectedUserId === user.userId ? " selected" : ""}`}
+                    aria-pressed={selectedUserId === user.userId}
+                    disabled={Boolean(busyUserId)}
+                    onClick={() => setSelectedUserId(user.userId)}
+                  >
+                    <strong>{user.displayName || user.email}</strong>
+                    {user.displayName ? <small>{user.email}</small> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
       <div className="feature-flag-list">

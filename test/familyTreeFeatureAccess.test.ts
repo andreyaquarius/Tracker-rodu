@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { resolveFamilyTreeFeatureAccess } from "../src/utils/familyTreeFeatureAccess.ts";
+import {
+  filterFamilyTreeAccessCandidates,
+  matchesFamilyTreeAccessSearch,
+  resolveFamilyTreeFeatureAccess,
+} from "../src/utils/familyTreeFeatureAccess.ts";
 
 const migration = readFileSync(
   new URL(
@@ -40,6 +44,46 @@ test("non-admin family-tree access is fail-closed", () => {
     serverAllowed: true,
     serverLoading: false,
   }), true);
+});
+
+test("family-tree tester search matches Ukrainian names and email tokens", () => {
+  const user = {
+    displayName: "Олена Каленська",
+    email: "Olena.Kalenska@example.com",
+  };
+
+  assert.equal(matchesFamilyTreeAccessSearch(user, "  оЛЕНа кален  "), true);
+  assert.equal(matchesFamilyTreeAccessSearch(user, "kalenska@EXAMPLE"), true);
+  assert.equal(matchesFamilyTreeAccessSearch(user, "Андрій"), false);
+});
+
+test("family-tree tester search returns only users who can be granted access", () => {
+  const candidates = filterFamilyTreeAccessCandidates([
+    {
+      userId: "available",
+      displayName: "Марія Коваль",
+      email: "maria@example.com",
+      isAdmin: false,
+      isEnabled: false,
+    },
+    {
+      userId: "enabled",
+      displayName: "Марія Іваненко",
+      email: "enabled@example.com",
+      isAdmin: false,
+      isEnabled: true,
+    },
+    {
+      userId: "admin",
+      displayName: "Марія Адміністратор",
+      email: "admin@example.com",
+      isAdmin: true,
+      isEnabled: true,
+    },
+  ], "марія");
+
+  assert.deepEqual(candidates.map((candidate) => candidate.userId), ["available"]);
+  assert.deepEqual(filterFamilyTreeAccessCandidates(candidates, "   "), []);
 });
 
 test("family-tree feature migration enforces allow-list on tables and definer RPCs", () => {
