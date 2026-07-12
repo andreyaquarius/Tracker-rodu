@@ -81,6 +81,7 @@ import { formatDateTime } from "../utils/dateHelpers";
 import { ProductionFamilyTreePage } from "./ProductionFamilyTreePage";
 import { useFamilyTreeRecordWindows } from "../hooks/useFamilyTreeRecordWindows";
 import type {
+  GedcomImportExecutionOptions,
   GedcomImportReconciliationPayload,
   GedcomImportReconciliationResult,
 } from "../utils/gedcomImportReconciliation.ts";
@@ -132,7 +133,10 @@ export type FamilyTreePageProps = {
   customFieldLimitMessage?: string;
   onSavePerson?: (person: Person) => void | Promise<Person | null | void>;
   onImportRecords?: (collection: "persons", records: AppEntity[]) => Promise<void>;
-  onImportGedcom?: (input: GedcomImportReconciliationPayload) => Promise<GedcomImportReconciliationResult | void>;
+  onImportGedcom?: (
+    input: GedcomImportReconciliationPayload,
+    options?: GedcomImportExecutionOptions,
+  ) => Promise<GedcomImportReconciliationResult | void>;
   onSaveEntity?: (collection: RelatedEntityPageKey, entity: AppEntity) => void | AppEntity | null | Promise<AppEntity | null | void>;
   onSaveRelation?: (relation: PersonRelation) => void;
   onDeleteRelation?: (id: string) => void;

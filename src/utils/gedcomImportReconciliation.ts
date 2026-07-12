@@ -40,6 +40,16 @@ export interface GedcomImportReconciliationResult extends GedcomImportReconcilia
   findingIdRemap: Record<string, string>;
 }
 
+export interface GedcomImportExecutionProgress {
+  step: string;
+  percent: number;
+  detail: string;
+}
+
+export interface GedcomImportExecutionOptions {
+  onProgress?: (progress: GedcomImportExecutionProgress) => void;
+}
+
 /** Uses a vendor tree identifier when available; otherwise fingerprints the exact GEDCOM content. */
 export function deriveGedcomImportSourceKey(draft: GedcomImportDraft): string {
   const head = (draft.preservedRecords ?? []).find((record) => record.tag.toUpperCase() === "HEAD");

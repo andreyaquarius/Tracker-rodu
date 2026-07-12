@@ -34,6 +34,7 @@ import { usePagination } from "../hooks/usePagination";
 import { useWorkspaceWindows } from "../components/WorkspaceWindows";
 import { createFamilyTreeFromLegacyImport } from "../services/familyTreeMutationService";
 import type {
+  GedcomImportExecutionOptions,
   GedcomImportReconciliationPayload,
   GedcomImportReconciliationResult,
 } from "../utils/gedcomImportReconciliation.ts";
@@ -111,7 +112,10 @@ export function PersonsPage({
   initialOpenPersonId?: string;
   onSavePerson: (person: Person) => void;
   onImportRecords: (collection: "persons", records: AppEntity[]) => Promise<void>;
-  onImportGedcom?: (input: GedcomImportReconciliationPayload) => Promise<GedcomImportReconciliationResult | void>;
+  onImportGedcom?: (
+    input: GedcomImportReconciliationPayload,
+    options?: GedcomImportExecutionOptions,
+  ) => Promise<GedcomImportReconciliationResult | void>;
   onDeletePerson: (id: string) => void;
   onSaveRelation: (relation: PersonRelation) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onDeleteRelation: (id: string) => void;

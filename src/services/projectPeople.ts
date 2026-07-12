@@ -14,9 +14,17 @@ import {
 import { normalizePersonStatus } from "../utils/personStatus.ts";
 import { normalizePersonGender } from "../utils/personGender.ts";
 import { normalizePersonRelation } from "../utils/personRelation.ts";
-import { saveOptionalProjectCache } from "../utils/projectCache.ts";
+import {
+  discardOptionalProjectCache,
+  saveOptionalProjectCache,
+} from "../utils/projectCache.ts";
 import { selectRowsInParallel } from "../utils/pagedRows.ts";
-import { chunkImportRows } from "../utils/importBatches.ts";
+import {
+  chunkImportRows,
+  runImportBatches,
+  withImportPhase,
+  type ImportPhaseProgressOptions,
+} from "../utils/importBatches.ts";
 import {
   PERSON_SCANS_METADATA_KEY,
   personPhotoMetadataForStorage,
@@ -89,7 +97,9 @@ const SELECT_BATCH_SIZE = 1000;
 // keeps the aggregate at two database statements instead of six competing
 // offset scans, while still allowing both independent tables to load together.
 const SELECT_CONCURRENCY_PER_TABLE = 1;
+const IMPORT_CONCURRENCY = 3;
 const PEOPLE_CACHE_MAX_CHARS = 3_500_000;
+const PEOPLE_CACHE_MAX_RECORDS = 8_000;
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -298,22 +308,29 @@ export async function importProjectPeople(
   persons: Person[],
   relations: PersonRelation[],
   researchIds: Set<string>,
+  options: ImportPhaseProgressOptions = {},
 ): Promise<void> {
   const client = getSupabaseClient();
   const personRows = persons.map((person) => personToRow(projectId, person, researchIds));
-  for (const batch of chunkImportRows(personRows)) {
+  await runImportBatches(chunkImportRows(personRows), async (batch) => {
     const { error } = await client
       .from("persons")
       .upsert(batch, { onConflict: "id" });
     if (error) throw error;
-  }
+  }, {
+    concurrency: IMPORT_CONCURRENCY,
+    onProgress: withImportPhase("persons", options.onProgress),
+  });
   const relationRows = relations.map((relation) => relationToRow(projectId, relation));
-  for (const batch of chunkImportRows(relationRows)) {
+  await runImportBatches(chunkImportRows(relationRows), async (batch) => {
     const { error } = await client
       .from("person_relations")
       .upsert(batch, { onConflict: "id" });
     if (error) throw error;
-  }
+  }, {
+    concurrency: IMPORT_CONCURRENCY,
+    onProgress: withImportPhase("relations", options.onProgress),
+  });
 }
 
 export async function saveProjectPerson(
@@ -397,6 +414,10 @@ export function saveProjectPeopleCache(
   relations: PersonRelation[],
 ): void {
   const key = `${CACHE_PREFIX}${projectId}`;
+  if (persons.length + relations.length > PEOPLE_CACHE_MAX_RECORDS) {
+    discardOptionalProjectCache(key);
+    return;
+  }
   const normalizedPersons = persons.map((person) => ({
     ...person,
     status: normalizePersonStatus(person.status),

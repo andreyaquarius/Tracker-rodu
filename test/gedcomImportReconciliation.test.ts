@@ -161,7 +161,8 @@ test("passes reconciled IDs to tree creation and archive persistence", () => {
   );
   const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 
-  assert.match(buttonSource, /const reconciled = await onImportGedcom\(committed\)/);
+  assert.match(buttonSource, /const reconciled = await onImportGedcom\(committed, \{/);
+  assert.match(buttonSource, /onProgress: \(nextProgress\) => setProgress\(nextProgress\)/);
   assert.match(buttonSource, /people: committed\.people/);
   assert.match(buttonSource, /relations: committed\.relations/);
   assert.match(buttonSource, /rootPersonId: committed\.rootPersonId/);

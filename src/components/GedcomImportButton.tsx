@@ -5,6 +5,7 @@ import { buildGedcomAppImport } from "../utils/gedcomAppImport";
 import { decodeGedcomBytes } from "../utils/gedcomEncoding";
 import { buildGedcomImportDraft } from "../utils/gedcomImport";
 import type {
+  GedcomImportExecutionOptions,
   GedcomImportReconciliationPayload,
   GedcomImportReconciliationResult,
 } from "../utils/gedcomImportReconciliation.ts";
@@ -35,6 +36,7 @@ interface GedcomImportButtonProps {
   onImportPersons: (records: AppEntity[]) => Promise<void>;
   onImportGedcom?: (
     input: GedcomImportReconciliationPayload,
+    options?: GedcomImportExecutionOptions,
   ) => Promise<GedcomImportReconciliationResult | void>;
   onSaveRelation: (relation: PersonRelation) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onCreateFamilyTree?: (input: {
@@ -186,7 +188,9 @@ export function GedcomImportButton({
         importSourceKey: preview.importSourceKey,
       };
       if (onImportGedcom) {
-        const reconciled = await onImportGedcom(committed);
+        const reconciled = await onImportGedcom(committed, {
+          onProgress: (nextProgress) => setProgress(nextProgress),
+        });
         if (reconciled) committed = reconciled;
       } else {
         await onImportPersons(preview.personRecords);
