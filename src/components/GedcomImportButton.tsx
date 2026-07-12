@@ -1,4 +1,4 @@
-﻿import { useMemo, useRef, useState, type ChangeEvent } from "react";
+﻿import { useId, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { AppEntity, DocumentRecord, Finding, Person, PersonRelation } from "../types";
 import type { FamilyTreeGraphIssue, GedcomPreservedRecord } from "../types/familyTree";
 import { buildGedcomAppImport } from "../utils/gedcomAppImport";
@@ -13,6 +13,11 @@ import {
   type GedcomImportStage,
 } from "../utils/gedcomImportDiagnostics";
 import { buildGedcomImportReport, formatGedcomImportReport, type GedcomImportReport } from "../utils/gedcomImportReport";
+import {
+  buildGedcomPersonSearchIndex,
+  gedcomPersonSearchLabel,
+  searchGedcomPeople,
+} from "../utils/gedcomPersonSearch";
 import { Modal } from "./Modal";
 
 export interface GedcomImportArchivePayload {
@@ -75,8 +80,23 @@ export function GedcomImportButton({
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<GedcomImportPreview | null>(null);
   const [progress, setProgress] = useState<GedcomImportProgress>(null);
+  const [rootSearchQuery, setRootSearchQuery] = useState("");
+  const rootPersonSearchId = useId();
   const rootCandidates = useMemo(
     () => preview ? sortRootCandidates(preview.people, preview.relations) : [],
+    [preview],
+  );
+  const rootSearchIndex = useMemo(
+    () => buildGedcomPersonSearchIndex(rootCandidates),
+    [rootCandidates],
+  );
+  const normalizedRootSearchQuery = rootSearchQuery.trim();
+  const rootSearchResults = useMemo(
+    () => searchGedcomPeople(rootSearchIndex, rootSearchQuery),
+    [rootSearchIndex, rootSearchQuery],
+  );
+  const selectedRootPerson = useMemo(
+    () => preview?.people.find((person) => person.id === preview.rootPersonId) ?? null,
     [preview],
   );
 
@@ -112,6 +132,7 @@ export function GedcomImportButton({
       const rootPersonId = built.rootPersonId && built.people.some((person) => person.id === built.rootPersonId)
         ? built.rootPersonId
         : candidates[0]?.id ?? built.people[0]?.id ?? "";
+      setRootSearchQuery("");
       setPreview({
         fileName: file.name,
         people: built.people,
@@ -197,6 +218,7 @@ export function GedcomImportButton({
         formatGedcomImportReport(preview.report),
       ].join("\n"));
       setPreview(null);
+      setRootSearchQuery("");
     } catch (error) {
       const stageError = toGedcomImportStageError(activeStage, error);
       console.error("GEDCOM import commit stage failed", {
@@ -241,7 +263,12 @@ export function GedcomImportButton({
         <Modal
           title="Імпорт GEDCOM"
           className="gedcom-import-modal"
-          onClose={() => !busy && setPreview(null)}
+          onClose={() => {
+            if (!busy) {
+              setPreview(null);
+              setRootSearchQuery("");
+            }
+          }}
         >
           <div className="gedcom-import-dialog-body">
             <div className="gedcom-import-preview">
@@ -249,23 +276,80 @@ export function GedcomImportButton({
               <span className="eyebrow">Файл</span>
               <h3>{preview.fileName}</h3>
             </div>
-            <label>
-              <span>Центральна особа для дерева</span>
-              <select
-                value={preview.rootPersonId}
-                disabled={busy || !onCreateFamilyTree}
-                onChange={(event) => setPreview((current) => current ? { ...current, rootPersonId: event.target.value } : current)}
-              >
-                {rootCandidates.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {personOptionLabel(person)}
-                  </option>
-                ))}
-              </select>
+            <div className="gedcom-root-person-picker">
+              <label htmlFor={`${rootPersonSearchId}-input`}>
+                <span>Центральна особа для дерева</span>
+              </label>
+              <div className="gedcom-root-person-picker__selected" aria-live="polite">
+                <small>Зараз вибрано</small>
+                <strong>{selectedRootPerson ? gedcomPersonSearchLabel(selectedRootPerson) : "Особу не вибрано"}</strong>
+              </div>
+              <div className="gedcom-root-person-picker__search">
+                <input
+                  id={`${rootPersonSearchId}-input`}
+                  type="search"
+                  value={rootSearchQuery}
+                  disabled={busy || !onCreateFamilyTree}
+                  placeholder="Введіть імʼя, прізвище або рік"
+                  autoComplete="off"
+                  aria-controls={`${rootPersonSearchId}-results`}
+                  aria-describedby={`${rootPersonSearchId}-help`}
+                  onChange={(event) => setRootSearchQuery(event.target.value)}
+                />
+                {normalizedRootSearchQuery ? (
+                  <button
+                    type="button"
+                    className="button button-secondary gedcom-root-person-picker__clear"
+                    disabled={busy || !onCreateFamilyTree}
+                    onClick={() => setRootSearchQuery("")}
+                  >
+                    Очистити
+                  </button>
+                ) : null}
+              </div>
+              {normalizedRootSearchQuery ? (
+                <div id={`${rootPersonSearchId}-results`} className="gedcom-root-person-picker__results">
+                  {rootSearchResults.length ? (
+                    <>
+                      <small role="status">
+                        Показано {rootSearchResults.length}{rootSearchResults.length === 20 ? " найкращих" : ""} збігів.
+                      </small>
+                      <ul className="gedcom-root-person-picker__list">
+                        {rootSearchResults.map(({ person, label }) => (
+                          <li key={person.id}>
+                            <button
+                              type="button"
+                              className="gedcom-root-person-picker__result"
+                              aria-pressed={person.id === preview.rootPersonId}
+                              onClick={() => {
+                                setPreview((current) => current ? { ...current, rootPersonId: person.id } : current);
+                                setRootSearchQuery("");
+                              }}
+                            >
+                              {label}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <small className="gedcom-root-person-picker__empty" role="status">
+                      Нікого не знайдено. Спробуйте інше імʼя, дату або рік.
+                    </small>
+                  )}
+                </div>
+              ) : (
+                <small className="gedcom-root-person-picker__idle" role="status">
+                  Почніть вводити запит, щоб знайти людину серед {rootSearchIndex.length.toLocaleString("uk-UA")} осіб.
+                </small>
+              )}
+              <small id={`${rootPersonSearchId}-help`}>
+                Пошук працює за повним імʼям, датою або роком народження і смерті.
+              </small>
               <small>
                 Від цієї особи буде збережено центр дерева після імпорту. Якщо треба, оберіть себе або іншу фокусну особу.
               </small>
-            </label>
+            </div>
             <pre>{formatGedcomImportReport(preview.report)}</pre>
             {progress ? (
               <div className="gedcom-import-progress" aria-live="polite">
@@ -289,7 +373,10 @@ export function GedcomImportButton({
             ) : null}
             </div>
             <div className="details-actions">
-              <button type="button" className="button button-secondary" disabled={busy} onClick={() => setPreview(null)}>
+              <button type="button" className="button button-secondary" disabled={busy} onClick={() => {
+                setPreview(null);
+                setRootSearchQuery("");
+              }}>
                 Скасувати
               </button>
               <button type="button" className="button button-primary" disabled={busy || !preview.rootPersonId} onClick={() => void confirmImport()}>
@@ -341,15 +428,6 @@ function isParentRelationLabel(type: string): boolean {
 
 function isChildRelationLabel(type: string): boolean {
   return ["син", "донь", "дит", "child", "son", "daughter", "сѓсђ", "рґрѕрЅ", "рґрё"].some((part) => type.includes(part));
-}
-
-function personOptionLabel(person: Person): string {
-  const birthYear = yearFromDateText(person.birthDate);
-  const deathYear = yearFromDateText(person.deathDate);
-  const years = [birthYear ? `нар. ${birthYear}` : "", deathYear ? `пом. ${deathYear}` : ""]
-    .filter(Boolean)
-    .join(", ");
-  return `${personDisplayName(person)}${years ? ` (${years})` : ""}`;
 }
 
 function personDisplayName(person: Person): string {
