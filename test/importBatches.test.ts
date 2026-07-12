@@ -8,6 +8,7 @@ import {
   FINDING_IMPORT_BATCH_ITEMS,
   chunkFindingImportRows,
   chunkImportRows,
+  runImportBatches,
 } from "../src/utils/importBatches.ts";
 
 const encoder = new TextEncoder();
@@ -66,11 +67,11 @@ test("all project bulk import services use bounded mutation batches", () => {
     "utf8",
   );
 
-  assert.match(peopleSource, /for \(const batch of chunkImportRows\(personRows\)\)/);
-  assert.match(peopleSource, /for \(const batch of chunkImportRows\(relationRows\)\)/);
-  assert.match(documentsSource, /for \(const batch of chunkImportRows\(documentRows\)\)/);
-  assert.match(documentsSource, /for \(const batch of chunkImportRows\(yearMatrixRows\)\)/);
-  assert.match(workRecordsSource, /for \(const batch of chunkFindingImportRows\(findingRows\)\)/);
+  assert.match(peopleSource, /runImportBatches\(chunkImportRows\(personRows\)/);
+  assert.match(peopleSource, /runImportBatches\(chunkImportRows\(relationRows\)/);
+  assert.match(documentsSource, /runImportBatches\(chunkImportRows\(documentRows\)/);
+  assert.match(documentsSource, /runImportBatches\(chunkImportRows\(yearMatrixRows\)/);
+  assert.match(workRecordsSource, /runImportBatches\(chunkFindingImportRows\(findingRows\)/);
   assert.match(workRecordsSource, /replaceImportedFindingParticipants/);
   assert.doesNotMatch(
     workRecordsSource,
@@ -78,7 +79,71 @@ test("all project bulk import services use bounded mutation batches", () => {
   );
 });
 
+test("runs import batches with bounded concurrency and monotonic progress", async () => {
+  const batches = Array.from({ length: 9 }, (_, batchIndex) =>
+    Array.from({ length: batchIndex === 8 ? 1 : 3 }, (_, itemIndex) =>
+      batchIndex * 3 + itemIndex,
+    ),
+  );
+  let activeWorkers = 0;
+  let maximumActiveWorkers = 0;
+  const processedBatchIndexes: number[] = [];
+  const progress: Array<{
+    completedBatches: number;
+    totalBatches: number;
+    processedItems: number;
+    totalItems: number;
+  }> = [];
+
+  await runImportBatches(batches, async (_batch, batchIndex) => {
+    activeWorkers += 1;
+    maximumActiveWorkers = Math.max(maximumActiveWorkers, activeWorkers);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    processedBatchIndexes.push(batchIndex);
+    activeWorkers -= 1;
+  }, {
+    concurrency: 3,
+    onProgress: (update) => progress.push(update),
+  });
+
+  assert.equal(maximumActiveWorkers, 3);
+  assert.deepEqual(processedBatchIndexes.toSorted((left, right) => left - right),
+    batches.map((_batch, index) => index));
+  assert.equal(progress.length, batches.length);
+  assert.equal(progress.every((update, index) =>
+    update.completedBatches === index + 1 &&
+    update.totalBatches === batches.length &&
+    update.totalItems === 25 &&
+    (index === 0 || update.processedItems > progress[index - 1].processedItems)), true);
+  assert.deepEqual(progress.at(-1), {
+    completedBatches: 9,
+    totalBatches: 9,
+    processedItems: 25,
+    totalItems: 25,
+  });
+});
+
+test("does not invoke a batch worker or report progress for empty input", async () => {
+  let calls = 0;
+  await runImportBatches([], async () => {
+    calls += 1;
+  }, {
+    concurrency: 2,
+    onProgress: () => {
+      calls += 1;
+    },
+  });
+  assert.equal(calls, 0);
+});
+
 test("rejects invalid batch limits", () => {
   assert.throws(() => chunkImportRows([1], { maxItems: 0 }), RangeError);
   assert.throws(() => chunkImportRows([1], { maxBytes: 1 }), RangeError);
+});
+
+test("rejects invalid batch concurrency", async () => {
+  await assert.rejects(
+    runImportBatches([[1]], async () => undefined, { concurrency: 0 }),
+    RangeError,
+  );
 });

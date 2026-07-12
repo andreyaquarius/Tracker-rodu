@@ -90,6 +90,20 @@ export function saveOptionalProjectCache(
   }
 }
 
+/**
+ * Explicitly discards a reproducible cache without serializing its source data.
+ * Large GEDCOM imports use this before JSON.stringify could block the UI or
+ * exceed the browser storage quota.
+ */
+export function discardOptionalProjectCache(
+  key: string,
+  storage: ProjectCacheStorage | undefined = defaultStorage(),
+): boolean {
+  if (!storage) return false;
+  removeOptionalProjectCache(key, storage);
+  return true;
+}
+
 function removeOptionalProjectCache(
   key: string,
   storage: ProjectCacheStorage,

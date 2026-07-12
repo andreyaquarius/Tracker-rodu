@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   clearAllProjectCaches,
+  discardOptionalProjectCache,
   PROJECT_CACHE_PREFIX,
   saveOptionalProjectCache,
 } from "../src/utils/projectCache.ts";
@@ -72,6 +73,21 @@ test("optional cache drops only its own oversized entry", () => {
   assert.equal(saveOptionalProjectCache(key, { text: "too large" }, 5, storage), false);
   assert.equal(storage.has(key), false);
   assert.equal(storage.get("unrelated-key"), "keep me");
+});
+
+test("explicitly discards a large reproducible cache without serializing it", () => {
+  const key = `${PROJECT_CACHE_PREFIX}work-records:abc`;
+  const storage = makeStorage({ [key]: "stale", "unrelated-key": "keep me" });
+  const value = {
+    toJSON() {
+      throw new Error("must not serialize");
+    },
+  };
+
+  assert.equal(discardOptionalProjectCache(key, storage), true);
+  assert.equal(storage.has(key), false);
+  assert.equal(storage.get("unrelated-key"), "keep me");
+  assert.equal(typeof value.toJSON, "function");
 });
 
 test("optional cache swallows quota errors and removes its stale entry", () => {

@@ -186,9 +186,11 @@ import {
 } from "./utils/gedcomImportDiagnostics";
 import {
   reconcileGedcomImportForRetry,
+  type GedcomImportExecutionOptions,
   type GedcomImportReconciliationPayload,
   type GedcomImportReconciliationResult,
 } from "./utils/gedcomImportReconciliation.ts";
+import type { ImportPhaseProgress } from "./utils/importBatches.ts";
 import {
   ALL_PROJECT_DATA_GROUPS,
   dataGroupsForPage,
@@ -454,6 +456,40 @@ function activityModuleLabel(collection: CollectionKey): string {
 function baseUpdatedAt(entity: object): string | undefined {
   const value = (entity as Record<string, unknown>).__baseUpdatedAt;
   return typeof value === "string" ? value : undefined;
+}
+
+const GEDCOM_IMPORT_PHASE_RANGES: Record<
+  ImportPhaseProgress["phase"],
+  { step: string; start: number; end: number }
+> = {
+  persons: { step: "Зберігаємо осіб", start: 47, end: 52 },
+  relations: { step: "Зберігаємо родинні звʼязки", start: 52, end: 56 },
+  documents: { step: "Зберігаємо джерела", start: 56, end: 58 },
+  "year-matrix": { step: "Зберігаємо матрицю років", start: 58, end: 59 },
+  tasks: { step: "Зберігаємо завдання", start: 59, end: 60 },
+  "task-person-delete": { step: "Оновлюємо учасників завдань", start: 60, end: 61 },
+  "task-person-insert": { step: "Оновлюємо учасників завдань", start: 61, end: 62 },
+  findings: { step: "Зберігаємо знахідки", start: 58, end: 68 },
+  "finding-participant-delete": { step: "Оновлюємо учасників знахідок", start: 68, end: 71 },
+  "finding-participant-upsert": { step: "Зберігаємо учасників знахідок", start: 71, end: 74 },
+};
+
+function reportGedcomImportBatchProgress(
+  options: GedcomImportExecutionOptions | undefined,
+  progress: ImportPhaseProgress,
+): void {
+  const range = GEDCOM_IMPORT_PHASE_RANGES[progress.phase];
+  const ratio = progress.totalItems > 0
+    ? progress.processedItems / progress.totalItems
+    : 1;
+  options?.onProgress?.({
+    step: range.step,
+    percent: range.start + (range.end - range.start) * Math.min(1, ratio),
+    detail: [
+      `Оброблено ${progress.processedItems.toLocaleString("uk-UA")} із ${progress.totalItems.toLocaleString("uk-UA")} записів.`,
+      `Пакетів: ${progress.completedBatches.toLocaleString("uk-UA")} із ${progress.totalBatches.toLocaleString("uk-UA")}.`,
+    ].join(" "),
+  });
 }
 
 export default function App() {
@@ -3094,8 +3130,14 @@ export default function App() {
   };
   const importGedcomRecords = async (
     input: GedcomImportReconciliationPayload,
+    options?: GedcomImportExecutionOptions,
   ): Promise<GedcomImportReconciliationResult | void> => {
     if (!input.people.length) return;
+    options?.onProgress?.({
+      step: "Перевіряємо попередні імпорти",
+      percent: 45,
+      detail: "Зіставляємо GEDCOM з уже збереженими даними проєкту.",
+    });
     if (workspace && !subscriptionAccess.isAdmin) {
       await assertFamilyTreeFeatureAccess();
     }
@@ -3115,6 +3157,11 @@ export default function App() {
         personRelations: mergeImportedRecords(reconciled.relations, current.personRelations),
         findings: mergeImportedRecords(reconciled.findings, current.findings),
       }));
+      options?.onProgress?.({
+        step: "Оновлюємо дані проєкту",
+        percent: 74,
+        detail: "Особи, звʼязки, джерела та знахідки підготовлені.",
+      });
       return reconciled;
     }
     if (workspace.role === "viewer") {
@@ -3127,11 +3174,21 @@ export default function App() {
       listProjectDocuments(projectId),
       listProjectWorkRecords(projectId),
     ]);
+    options?.onProgress?.({
+      step: "Зіставляємо записи GEDCOM",
+      percent: 46,
+      detail: "Перевіряємо повторний імпорт і зберігаємо сталі ідентифікатори.",
+    });
     const reconciled = reconcileGedcomImportForRetry(input, {
       people: storedPeople.persons,
       documents: storedDocuments.documents,
       relations: storedPeople.relations,
       findings: storedWorkRecords.findings,
+    });
+    options?.onProgress?.({
+      step: "Готуємо пакетне збереження",
+      percent: 47,
+      detail: `Підготовлено ${reconciled.people.length.toLocaleString("uk-UA")} осіб, ${reconciled.relations.length.toLocaleString("uk-UA")} звʼязків і ${reconciled.findings.length.toLocaleString("uk-UA")} знахідок.`,
     });
     const storedPersonIds = new Set(storedPeople.persons.map((person) => person.id));
     const storedDocumentIds = new Set(storedDocuments.documents.map((document) => document.id));
@@ -3187,16 +3244,38 @@ export default function App() {
         "people-relations",
         "Не вдалося зберегти осіб і родинні зв’язки.",
         { people: reconciled.people.length, relations: reconciled.relations.length },
-        () => importProjectPeople(projectId, reconciled.people, reconciled.relations, researchIds),
+        () => importProjectPeople(
+          projectId,
+          reconciled.people,
+          reconciled.relations,
+          researchIds,
+          { onProgress: (progress) => reportGedcomImportBatchProgress(options, progress) },
+        ),
       );
+      options?.onProgress?.({
+        step: "Особи та звʼязки збережені",
+        percent: 56,
+        detail: `Осіб: ${reconciled.people.length.toLocaleString("uk-UA")}, звʼязків: ${reconciled.relations.length.toLocaleString("uk-UA")}.`,
+      });
       if (reconciled.documents.length) {
         await runPersistenceStage(
           "documents",
           "Не вдалося зберегти джерела і документи.",
           { documents: reconciled.documents.length },
-          () => importProjectDocuments(projectId, reconciled.documents, [], researchIds),
+          () => importProjectDocuments(
+            projectId,
+            reconciled.documents,
+            [],
+            researchIds,
+            { onProgress: (progress) => reportGedcomImportBatchProgress(options, progress) },
+          ),
         );
       }
+      options?.onProgress?.({
+        step: "Джерела збережені",
+        percent: 58,
+        detail: `Джерел і документів: ${reconciled.documents.length.toLocaleString("uk-UA")}.`,
+      });
       if (reconciled.findings.length) {
         await runPersistenceStage(
           "findings",
@@ -3209,9 +3288,15 @@ export default function App() {
             researchIds,
             documentIds,
             new Set(nextPersons.map((person) => person.id)),
+            { onProgress: (progress) => reportGedcomImportBatchProgress(options, progress) },
           ),
         );
       }
+      options?.onProgress?.({
+        step: "Завершуємо збереження даних",
+        percent: 74,
+        detail: `Знахідок: ${reconciled.findings.length.toLocaleString("uk-UA")}. Оновлюємо локальний стан проєкту.`,
+      });
       setProjectPersons(nextPersons);
       setProjectPersonRelations(nextRelations);
       if (reconciled.documents.length) setProjectDocuments(nextDocuments);
@@ -3219,6 +3304,11 @@ export default function App() {
       saveProjectPeopleCache(projectId, nextPersons, nextRelations);
       if (reconciled.documents.length) saveProjectDocumentsCache(projectId, nextDocuments, storedDocuments.yearMatrix);
       if (reconciled.findings.length) saveProjectWorkRecordsCache(projectId, storedWorkRecords.tasks, nextFindings);
+      options?.onProgress?.({
+        step: "Дані GEDCOM збережені",
+        percent: 74.5,
+        detail: "Переходимо до формування родового дерева.",
+      });
       void subscriptionAccess.refreshSubscription();
       return reconciled;
     } catch (error) {

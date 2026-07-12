@@ -86,6 +86,7 @@ import type {
 import { moveFamilyTreeFocus, pushFamilyTreeFocus } from "../utils/familyTreeFocusHistory.ts";
 import { exportFamilyTreeGraphToGedcom } from "../utils/gedcom";
 import type {
+  GedcomImportExecutionOptions,
   GedcomImportReconciliationPayload,
   GedcomImportReconciliationResult,
 } from "../utils/gedcomImportReconciliation.ts";
@@ -114,7 +115,10 @@ export interface ProductionFamilyTreePageProps {
     collection: "persons",
     records: AppEntity[],
   ) => Promise<void>;
-  onImportGedcom?: (input: GedcomImportReconciliationPayload) => Promise<GedcomImportReconciliationResult | void>;
+  onImportGedcom?: (
+    input: GedcomImportReconciliationPayload,
+    options?: GedcomImportExecutionOptions,
+  ) => Promise<GedcomImportReconciliationResult | void>;
   onSaveRelation?: (
     relation: PersonRelation,
   ) => Promise<PersonRelation | null> | PersonRelation | null | void;

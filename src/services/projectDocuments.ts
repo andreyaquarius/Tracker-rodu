@@ -6,7 +6,12 @@ import type {
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
 import { saveOptionalProjectCache } from "../utils/projectCache";
-import { chunkImportRows } from "../utils/importBatches.ts";
+import {
+  chunkImportRows,
+  runImportBatches,
+  withImportPhase,
+  type ImportPhaseProgressOptions,
+} from "../utils/importBatches.ts";
 
 type DocumentRow = {
   id: string;
@@ -45,6 +50,8 @@ type YearMatrixRow = {
   created_at: string;
   updated_at: string;
 };
+
+const IMPORT_CONCURRENCY = 3;
 
 const DOCUMENT_SELECT =
   "id, project_id, research_id, title, document_type, archive, fund, file_reference, year_from, year_to, place, url, pages_count, last_page, review_status, description, notes, custom_fields, created_at, updated_at";
@@ -195,25 +202,32 @@ export async function importProjectDocuments(
   documents: DocumentRecord[],
   yearMatrix: YearMatrixRecord[],
   researchIds: Set<string>,
+  options: ImportPhaseProgressOptions = {},
 ): Promise<void> {
   const client = getSupabaseClient();
   const documentIds = new Set(documents.map((document) => document.id));
   const documentRows = documents.map((document) => documentToRow(projectId, document, researchIds));
-  for (const batch of chunkImportRows(documentRows)) {
+  await runImportBatches(chunkImportRows(documentRows), async (batch) => {
     const { error } = await client
       .from("documents")
       .upsert(batch, { onConflict: "id" });
     if (error) throw error;
-  }
+  }, {
+    concurrency: IMPORT_CONCURRENCY,
+    onProgress: withImportPhase("documents", options.onProgress),
+  });
   const yearMatrixRows = yearMatrix.map((record) =>
     matrixToRow(projectId, record, researchIds, documentIds),
   );
-  for (const batch of chunkImportRows(yearMatrixRows)) {
+  await runImportBatches(chunkImportRows(yearMatrixRows), async (batch) => {
     const { error } = await client
       .from("year_matrix")
       .upsert(batch, { onConflict: "id" });
     if (error) throw error;
-  }
+  }, {
+    concurrency: IMPORT_CONCURRENCY,
+    onProgress: withImportPhase("year-matrix", options.onProgress),
+  });
 }
 
 export async function saveProjectDocument(
