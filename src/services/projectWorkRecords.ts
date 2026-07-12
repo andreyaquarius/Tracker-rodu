@@ -320,6 +320,148 @@ export async function listProjectWorkRecords(projectId: string): Promise<{
   };
 }
 
+export async function listPersonWorkRecords(
+  projectId: string,
+  personId: string,
+): Promise<{ tasks: TaskRecord[]; findings: Finding[] }> {
+  const client = getSupabaseClient();
+  const [taskLinksResult, findingsResult] = await Promise.all([
+    client
+      .from("task_persons")
+      .select("task_id")
+      .eq("project_id", projectId)
+      .eq("person_id", personId),
+    client
+      .from("findings")
+      .select(FINDING_SELECT)
+      .eq("project_id", projectId)
+      .contains("custom_fields", {
+        [FINDING_META_KEY]: { personIds: [personId] },
+      })
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true }),
+  ]);
+  if (taskLinksResult.error) throw taskLinksResult.error;
+  if (findingsResult.error) throw findingsResult.error;
+
+  const taskIds = [...new Set(
+    (taskLinksResult.data as Array<{ task_id: string }>).map((row) => row.task_id),
+  )];
+  const findingRows = findingsResult.data as FindingRow[];
+  const findingIds = findingRows.map((row) => row.id);
+  const [tasksResult, allTaskLinksResult, participantsResult] = await Promise.all([
+    taskIds.length
+      ? client
+          .from("tasks")
+          .select(TASK_SELECT)
+          .eq("project_id", projectId)
+          .in("id", taskIds)
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: true })
+      : Promise.resolve({ data: [] as TaskRow[], error: null }),
+    taskIds.length
+      ? client
+          .from("task_persons")
+          .select("task_id, person_id")
+          .eq("project_id", projectId)
+          .in("task_id", taskIds)
+      : Promise.resolve({ data: [] as TaskPersonRow[], error: null }),
+    findingIds.length
+      ? client
+          .from("finding_participants")
+          .select("id, finding_id, person_id, name, role, notes")
+          .eq("project_id", projectId)
+          .in("finding_id", findingIds)
+          .order("id", { ascending: true })
+      : Promise.resolve({ data: [] as FindingParticipantRow[], error: null }),
+  ]);
+  if (tasksResult.error) throw tasksResult.error;
+  if (allTaskLinksResult.error) throw allTaskLinksResult.error;
+  if (participantsResult.error) throw participantsResult.error;
+
+  const personIdsByTask = new Map<string, string[]>();
+  for (const row of allTaskLinksResult.data as TaskPersonRow[]) {
+    personIdsByTask.set(row.task_id, [
+      ...(personIdsByTask.get(row.task_id) ?? []),
+      row.person_id,
+    ]);
+  }
+  const participantsByFinding = new Map<string, FindingParticipant[]>();
+  for (const row of participantsResult.data as FindingParticipantRow[]) {
+    participantsByFinding.set(row.finding_id, [
+      ...(participantsByFinding.get(row.finding_id) ?? []),
+      { id: row.id, name: row.name, role: row.role, notes: row.notes },
+    ]);
+  }
+
+  return {
+    tasks: (tasksResult.data as TaskRow[]).map((row) =>
+      taskFromRow(row, personIdsByTask.get(row.id) ?? []),
+    ),
+    findings: findingRows.map((row) =>
+      findingFromRow(row, participantsByFinding.get(row.id) ?? []),
+    ),
+  };
+}
+
+export async function getProjectTask(
+  projectId: string,
+  taskId: string,
+): Promise<TaskRecord | null> {
+  const client = getSupabaseClient();
+  const [taskResult, personResult] = await Promise.all([
+    client
+      .from("tasks")
+      .select(TASK_SELECT)
+      .eq("project_id", projectId)
+      .eq("id", taskId)
+      .maybeSingle(),
+    client
+      .from("task_persons")
+      .select("person_id")
+      .eq("project_id", projectId)
+      .eq("task_id", taskId),
+  ]);
+  if (taskResult.error) throw taskResult.error;
+  if (personResult.error) throw personResult.error;
+  if (!taskResult.data) return null;
+  return taskFromRow(
+    taskResult.data as TaskRow,
+    (personResult.data as Array<{ person_id: string }>).map((row) => row.person_id),
+  );
+}
+
+export async function getProjectFinding(
+  projectId: string,
+  findingId: string,
+): Promise<Finding | null> {
+  const client = getSupabaseClient();
+  const [findingResult, participantResult] = await Promise.all([
+    client
+      .from("findings")
+      .select(FINDING_SELECT)
+      .eq("project_id", projectId)
+      .eq("id", findingId)
+      .maybeSingle(),
+    client
+      .from("finding_participants")
+      .select("id, finding_id, person_id, name, role, notes")
+      .eq("project_id", projectId)
+      .eq("finding_id", findingId)
+      .order("id", { ascending: true }),
+  ]);
+  if (findingResult.error) throw findingResult.error;
+  if (participantResult.error) throw participantResult.error;
+  if (!findingResult.data) return null;
+  const participants = (participantResult.data as FindingParticipantRow[]).map((row) => ({
+    id: row.id,
+    name: row.name,
+    role: row.role,
+    notes: row.notes,
+  }));
+  return findingFromRow(findingResult.data as FindingRow, participants);
+}
+
 function normalizeFragmentSelection(value: unknown): DocumentFragmentSelection | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Partial<DocumentFragmentSelection> & {

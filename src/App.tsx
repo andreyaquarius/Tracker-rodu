@@ -89,6 +89,7 @@ import type { PlanLimitKey, UpgradeReason } from "./types/subscription";
 import {
   clearProjectResearchCache,
   deleteProjectResearch,
+  getProjectResearch,
   importProjectResearches,
   listProjectResearches,
   loadProjectResearchCache,
@@ -99,6 +100,8 @@ import {
   clearProjectPeopleCache,
   deleteProjectPerson,
   deleteProjectPersonRelation,
+  getProjectPerson,
+  getProjectPersonRelation,
   importProjectPeople,
   listProjectPeople,
   loadProjectPeopleCache,
@@ -110,6 +113,8 @@ import {
   clearProjectDocumentsCache,
   deleteProjectDocument,
   deleteProjectYearMatrixRecord,
+  getProjectDocument,
+  getProjectYearMatrixRecord,
   importProjectDocuments,
   listProjectDocuments,
   loadProjectDocumentsCache,
@@ -122,6 +127,8 @@ import {
   clearProjectWorkRecordsCache,
   deleteProjectFinding,
   deleteProjectTask,
+  getProjectFinding,
+  getProjectTask,
   importProjectWorkRecords,
   listProjectWorkRecords,
   loadProjectWorkRecordsCache,
@@ -134,6 +141,8 @@ import {
   deleteProjectArchiveRequest,
   deleteProjectHypothesis,
   deleteProjectHypothesisTargetLinks,
+  getProjectArchiveRequest,
+  getProjectHypothesis,
   importProjectAnalysisRecords,
   listProjectAnalysisRecords,
   loadProjectAnalysisRecordsCache,
@@ -172,6 +181,7 @@ import {
 } from "./services/projectBackups";
 import {
   subscribeProjectRealtime,
+  type ProjectRealtimeEntityChange,
   type ProjectRealtimeGroup,
 } from "./services/projectRealtime";
 import { assertProjectRecordUnchanged } from "./services/projectConflicts";
@@ -192,9 +202,13 @@ import {
 } from "./utils/gedcomImportReconciliation.ts";
 import type { ImportPhaseProgress } from "./utils/importBatches.ts";
 import {
-  ALL_PROJECT_DATA_GROUPS,
   dataGroupsForPage,
 } from "./utils/projectDataGroups";
+import {
+  realtimeRecordMutation,
+  removeRealtimeRecord,
+  upsertRealtimeRecord,
+} from "./utils/realtimeChanges";
 import { createActivityEntries } from "./utils/activityLog";
 import {
   emptyProjectDashboardStats,
@@ -565,7 +579,6 @@ export default function App() {
     emptyProjectDashboardStats,
   );
   const [dashboardTasks, setDashboardTasks] = useState<ProjectDashboardTask[]>([]);
-  const [searchDataProjectId, setSearchDataProjectId] = useState<string | null>(null);
   const [projectPreferences, setProjectPreferences] = useState<ProjectPreferences>(
     () => ({
       researcherName: app.db.settings.researcherName,
@@ -712,17 +725,7 @@ export default function App() {
         "researches_total",
       ]);
   const researchRequiredByPlan = subscriptionAccess.effectivePlan !== "professional";
-  const requestedDataGroups = useMemo(() => {
-    if (workspace && searchDataProjectId === workspace.projectId) {
-      return new Set(ALL_PROJECT_DATA_GROUPS);
-    }
-    const groups = dataGroupsForPage(page);
-    if (page === "persons" && peopleReadyForProject === workspace?.projectId) {
-      groups.add("work");
-      groups.add("analysis");
-    }
-    return groups;
-  }, [page, peopleReadyForProject, searchDataProjectId, workspace]);
+  const requestedDataGroups = useMemo(() => dataGroupsForPage(page), [page]);
   const shouldLoadResearches = requestedDataGroups.has("researches");
   const shouldLoadPeople = requestedDataGroups.has("people");
   const shouldLoadDocuments = requestedDataGroups.has("documents");
@@ -996,13 +999,6 @@ export default function App() {
       toastTimerRef.current = null;
     }, 3500);
   }, []);
-  const requestDashboardSearchData = useCallback(() => {
-    if (!workspace) return;
-    setSearchDataProjectId((current) =>
-      current === workspace.projectId ? current : workspace.projectId
-    );
-  }, [workspace]);
-
   useEffect(() => () => {
     if (toastTimerRef.current !== null) {
       window.clearTimeout(toastTimerRef.current);
@@ -1482,8 +1478,7 @@ export default function App() {
     const includeRecords =
       page === "settings" ||
       page === "backup" ||
-      page.startsWith("custom:") ||
-      searchDataProjectId === projectId;
+      page.startsWith("custom:");
     const hasCached =
       cached.definitions.length || cached.sections.length || cached.records.length;
     const fallback = cached;
@@ -1529,7 +1524,6 @@ export default function App() {
     describeError,
     notify,
     page,
-    searchDataProjectId,
     workspace,
   ]);
 
@@ -1577,9 +1571,24 @@ export default function App() {
     ],
   );
 
+  const realtimeProjectId = workspace?.projectId ?? "";
+  const realtimeUserId = account?.id ?? "";
+  const realtimeViewRef = useRef({
+    page,
+    projectPreferences,
+    notify,
+    describeError,
+  });
+  realtimeViewRef.current = {
+    page,
+    projectPreferences,
+    notify,
+    describeError,
+  };
+
   useEffect(() => {
-    if (!workspace || !account) return;
-    const projectId = workspace.projectId;
+    if (!realtimeProjectId || !realtimeUserId) return;
+    const projectId = realtimeProjectId;
     let active = true;
     let refreshing = false;
     const queued = new Set<ProjectRealtimeGroup>();
@@ -1596,7 +1605,10 @@ export default function App() {
 
           if (current.has("project")) {
             jobs.push(
-              loadProjectPreferences(projectId, projectPreferences).then(
+              loadProjectPreferences(
+                projectId,
+                realtimeViewRef.current.projectPreferences,
+              ).then(
                 (preferences) => {
                   if (activeWorkspaceIdRef.current !== projectId) return;
                   syncedPreferencesRef.current = {
@@ -1674,11 +1686,11 @@ export default function App() {
             );
           }
           if (current.has("custom")) {
+            const currentPage = realtimeViewRef.current.page;
             const includeRecords =
-              page === "settings" ||
-              page === "backup" ||
-              page.startsWith("custom:") ||
-              searchDataProjectId === projectId;
+              currentPage === "settings" ||
+              currentPage === "backup" ||
+              currentPage.startsWith("custom:");
             jobs.push(
               listProjectCustomStructure(projectId, includeRecords).then((records) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
@@ -1707,11 +1719,11 @@ export default function App() {
             );
           }
           if (
-            page === "dashboard" &&
+            realtimeViewRef.current.page === "dashboard" &&
             [...current].some((group) => group !== "activity")
           ) {
             jobs.push(
-              loadProjectDashboard(projectId).then((dashboard) => {
+              loadProjectDashboard(projectId, { force: true }).then((dashboard) => {
                 if (activeWorkspaceIdRef.current !== projectId) return;
                 setDashboardStats(dashboard.stats);
                 setDashboardTasks(dashboard.tasks);
@@ -1726,35 +1738,184 @@ export default function App() {
         }
       } catch (error) {
         if (active) {
-          notify(describeError(error, "Не вдалося отримати зміни проєкту."), true);
+          realtimeViewRef.current.notify(
+            realtimeViewRef.current.describeError(
+              error,
+              "Не вдалося отримати зміни проєкту.",
+            ),
+            true,
+          );
         }
       } finally {
         refreshing = false;
       }
     };
 
+    const applyRealtimeMutation = async (
+      change: ProjectRealtimeEntityChange,
+    ): Promise<boolean> => {
+      const mutation = realtimeRecordMutation(change);
+      if (!mutation) return false;
+      const { module, entityId, operation } = mutation;
+      const shouldApply = () =>
+        active && activeWorkspaceIdRef.current === projectId;
+
+      if (operation === "delete") {
+        if (!shouldApply()) return true;
+        if (module === "researches") {
+          setProjectResearches((records) => removeRealtimeRecord(records, entityId));
+        } else if (module === "persons") {
+          setProjectPersons((records) => removeRealtimeRecord(records, entityId));
+          setProjectPersonRelations((records) =>
+            records.filter(
+              (relation) =>
+                relation.personId !== entityId &&
+                relation.relatedPersonId !== entityId,
+              ),
+          );
+        } else if (module === "personRelations") {
+          setProjectPersonRelations((records) => removeRealtimeRecord(records, entityId));
+        } else if (module === "documents") {
+          setProjectDocuments((records) => removeRealtimeRecord(records, entityId));
+        } else if (module === "yearMatrix") {
+          setProjectYearMatrix((records) => removeRealtimeRecord(records, entityId));
+        } else if (module === "tasks") {
+          setProjectTasks((records) => removeRealtimeRecord(records, entityId));
+        } else if (module === "findings") {
+          setProjectFindings((records) => removeRealtimeRecord(records, entityId));
+        } else if (module === "hypotheses") {
+          setProjectHypotheses((records) => removeRealtimeRecord(records, entityId));
+        } else if (module === "archiveRequests") {
+          setProjectArchiveRequests((records) => removeRealtimeRecord(records, entityId));
+        }
+        return true;
+      }
+
+      if (module === "researches") {
+        const record = await getProjectResearch(projectId, entityId);
+        if (shouldApply()) {
+          setProjectResearches((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      } else if (module === "persons") {
+        const record = await getProjectPerson(projectId, entityId);
+        if (shouldApply()) {
+          setProjectPersons((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      } else if (module === "personRelations") {
+        const record = await getProjectPersonRelation(projectId, entityId);
+        if (shouldApply()) {
+          setProjectPersonRelations((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      } else if (module === "documents") {
+        const record = await getProjectDocument(projectId, entityId);
+        if (shouldApply()) {
+          setProjectDocuments((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      } else if (module === "yearMatrix") {
+        const record = await getProjectYearMatrixRecord(projectId, entityId);
+        if (shouldApply()) {
+          setProjectYearMatrix((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      } else if (module === "tasks") {
+        const record = await getProjectTask(projectId, entityId);
+        if (shouldApply()) {
+          setProjectTasks((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      } else if (module === "findings") {
+        const record = await getProjectFinding(projectId, entityId);
+        if (shouldApply()) {
+          setProjectFindings((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      } else if (module === "hypotheses") {
+        const record = await getProjectHypothesis(projectId, entityId);
+        if (shouldApply()) {
+          setProjectHypotheses((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      } else if (module === "archiveRequests") {
+        const record = await getProjectArchiveRequest(projectId, entityId);
+        if (shouldApply()) {
+          setProjectArchiveRequests((records) => record
+            ? upsertRealtimeRecord(records, record)
+            : removeRealtimeRecord(records, entityId));
+        }
+      }
+      return true;
+    };
+
     const unsubscribe = subscribeProjectRealtime(
       projectId,
-      account.id,
-      (groups, changedByOtherUser) => {
-      if (changedByOtherUser) {
-        notify("Інший учасник оновив дані проєкту.");
-      }
-      void refreshGroups(groups);
-    });
+      realtimeUserId,
+      (groups, changedByOtherUser, changes) => {
+        if (changedByOtherUser) {
+          realtimeViewRef.current.notify(
+            "Інший учасник оновив дані проєкту.",
+          );
+        }
+        void (async () => {
+          const fallbackGroups = new Set(
+            [...groups].filter((group) => group !== "activity"),
+          );
+          for (const group of [...fallbackGroups]) {
+            const groupChanges = changes.filter((change) => change.group === group);
+            if (!groupChanges.length) continue;
+            const results = await Promise.allSettled(
+              groupChanges.map(applyRealtimeMutation),
+            );
+            if (
+              results.every(
+                (result) => result.status === "fulfilled" && result.value,
+              )
+            ) {
+              fallbackGroups.delete(group);
+            }
+          }
+
+          await refreshGroups(new Set(["activity", ...fallbackGroups]));
+          if (
+            active &&
+            changes.length > 0 &&
+            fallbackGroups.size === 0 &&
+            realtimeViewRef.current.page === "dashboard"
+          ) {
+            const dashboard = await loadProjectDashboard(projectId, { force: true });
+            if (activeWorkspaceIdRef.current === projectId) {
+              setDashboardStats(dashboard.stats);
+              setDashboardTasks(dashboard.tasks);
+            }
+          }
+        })().catch((error: unknown) => {
+          if (!active) return;
+          realtimeViewRef.current.notify(
+            realtimeViewRef.current.describeError(
+              error,
+              "Не вдалося отримати зміни проєкту.",
+            ),
+            true,
+          );
+        });
+      },
+    );
     return () => {
       active = false;
       unsubscribe();
     };
-  }, [
-    account,
-    describeError,
-    notify,
-    page,
-    projectPreferences,
-    searchDataProjectId,
-    workspace,
-  ]);
+  }, [realtimeProjectId, realtimeUserId]);
 
   useEffect(() => {
     if (
@@ -1825,9 +1986,16 @@ export default function App() {
     relatedId: string,
     text: string,
     actionType: ActivityLogEntry["actionType"],
+    mutationEntityId?: string,
   ) => {
     if (!workspace) return;
-    const entry = createGenericProjectActivity(module, relatedId, text, actionType);
+    const entry = createGenericProjectActivity(
+      module,
+      relatedId,
+      text,
+      actionType,
+      mutationEntityId,
+    );
     void addProjectActivity(workspace.projectId, entry)
       .then((saved) => {
         if (activeWorkspaceIdRef.current !== workspace.projectId) return;
@@ -3239,6 +3407,7 @@ export default function App() {
         throw stageError;
       }
     };
+
     try {
       await runPersistenceStage(
         "people-relations",
@@ -3644,6 +3813,7 @@ export default function App() {
           saved.personId,
           `${previousRelation ? "Оновлено" : "Створено"} зв’язок між «${firstName}» та «${secondName}».`,
           previousRelation ? "relation_updated" : "relation_created",
+          saved.id,
         );
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectPeopleCache(projectId);
@@ -4298,9 +4468,9 @@ export default function App() {
             db={activeDb}
             stats={dashboardStats}
             dashboardTasks={dashboardTasks}
+            projectId={workspace?.projectId}
             onNavigate={navigate}
             onOpenSearchResult={openSearchResult}
-            onRequestSearchData={requestDashboardSearchData}
           />
         );
       case "map":

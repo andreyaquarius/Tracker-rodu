@@ -73,6 +73,22 @@ export async function listProjectResearches(projectId: string): Promise<Research
   return (data as ResearchRow[]).map(fromRow);
 }
 
+export async function getProjectResearch(
+  projectId: string,
+  researchId: string,
+): Promise<Research | null> {
+  const { data, error } = await getSupabaseClient()
+    .from("researches")
+    .select(
+      "id, project_id, title, goal, surnames, places, period_from, period_to, archives, status, notes, custom_fields, created_at, updated_at",
+    )
+    .eq("project_id", projectId)
+    .eq("id", researchId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? fromRow(data as ResearchRow) : null;
+}
+
 export async function saveProjectResearch(
   projectId: string,
   research: Research,

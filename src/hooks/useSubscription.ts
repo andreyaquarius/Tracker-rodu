@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadSubscriptionContext } from "../services/subscriptionService";
 import type {
   PlanLimitKey,
@@ -6,30 +6,69 @@ import type {
   SubscriptionFeature,
 } from "../types/subscription";
 import { hasPlanCapacity, trialDaysRemaining as calculateTrialDaysRemaining } from "../utils/subscription";
+import {
+  createInFlightRequestDeduper,
+  getJitteredSubscriptionPollDelay,
+  isSubscriptionRefreshDue,
+} from "../utils/subscriptionPolling";
 
 export function useSubscription(projectId?: string, enabled = true) {
   const [context, setContext] = useState<SubscriptionContext | null>(null);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState("");
+  const requestGenerationRef = useRef(0);
+  const refreshDeduperRef = useRef(
+    createInFlightRequestDeduper<SubscriptionContext | null>(),
+  );
+  const nextAutomaticRefreshAtRef = useRef<number | null>(null);
 
-  const refreshSubscription = useCallback(async () => {
+  const refreshSubscription = useCallback((): Promise<SubscriptionContext | null> => {
     if (!enabled) {
       setContext(null);
       setLoading(false);
-      return null;
+      return Promise.resolve(null);
     }
-    setLoading(true);
-    setError("");
-    try {
-      const next = await loadSubscriptionContext(projectId);
-      setContext(next);
-      return next;
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Не вдалося завантажити тариф.");
-      return null;
-    } finally {
+
+    const requestGeneration = requestGenerationRef.current;
+    return refreshDeduperRef.current.run(async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const next = await loadSubscriptionContext(projectId);
+        if (requestGeneration !== requestGenerationRef.current) return null;
+        setContext(next);
+        return next;
+      } catch (loadError) {
+        if (requestGeneration === requestGenerationRef.current) {
+          setError(loadError instanceof Error ? loadError.message : "Не вдалося завантажити тариф.");
+        }
+        return null;
+      } finally {
+        if (requestGeneration === requestGenerationRef.current) {
+          nextAutomaticRefreshAtRef.current = Date.now() + getJitteredSubscriptionPollDelay();
+          setLoading(false);
+        }
+      }
+    });
+  }, [enabled, projectId]);
+
+  useEffect(() => {
+    const requestGeneration = requestGenerationRef.current + 1;
+    requestGenerationRef.current = requestGeneration;
+    refreshDeduperRef.current.clear();
+    nextAutomaticRefreshAtRef.current = null;
+
+    if (!enabled) {
+      setContext(null);
       setLoading(false);
+      setError("");
     }
+
+    return () => {
+      if (requestGenerationRef.current !== requestGeneration) return;
+      requestGenerationRef.current += 1;
+      refreshDeduperRef.current.clear();
+    };
   }, [enabled, projectId]);
 
   useEffect(() => {
@@ -38,8 +77,68 @@ export function useSubscription(projectId?: string, enabled = true) {
 
   useEffect(() => {
     if (!enabled) return;
-    const timer = window.setInterval(() => void refreshSubscription(), 60_000);
-    return () => window.clearInterval(timer);
+
+    let disposed = false;
+    let timer: number | null = null;
+
+    const clearTimer = () => {
+      if (timer === null) return;
+      window.clearTimeout(timer);
+      timer = null;
+    };
+
+    const ensureNextRefreshAt = () => {
+      if (nextAutomaticRefreshAtRef.current === null) {
+        nextAutomaticRefreshAtRef.current = Date.now() + getJitteredSubscriptionPollDelay();
+      }
+      return nextAutomaticRefreshAtRef.current;
+    };
+
+    function runAutomaticRefresh() {
+      timer = null;
+      refreshIfDue();
+    }
+
+    const scheduleNextPoll = () => {
+      clearTimer();
+      if (disposed || document.hidden) return;
+
+      const delay = Math.max(0, ensureNextRefreshAt() - Date.now());
+      timer = window.setTimeout(runAutomaticRefresh, delay);
+    };
+
+    const refreshIfDue = () => {
+      clearTimer();
+      if (disposed || document.hidden) return;
+      if (!isSubscriptionRefreshDue(ensureNextRefreshAt())) {
+        scheduleNextPoll();
+        return;
+      }
+      void refreshSubscription().finally(scheduleNextPoll);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearTimer();
+        return;
+      }
+      refreshIfDue();
+    };
+
+    const handleWindowFocus = () => {
+      refreshIfDue();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+    scheduleNextPoll();
+
+    return () => {
+      disposed = true;
+      clearTimer();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+    };
   }, [enabled, refreshSubscription]);
 
   const getLimit = useCallback((key: PlanLimitKey) => context?.limits[key] ?? null, [context]);

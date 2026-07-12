@@ -345,6 +345,7 @@ export function LegacyFamilyTreePage({
       logicalKey: `view:${person.id}`,
       render: ({ stackIndex, dockIndex, onFocus, close }) => (
         <PersonCardModal
+          projectId={projectId}
           db={db}
           person={person}
           persons={persons}
@@ -408,7 +409,11 @@ export function LegacyFamilyTreePage({
     });
   }
 
-  function openRelatedRecordWindow(page: PageKey, entityId: string) {
+  function openRelatedRecordWindow(
+    page: PageKey,
+    entityId: string,
+    loadedEntity?: AppEntity,
+  ) {
     if (page === "persons") {
       openPersonCardWindow(entityId);
       return;
@@ -417,7 +422,8 @@ export function LegacyFamilyTreePage({
       onOpenRelated?.(page, entityId);
       return;
     }
-    const entity = (db[page] as AppEntity[]).find((item) => item.id === entityId);
+    const entity = loadedEntity ??
+      (db[page] as AppEntity[]).find((item) => item.id === entityId);
     if (!entity) {
       onOpenRelated?.(page, entityId);
       return;

@@ -143,6 +143,7 @@ export function useFamilyTreeRecordWindows({
       logicalKey: `view:${person.id}`,
       render: ({ stackIndex, dockIndex, onFocus, close }) => (
         <PersonCardModal
+          projectId={projectId}
           db={db}
           person={person}
           persons={persons}
@@ -208,7 +209,11 @@ export function useFamilyTreeRecordWindows({
     });
   }
 
-  function openRelatedRecordWindow(page: PageKey, entityId: string): void {
+  function openRelatedRecordWindow(
+    page: PageKey,
+    entityId: string,
+    loadedEntity?: AppEntity,
+  ): void {
     if (page === "persons") {
       openPersonCardWindow(entityId);
       return;
@@ -217,7 +222,8 @@ export function useFamilyTreeRecordWindows({
       navigationFallback(() => onOpenRelated?.(page, entityId));
       return;
     }
-    const entity = (db[page] as AppEntity[]).find((item) => item.id === entityId);
+    const entity = loadedEntity ??
+      (db[page] as AppEntity[]).find((item) => item.id === entityId);
     if (!entity) {
       navigationFallback(() => onOpenRelated?.(page, entityId));
       return;

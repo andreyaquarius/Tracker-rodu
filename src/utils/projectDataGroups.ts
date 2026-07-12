@@ -30,8 +30,7 @@ export function dataGroupsForPage(page: PageKey): Set<ProjectDataGroup> {
     return new Set(["researches", "people", "documents", "work"]);
   }
   if (page === "persons") {
-    // Render the list first. Person-card supporting groups are requested in the
-    // background by App after the people collection has hydrated.
+    // Person-card work and analysis records are fetched on demand for one person.
     return new Set(["researches", "people"]);
   }
   if (page === "hypotheses" || page === "backup") {

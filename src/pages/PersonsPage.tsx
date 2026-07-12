@@ -48,6 +48,10 @@ import {
 } from "../utils/personPhotos.ts";
 import { PersonEventsView } from "../components/PersonEventsView.tsx";
 import { personEducation, personNationality } from "../utils/personStandardFields.ts";
+import {
+  listPersonLinkedRecords,
+  type PersonLinkedRecords,
+} from "../services/projectPersonLinkedRecords.ts";
 
 type PersonTab =
   | "overview"
@@ -119,7 +123,7 @@ export function PersonsPage({
   onDeletePerson: (id: string) => void;
   onSaveRelation: (relation: PersonRelation) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onDeleteRelation: (id: string) => void;
-  onOpenRelated: (page: PageKey, entityId: string) => void;
+  onOpenRelated: (page: PageKey, entityId: string, entity?: AppEntity) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly?: boolean;
   canCreate?: boolean;
@@ -165,6 +169,7 @@ export function PersonsPage({
       logicalKey: personWindowKey({ windowId: "", kind: "view", personId: person.id }),
       render: ({ stackIndex, dockIndex, onFocus, close }) => (
         <PersonCardModal
+          projectId={projectId}
           db={db}
           person={person}
           persons={persons}
@@ -538,6 +543,7 @@ function customAttachmentScans(
 }
 
 export function PersonCardModal({
+  projectId,
   db,
   person,
   persons,
@@ -560,6 +566,7 @@ export function PersonCardModal({
   dockIndex,
   onFocus,
 }: {
+  projectId?: string;
   db: AppDatabase;
   person: Person;
   persons: Person[];
@@ -574,7 +581,7 @@ export function PersonCardModal({
   onEdit?: () => void;
   onSaveRelation: (relation: PersonRelation) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onDeleteRelation: (id: string) => void;
-  onOpenRelated: (page: PageKey, entityId: string) => void;
+  onOpenRelated: (page: PageKey, entityId: string, entity?: AppEntity) => void;
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly: boolean;
   canCreate: boolean;
@@ -584,10 +591,54 @@ export function PersonCardModal({
 }) {
   const [tab, setTab] = useState<PersonTab>("overview");
   const [relationFormOpen, setRelationFormOpen] = useState(false);
-  const linkedFindings = findings.filter((item) => item.personIds?.includes(person.id));
-  const linkedTasks = tasks.filter((item) => item.personIds?.includes(person.id));
-  const linkedHypotheses = hypotheses.filter((item) => item.personIds?.includes(person.id));
-  const linkedArchiveRequests = archiveRequests.filter((item) => item.personIds?.includes(person.id));
+  const [linkedReloadKey, setLinkedReloadKey] = useState(0);
+  const [linkedLoading, setLinkedLoading] = useState(Boolean(projectId));
+  const [linkedError, setLinkedError] = useState("");
+  const [remoteLinkedRecords, setRemoteLinkedRecords] = useState<{
+    personId: string;
+    records: PersonLinkedRecords;
+  } | null>(null);
+  const localLinkedRecords = useMemo<PersonLinkedRecords>(() => ({
+    findings: findings.filter((item) => item.personIds?.includes(person.id)),
+    tasks: tasks.filter((item) => item.personIds?.includes(person.id)),
+    hypotheses: hypotheses.filter((item) => item.personIds?.includes(person.id)),
+    archiveRequests: archiveRequests.filter((item) => item.personIds?.includes(person.id)),
+  }), [archiveRequests, findings, hypotheses, person.id, tasks]);
+  const linkedRecords = remoteLinkedRecords?.personId === person.id
+    ? remoteLinkedRecords.records
+    : localLinkedRecords;
+  const linkedFindings = linkedRecords.findings;
+  const linkedTasks = linkedRecords.tasks;
+  const linkedHypotheses = linkedRecords.hypotheses;
+  const linkedArchiveRequests = linkedRecords.archiveRequests;
+
+  useEffect(() => {
+    if (!projectId) {
+      setLinkedLoading(false);
+      setLinkedError("");
+      setRemoteLinkedRecords(null);
+      return;
+    }
+    let active = true;
+    setLinkedLoading(true);
+    setLinkedError("");
+    void listPersonLinkedRecords(projectId, person.id)
+      .then((records) => {
+        if (active) setRemoteLinkedRecords({ personId: person.id, records });
+      })
+      .catch(() => {
+        if (!active) return;
+        setLinkedError(
+          "Не вдалося завантажити пов’язані записи особи. Спробуйте ще раз.",
+        );
+      })
+      .finally(() => {
+        if (active) setLinkedLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [linkedReloadKey, person.id, projectId]);
   const linkedRelationItems = useMemo(
     () => personRelationDisplayItems(relations, person.id),
     [person.id, relations],
@@ -620,6 +671,23 @@ export function PersonCardModal({
           ))}
         </div>
         <div className="person-tab-content">
+          {linkedLoading ? (
+            <div className="empty-inline" role="status">
+              Завантажуємо пов’язані записи особи…
+            </div>
+          ) : null}
+          {linkedError ? (
+            <div className="empty-inline" role="alert">
+              <span>{linkedError}</span>{" "}
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setLinkedReloadKey((value) => value + 1)}
+              >
+                Спробувати ще раз
+              </button>
+            </div>
+          ) : null}
           {tab === "overview" ? (
             <PersonOverview
               db={db}
@@ -627,7 +695,11 @@ export function PersonCardModal({
               researches={researches}
               findings={linkedFindings}
               customFieldDefinitions={customFieldDefinitions}
-              onOpenFinding={(findingId) => onOpenRelated("findings", findingId)}
+              onOpenFinding={(findingId) => onOpenRelated(
+                "findings",
+                findingId,
+                linkedFindings.find((finding) => finding.id === findingId),
+              )}
             />
           ) : null}
           {tab === "findings" ? (
@@ -938,7 +1010,7 @@ function LinkedRecordsSection({
 }: {
   records: Array<Finding | TaskRecord | Hypothesis | ArchiveRequest>;
   type: "finding" | "task" | "hypothesis" | "archiveRequest";
-  onOpen: (page: PageKey, entityId: string) => void;
+  onOpen: (page: PageKey, entityId: string, entity?: AppEntity) => void;
   onAdd: () => void;
   readOnly: boolean;
 }) {
@@ -974,7 +1046,7 @@ function LinkedRecords({
 }: {
   records: Array<Finding | TaskRecord | Hypothesis | ArchiveRequest>;
   type: "finding" | "task" | "hypothesis" | "archiveRequest";
-  onOpen: (page: PageKey, entityId: string) => void;
+  onOpen: (page: PageKey, entityId: string, entity?: AppEntity) => void;
 }) {
   if (!records.length) return <div className="empty-inline">Пов’язаних записів поки немає.</div>;
   return (
@@ -1006,6 +1078,7 @@ function LinkedRecords({
                     ? "archiveRequests"
                     : "hypotheses",
               record.id,
+              record,
             )}
           >
             <strong>{title || "Запис без назви"}</strong>

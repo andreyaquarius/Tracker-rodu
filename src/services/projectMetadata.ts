@@ -37,6 +37,7 @@ function activityFromRow(row: ActivityRow): ActivityLogEntry | null {
     text,
     module,
     relatedId: String(details.relatedId ?? row.entity_id ?? ""),
+    mutationEntityId: String(details.entityId ?? "") || undefined,
   };
 }
 
@@ -75,6 +76,7 @@ export async function addProjectActivity(
         text: entry.text,
         module: entry.module,
         relatedId: entry.relatedId,
+        entityId: entry.mutationEntityId || entry.relatedId,
       },
       created_at: entry.createdAt,
     })
@@ -89,6 +91,7 @@ export function createGenericProjectActivity(
   relatedId: string,
   text: string,
   actionType: ActivityLogEntry["actionType"],
+  mutationEntityId?: string,
 ): ActivityLogEntry {
   return {
     id: createId(),
@@ -97,6 +100,7 @@ export function createGenericProjectActivity(
     text,
     module,
     relatedId,
+    mutationEntityId,
   };
 }
 

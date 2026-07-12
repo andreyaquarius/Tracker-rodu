@@ -10,14 +10,20 @@ const globalSearch = readFileSync(
   new URL("../src/utils/globalSearch.ts", import.meta.url),
   "utf8",
 );
+const projectDashboard = readFileSync(
+  new URL("../src/services/projectDashboard.ts", import.meta.url),
+  "utf8",
+);
 
-test("dashboard does not build the large global-search index before search is used", () => {
+test("dashboard uses bounded server search for projects and keeps local search as fallback", () => {
   assert.match(
     dashboard,
-    /hasSearchQuery\s*\?\s*createGlobalSearchIndex\(db\)\s*:\s*null/,
+    /!projectId\s*&&\s*hasSearchQuery\s*\?\s*createGlobalSearchIndex\(db\)\s*:\s*null/,
   );
   assert.match(dashboard, /useDeferredValue\(globalQuery\)/);
-  assert.match(dashboard, /setTimeout\(onRequestSearchData,\s*300\)/);
+  assert.match(dashboard, /searchProjectRecords\(projectId, searchedQuery\)/);
+  assert.match(dashboard, /window\.setTimeout\(\(\) =>/);
+  assert.match(dashboard, /searchedQuery\.length < 3/);
 });
 
 test("global-search indexing resolves related records through ID maps", () => {
@@ -36,4 +42,13 @@ test("global-search indexing resolves related records through ID maps", () => {
     globalSearch,
     /db\.persons\.filter\(\(item\)\s*=>\s*personIds\.includes/,
   );
+});
+
+test("dashboard requests are coalesced and briefly cached per project", () => {
+  assert.match(projectDashboard, /DASHBOARD_CACHE_TTL_MS\s*=\s*20_000/);
+  assert.match(projectDashboard, /dashboardRequests\.get\(projectId\)/);
+  assert.match(projectDashboard, /dashboardRequests\.set\(projectId, request\)/);
+  assert.match(projectDashboard, /dashboardCache\.set\(projectId/);
+  assert.match(projectDashboard, /options\.force/);
+  assert.match(projectDashboard, /invalidateProjectDashboard/);
 });
