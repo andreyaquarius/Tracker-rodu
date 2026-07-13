@@ -68,6 +68,7 @@ import {
 } from "../services/familyTreeMutationService";
 import { getFamilyTreeGraph } from "../services/familyTreeGraphService";
 import { readLatestGedcomArchive, saveGedcomArchive } from "../services/gedcomArchiveService.ts";
+import { registerGedcomImportTree } from "../services/gedcomImportOperation.ts";
 import { getScanPreviewSource } from "../services/scanStorage.ts";
 import {
   createTrackerNeighborhoodClient,
@@ -274,6 +275,7 @@ export function ProductionFamilyTreePage({
     relations: PersonRelation[];
     rootPersonId?: string;
     archive: GedcomImportArchivePayload;
+    importOperationId?: string;
   }) {
     if (!projectId) return;
     const result = await createFamilyTreeFromLegacyImport({
@@ -282,12 +284,19 @@ export function ProductionFamilyTreePage({
       persons: input.people,
       relations: input.relations,
       rootPersonId: input.rootPersonId,
+      rollbackOperationId: input.importOperationId,
     });
     if (!result) return;
+    if (input.importOperationId) {
+      // The tree is already registered by the mutation service; repeat the
+      // idempotent registration here before any archive work or UI return.
+      await registerGedcomImportTree(input.importOperationId, result.treeId);
+    }
     preferredTreeIdRef.current = result.treeId;
     setSelectedTreeId(result.treeId);
+    let archiveBatchId = "";
     try {
-      await saveGedcomArchive({
+      const savedArchive = await saveGedcomArchive({
         projectId,
         treeId: result.treeId,
         fileName: input.fileName,
@@ -295,16 +304,20 @@ export function ProductionFamilyTreePage({
         records: input.archive.records,
         personIdByXref: input.archive.personIdByXref,
         warnings: input.archive.warnings,
+        rollbackOperationId: input.importOperationId,
       });
+      archiveBatchId = savedArchive.batchId;
       setTreeToolsNotice(`Імпортовано дерево «GEDCOM: ${input.fileName}» і збережено повний сирий архів.`);
     } catch (archiveError) {
       console.error("GEDCOM archive persistence failed", archiveError);
       setTreeToolsNotice(
-        `Дерево «GEDCOM: ${input.fileName}» імпортовано, але сирий GEDCOM-архів не вдалося зберегти. ` +
+        `Імпорт «GEDCOM: ${input.fileName}» буде скасовано, бо сирий GEDCOM-архів не вдалося зберегти. ` +
           (archiveError instanceof Error ? archiveError.message : ""),
       );
+      throw archiveError;
     }
     setReloadRevision((value) => value + 1);
+    return { treeId: result.treeId, archiveBatchId: archiveBatchId || undefined };
   }
 
   async function exportGedcom() {

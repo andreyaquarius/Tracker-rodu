@@ -112,6 +112,35 @@ test("reuses committed IDs and remaps root, archive map and dependent records on
   ), true);
 });
 
+test("keeps matched Tracker records canonical instead of partially overwriting them", () => {
+  const committed = payload("old");
+  const retry = payload("new");
+  const existingPerson = {
+    ...committed.people[0]!,
+    notes: "Edited safely in Tracker",
+  };
+  const existingDocument = {
+    ...committed.documents[0]!,
+    notes: "Tracker document note",
+  };
+  const existingFinding = {
+    ...committed.findings[0]!,
+    notes: "Tracker finding note",
+  };
+
+  const result = reconcileGedcomImportForRetry(retry, {
+    people: [existingPerson, ...committed.people.slice(1)],
+    documents: [existingDocument, ...committed.documents.slice(1)],
+    relations: committed.relations,
+    findings: [existingFinding, ...committed.findings.slice(1)],
+  });
+
+  assert.equal(result.people[0], existingPerson);
+  assert.equal(result.documents[0], existingDocument);
+  assert.equal(result.findings[0], existingFinding);
+  assert.equal(result.relations[0], committed.relations[0]);
+});
+
 test("recovers records committed before source namespaces existed using UID and exact source metadata", () => {
   const committed = payload("old");
   const legacyPeople = committed.people.map((person) => {
@@ -170,4 +199,9 @@ test("passes reconciled IDs to tree creation and archive persistence", () => {
   assert.match(appSource, /listProjectDocuments\(projectId\)/);
   assert.match(appSource, /listProjectWorkRecords\(projectId\)/);
   assert.match(appSource, /reconcileGedcomImportForRetry\(input/);
+  assert.match(appSource, /const peopleToImport = reconciled\.people\.filter/);
+  assert.match(appSource, /const relationsToImport = reconciled\.relations\.filter/);
+  assert.match(appSource, /importProjectPeople\([\s\S]*?peopleToImport,[\s\S]*?relationsToImport/);
+  assert.match(appSource, /importProjectDocuments\([\s\S]*?documentsToImport/);
+  assert.match(appSource, /importProjectWorkRecords\([\s\S]*?findingsToImport/);
 });

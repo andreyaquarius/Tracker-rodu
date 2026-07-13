@@ -1,0 +1,51 @@
+name: Process legacy GEDCOM cleanups
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legacy-gedcom-cleanup-worker
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify legacy cleanup worker secrets
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+        run: |
+          if [ -z "$PROJECT_REF" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::SUPABASE_PROJECT_REF and TASK_REMINDER_CRON_SECRET are required."
+            exit 1
+          fi
+
+      - name: Resume confirmed legacy GEDCOM cleanups
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+        run: |
+          if ! response="$(curl --fail-with-body --retry 2 --max-time 110 \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "https://${PROJECT_REF}.supabase.co/functions/v1/process-legacy-gedcom-cleanups")"; then
+            echo "::error::Legacy GEDCOM cleanup worker request failed."
+            exit 1
+          fi
+
+          echo "$response"
+          {
+            echo "### Legacy GEDCOM cleanup worker"
+            echo '```json'
+            echo "$response"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -95,29 +95,27 @@ export async function deleteProjectBackup(path: string): Promise<void> {
 
 export async function clearProjectRecords(projectId: string): Promise<void> {
   const client = getSupabaseClient();
-  const tables = [
-    "attachments",
-    "record_links",
-    "custom_records",
-    "custom_section_fields",
-    "custom_sections",
-    "custom_field_definitions",
-    "archive_request_persons",
-    "archive_requests",
-    "hypothesis_links",
-    "hypotheses",
-    "finding_participants",
-    "findings",
-    "task_persons",
-    "tasks",
-    "year_matrix",
-    "documents",
-    "person_relations",
-    "persons",
-    "researches",
-  ];
-  for (const table of tables) {
-    const { error } = await client.from(table).delete().eq("project_id", projectId);
+  // Each RPC removes at most 500 rows and derives its table order from the
+  // canonical asynchronous-deletion phases. This keeps large restores below
+  // the request timeout and prevents new family-tree tables from being left
+  // behind when the backup format itself does not contain them.
+  for (let step = 0; step < 100_000; step += 1) {
+    const { data, error } = await client.rpc("clear_project_records_for_restore", {
+      target_project_id: projectId,
+      batch_size: 500,
+    });
     if (error) throw error;
+
+    const result = data as {
+      complete?: unknown;
+      deletedRows?: unknown;
+    } | null;
+    if (result?.complete === true) return;
+    const deletedRows = Number(result?.deletedRows);
+    if (!Number.isFinite(deletedRows) || deletedRows <= 0) {
+      throw new Error("PROJECT_RESTORE_CLEAR_INVALID_PROGRESS");
+    }
   }
+
+  throw new Error("PROJECT_RESTORE_CLEAR_STEP_LIMIT_EXCEEDED");
 }

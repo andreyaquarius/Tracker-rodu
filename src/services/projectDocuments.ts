@@ -242,6 +242,7 @@ export async function importProjectDocuments(
     if (error) throw error;
   }, {
     concurrency: IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("documents", options.onProgress),
   });
   const yearMatrixRows = yearMatrix.map((record) =>
@@ -254,6 +255,7 @@ export async function importProjectDocuments(
     if (error) throw error;
   }, {
     concurrency: IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("year-matrix", options.onProgress),
   });
 }
