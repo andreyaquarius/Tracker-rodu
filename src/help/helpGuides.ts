@@ -34,6 +34,7 @@ export type HelpGuide = {
 export const HELP_STORAGE_KEYS = {
   introCompleted: "tracker-rodu-help-intro-completed",
   autoTipsDisabled: "tracker-rodu-help-auto-disabled",
+  guideProgress: "tracker-rodu-help-guide-progress-v2",
 };
 
 export const fullHelpTourKeys: HelpGuideKey[] = [
@@ -209,6 +210,10 @@ export const helpGuides: Record<HelpGuideKey, HelpGuide> = {
       {
         title: "Пов'язуйте з особами й документами",
         text: "Так завдання буде видно в контексті потрібної людини або джерела.",
+      },
+      {
+        title: "Налаштуйте нагадування",
+        text: "Вкажіть дату й час, а потім оберіть сповіщення в Трекері Роду, лист на email або обидва способи. Нагадування отримає автор завдання.",
       },
     ],
   },

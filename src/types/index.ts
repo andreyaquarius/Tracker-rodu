@@ -239,6 +239,10 @@ export interface TaskRecord extends BaseEntity {
   status: string;
   priority: string;
   deadline: string;
+  reminderAt: string;
+  reminderInApp: boolean;
+  reminderEmail: boolean;
+  reminderSentAt: string;
   notes: string;
   customFields: CustomFieldValues;
 }

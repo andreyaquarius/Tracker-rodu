@@ -13,6 +13,11 @@ import { createId } from "./id";
 import { nowIso } from "./dateHelpers";
 import { participantSummary, sortFindingParticipants } from "./findingParticipants";
 import { standardLabels } from "./excelExport";
+import {
+  normalizeTaskReminderFields,
+  normalizeTaskReminderTimestamp,
+  taskReminderValidationError,
+} from "./taskReminders";
 
 export interface ImportTableRow {
   sourceRowNumber: number;
@@ -354,6 +359,16 @@ function normalizedComparableValue(value: unknown): unknown {
 }
 
 function importFields(collection: CollectionKey, fields: FieldConfig[]): FieldConfig[] {
+  if (collection === "tasks") {
+    return [
+      ...fields,
+      {
+        key: "reminderSentAt",
+        label: standardLabels.tasks.reminderSentAt,
+        type: "datetime-local",
+      },
+    ];
+  }
   if (collection !== "persons") return fields;
   return Object.entries(standardLabels.persons).map(([key, label]) => ({
     key,
@@ -459,6 +474,14 @@ function buildRecordFromRow({
     record.photos = [];
     record.primaryPhotoId = "";
   }
+  if (collection === "tasks") {
+    const reminderError = taskReminderValidationError(record);
+    if (reminderError) {
+      warnings.push(`Рядок ${row.sourceRowNumber} пропущено: ${reminderError}`);
+      return null;
+    }
+    Object.assign(record, normalizeTaskReminderFields(record));
+  }
 
   const missingRequired = fields
     .filter((field) => field.required)
@@ -501,6 +524,7 @@ function coerceFieldValue(
   if (field.type === "checkbox") return booleanValue(value);
   if (field.type === "number") return value.replace(/\s+/g, "");
   if (field.type === "date") return normalizeDateValue(value);
+  if (field.type === "datetime-local") return normalizeTaskReminderTimestamp(value);
   if (field.type === "select") {
     if (field.key === "privacyStatus") return normalizePersonPrivacyImportValue(value, rowNumber, warnings);
     if (!field.options?.length || field.options.includes(value)) return value;

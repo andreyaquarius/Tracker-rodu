@@ -24,6 +24,9 @@ import {
   selectRowsByCursor,
   selectRowsInParallel,
 } from "../utils/pagedRows.ts";
+import {
+  normalizeTaskReminderFields,
+} from "../utils/taskReminders.ts";
 
 type TaskRow = {
   id: string;
@@ -40,6 +43,10 @@ type TaskRow = {
   status: string;
   priority: string;
   deadline: string;
+  reminder_at: string | null;
+  reminder_in_app: boolean;
+  reminder_email: boolean;
+  reminder_sent_at: string | null;
   notes: string;
   custom_fields: unknown;
   created_at: string;
@@ -87,7 +94,7 @@ type FindingParticipantRow = {
 };
 
 const TASK_SELECT =
-  "id, project_id, research_id, person_name, title, description, place, year_from, year_to, document_type, document_id, status, priority, deadline, notes, custom_fields, created_at, updated_at";
+  "id, project_id, research_id, person_name, title, description, place, year_from, year_to, document_type, document_id, status, priority, deadline, reminder_at, reminder_in_app, reminder_email, reminder_sent_at, notes, custom_fields, created_at, updated_at";
 const FINDING_SELECT =
   "id, project_id, research_id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields, created_at, updated_at";
 const FINDING_META_KEY = "__trackerRoduFindingMeta";
@@ -118,6 +125,10 @@ function taskFromRow(row: TaskRow, personIds: string[]): TaskRecord {
     status: row.status,
     priority: row.priority,
     deadline: row.deadline,
+    reminderAt: row.reminder_at ?? "",
+    reminderInApp: row.reminder_in_app,
+    reminderEmail: row.reminder_email,
+    reminderSentAt: row.reminder_sent_at ?? "",
     notes: row.notes,
     customFields: asRecord(row.custom_fields) as CustomFieldValues,
     createdAt: row.created_at,
@@ -130,8 +141,10 @@ function taskToRow(
   task: TaskRecord,
   researchIds: Set<string>,
   documentIds: Set<string>,
+  includeDeliveryState = false,
 ) {
-  return {
+  const reminder = normalizeTaskReminderFields(task);
+  const row = {
     id: task.id,
     project_id: projectId,
     research_id: researchIds.has(task.researchId) ? task.researchId : null,
@@ -146,11 +159,17 @@ function taskToRow(
     status: task.status,
     priority: task.priority,
     deadline: task.deadline,
+    reminder_at: reminder.reminderAt || null,
+    reminder_in_app: reminder.reminderInApp,
+    reminder_email: reminder.reminderEmail,
     notes: task.notes,
     custom_fields: task.customFields ?? {},
     created_at: task.createdAt,
     updated_at: task.updatedAt,
   };
+  return includeDeliveryState
+    ? { ...row, reminder_sent_at: reminder.reminderSentAt || null }
+    : row;
 }
 
 function findingFromRow(
@@ -666,7 +685,9 @@ export async function importProjectWorkRecords(
   options: ImportPhaseProgressOptions = {},
 ): Promise<void> {
   const client = getSupabaseClient();
-  const taskRows = tasks.map((task) => taskToRow(projectId, task, researchIds, documentIds));
+  const taskRows = tasks.map((task) =>
+    taskToRow(projectId, task, researchIds, documentIds, true)
+  );
   await runImportBatches(chunkImportRows(taskRows), async (batch) => {
     const { error } = await client
       .from("tasks")
@@ -770,7 +791,12 @@ export function loadProjectWorkRecordsCache(projectId: string): {
     if (!stored) return { tasks: [], findings: [] };
     const parsed = JSON.parse(stored) as { tasks?: unknown; findings?: unknown };
     return {
-      tasks: Array.isArray(parsed.tasks) ? (parsed.tasks as TaskRecord[]) : [],
+      tasks: Array.isArray(parsed.tasks)
+        ? (parsed.tasks as TaskRecord[]).map((task) => ({
+            ...task,
+            ...normalizeTaskReminderFields(task),
+          }))
+        : [],
       findings: Array.isArray(parsed.findings) ? (parsed.findings as Finding[]) : [],
     };
   } catch {

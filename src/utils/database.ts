@@ -20,6 +20,7 @@ import { normalizeGeo, normalizePersonEvents, syncPersonEventsFromFields } from 
 import { normalizePersonGender } from "./personGender";
 import { normalizePersonRelation } from "./personRelation";
 import { normalizePersonStatus } from "./personStatus";
+import { normalizeTaskReminderFields } from "./taskReminders";
 
 export function createEmptyDatabase(): AppDatabase {
   return {
@@ -95,6 +96,7 @@ export function normalizeDatabase(value: unknown): AppDatabase {
   });
   const tasks = (Array.isArray(candidate.tasks) ? candidate.tasks : []).map((item) => ({
     ...item,
+    ...normalizeTaskReminderFields(item),
     personIds: normalizeIds(item.personIds),
     customFields: normalizeCustomFieldValues(item.customFields),
   }));

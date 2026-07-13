@@ -105,6 +105,10 @@ export const standardLabels: Record<CollectionKey, Record<string, string>> = {
     status: "Статус",
     priority: "Пріоритет",
     deadline: "Дедлайн",
+    reminderAt: "Дата й час нагадування",
+    reminderInApp: "Нагадування в застосунку",
+    reminderEmail: "Нагадування електронною поштою",
+    reminderSentAt: "Нагадування надіслано",
     notes: "Нотатки",
   },
   findings: {

@@ -99,7 +99,11 @@ export function Layout(props: LayoutProps) {
               <>
                 <AnnouncementBell account={props.account} />
                 <GoogleDriveConnectionButton />
-                <HelpCenter page={props.page} />
+                <HelpCenter
+                  key={props.account?.id ?? "anonymous"}
+                  page={props.page}
+                  accountId={props.account?.id ?? "anonymous"}
+                />
               </>
             )}
           />

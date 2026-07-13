@@ -6,6 +6,12 @@ import {
   markAnnouncementRead,
 } from "../services/announcementService";
 import type { AppAnnouncement } from "../types/announcements";
+import {
+  loadMyTaskNotifications,
+  markAllTaskNotificationsRead,
+  markTaskNotificationRead,
+} from "../services/taskNotificationService";
+import type { TaskReminderNotification } from "../types/notifications";
 
 interface AnnouncementBellProps {
   account: SupabaseAccount | null;
@@ -21,12 +27,15 @@ const categoryLabels: Record<AppAnnouncement["category"], string> = {
 export function AnnouncementBell({ account }: AnnouncementBellProps) {
   const detailsRef = useDismissibleDetails();
   const [announcements, setAnnouncements] = useState<AppAnnouncement[]>([]);
+  const [taskNotifications, setTaskNotifications] = useState<TaskReminderNotification[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const unreadCount = useMemo(
-    () => announcements.filter((item) => !item.isRead).length,
-    [announcements],
+    () =>
+      announcements.filter((item) => !item.isRead).length +
+      taskNotifications.filter((item) => !item.isRead).length,
+    [announcements, taskNotifications],
   );
 
   const refresh = async () => {
@@ -34,9 +43,24 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
     setLoading(true);
     setError("");
     try {
-      setAnnouncements(await loadMyAnnouncements());
+      const [announcementResult, taskResult] = await Promise.allSettled([
+        loadMyAnnouncements(),
+        loadMyTaskNotifications(),
+      ]);
+      if (announcementResult.status === "fulfilled") {
+        setAnnouncements(announcementResult.value);
+      }
+      if (taskResult.status === "fulfilled") {
+        setTaskNotifications(taskResult.value);
+      }
+      if (announcementResult.status === "rejected" && taskResult.status === "rejected") {
+        throw announcementResult.reason;
+      }
+      if (announcementResult.status === "rejected" || taskResult.status === "rejected") {
+        setError("Частину сповіщень тимчасово не вдалося завантажити.");
+      }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Не вдалося завантажити оновлення.");
+      setError(loadError instanceof Error ? loadError.message : "Не вдалося завантажити сповіщення.");
     } finally {
       setLoading(false);
     }
@@ -45,6 +69,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
   useEffect(() => {
     if (!account) {
       setAnnouncements([]);
+      setTaskNotifications([]);
       return;
     }
     void refresh();
@@ -73,19 +98,43 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
     }
   };
 
+  const markTaskRead = async (notification: TaskReminderNotification) => {
+    if (notification.isRead) return;
+    setTaskNotifications((current) =>
+      current.map((item) =>
+        item.id === notification.id
+          ? { ...item, isRead: true, readAt: new Date().toISOString() }
+          : item,
+      ),
+    );
+    try {
+      await markTaskNotificationRead(notification.id);
+    } catch {
+      void refresh();
+    }
+  };
+
   const markAllRead = async () => {
     const unread = announcements.filter((item) => !item.isRead);
-    if (!unread.length) return;
+    const unreadTasks = taskNotifications.filter((item) => !item.isRead);
+    if (!unread.length && !unreadTasks.length) return;
     setAnnouncements((current) =>
       current.map((item) => ({ ...item, isRead: true, readAt: item.readAt ?? new Date().toISOString() })),
     );
-    for (const announcement of unread) {
-      try {
-        await markAnnouncementRead(announcement.id);
-      } catch {
-        void refresh();
-        return;
-      }
+    setTaskNotifications((current) =>
+      current.map((item) => ({
+        ...item,
+        isRead: true,
+        readAt: item.readAt ?? new Date().toISOString(),
+      })),
+    );
+    try {
+      await Promise.all([
+        ...unread.map((announcement) => markAnnouncementRead(announcement.id)),
+        ...(unreadTasks.length ? [markAllTaskNotificationsRead()] : []),
+      ]);
+    } catch {
+      void refresh();
     }
   };
 
@@ -93,23 +142,53 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
 
   return (
     <details className="announcement-menu" ref={detailsRef}>
-      <summary aria-label="Відкрити оновлення Трекера Роду" title="Оновлення">
+      <summary aria-label="Відкрити сповіщення Трекера Роду" title="Сповіщення">
         <BellIcon />
         {unreadCount ? <span className="announcement-badge">{unreadCount}</span> : null}
       </summary>
       <div className="announcement-popover">
         <div className="announcement-popover-header">
           <div>
-            <span className="eyebrow">Оновлення</span>
-            <strong>Що нового</strong>
+            <span className="eyebrow">Сповіщення</span>
+            <strong>Нагадування та оновлення</strong>
           </div>
           <button type="button" className="text-button" onClick={() => void refresh()} disabled={loading}>
             Оновити
           </button>
         </div>
         {error ? <div className="alert alert-error compact-alert">{error}</div> : null}
-        {announcements.length ? (
+        {taskNotifications.length || announcements.length ? (
           <>
+            {taskNotifications.length ? (
+              <div className="announcement-list task-notification-list">
+                {taskNotifications.map((notification) => (
+                  <article
+                    className={`announcement-item task-notification-item ${notification.isRead ? "" : "unread"}`}
+                    key={notification.id}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => void markTaskRead(notification).finally(() => {
+                        window.location.assign(taskNotificationUrl(notification));
+                      })}
+                    >
+                      <span>Нагадування про завдання</span>
+                      <strong>{notification.taskTitle}</strong>
+                      <p>
+                        Проєкт: {notification.projectName}
+                        {notification.taskDeadline ? (
+                          <>
+                            <br />
+                            Строк виконання: {notification.taskDeadline}
+                          </>
+                        ) : null}
+                      </p>
+                      <small>{formatDate(notification.scheduledFor)}</small>
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : null}
             <div className="announcement-list">
               {announcements.map((announcement) => (
                 <article
@@ -143,7 +222,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
           </>
         ) : (
           <div className="empty-inline">
-            {loading ? "Завантажуємо оновлення..." : "Нових повідомлень немає."}
+            {loading ? "Завантажуємо сповіщення..." : "Нових повідомлень немає."}
           </div>
         )}
       </div>
@@ -181,4 +260,8 @@ function formatDate(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+function taskNotificationUrl(notification: TaskReminderNotification): string {
+  return `/projects/${encodeURIComponent(notification.projectId)}/tasks`;
 }

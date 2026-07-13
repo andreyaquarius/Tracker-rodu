@@ -47,3 +47,8 @@ verify_jwt = true
 # browser calls Supabase Auth.
 [functions.registration-guard]
 verify_jwt = false
+
+[functions.send-task-reminders]
+# Called by the scheduled GitHub workflow with TASK_REMINDER_CRON_SECRET.
+# The function validates that secret itself before using service-role access.
+verify_jwt = false
