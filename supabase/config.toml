@@ -52,3 +52,8 @@ verify_jwt = false
 # Called by the scheduled GitHub workflow with TASK_REMINDER_CRON_SECRET.
 # The function validates that secret itself before using service-role access.
 verify_jwt = false
+
+[functions.process-project-deletions]
+# Accepts either a browser JWT (validated in code together with job ownership)
+# or the scheduled worker secret. CORS preflight also has no JWT.
+verify_jwt = false
