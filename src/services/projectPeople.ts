@@ -97,7 +97,11 @@ const SELECT_BATCH_SIZE = 1000;
 // keeps the aggregate at two database statements instead of six competing
 // offset scans, while still allowing both independent tables to load together.
 const SELECT_CONCURRENCY_PER_TABLE = 1;
-const IMPORT_CONCURRENCY = 3;
+const PERSON_IMPORT_CONCURRENCY = 3;
+// person_relations synchronously project into the canonical family graph via
+// database triggers. Keep those batches ordered per browser; the database also
+// serializes them per project to protect concurrent tabs and users.
+const RELATION_IMPORT_CONCURRENCY = 1;
 const PEOPLE_CACHE_MAX_CHARS = 3_500_000;
 const PEOPLE_CACHE_MAX_RECORDS = 8_000;
 function asRecord(value: unknown): Record<string, unknown> {
@@ -346,7 +350,7 @@ export async function importProjectPeople(
       .upsert(batch, { onConflict: "id" });
     if (error) throw error;
   }, {
-    concurrency: IMPORT_CONCURRENCY,
+    concurrency: PERSON_IMPORT_CONCURRENCY,
     onProgress: withImportPhase("persons", options.onProgress),
   });
   const relationRows = relations.map((relation) => relationToRow(projectId, relation));
@@ -356,7 +360,7 @@ export async function importProjectPeople(
       .upsert(batch, { onConflict: "id" });
     if (error) throw error;
   }, {
-    concurrency: IMPORT_CONCURRENCY,
+    concurrency: RELATION_IMPORT_CONCURRENCY,
     onProgress: withImportPhase("relations", options.onProgress),
   });
 }
