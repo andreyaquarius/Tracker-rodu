@@ -19,6 +19,7 @@ import {
 import { Modal } from "./Modal";
 import type { ActivityActionType } from "../types";
 import { subscriptionErrorMessage } from "../services/subscriptionService";
+import { formatDateForDisplay } from "../utils/dateHelpers";
 
 interface ProjectTeamModalProps {
   account: SupabaseAccount;
@@ -403,7 +404,7 @@ export function ProjectTeamModal({
                   <div>
                     <strong>{invitation.email}</strong>
                     <small>
-                      До {new Date(invitation.expiresAt).toLocaleDateString("uk-UA")}
+                      До {formatDateForDisplay(invitation.expiresAt)}
                     </small>
                   </div>
                   <div className="team-row-actions">

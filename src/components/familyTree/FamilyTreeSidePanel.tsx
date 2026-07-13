@@ -9,6 +9,7 @@ import {
 } from "../../utils/familyTreeActions";
 import { familyTreeKinshipLabel } from "../../utils/familyTreeKinship";
 import { personStatusLabel } from "../../utils/familyTreeLabels";
+import { formatDateForDisplay } from "../../utils/dateHelpers.ts";
 
 export function FamilyTreeSidePanel({
   graph,
@@ -161,7 +162,10 @@ export function FamilyTreeSidePanel({
             {selected.person.events.slice(0, 6).map((event) => (
               <div key={event.id}>
                 <strong>{event.title || eventTypeLabel(event.eventType)}</strong>
-                <small>{[event.eventDate || event.dateText, event.placeName].filter(Boolean).join(" · ")}</small>
+                <small>{[
+                  formatDateForDisplay(event.eventDate || event.dateText),
+                  event.placeName,
+                ].filter(Boolean).join(" · ")}</small>
               </div>
             ))}
           </div>

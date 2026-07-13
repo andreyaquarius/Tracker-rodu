@@ -77,7 +77,7 @@ import {
   setDefaultFamilyTree,
   type FamilyTreeAdminSummary,
 } from "../services/familyTreeAdminService";
-import { formatDateTime } from "../utils/dateHelpers";
+import { formatDateForDisplay, formatDateTime } from "../utils/dateHelpers";
 import { ProductionFamilyTreePage } from "./ProductionFamilyTreePage";
 import { useFamilyTreeRecordWindows } from "../hooks/useFamilyTreeRecordWindows";
 import type {
@@ -1426,7 +1426,10 @@ function attachCandidatesForAction(
       label: person.displayName || "Особа без імені",
       detail: person.events
         .slice(0, 2)
-        .map((event) => [event.eventDate || event.dateText, event.placeName].filter(Boolean).join(" · "))
+        .map((event) => [
+          formatDateForDisplay(event.eventDate || event.dateText),
+          event.placeName,
+        ].filter(Boolean).join(" · "))
         .filter(Boolean)
         .join("; "),
     });

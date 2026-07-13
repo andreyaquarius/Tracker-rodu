@@ -20,7 +20,7 @@ import {
   relatedRecordLabel,
 } from "../utils/customSections";
 import { createId } from "../utils/id";
-import { nowIso } from "../utils/dateHelpers";
+import { formatDateForDisplay, nowIso } from "../utils/dateHelpers";
 import { deleteScanFile } from "../services/scanStorage";
 import { InlineCustomSectionFieldCreator } from "../components/InlineCustomSectionFieldCreator";
 import { ExcelExportMenu } from "../components/ExcelExportMenu";
@@ -696,6 +696,9 @@ function CustomRecordValue({
   if (field.type === "tel" && typeof value === "string" && value) {
     return <a href={`tel:${value}`}>{value}</a>;
   }
+  if (field.type === "date") {
+    return <div className="detail-text">{formatDateForDisplay(String(value ?? "")) || "—"}</div>;
+  }
   return <div className="detail-text">{String(value ?? "") || "—"}</div>;
 }
 
@@ -793,6 +796,7 @@ function compactValue(
       "—";
   }
   if (Array.isArray(value)) return value.length ? `${value.length} файлів` : "—";
+  if (field.type === "date") return formatDateForDisplay(String(value ?? "")) || "—";
   const text = String(value ?? "");
   return text.length > 80 ? `${text.slice(0, 77)}…` : text || "—";
 }

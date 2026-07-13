@@ -69,19 +69,86 @@ export function normalizeFlexibleDateInput(input: string): FlexibleDateInputResu
 }
 
 export function formatFlexibleDateForDisplay(input: string): string {
-  const normalized = normalizeFlexibleDateInput(input);
-  if (normalized.error || !normalized.value) return input;
-  if (/^\d{4}$/.test(normalized.value)) return normalized.value;
-  const [year, month, day] = normalized.value.split("-");
-  return `${day}.${month}.${year}`;
+  return formatDateForDisplay(input);
+}
+
+const DISPLAY_DATE_FORMATTER = new Intl.DateTimeFormat("uk-UA", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
+const DISPLAY_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("uk-UA", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * Formats a date for the UI without losing genealogical precision.
+ *
+ * Full dates use dd.mm.yyyy, year-only and year-month values stay partial, and
+ * unrecognised/approximate historical text is returned unchanged. Timestamps
+ * are treated as instants and rendered in the user's local time zone.
+ */
+export function formatDateForDisplay(input?: string | Date | null): string {
+  if (input === null || input === undefined || input === "") return "";
+  if (input instanceof Date) {
+    return Number.isNaN(input.getTime()) ? "" : DISPLAY_DATE_FORMATTER.format(input);
+  }
+
+  const value = input.trim();
+  if (!value) return "";
+
+  const normalized = normalizeFlexibleDateInput(value);
+  if (!normalized.error && normalized.value) {
+    if (/^\d{4}$/.test(normalized.value)) return normalized.value;
+    const [year, month, day] = normalized.value.split("-");
+    return `${day}.${month}.${year}`;
+  }
+
+  const yearMonth = value.match(/^(\d{4})-(\d{1,2})$/);
+  if (yearMonth) {
+    const year = Number(yearMonth[1]);
+    const month = Number(yearMonth[2]);
+    if (year >= 1 && year <= 9999 && month >= 1 && month <= 12) {
+      return `${String(month).padStart(2, "0")}.${yearMonth[1]}`;
+    }
+  }
+
+  if (hasExplicitTime(value)) {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return DISPLAY_DATE_FORMATTER.format(date);
+  }
+
+  return value;
+}
+
+/** Formats an ISO timestamp as dd.mm.yyyy, HH:mm, preserving non-timestamp partial dates. */
+export function formatDateTimeForDisplay(input?: string | Date | null): string {
+  if (input === null || input === undefined || input === "") return "";
+  if (input instanceof Date) {
+    return Number.isNaN(input.getTime()) ? "" : DISPLAY_DATE_TIME_FORMATTER.format(input);
+  }
+
+  const value = input.trim();
+  if (!value) return "";
+  if (!hasExplicitTime(value)) return formatDateForDisplay(value);
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : DISPLAY_DATE_TIME_FORMATTER.format(date);
+}
+
+function hasExplicitTime(value: string): boolean {
+  return /(?:T|\s)\d{1,2}:\d{2}/.test(value);
 }
 
 export function formatDateTime(value?: string | null): string {
   if (!value) return "Ще не синхронізовано";
-  return new Intl.DateTimeFormat("uk-UA", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTimeForDisplay(value);
 }
 
 export function backupTimestamp(): string {

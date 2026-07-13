@@ -20,7 +20,7 @@ import { Modal } from "../components/Modal";
 import { PersonFormModal } from "../components/PersonFormModal";
 import { ScanAttachmentsView } from "../components/ScanAttachments";
 import { createId } from "../utils/id";
-import { nowIso } from "../utils/dateHelpers";
+import { formatDateForDisplay, nowIso } from "../utils/dateHelpers";
 import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile, getScanPreviewSource } from "../services/scanStorage";
 import { CustomFieldsView } from "../components/CustomFields";
@@ -1058,11 +1058,19 @@ function LinkedRecords({
             ? ((record as ArchiveRequest).subject || (record as ArchiveRequest).archive)
           : (record as TaskRecord | Hypothesis).title;
         const details = type === "finding"
-          ? [(record as Finding).findingType, (record as Finding).eventDate, (record as Finding).place]
+          ? [
+              (record as Finding).findingType,
+              formatDateForDisplay((record as Finding).eventDate),
+              (record as Finding).place,
+            ]
           : type === "task"
             ? [(record as TaskRecord).status, (record as TaskRecord).place]
             : type === "archiveRequest"
-              ? [(record as ArchiveRequest).archive, (record as ArchiveRequest).requestDate, (record as ArchiveRequest).status]
+              ? [
+                  (record as ArchiveRequest).archive,
+                  formatDateForDisplay((record as ArchiveRequest).requestDate),
+                  (record as ArchiveRequest).status,
+                ]
             : [(record as Hypothesis).status, (record as Hypothesis).probability];
         return (
           <button
@@ -1466,9 +1474,7 @@ function yearRange(from: string, to: string): string {
 }
 
 function displayDate(value: string): string {
-  if (!value) return "";
-  const [year, month, day] = value.split("-");
-  return year && month && day ? `${day}.${month}.${year}` : value;
+  return formatDateForDisplay(value);
 }
 
 function personPlaces(person: Person): string {

@@ -16,6 +16,7 @@ import type {
   TreePerson,
   TreeUnion,
 } from "../types.ts";
+import { formatDateForDisplay } from "../../../utils/dateHelpers.ts";
 import { createTrackerFamilyTreeAdapter } from "./createTrackerAdapter.ts";
 import {
   isPhotoReferenceAvailable,
@@ -369,10 +370,11 @@ function lifeDate(
 ): SortableGenealogyDate | undefined {
   for (const event of events) {
     if (!eventTypes.includes(event.eventType)) continue;
-    const display =
+    const display = formatDateForDisplay(
       event.dateText.trim() ||
       event.eventDate.trim() ||
-      dateRangeDisplay(event.dateFrom, event.dateTo);
+      dateRangeDisplay(event.dateFrom, event.dateTo),
+    );
     if (!display) continue;
     return sortableDate(
       display,
@@ -385,8 +387,10 @@ function lifeDate(
 function dateRangeDisplay(from: string, to: string): string {
   const start = from.trim();
   const end = to.trim();
-  if (start && end) return `${start}–${end}`;
-  return start || end;
+  if (start && end) {
+    return `${formatDateForDisplay(start)}–${formatDateForDisplay(end)}`;
+  }
+  return formatDateForDisplay(start || end);
 }
 
 function sortableDate(

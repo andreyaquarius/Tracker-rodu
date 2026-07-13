@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactElement } from "react";
 import type { LayoutNode, TreePerson } from "../types.ts";
+import { formatDateForDisplay } from "../../../utils/dateHelpers.ts";
 import { branchControlPresentation } from "./branchControlPresentation.ts";
 import {
   leaseTreePersonPhotoSource,
@@ -33,8 +34,8 @@ export interface PersonCardProps {
 
 function years(person: TreePerson | undefined): string {
   if (!person) return "";
-  const birth = person.birth?.display ?? person.birth?.sort;
-  const death = person.death?.display ?? person.death?.sort;
+  const birth = formatDateForDisplay(person.birth?.display ?? person.birth?.sort);
+  const death = formatDateForDisplay(person.death?.display ?? person.death?.sort);
   if (birth && death) return `${birth} — ${death}`;
   if (birth) return `нар. ${birth}`;
   if (death) return `пом. ${death}`;

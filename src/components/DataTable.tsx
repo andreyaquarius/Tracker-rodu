@@ -1,10 +1,12 @@
 import type { AppEntity, DocumentRecord, Research } from "../types";
 import type { PageKey } from "./Sidebar";
+import { formatDateForDisplay, formatDateTimeForDisplay } from "../utils/dateHelpers";
 
 export interface TableColumn {
   key: string;
   label: string;
   render?: (entity: AppEntity) => string;
+  valueType?: "date" | "datetime-local";
 }
 
 interface DataTableProps {
@@ -65,11 +67,12 @@ export function DataTable({
               >
                 {columns.map((column) => {
                   const relatedId = String(record[column.key] ?? "");
+                  const rawValue = record[column.key];
                   const value = column.key === "documentId"
                     ? documentTitle(documents, relatedId)
                     : column.key === "researchId"
                       ? researchTitle(researches, relatedId)
-                      : column.render?.(entity) ?? String(record[column.key] ?? "—");
+                      : column.render?.(entity) ?? formattedColumnValue(rawValue, column.valueType);
                   const isStatus = column.key === "status" || column.key === "reviewStatus";
                   const relatedPage = column.key === "documentId"
                     ? "documents"
@@ -143,6 +146,17 @@ export function DataTable({
       </table>
     </div>
   );
+}
+
+function formattedColumnValue(
+  value: unknown,
+  valueType: TableColumn["valueType"],
+): string {
+  const text = String(value ?? "");
+  if (!text) return "—";
+  if (valueType === "date") return formatDateForDisplay(text) || "—";
+  if (valueType === "datetime-local") return formatDateTimeForDisplay(text) || "—";
+  return text;
 }
 
 function documentTitle(documents: DocumentRecord[], id: string): string {
