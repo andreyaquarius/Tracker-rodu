@@ -64,3 +64,25 @@ jobs:
             echo "Deploying $function_name"
             supabase functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF"
           done
+
+      - name: Deliver overdue task reminders after deployment
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+        run: |
+          if ! response="$(curl --fail-with-body --retry 2 --max-time 55 \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            "https://${PROJECT_REF}.supabase.co/functions/v1/send-task-reminders")"; then
+            echo "::error::The reminder catch-up request failed after deployment."
+            exit 1
+          fi
+
+          echo "$response"
+          {
+            echo "### Task reminder catch-up"
+            echo '```json'
+            echo "$response"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

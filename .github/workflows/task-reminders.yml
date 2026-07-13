@@ -8,9 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: task-reminder-delivery
+  cancel-in-progress: false
+
 jobs:
   deliver:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
       - name: Verify reminder secrets
         env:
@@ -27,8 +32,19 @@ jobs:
           PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
           CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
         run: |
-          curl --fail-with-body --retry 2 --max-time 55 \
+          if ! response="$(curl --fail-with-body --retry 2 --max-time 55 \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
             -H "Content-Type: application/json" \
-            "https://${PROJECT_REF}.supabase.co/functions/v1/send-task-reminders"
+            "https://${PROJECT_REF}.supabase.co/functions/v1/send-task-reminders")"; then
+            echo "::error::Task reminder delivery request failed."
+            exit 1
+          fi
+
+          echo "$response"
+          {
+            echo "### Task reminder delivery"
+            echo '```json'
+            echo "$response"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
