@@ -23,13 +23,38 @@ test("project deletion worker authenticates browser jobs before service-role wor
   assert.match(worker, /Project deletion access denied/);
 });
 
-test("project deletion worker uses constant-time cron auth and returns accepted work", () => {
+test("project deletion worker uses constant-time server auth and returns accepted work", () => {
   assert.match(worker, /TASK_REMINDER_CRON_SECRET/);
-  assert.match(worker, /function safeEqual/);
+  assert.match(worker, /isTrustedDeletionWorkerToken/);
+  assert.match(worker, /cronSecret \|\| serviceRoleKey/);
   assert.match(worker, /EdgeRuntime\.waitUntil/);
-  assert.match(worker, /runDeletionWorker\(supabaseUrl, serviceRoleKey, targetJobId\)/);
+  assert.match(worker, /runDeletionWorkerWithContinuation/);
   assert.match(worker, /202/);
   assert.match(config, /\[functions\.process-project-deletions\][\s\S]*?verify_jwt\s*=\s*false/);
+});
+
+test("unfinished deletion workers immediately wake one targeted successor", () => {
+  assert.match(worker, /return \{ shouldContinue: true, jobId: activeJobId \}/);
+  assert.match(worker, /if \(!outcome\.shouldContinue \|\| !outcome\.jobId\) return/);
+  assert.match(worker, /requestDeletionContinuation\(\{/);
+  assert.match(worker, /jobId: outcome\.jobId/);
+  assert.match(worker, /cron will recover the durable job/i);
+  assert.match(worker, /if \(isServerRequest\)[\s\S]*?targetJobId = body\.jobId/);
+});
+
+test("a queue recovery claim stays on that job for every subsequent batch", () => {
+  assert.match(worker, /const rpcName = activeJobId/);
+  assert.match(worker, /target_job_id: activeJobId/);
+  assert.match(worker, /activeJobId = job\.jobId/);
+  assert.match(
+    worker,
+    /if \(job\.status === "completed"\) \{\s*return \{ shouldContinue: false \}/,
+  );
+});
+
+test("empty recovery queues do not spawn a continuation", () => {
+  assert.match(worker, /if \(!outcome\.shouldContinue \|\| !outcome\.jobId\) return/);
+  assert.match(workflow, /-d '\{\}'/);
 });
 
 test("project deletion worker processes durable jobs with adaptive bounded batches", () => {

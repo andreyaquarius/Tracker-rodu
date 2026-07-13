@@ -11,8 +11,11 @@ import {
 } from "../utils/authRestrictions.ts";
 import {
   createProjectDeletionOperations,
+  parseProjectDeletionStatus,
+  resumeProjectDeletion,
   runProjectDeletion,
   type ProjectDeletionOptions,
+  type ProjectDeletionStatus,
 } from "./projectDeletion.ts";
 
 export interface SupabaseAccount {
@@ -27,6 +30,8 @@ export interface SupabaseWorkspace {
   projectName: string;
   projectSlug: string;
   role: "owner" | "editor" | "viewer";
+  deletionPending: boolean;
+  deletionJobId: string | null;
 }
 
 type MembershipRow = {
@@ -153,13 +158,43 @@ function projectSlug(project: ProjectRow): string {
 
 function mapMembership(row: MembershipRow): SupabaseWorkspace | null {
   const project = Array.isArray(row.projects) ? row.projects[0] : row.projects;
-  if (!project || project.deletion_pending === true) return null;
+  if (!project) return null;
   return {
     projectId: project.id,
     projectName: project.name,
     projectSlug: projectSlug(project),
     role: row.role,
+    deletionPending: project.deletion_pending === true,
+    deletionJobId: null,
   };
+}
+
+function isMissingPendingDeletionRpcError(
+  error: { code?: string; message?: string; details?: string; hint?: string } | null,
+): boolean {
+  const description = [error?.code, error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+  return description.includes("list_accessible_project_deletions") && (
+    description.includes("pgrst202") ||
+    description.includes("schema cache") ||
+    description.includes("function")
+  );
+}
+
+async function readAccessibleProjectDeletions(): Promise<ProjectDeletionStatus[]> {
+  const { data, error } = await requireSupabase().rpc("list_accessible_project_deletions");
+  if (error && isMissingPendingDeletionRpcError(error)) return [];
+  if (error) throw error;
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((value) => {
+    try {
+      return [parseProjectDeletionStatus(value)];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function isMissingSlugError(error: { message?: string; details?: string; hint?: string } | null): boolean {
@@ -226,8 +261,22 @@ async function readMemberships(knownUserId?: string): Promise<SupabaseWorkspace[
   const mapped = (data ?? [])
     .map(mapMembership)
     .filter((workspace): workspace is SupabaseWorkspace => workspace !== null);
+  const pendingDeletions = await readAccessibleProjectDeletions();
+  const pendingByProject = new Map(
+    pendingDeletions.map((status) => [status.projectId, status]),
+  );
+  const workspaces = mapped.map((workspace) => {
+    const deletion = pendingByProject.get(workspace.projectId);
+    if (!deletion) return workspace;
+    pendingByProject.delete(workspace.projectId);
+    return {
+      ...workspace,
+      deletionPending: true,
+      deletionJobId: deletion.jobId,
+    };
+  });
   return Array.from(
-    new Map(mapped.map((workspace) => [workspace.projectId, workspace])).values(),
+    new Map(workspaces.map((workspace) => [workspace.projectId, workspace])).values(),
   );
 }
 
@@ -425,6 +474,8 @@ export async function createSupabaseWorkspace(
     projectName: fallbackProject.name,
     projectSlug: projectSlug(fallbackProject),
     role: "owner",
+    deletionPending: false,
+    deletionJobId: null,
   };
 }
 
@@ -444,6 +495,32 @@ export async function deleteSupabaseWorkspace(
   );
   await runProjectDeletion(operations, projectId, options);
   return waitForWorkspaceRemoval(projectId);
+}
+
+export async function resumeSupabaseWorkspaceDeletion(
+  workspace: SupabaseWorkspace,
+  options: ProjectDeletionOptions = {},
+): Promise<SupabaseWorkspace[]> {
+  if (!workspace.deletionPending || !workspace.deletionJobId) {
+    throw new Error("Не знайдено активне завдання видалення цього проєкту.");
+  }
+  const client = requireSupabase();
+  const operations = createProjectDeletionOperations(
+    (functionName, args) => client.rpc(functionName, args),
+    async (jobId) => {
+      const { error } = await client.functions.invoke("process-project-deletions", {
+        body: { jobId },
+      });
+      if (error) throw error;
+    },
+  );
+  await resumeProjectDeletion(
+    operations,
+    workspace.projectId,
+    workspace.deletionJobId,
+    options,
+  );
+  return waitForWorkspaceRemoval(workspace.projectId);
 }
 
 export async function renameSupabaseWorkspace(
@@ -472,7 +549,9 @@ export async function ensureSupabaseWorkspace(
   const client = requireSupabase();
 
   const memberships = knownMemberships ?? await readMemberships();
-  if (memberships.length) return memberships[0];
+  const availableMembership = memberships.find((workspace) => !workspace.deletionPending);
+  if (availableMembership) return availableMembership;
+  if (memberships.length) return null;
 
   const normalizedEmail = session.user.email?.trim().toLocaleLowerCase() ?? "";
   if (normalizedEmail) {
@@ -516,6 +595,8 @@ export async function ensureSupabaseWorkspace(
       projectName: existingProject.name,
       projectSlug: projectSlug(existingProject),
       role: "owner",
+      deletionPending: false,
+      deletionJobId: null,
     };
   }
 
