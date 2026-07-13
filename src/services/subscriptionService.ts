@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabaseAuth";
+import { runAuthenticatedRpc } from "../utils/authenticatedRpc";
 import type {
   PlanCode,
   PlanLimit,
@@ -50,10 +51,31 @@ const publishedAiCreditsPerMonth: Record<PlanCode, number> = {
 };
 
 export async function loadSubscriptionContext(projectId?: string): Promise<SubscriptionContext> {
-  const { data, error } = await getSupabaseClient().rpc(
-    "get_my_subscription_context",
-    { target_project_id: projectId || null },
-  );
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedRpc({
+    getSession: async () => {
+      const result = await client.auth.getSession();
+      return {
+        data: { session: result.data.session },
+        error: result.error,
+      };
+    },
+    refreshSession: async () => {
+      const result = await client.auth.refreshSession();
+      return {
+        data: { session: result.data.session },
+        error: result.error,
+      };
+    },
+    invoke: async () => {
+      const result = await client.rpc(
+        "get_my_subscription_context",
+        { target_project_id: projectId || null },
+      );
+      return { data: result.data, error: result.error };
+    },
+    shouldRetryAfterRefresh: isSubscriptionContextAuthError,
+  });
   if (error) throw error;
   if (!data || typeof data !== "object") {
     throw new Error("Не вдалося завантажити тарифний план.");
@@ -106,6 +128,17 @@ export async function loadSubscriptionPlans(): Promise<Array<{
       limits: withDefaultPlanLimits(code, limits),
     };
   });
+}
+
+function isSubscriptionContextAuthError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? String(error.code ?? "") : "";
+  const status = "status" in error ? Number(error.status) : 0;
+  const message = "message" in error ? String(error.message ?? "").toLocaleLowerCase() : "";
+  return status === 401 ||
+    code === "PGRST301" ||
+    (code === "42501" && message.includes("get_my_subscription_context")) ||
+    message.includes("jwt expired");
 }
 
 export interface AdminSubscriptionRow {

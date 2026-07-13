@@ -147,6 +147,7 @@ export function TopBar({
                         onSwitchWorkspace(item.projectId);
                       }}
                       type="button"
+                      disabled={isCreatingWorkspace}
                     >
                       <strong>{item.projectName}</strong>
                       <small>{roleLabel(item.role)}</small>
@@ -160,6 +161,7 @@ export function TopBar({
                             onRenameWorkspace(item.projectId);
                           }}
                           type="button"
+                          disabled={isCreatingWorkspace}
                           aria-label={`Перейменувати проєкт ${item.projectName}`}
                           title="Перейменувати проєкт"
                         >
@@ -172,6 +174,7 @@ export function TopBar({
                             onDeleteWorkspace(item.projectId);
                           }}
                           type="button"
+                          disabled={isCreatingWorkspace}
                           aria-label={`Видалити проєкт ${item.projectName}`}
                           title="Видалити проєкт"
                         >

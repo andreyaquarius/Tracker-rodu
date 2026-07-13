@@ -216,6 +216,7 @@ import {
   type ProjectDashboardStats,
   type ProjectDashboardTask,
 } from "./services/projectDashboard";
+import type { ProjectDeletionStatus } from "./services/projectDeletion.ts";
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
@@ -506,6 +507,23 @@ function reportGedcomImportBatchProgress(
   });
 }
 
+function projectDeletionPhaseLabel(phase: string): string {
+  const labels: Record<string, string> = {
+    queued: "Готуємо видалення",
+    storage_cleanup: "Очищаємо резервні копії та вкладення",
+    finalizing: "Завершуємо видалення",
+    completed: "Проєкт видалено",
+    project_members: "Очищаємо учасників проєкту",
+    project_invitations: "Очищаємо запрошення",
+    persons: "Видаляємо осіб",
+    person_relations: "Видаляємо родинні зв’язки",
+    findings: "Видаляємо знахідки",
+    documents: "Видаляємо документи",
+    family_trees: "Видаляємо родові дерева",
+  };
+  return labels[phase] ?? "Очищаємо дані проєкту";
+}
+
 export default function App() {
   const app = useAppDatabase();
   const location = useLocation();
@@ -529,6 +547,11 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [isAccountSigningIn, setIsAccountSigningIn] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [workspaceDeletion, setWorkspaceDeletion] = useState<{
+    projectId: string;
+    projectName: string;
+    progress: ProjectDeletionStatus | null;
+  } | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
   const [scanViewer, setScanViewer] = useState<ActiveDocumentScanViewer | null>(null);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
@@ -2145,6 +2168,7 @@ export default function App() {
   };
 
   const createWorkspace = async () => {
+    if (isCreatingWorkspace) return;
     const session = await getSupabaseSession();
     if (!session || !account) {
       notify("Спочатку увійдіть до облікового запису.", true);
@@ -2186,6 +2210,7 @@ export default function App() {
   };
 
   const removeWorkspace = async (projectId: string) => {
+    if (isCreatingWorkspace) return;
     const targetWorkspace = workspaces.find((item) => item.projectId === projectId);
     if (!targetWorkspace) return;
     if (targetWorkspace.role !== "owner") {
@@ -2203,8 +2228,19 @@ export default function App() {
     if (!confirmed) return;
 
     setIsCreatingWorkspace(true);
+    setWorkspaceDeletion({
+      projectId,
+      projectName: targetWorkspace.projectName,
+      progress: null,
+    });
     try {
-      const refreshed = await deleteSupabaseWorkspace(projectId);
+      const refreshed = await deleteSupabaseWorkspace(projectId, {
+        onProgress: (progress) => {
+          setWorkspaceDeletion((current) => current?.projectId === projectId
+            ? { ...current, progress }
+            : current);
+        },
+      });
       clearProjectResearchCache(projectId);
       clearProjectPeopleCache(projectId);
       clearProjectDocumentsCache(projectId);
@@ -2228,11 +2264,13 @@ export default function App() {
     } catch (error) {
       notify(describeError(error, "Не вдалося видалити проєкт."), true);
     } finally {
+      setWorkspaceDeletion(null);
       setIsCreatingWorkspace(false);
     }
   };
 
   const renameWorkspace = async (projectId: string) => {
+    if (isCreatingWorkspace) return;
     const targetWorkspace = workspaces.find((item) => item.projectId === projectId);
     if (!targetWorkspace) return;
     if (targetWorkspace.role !== "owner") {
@@ -4825,6 +4863,47 @@ export default function App() {
             navigate("subscription");
           }}
         />
+      ) : null}
+      {workspaceDeletion ? (
+        <div className="workspace-deletion-overlay" role="status" aria-live="polite">
+          <div className="workspace-deletion-card">
+            <span className="eyebrow">Видалення проєкту</span>
+            <h2>«{workspaceDeletion.projectName}»</h2>
+            <div className="workspace-deletion-progress-heading">
+              <strong>
+                {workspaceDeletion.progress
+                  ? projectDeletionPhaseLabel(workspaceDeletion.progress.phase)
+                  : "Створюємо безпечне завдання видалення"}
+              </strong>
+              <span>{Math.round(workspaceDeletion.progress?.progressPercent ?? 0)}%</span>
+            </div>
+            <div
+              className="workspace-deletion-progress-bar"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(workspaceDeletion.progress?.progressPercent ?? 0)}
+            >
+              <span style={{ width: `${workspaceDeletion.progress?.progressPercent ?? 0}%` }} />
+            </div>
+            {workspaceDeletion.progress ? (
+              <p>
+                Видалено {workspaceDeletion.progress.processedRows.toLocaleString("uk-UA")}
+                {workspaceDeletion.progress.totalRows > 0
+                  ? ` із ${workspaceDeletion.progress.totalRows.toLocaleString("uk-UA")} записів`
+                  : " записів"}.
+                {workspaceDeletion.progress.totalTables > 0
+                  ? ` Етапів: ${workspaceDeletion.progress.completedTables.toLocaleString("uk-UA")} із ${workspaceDeletion.progress.totalTables.toLocaleString("uk-UA")}.`
+                  : ""}
+              </p>
+            ) : (
+              <p>Будь ласка, зачекайте. Дані видаляються невеликими пакетами.</p>
+            )}
+            <small>
+              Видалення виконується на сервері. Можна закрити цю вкладку — фоновий процес продовжить роботу, а повторна команда безпечно відкриє те саме завдання.
+            </small>
+          </div>
+        </div>
       ) : null}
       {toast ? <div className={`toast ${toast.error ? "toast-error" : ""}`}>{toast.message}</div> : null}
     </div>

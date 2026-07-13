@@ -20,7 +20,9 @@ import {
 } from "../utils/projectCache.ts";
 import { selectRowsInParallel } from "../utils/pagedRows.ts";
 import {
-  chunkImportRows,
+  chunkPersonImportRows,
+  chunkRelationImportRows,
+  runAdaptiveImportBatch,
   runImportBatches,
   withImportPhase,
   type ImportPhaseProgressOptions,
@@ -97,7 +99,10 @@ const SELECT_BATCH_SIZE = 1000;
 // keeps the aggregate at two database statements instead of six competing
 // offset scans, while still allowing both independent tables to load together.
 const SELECT_CONCURRENCY_PER_TABLE = 1;
-const PERSON_IMPORT_CONCURRENCY = 3;
+// Person upserts fan out into synchronous projection triggers. A single
+// in-flight request avoids making three trigger-heavy statements compete for
+// the same project, while adaptive splitting handles unusually expensive rows.
+const PERSON_IMPORT_CONCURRENCY = 1;
 // person_relations synchronously project into the canonical family graph via
 // database triggers. Keep those batches ordered per browser; the database also
 // serializes them per project to protect concurrent tabs and users.
@@ -344,21 +349,25 @@ export async function importProjectPeople(
 ): Promise<void> {
   const client = getSupabaseClient();
   const personRows = persons.map((person) => personToRow(projectId, person, researchIds));
-  await runImportBatches(chunkImportRows(personRows), async (batch) => {
-    const { error } = await client
-      .from("persons")
-      .upsert(batch, { onConflict: "id" });
-    if (error) throw error;
+  await runImportBatches(chunkPersonImportRows(personRows), async (batch) => {
+    await runAdaptiveImportBatch(batch, async (items) => {
+      const { error } = await client
+        .from("persons")
+        .upsert(items, { onConflict: "id" });
+      if (error) throw error;
+    });
   }, {
     concurrency: PERSON_IMPORT_CONCURRENCY,
     onProgress: withImportPhase("persons", options.onProgress),
   });
   const relationRows = relations.map((relation) => relationToRow(projectId, relation));
-  await runImportBatches(chunkImportRows(relationRows), async (batch) => {
-    const { error } = await client
-      .from("person_relations")
-      .upsert(batch, { onConflict: "id" });
-    if (error) throw error;
+  await runImportBatches(chunkRelationImportRows(relationRows), async (batch) => {
+    await runAdaptiveImportBatch(batch, async (items) => {
+      const { error } = await client
+        .from("person_relations")
+        .upsert(items, { onConflict: "id" });
+      if (error) throw error;
+    });
   }, {
     concurrency: RELATION_IMPORT_CONCURRENCY,
     onProgress: withImportPhase("relations", options.onProgress),
