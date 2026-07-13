@@ -74,7 +74,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
       return;
     }
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 5 * 60 * 1000);
+    const timer = window.setInterval(() => void refresh(), 60 * 1000);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {
@@ -142,7 +142,13 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
   if (!account) return null;
 
   return (
-    <details className="announcement-menu" ref={detailsRef}>
+    <details
+      className="announcement-menu"
+      ref={detailsRef}
+      onToggle={(event) => {
+        if (event.currentTarget.open) void refresh();
+      }}
+    >
       <summary aria-label="Відкрити сповіщення Трекера Роду" title="Сповіщення">
         <BellIcon />
         {unreadCount ? <span className="announcement-badge">{unreadCount}</span> : null}

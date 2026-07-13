@@ -72,6 +72,28 @@ test("scheduled workflow invokes reminders every five minutes", () => {
   assert.match(deployWorkflow, /supabase secrets set/);
 });
 
+test("successful Edge Function deployment immediately exercises and logs reminder delivery", () => {
+  const deployPosition = deployWorkflow.lastIndexOf("supabase functions deploy");
+  const reminderPosition = deployWorkflow.lastIndexOf(
+    "/functions/v1/send-task-reminders",
+  );
+
+  assert.notEqual(deployPosition, -1, "Edge Functions must be deployed");
+  assert.ok(
+    reminderPosition > deployPosition,
+    "the reminder smoke call must run only after all Edge Functions deploy successfully",
+  );
+  assert.match(
+    deployWorkflow.slice(reminderPosition - 1_000),
+    /curl[\s\S]*--fail-with-body[\s\S]*-X POST/i,
+  );
+  assert.match(
+    deployWorkflow.slice(deployPosition),
+    /(?:response|result|body)\s*=\s*"?\$\(\s*curl[\s\S]*?(?:echo|printf)[\s\S]*?\$(?:response|result|body)/i,
+    "the delivery response must be captured and written to the Actions log",
+  );
+});
+
 test("notification bell combines announcements and task reminders", () => {
   assert.match(bell, /loadMyTaskNotifications/);
   assert.match(bell, /markTaskNotificationRead/);
@@ -79,4 +101,17 @@ test("notification bell combines announcements and task reminders", () => {
   assert.match(bell, /Нагадування про завдання/);
   assert.match(service, /\.from\("task_notifications"\)/);
   assert.match(service, /Math\.min\(100, Math\.max\(1/);
+});
+
+test("notification bell refreshes within a minute and whenever the panel opens", () => {
+  assert.match(
+    bell,
+    /window\.setInterval\(\(\)\s*=>\s*void refresh\(\),\s*60\s*\*\s*1000\s*\)/,
+  );
+  assert.match(bell, /<details[\s\S]*?onToggle=/);
+  assert.match(
+    bell,
+    /(?:currentTarget|target)\.open[\s\S]{0,200}(?:void\s+)?refresh\(\)/,
+    "opening the notifications panel must fetch reminders immediately",
+  );
 });
