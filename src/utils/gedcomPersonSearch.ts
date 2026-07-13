@@ -1,4 +1,5 @@
 import type { Person } from "../types";
+import { formatDateForDisplay } from "./dateHelpers.ts";
 
 export interface GedcomPersonSearchEntry {
   person: Person;
@@ -24,9 +25,11 @@ export function buildGedcomPersonSearchIndex(people: Person[]): GedcomPersonSear
     ];
     const dateParts = [
       person.birthDate,
+      formatDateForDisplay(person.birthDate),
       person.birthYearFrom,
       person.birthYearTo,
       person.deathDate,
+      formatDateForDisplay(person.deathDate),
       person.deathYearFrom,
       person.deathYearTo,
     ];
@@ -92,7 +95,8 @@ export function gedcomPersonDisplayName(person: Person): string {
 }
 
 function personLifeDateLabel(prefix: string, exact: string, from: string, to: string): string {
-  const dateText = exact.trim() || yearRangeText(from, to);
+  const exactDate = exact.trim();
+  const dateText = exactDate ? formatDateForDisplay(exactDate) : yearRangeText(from, to);
   return dateText ? `${prefix} ${dateText}` : "";
 }
 

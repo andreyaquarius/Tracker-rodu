@@ -67,6 +67,13 @@ test("keeps the complete stored name and exact date/year display values", () => 
 
 test("formats partial life data without inventing date precision", () => {
   assert.equal(
+    formatCircularAncestorLife(person({
+      birth: { display: "1777-11-17" },
+      death: { display: "1840-03-12" },
+    })),
+    "17.11.1777 — 12.03.1840",
+  );
+  assert.equal(
     formatCircularAncestorLife(person({ birth: { sort: "1777" } })),
     "нар. 1777",
   );

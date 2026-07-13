@@ -1,6 +1,7 @@
 import type { CollectionKey } from "../types";
 import type { TableColumn } from "../components/DataTable";
 import { primaryParticipantName } from "../utils/findingParticipants";
+import { formatDateTimeForDisplay } from "../utils/dateHelpers";
 
 export interface FieldConfig {
   key: string;
@@ -358,10 +359,5 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
 };
 
 function formatDateTimeColumn(value: unknown): string {
-  const date = new Date(String(value ?? ""));
-  if (!value || Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("uk-UA", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(date);
+  return formatDateTimeForDisplay(String(value ?? "")) || "—";
 }

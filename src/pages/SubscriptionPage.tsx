@@ -37,6 +37,7 @@ import type {
   SubscriptionStatus,
 } from "../types/subscription";
 import { filterFamilyTreeAccessCandidates } from "../utils/familyTreeFeatureAccess";
+import { formatDateForDisplay } from "../utils/dateHelpers";
 
 interface SubscriptionPageProps {
   context: SubscriptionContext | null;
@@ -1074,5 +1075,5 @@ function planDisplayName(planCode: PlanCode): string {
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("uk-UA", { dateStyle: "long" }).format(new Date(value));
+  return formatDateForDisplay(value) || "—";
 }

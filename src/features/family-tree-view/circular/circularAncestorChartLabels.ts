@@ -1,5 +1,6 @@
 import type { TreePerson } from "../types.ts";
 import type { CircularAncestorOccurrence } from "./circularAncestorChartLayout.ts";
+import { formatDateForDisplay } from "../../../utils/dateHelpers.ts";
 
 export type CircularAncestorLabelMode = "curved" | "radial" | "hidden";
 export type CircularAncestorVisibleLabelMode = Exclude<
@@ -74,10 +75,10 @@ export function formatCircularAncestorName(person: TreePerson): string {
   return fallback || "Особа без імені";
 }
 
-/** Preserves the exact date/year representation stored by the person card. */
+/** Preserves genealogical precision while presenting exact dates as dd.mm.yyyy. */
 export function formatCircularAncestorLife(person: TreePerson): string {
-  const birth = normalizeWhitespace(person.birth?.display || person.birth?.sort);
-  const death = normalizeWhitespace(person.death?.display || person.death?.sort);
+  const birth = formatDateForDisplay(normalizeWhitespace(person.birth?.display || person.birth?.sort));
+  const death = formatDateForDisplay(normalizeWhitespace(person.death?.display || person.death?.sort));
   if (birth && death) return `${birth} — ${death}`;
   if (birth) return `нар. ${birth}`;
   if (death) return `пом. ${death}`;

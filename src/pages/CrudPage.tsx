@@ -22,7 +22,11 @@ import type {
   TaskRecord,
 } from "../types";
 import { createId } from "../utils/id";
-import { nowIso } from "../utils/dateHelpers";
+import {
+  formatDateForDisplay,
+  formatDateTimeForDisplay,
+  nowIso,
+} from "../utils/dateHelpers";
 import { DataTable } from "../components/DataTable";
 import { Modal } from "../components/Modal";
 import type { EntityConfig, FieldConfig } from "./entityConfigs";
@@ -608,7 +612,14 @@ export function CrudPage({
             />
             <DataTable
               items={pagination.pageItems}
-              columns={config.columns}
+              columns={config.columns.map((column) => ({
+                ...column,
+                valueType: config.fields.find((field) => field.key === column.key)?.type === "date"
+                  ? "date"
+                  : config.fields.find((field) => field.key === column.key)?.type === "datetime-local"
+                    ? "datetime-local"
+                    : undefined,
+              }))}
               documents={documents}
               researches={researches}
               onView={openViewWindow}
@@ -1046,6 +1057,9 @@ function DetailValue({
     const normalized = normalizeTaskReminderTimestamp(value);
     return <strong>{normalized ? formatEntityDate(normalized) : "Не вказано"}</strong>;
   }
+  if (field.type === "date") {
+    return <strong>{formatDateForDisplay(String(value ?? "")) || "Не вказано"}</strong>;
+  }
   if (field.type === "document") {
     const document = documents.find((item) => item.id === value);
     return document ? (
@@ -1217,7 +1231,7 @@ function taskGeneHelpInitialRequest(
   }
   appendTaskLine(rows, "Статус завдання", task.status);
   appendTaskLine(rows, "Пріоритет", task.priority);
-  appendTaskLine(rows, "Дедлайн", task.deadline);
+  appendTaskLine(rows, "Дедлайн", formatDateForDisplay(String(task.deadline ?? "")));
   appendTaskLine(rows, "Нотатки", task.notes);
 
   rows.push("");
@@ -1240,10 +1254,7 @@ function cleanTaskText(value: unknown): string {
 }
 
 function formatEntityDate(value: string): string {
-  return new Intl.DateTimeFormat("uk-UA", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTimeForDisplay(value) || "—";
 }
 
 export function EntityModal({
@@ -2722,7 +2733,7 @@ function notesFromFinding(form: FormRecord, participant: FindingParticipant | nu
     fieldLine("Тип знахідки", form.findingType),
     participant ? fieldLine("Учасник запису", [participant.role, participant.name].filter(Boolean).join(": ")) : "",
     participant?.notes ? fieldLine("Нотатки учасника", participant.notes) : "",
-    fieldLine("Дата події", form.eventDate),
+    fieldLine("Дата події", formatDateForDisplay(String(form.eventDate ?? ""))),
     fieldLine("Місце", form.place),
     sourceParts.length ? `Джерело: ${sourceParts.join(", ")}.` : "",
     fieldLine("Короткий зміст", form.summary),
@@ -3075,7 +3086,11 @@ function findingLabel(finding: Finding): string {
     finding.people ||
     finding.summary ||
     "Знахідка";
-  const details = [finding.findingType, finding.eventDate, finding.place].filter(Boolean).join(" · ");
+  const details = [
+    finding.findingType,
+    formatDateForDisplay(finding.eventDate),
+    finding.place,
+  ].filter(Boolean).join(" · ");
   return details ? `${title} — ${details}` : title;
 }
 

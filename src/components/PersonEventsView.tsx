@@ -1,5 +1,6 @@
 import type { PersonEvent } from "../types";
 import { personEventLabel } from "../utils/geo";
+import { formatDateForDisplay } from "../utils/dateHelpers";
 
 const CORE_FIELD_EVENT_TYPES = new Set(["birth", "marriage", "death"]);
 
@@ -22,7 +23,7 @@ export function PersonEventsView({ events }: { events: PersonEvent[] }) {
         <article key={event.id} className="person-event-detail-card">
           <strong>{event.title?.trim() || personEventLabel(event.type)}</strong>
           <span>
-            {[event.date, event.placeName].filter(Boolean).join(" · ") || "Дата і місце не вказані"}
+            {[formatDateForDisplay(event.date), event.placeName].filter(Boolean).join(" · ") || "Дата і місце не вказані"}
           </span>
           {event.value ? <p><b>Зміст:</b> {event.value}</p> : null}
           {event.age ? <p><b>Вік у джерелі:</b> {event.age}</p> : null}

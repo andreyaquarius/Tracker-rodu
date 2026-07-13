@@ -8,7 +8,10 @@ import {
   type FamilyTreeBuilderAction,
   type FamilyTreePersonMutationDraft,
 } from "../../services/familyTreeMutationService";
-import { normalizeFlexibleDateInput } from "../../utils/dateHelpers";
+import {
+  formatDateForDisplay,
+  normalizeFlexibleDateInput,
+} from "../../utils/dateHelpers";
 import { Modal } from "../Modal";
 
 export interface FamilyTreePartnerOption {
@@ -119,7 +122,9 @@ export function FamilyTreePersonDialog({
       return;
     }
     setDateError("");
-    updatePerson({ [field]: result.value } as Partial<FamilyTreePersonMutationDraft>);
+    updatePerson({
+      [field]: formatDateForDisplay(result.value),
+    } as Partial<FamilyTreePersonMutationDraft>);
   };
 
   const submit = (event: FormEvent) => {

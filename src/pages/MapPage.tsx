@@ -5,6 +5,7 @@ import type { AppDatabase, Finding, GeoPoint, Person, PersonEvent } from "../typ
 import type { PageKey } from "../components/Sidebar";
 import { geoMarkerColor, personEventLabel } from "../utils/geo";
 import { primaryParticipantName } from "../utils/findingParticipants";
+import { formatDateForDisplay } from "../utils/dateHelpers";
 
 type MapMarkerKind = "person-event" | "finding";
 const PERSON_MARKER_COLOR = "#c49a32";
@@ -165,7 +166,8 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
   for (const finding of db.findings) {
     if (!hasCoordinates(finding.geo)) continue;
     const title = findingTitle(finding);
-    const subtitle = [finding.findingType, finding.eventDate].filter(Boolean).join(" · ") || "Знахідка";
+    const subtitle = [finding.findingType, formatDateForDisplay(finding.eventDate)]
+      .filter(Boolean).join(" · ") || "Знахідка";
     const place = finding.place || finding.geo.displayName || "";
     const settlement = settlementName(place);
     markers.push({
@@ -226,7 +228,8 @@ function createMapSearch(markers: TrackerMapMarker[]) {
 }
 
 function personEventTitle(event: PersonEvent): string {
-  return [personEventLabel(event.type), event.date].filter(Boolean).join(" · ");
+  return [personEventLabel(event.type), formatDateForDisplay(event.date)]
+    .filter(Boolean).join(" · ");
 }
 
 export function MapPage({
@@ -441,7 +444,7 @@ function PersonMapFilter({
               }}
             >
               <strong>{personName(person)}</strong>
-              <small>{[person.birthDate, person.birthPlace].filter(Boolean).join(" · ")}</small>
+              <small>{[formatDateForDisplay(person.birthDate), person.birthPlace].filter(Boolean).join(" · ")}</small>
             </button>
           ))}
           {!suggestions.length ? <p>Особу не знайдено.</p> : null}

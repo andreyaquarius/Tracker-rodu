@@ -27,6 +27,17 @@ test("GEDCOM and relative dialogs own padded, non-overflowing content areas", ()
   assert.match(styles, /\.family-tree-v2-relative-menu \{[^}]*padding:\s*22px 24px 24px/s);
 });
 
+test("GEDCOM central-person picker shows search before the current selection", () => {
+  const gedcom = source("../src/components/GedcomImportButton.tsx");
+  const searchPosition = gedcom.indexOf('className="gedcom-root-person-picker__search"');
+  const selectedPosition = gedcom.indexOf('className="gedcom-root-person-picker__selected"');
+
+  assert.notEqual(searchPosition, -1);
+  assert.notEqual(selectedPosition, -1);
+  assert.ok(searchPosition < selectedPosition);
+  assert.match(gedcom, /className="gedcom-root-person-picker__selected" aria-live="polite"/);
+});
+
 test("topbar popovers stay above tree chrome while dialogs stay above the topbar", () => {
   const modal = source("../src/components/Modal.tsx");
   const styles = source("../src/styles.css");

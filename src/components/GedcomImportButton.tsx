@@ -284,10 +284,6 @@ export function GedcomImportButton({
               <label htmlFor={`${rootPersonSearchId}-input`}>
                 <span>Центральна особа для дерева</span>
               </label>
-              <div className="gedcom-root-person-picker__selected" aria-live="polite">
-                <small>Зараз вибрано</small>
-                <strong>{selectedRootPerson ? gedcomPersonSearchLabel(selectedRootPerson) : "Особу не вибрано"}</strong>
-              </div>
               <div className="gedcom-root-person-picker__search">
                 <input
                   id={`${rootPersonSearchId}-input`}
@@ -310,6 +306,10 @@ export function GedcomImportButton({
                     Очистити
                   </button>
                 ) : null}
+              </div>
+              <div className="gedcom-root-person-picker__selected" aria-live="polite">
+                <small>Зараз вибрано</small>
+                <strong>{selectedRootPerson ? gedcomPersonSearchLabel(selectedRootPerson) : "Особу не вибрано"}</strong>
               </div>
               {normalizedRootSearchQuery ? (
                 <div id={`${rootPersonSearchId}-results`} className="gedcom-root-person-picker__results">

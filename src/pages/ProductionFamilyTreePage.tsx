@@ -84,6 +84,7 @@ import type {
   ScanAttachment,
 } from "../types";
 import { moveFamilyTreeFocus, pushFamilyTreeFocus } from "../utils/familyTreeFocusHistory.ts";
+import { formatDateForDisplay } from "../utils/dateHelpers.ts";
 import { exportFamilyTreeGraphToGedcom } from "../utils/gedcom";
 import type {
   GedcomImportExecutionOptions,
@@ -213,8 +214,8 @@ export function ProductionFamilyTreePage({
         personId: person.id,
         label: personLabel(person),
         detail: [
-          person.birthDate || person.birthYearFrom,
-          person.deathDate || person.deathYearFrom,
+          formatDateForDisplay(person.birthDate) || person.birthYearFrom,
+          formatDateForDisplay(person.deathDate) || person.deathYearFrom,
           person.birthPlace,
         ].filter(Boolean).join(" · "),
       }));
@@ -1303,7 +1304,7 @@ function LoadedFamilyTree({
     .map((person) => ({
       personId: person.id,
       label: personLabel(person),
-      detail: [person.birthDate, person.birthPlace].filter(Boolean).join(" · "),
+      detail: [formatDateForDisplay(person.birthDate), person.birthPlace].filter(Boolean).join(" · "),
     })), [persons, targetPersonId]);
 
   async function submitRelative(payload: FamilyTreePersonDialogSubmit) {
@@ -1505,7 +1506,10 @@ function LoadedFamilyTree({
               {searchResults.length ? searchResults.map((person) => (
                 <button key={person.id} type="button" role="option" aria-selected={person.id === focusPersonId} onClick={() => changeFocus(person.id)}>
                   <strong>{personLabel(person)}</strong>
-                  <small>{[person.birthDate, person.birthPlace].filter(Boolean).join(" · ") || "Без дат"}</small>
+                  <small>{[
+                    formatDateForDisplay(person.birthDate),
+                    person.birthPlace,
+                  ].filter(Boolean).join(" · ") || "Без дат"}</small>
                 </button>
               )) : <div>Збігів не знайдено</div>}
             </div>
@@ -1943,8 +1947,10 @@ function searchablePersonText(person: Person): string {
   return [
     personLabel(person),
     person.birthDate,
+    formatDateForDisplay(person.birthDate),
     person.birthPlace,
     person.deathDate,
+    formatDateForDisplay(person.deathDate),
     person.deathPlace,
   ].filter(Boolean).join(" ").toLocaleLowerCase("uk");
 }

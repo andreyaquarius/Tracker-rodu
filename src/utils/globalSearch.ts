@@ -20,6 +20,7 @@ import { primaryParticipantName } from "./findingParticipants";
 import { customRecordSearchText, customRecordTitle } from "./customSections";
 import { customFieldModuleLabels } from "./customFields";
 import { sectionAncestors } from "./sectionHierarchy";
+import { formatDateForDisplay } from "./dateHelpers";
 
 export type HighlightRange = readonly [number, number];
 
@@ -357,7 +358,8 @@ function entityDescription(
     }
     case "findings": {
       const item = entity as Finding;
-      return [item.findingType, item.eventDate, item.place, research?.title].filter(Boolean).join(" · ");
+      return [item.findingType, formatDateForDisplay(item.eventDate), item.place, research?.title]
+        .filter(Boolean).join(" · ");
     }
     case "hypotheses": {
       const item = entity as Hypothesis;
@@ -365,7 +367,8 @@ function entityDescription(
     }
     case "archiveRequests": {
       const item = entity as ArchiveRequest;
-      return [item.archive, item.requestDate, item.status, research?.title].filter(Boolean).join(" · ");
+      return [item.archive, formatDateForDisplay(item.requestDate), item.status, research?.title]
+        .filter(Boolean).join(" · ");
     }
     case "persons": {
       const item = entity as Person;

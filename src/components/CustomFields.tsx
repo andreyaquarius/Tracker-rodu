@@ -9,6 +9,7 @@ import { ScanAttachmentsEditor, ScanAttachmentsView } from "./ScanAttachments";
 import { RecordRelationPicker } from "./RecordRelationPicker";
 import { relatedRecordLabel } from "../utils/customSections";
 import { sanitizeWebUrl } from "../utils/safeUrl";
+import { formatDateForDisplay } from "../utils/dateHelpers";
 
 export function CustomFieldsEditor({
   db,
@@ -217,6 +218,9 @@ function CustomFieldDisplay({
   }
   if (definition.type === "boolean") {
     return <div className="detail-text">{value ? "Так" : "Ні"}</div>;
+  }
+  if (definition.type === "date") {
+    return <div className="detail-text">{formatDateForDisplay(String(value ?? "")) || "—"}</div>;
   }
   const text = String(value ?? "") || "—";
   if (definition.type === "url" && text !== "—") {

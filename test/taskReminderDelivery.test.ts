@@ -59,6 +59,8 @@ test("task reminder Edge Function requires a cron secret and completes every cla
   assert.match(edgeFunction, /RESEND_API_KEY/);
   assert.match(edgeFunction, /Idempotency-Key/);
   assert.match(edgeFunction, /slice\(offset, offset \+ 5\)/);
+  assert.match(edgeFunction, /formattedCalendarDate\(reminder\.task_deadline\)/);
+  assert.match(edgeFunction, /day:\s*"2-digit"[\s\S]*month:\s*"2-digit"[\s\S]*year:\s*"numeric"/);
 });
 
 test("scheduled workflow invokes reminders every five minutes", () => {

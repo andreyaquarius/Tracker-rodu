@@ -12,6 +12,7 @@ import {
   markTaskNotificationRead,
 } from "../services/taskNotificationService";
 import type { TaskReminderNotification } from "../types/notifications";
+import { formatDateForDisplay, formatDateTimeForDisplay } from "../utils/dateHelpers";
 
 interface AnnouncementBellProps {
   account: SupabaseAccount | null;
@@ -179,11 +180,11 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
                         {notification.taskDeadline ? (
                           <>
                             <br />
-                            Строк виконання: {notification.taskDeadline}
+                            Строк виконання: {formatDateForDisplay(notification.taskDeadline)}
                           </>
                         ) : null}
                       </p>
-                      <small>{formatDate(notification.scheduledFor)}</small>
+                      <small>{formatDateTimeForDisplay(notification.scheduledFor)}</small>
                     </button>
                   </article>
                 ))}
@@ -199,7 +200,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
                     <span>{categoryLabels[announcement.category]}</span>
                     <strong>{announcement.title}</strong>
                     <p>{announcement.body}</p>
-                    <small>{formatDate(announcement.publishedAt ?? announcement.createdAt)}</small>
+                    <small>{formatDateTimeForDisplay(announcement.publishedAt ?? announcement.createdAt)}</small>
                   </button>
                   {announcement.mediaUrl ? (
                     <a href={announcement.mediaUrl} target="_blank" rel="noreferrer">
@@ -250,16 +251,6 @@ function BellIcon() {
       />
     </svg>
   );
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("uk-UA", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 }
 
 function taskNotificationUrl(notification: TaskReminderNotification): string {

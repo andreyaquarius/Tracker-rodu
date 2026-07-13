@@ -42,9 +42,10 @@ test("GEDCOM person search matches exact dates, years, and year ranges", () => {
   ]);
 
   assert.deepEqual(searchGedcomPeople(index, "1969-04-12").map((entry) => entry.person.id), ["1"]);
+  assert.deepEqual(searchGedcomPeople(index, "12.04.1969").map((entry) => entry.person.id), ["1"]);
   assert.deepEqual(searchGedcomPeople(index, "2016").map((entry) => entry.person.id), ["1"]);
   assert.deepEqual(searchGedcomPeople(index, "1872").map((entry) => entry.person.id), ["2"]);
-  assert.equal(gedcomPersonSearchLabel(index[0].person), "Перша Особа (нар. 1969-04-12, пом. 2016-09-03)");
+  assert.equal(gedcomPersonSearchLabel(index[0].person), "Перша Особа (нар. 12.04.1969, пом. 03.09.2016)");
 });
 
 test("GEDCOM person search returns nothing for blank input and enforces the result limit", () => {

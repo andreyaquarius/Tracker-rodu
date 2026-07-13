@@ -47,10 +47,19 @@ function formattedDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("uk-UA", {
-    dateStyle: "long",
-    timeStyle: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
     timeZone: "Europe/Kyiv",
   }).format(date);
+}
+
+function formattedCalendarDate(value: string): string {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value;
 }
 
 function appTaskUrl(reminder: ClaimedReminder): string {
@@ -62,7 +71,7 @@ function appTaskUrl(reminder: ClaimedReminder): string {
 function emailContent(reminder: ClaimedReminder): { html: string; text: string } {
   const taskUrl = appTaskUrl(reminder);
   const deadline = reminder.task_deadline
-    ? `<p><strong>Строк виконання:</strong> ${escapeHtml(reminder.task_deadline)}</p>`
+    ? `<p><strong>Строк виконання:</strong> ${escapeHtml(formattedCalendarDate(reminder.task_deadline))}</p>`
     : "";
   const description = reminder.task_description.trim()
     ? `<p>${escapeHtml(reminder.task_description).replaceAll("\n", "<br>")}</p>`
@@ -89,7 +98,7 @@ function emailContent(reminder: ClaimedReminder): { html: string; text: string }
       reminder.task_title,
       `Проєкт: ${reminder.project_name}`,
       `Час нагадування: ${formattedDate(reminder.scheduled_for)}`,
-      reminder.task_deadline ? `Строк виконання: ${reminder.task_deadline}` : "",
+      reminder.task_deadline ? `Строк виконання: ${formattedCalendarDate(reminder.task_deadline)}` : "",
       reminder.task_description,
       `Відкрити завдання: ${taskUrl}`,
     ].filter(Boolean).join("\n\n"),
