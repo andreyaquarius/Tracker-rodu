@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PageKey } from "./Sidebar";
 import {
@@ -10,9 +10,20 @@ import {
   type HelpGuideKey,
   type HelpStep,
 } from "../help/helpGuides";
+import {
+  completeAllHelpGuides,
+  createScopedHelpStorage,
+  loadHelpGuideProgress,
+  readHelpStorageFlag,
+  saveHelpStorageFlag,
+  shouldAutoOpenHelpGuide,
+  updateHelpGuideStatus,
+  type HelpGuideStatus,
+} from "../help/helpProgress.ts";
 
 interface HelpCenterProps {
   page: PageKey | null;
+  accountId: string;
 }
 
 type ActiveHelpKey = HelpGuideKey | "full-tour";
@@ -29,42 +40,53 @@ type FullTourStep = {
   stepIndex: number;
 };
 
-function isStorageEnabled(key: string): boolean {
-  return localStorage.getItem(key) === "1";
-}
+type HelpOpenSource = "auto" | "manual" | null;
 
-function saveStorageFlag(key: string, value: boolean): void {
-  if (value) localStorage.setItem(key, "1");
-  else localStorage.removeItem(key);
-}
-
-export function HelpCenter({ page }: HelpCenterProps) {
+export function HelpCenter({ page, accountId }: HelpCenterProps) {
   const currentGuide = useMemo(() => helpGuideForPage(page), [page]);
+  const helpStorage = useMemo(() => createScopedHelpStorage(accountId), [accountId]);
   const [open, setOpen] = useState(false);
-  const [activeKey, setActiveKey] = useState<ActiveHelpKey>("full-tour");
+  const [activeKey, setActiveKey] = useState<ActiveHelpKey>(currentGuide.key);
   const [stepIndex, setStepIndex] = useState(0);
+  const [guideProgress, setGuideProgress] = useState(() => loadHelpGuideProgress(helpStorage));
   const [autoTipsDisabled, setAutoTipsDisabled] = useState(() =>
-    isStorageEnabled(HELP_STORAGE_KEYS.autoTipsDisabled),
+    readHelpStorageFlag(HELP_STORAGE_KEYS.autoTipsDisabled, helpStorage),
   );
+  const openSourceRef = useRef<HelpOpenSource>(null);
+  const autoGuideKeyRef = useRef<HelpGuideKey | null>(null);
   const fullTourSteps = useMemo(() => buildFullTourSteps(), []);
 
   useEffect(() => {
-    if (!open) {
-      setActiveKey("full-tour");
-      setStepIndex(0);
-    }
-  }, [currentGuide.key, open]);
-
-  useEffect(() => {
+    const previousAutoGuide = autoGuideKeyRef.current;
     if (
-      !isStorageEnabled(HELP_STORAGE_KEYS.introCompleted) &&
-      !isStorageEnabled(HELP_STORAGE_KEYS.autoTipsDisabled)
+      openSourceRef.current === "auto" &&
+      previousAutoGuide &&
+      previousAutoGuide !== currentGuide.key
     ) {
-      setActiveKey("full-tour");
-      setStepIndex(0);
-      setOpen(true);
+      setGuideProgress((current) =>
+        updateHelpGuideStatus(current, previousAutoGuide, "dismissed", helpStorage),
+      );
     }
-  }, []);
+
+    setActiveKey(currentGuide.key);
+    setStepIndex(0);
+    if (shouldAutoOpenHelpGuide({
+      guideKey: currentGuide.key,
+      progress: guideProgress,
+      autoTipsDisabled,
+    })) {
+      openSourceRef.current = "auto";
+      autoGuideKeyRef.current = currentGuide.key;
+      setOpen(true);
+      return;
+    }
+
+    if (openSourceRef.current === "auto") {
+      openSourceRef.current = null;
+      autoGuideKeyRef.current = null;
+      setOpen(false);
+    }
+  }, [currentGuide.key]);
 
   const isFullTour = activeKey === "full-tour";
   const activeFullTourStep = fullTourSteps[stepIndex] ?? fullTourSteps[0];
@@ -76,14 +98,38 @@ export function HelpCenter({ page }: HelpCenterProps) {
   const isLastStep = stepIndex >= totalSteps - 1;
   const guideOptions = buildGuideOptions(currentGuide);
 
-  const closeHelp = (markIntroDone = false) => {
-    if (markIntroDone || activeKey === "workspace-intro" || activeKey === "full-tour") {
-      saveStorageFlag(HELP_STORAGE_KEYS.introCompleted, true);
+  const markGuideStatus = (guideKey: HelpGuideKey, status: HelpGuideStatus) => {
+    setGuideProgress((current) =>
+      updateHelpGuideStatus(current, guideKey, status, helpStorage),
+    );
+  };
+
+  const closeHelp = (completed = false) => {
+    if (completed) {
+      if (activeKey === "full-tour") {
+        setGuideProgress(completeAllHelpGuides(helpStorage));
+        saveHelpStorageFlag(HELP_STORAGE_KEYS.introCompleted, true, helpStorage);
+      } else {
+        markGuideStatus(activeKey, "completed");
+      }
+    } else if (openSourceRef.current === "auto" && autoGuideKeyRef.current) {
+      markGuideStatus(autoGuideKeyRef.current, "dismissed");
     }
+    openSourceRef.current = null;
+    autoGuideKeyRef.current = null;
     setOpen(false);
   };
 
   const switchGuide = (key: ActiveHelpKey) => {
+    if (
+      openSourceRef.current === "auto" &&
+      autoGuideKeyRef.current &&
+      key !== autoGuideKeyRef.current
+    ) {
+      markGuideStatus(autoGuideKeyRef.current, "dismissed");
+      openSourceRef.current = "manual";
+      autoGuideKeyRef.current = null;
+    }
     setActiveKey(key);
     setStepIndex(0);
   };
@@ -91,8 +137,23 @@ export function HelpCenter({ page }: HelpCenterProps) {
   const toggleAutoTips = () => {
     const next = !autoTipsDisabled;
     setAutoTipsDisabled(next);
-    saveStorageFlag(HELP_STORAGE_KEYS.autoTipsDisabled, next);
-    if (next) saveStorageFlag(HELP_STORAGE_KEYS.introCompleted, true);
+    saveHelpStorageFlag(HELP_STORAGE_KEYS.autoTipsDisabled, next, helpStorage);
+    if (next && openSourceRef.current === "auto" && autoGuideKeyRef.current) {
+      markGuideStatus(autoGuideKeyRef.current, "dismissed");
+      openSourceRef.current = null;
+      autoGuideKeyRef.current = null;
+      setOpen(false);
+    } else if (!next && shouldAutoOpenHelpGuide({
+      guideKey: currentGuide.key,
+      progress: guideProgress,
+      autoTipsDisabled: false,
+    })) {
+      setActiveKey(currentGuide.key);
+      setStepIndex(0);
+      openSourceRef.current = "auto";
+      autoGuideKeyRef.current = currentGuide.key;
+      setOpen(true);
+    }
   };
 
   return (
@@ -101,8 +162,10 @@ export function HelpCenter({ page }: HelpCenterProps) {
         type="button"
         className="help-topbar-button"
         onClick={() => {
-          setActiveKey("full-tour");
+          setActiveKey(currentGuide.key);
           setStepIndex(0);
+          openSourceRef.current = "manual";
+          autoGuideKeyRef.current = null;
           setOpen(true);
         }}
         aria-label="Відкрити підказки"
@@ -187,7 +250,7 @@ export function HelpCenter({ page }: HelpCenterProps) {
                     checked={autoTipsDisabled}
                     onChange={toggleAutoTips}
                   />
-                  Не показувати повний тур автоматично
+                  Не показувати підказки автоматично
                 </label>
               </article>
             </div>

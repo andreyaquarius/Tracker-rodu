@@ -10,6 +10,7 @@ export interface FieldConfig {
     | "textarea"
     | "number"
     | "date"
+    | "datetime-local"
     | "url"
     | "select"
     | "checkbox"
@@ -245,6 +246,9 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
       { key: "status", label: "Статус", type: "select", options: ["не почато", "в роботі", "знайдено", "не знайдено", "перевірено", "потрібно повторно перевірити", "закрито"] },
       { key: "priority", label: "Пріоритет", type: "select", options: ["низький", "середній", "високий", "критичний"] },
       { key: "deadline", label: "Дедлайн", type: "date" },
+      { key: "reminderAt", label: "Дата й час нагадування", type: "datetime-local", wide: true },
+      { key: "reminderInApp", label: "Нагадати автору в застосунку", type: "checkbox" },
+      { key: "reminderEmail", label: "Нагадати автору електронною поштою", type: "checkbox" },
       { key: "notes", label: "Нотатки", type: "textarea", wide: true },
     ],
     columns: [
@@ -252,6 +256,13 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
       { key: "personName", label: "Особа" },
       { key: "priority", label: "Пріоритет" },
       { key: "deadline", label: "Дедлайн" },
+      {
+        key: "reminderAt",
+        label: "Нагадування",
+        render: (entity) => formatDateTimeColumn(
+          (entity as unknown as Record<string, unknown>).reminderAt,
+        ),
+      },
       { key: "status", label: "Статус" },
     ],
   },
@@ -345,3 +356,12 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
     ],
   },
 };
+
+function formatDateTimeColumn(value: unknown): string {
+  const date = new Date(String(value ?? ""));
+  if (!value || Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("uk-UA", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
+}

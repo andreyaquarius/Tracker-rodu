@@ -60,6 +60,12 @@ import { GeoPlaceField } from "../components/GeoPlaceField";
 import { PaginationControls } from "../components/PaginationControls";
 import { usePagination } from "../hooks/usePagination";
 import { useWorkspaceWindows } from "../components/WorkspaceWindows";
+import {
+  normalizeTaskReminderFields,
+  normalizeTaskReminderTimestamp,
+  taskReminderDateTimeLocalValue,
+  taskReminderValidationError,
+} from "../utils/taskReminders";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -1036,6 +1042,10 @@ function DetailValue({
   if (field.type === "checkbox") {
     return <strong>{value ? "Так" : "Ні"}</strong>;
   }
+  if (field.type === "datetime-local") {
+    const normalized = normalizeTaskReminderTimestamp(value);
+    return <strong>{normalized ? formatEntityDate(normalized) : "Не вказано"}</strong>;
+  }
   if (field.type === "document") {
     const document = documents.find((item) => item.id === value);
     return document ? (
@@ -1293,7 +1303,10 @@ export function EntityModal({
   const [form, setForm] = useState<FormRecord>(() => {
     const defaults: FormRecord = {};
     for (const field of config.fields) {
-      defaults[field.key] = initial[field.key] ?? defaultFieldValue(field);
+      const initialValue = initial[field.key] ?? defaultFieldValue(field);
+      defaults[field.key] = field.type === "datetime-local"
+        ? taskReminderDateTimeLocalValue(initialValue)
+        : initialValue;
     }
     if (config.collection === "findings") {
       defaults.geo = (initial.geo as GeoPoint | null | undefined) ?? null;
@@ -1332,6 +1345,12 @@ export function EntityModal({
         ? { people: participantSummary(sourceParticipants, findingType), participants: sourceParticipants }
         : {}),
       ...(supportsCustomFields(config.collection) ? { customFields: customValues } : {}),
+      ...(config.collection === "tasks"
+        ? normalizeTaskReminderFields({
+            ...sourceForm,
+            reminderSentAt: (entity as TaskRecord | null)?.reminderSentAt ?? "",
+          })
+        : {}),
       id: entity?.id ?? createId(),
       createdAt: entity?.createdAt ?? timestamp,
       __baseUpdatedAt: persistedBaseUpdatedAtRef.current || entity?.updatedAt,
@@ -1374,6 +1393,13 @@ export function EntityModal({
     ) {
       window.alert("Додайте принаймні одну особу, згадану в записі.");
       return;
+    }
+    if (config.collection === "tasks") {
+      const reminderError = taskReminderValidationError(form);
+      if (reminderError) {
+        window.alert(reminderError);
+        return;
+      }
     }
     if (
       researchRequired &&

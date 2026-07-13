@@ -1,0 +1,34 @@
+name: Deliver task reminders
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify reminder secrets
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+        run: |
+          if [ -z "$PROJECT_REF" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::SUPABASE_PROJECT_REF and TASK_REMINDER_CRON_SECRET are required."
+            exit 1
+          fi
+
+      - name: Deliver due reminders
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+        run: |
+          curl --fail-with-body --retry 2 --max-time 55 \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            "https://${PROJECT_REF}.supabase.co/functions/v1/send-task-reminders"

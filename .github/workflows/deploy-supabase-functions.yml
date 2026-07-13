@@ -19,6 +19,7 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      TASK_REMINDER_CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
 
     steps:
       - name: Checkout repository
@@ -34,6 +35,10 @@ jobs:
             echo "::error::Repository secret SUPABASE_PROJECT_REF is missing."
             exit 1
           fi
+          if [ -z "$TASK_REMINDER_CRON_SECRET" ]; then
+            echo "::error::Repository secret TASK_REMINDER_CRON_SECRET is missing."
+            exit 1
+          fi
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
@@ -42,6 +47,10 @@ jobs:
 
       - name: Deploy Edge Functions
         run: |
+          supabase secrets set \
+            TASK_REMINDER_CRON_SECRET="$TASK_REMINDER_CRON_SECRET" \
+            --project-ref "$SUPABASE_PROJECT_REF"
+
           for function_dir in supabase/functions/*; do
             if [ ! -d "$function_dir" ]; then
               continue

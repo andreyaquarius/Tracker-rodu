@@ -280,6 +280,9 @@ p { color: var(--muted); line-height: 1.7; }
   display: grid;
   gap: 10px;
 }
+.task-notification-list {
+  margin-bottom: 10px;
+}
 .announcement-item {
   padding: 13px;
   background: #fffdfa;
