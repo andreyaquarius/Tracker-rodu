@@ -33,6 +33,8 @@ export interface ProjectDeletionOptions {
   onProgress?: (status: ProjectDeletionStatus) => void;
   onWakeError?: (error: unknown) => void;
   onPollError?: (error: unknown) => void;
+  /** Optional resume policy; new deletions wake immediately by default. */
+  shouldWake?: (status: ProjectDeletionStatus) => boolean;
   /** Test seam; production callers use the abort-aware timer. */
   waitForNextPoll?: (delayMs: number) => Promise<void>;
 }
@@ -234,8 +236,10 @@ export async function runProjectDeletion(
   // The wake-up is only an optimization. The durable queued job is already
   // committed, and the scheduled worker will pick it up even if this request
   // cannot reach the Edge Function.
-  void withTransientRetry(() => operations.wake(current.jobId), retryOptions)
-    .catch((error) => options.onWakeError?.(error));
+  if (options.shouldWake?.(current) ?? true) {
+    void withTransientRetry(() => operations.wake(current.jobId), retryOptions)
+      .catch((error) => options.onWakeError?.(error));
+  }
 
   const waitForNextPoll = options.waitForNextPoll
     ?? ((delayMs: number) => wait(delayMs, options.signal));
@@ -268,3 +272,46 @@ export async function runProjectDeletion(
   throw new Error("Серверне видалення проєкту ще не завершилося. Воно продовжується у фоні.");
 }
 
+/**
+ * Reattaches the UI to an already-created durable job. Running and queued jobs
+ * are read by id and monitored directly. A failed job is requeued through the
+ * idempotent start RPC and must return the exact same job id.
+ */
+export async function resumeProjectDeletion(
+  operations: ProjectDeletionOperations,
+  projectId: string,
+  jobId: string,
+  options: ProjectDeletionOptions = {},
+): Promise<ProjectDeletionStatus> {
+  if (!jobId.trim()) throw new Error("Не вказано завдання видалення проєкту.");
+  let wakeExistingJob = false;
+  return runProjectDeletion({
+    ...operations,
+    start: async (requestedProjectId) => {
+      const existing = await operations.getStatus(jobId);
+      if (existing.projectId !== requestedProjectId) {
+        throw new Error("Сервер повернув завдання видалення для іншого проєкту.");
+      }
+      wakeExistingJob = shouldWakeResumedProjectDeletion(existing);
+      if (existing.status !== "failed") return existing;
+      const resumed = await operations.start(requestedProjectId);
+      if (resumed.jobId !== jobId) {
+        throw new Error("Сервер повернув інше завдання видалення. Продовження зупинено.");
+      }
+      return resumed;
+    },
+  }, projectId, {
+    ...options,
+    shouldWake: (status) => wakeExistingJob && (options.shouldWake?.(status) ?? true),
+  });
+}
+
+export function shouldWakeResumedProjectDeletion(
+  status: ProjectDeletionStatus,
+  nowMs = Date.now(),
+): boolean {
+  if (status.status === "queued" || status.status === "failed") return true;
+  if (status.status !== "running") return false;
+  const updatedAtMs = status.updatedAt ? Date.parse(status.updatedAt) : Number.NaN;
+  return !Number.isFinite(updatedAtMs) || nowMs - updatedAtMs >= 120_000;
+}

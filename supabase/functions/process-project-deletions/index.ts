@@ -1,4 +1,8 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import {
+  isTrustedDeletionWorkerToken,
+  requestDeletionContinuation,
+} from "./continuation.ts";
 
 const STORAGE_BUCKETS = ["project-backups", "project-attachments"] as const;
 const STORAGE_PAGE_SIZE = 1_000;
@@ -19,6 +23,11 @@ type StorageListEntry = {
   id?: string | null;
   name: string;
   metadata?: Record<string, unknown> | null;
+};
+
+type WorkerOutcome = {
+  shouldContinue: boolean;
+  jobId?: string;
 };
 
 declare const EdgeRuntime: {
@@ -80,19 +89,6 @@ function json(request: Request, body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders(request), "Content-Type": "application/json" },
   });
-}
-
-/** Compares secrets without returning at the first differing byte. */
-function safeEqual(left: string, right: string): boolean {
-  const encoder = new TextEncoder();
-  const leftBytes = encoder.encode(left);
-  const rightBytes = encoder.encode(right);
-  const length = Math.max(leftBytes.length, rightBytes.length);
-  let difference = leftBytes.length ^ rightBytes.length;
-  for (let index = 0; index < length; index += 1) {
-    difference |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
-  }
-  return difference === 0;
 }
 
 function bearerToken(request: Request): string {
@@ -240,7 +236,7 @@ async function runDeletionWorker(
   supabaseUrl: string,
   serviceRoleKey: string,
   targetJobId?: string,
-): Promise<void> {
+): Promise<WorkerOutcome> {
   const deadline = Date.now() + WORKER_BUDGET_MS;
   const adminClient = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -248,14 +244,15 @@ async function runDeletionWorker(
   let databaseBatchSize = INITIAL_DATABASE_BATCH_SIZE;
   let transientAttempt = 0;
   let successfulBatches = 0;
+  let activeJobId = targetJobId;
 
   try {
     while (Date.now() < deadline) {
-      const rpcName = targetJobId
+      const rpcName = activeJobId
         ? "process_project_deletion"
         : "process_next_project_deletion";
-      const rpcArguments = targetJobId
-        ? { target_job_id: targetJobId, batch_size: databaseBatchSize }
+      const rpcArguments = activeJobId
+        ? { target_job_id: activeJobId, batch_size: databaseBatchSize }
         : { batch_size: databaseBatchSize };
       const { data, error } = await adminClient.rpc(rpcName, rpcArguments);
       if (error) {
@@ -267,7 +264,9 @@ async function runDeletionWorker(
           successfulBatches = 0;
           transientAttempt += 1;
           const delay = retryDelay(transientAttempt);
-          if (Date.now() + delay >= deadline) return;
+          if (Date.now() + delay >= deadline) {
+            return { shouldContinue: true, jobId: activeJobId };
+          }
           await new Promise<void>((resolve) => setTimeout(resolve, delay));
           continue;
         }
@@ -285,17 +284,17 @@ async function runDeletionWorker(
       }
 
       const job = asJob(data);
-      if (!job) return; // The cron queue is empty.
+      if (!job) return { shouldContinue: false }; // The cron queue is empty.
+      activeJobId = job.jobId;
       if (job.status === "failed") {
         console.error("Project deletion job failed", {
           jobId: job.jobId,
           error: job.error ?? "Unknown deletion error",
         });
-        return;
+        return { shouldContinue: false };
       }
       if (job.status === "completed") {
-        if (targetJobId) return;
-        continue; // Cron workers may finish more than one queued project.
+        return { shouldContinue: false };
       }
       if (job.phase === "storage_cleanup") {
         await cleanupProjectStorage(adminClient, job, deadline);
@@ -304,9 +303,46 @@ async function runDeletionWorker(
       // Yield between bounded database batches so other work can run.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
+    return { shouldContinue: true, jobId: activeJobId };
   } catch (error) {
-    if (error instanceof WorkerBudgetExpired) return;
+    if (error instanceof WorkerBudgetExpired || isTransientDatabaseError(error)) {
+      return { shouldContinue: true, jobId: activeJobId };
+    }
     console.error("Project deletion worker stopped; the durable job will resume", error);
+    return { shouldContinue: false };
+  }
+}
+
+async function runDeletionWorkerWithContinuation(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  continuationToken: string,
+  targetJobId?: string,
+): Promise<void> {
+  const outcome = await runDeletionWorker(
+    supabaseUrl,
+    serviceRoleKey,
+    targetJobId,
+  );
+  // Queue recovery only receives a job after the database stale-worker guard
+  // claims it. Once claimed, it may become one targeted chain just like a
+  // browser-started job. An empty queue never schedules another invocation.
+  if (!outcome.shouldContinue || !outcome.jobId) return;
+
+  try {
+    // One completed worker schedules one successor. There is deliberately no
+    // retry loop here: the five-minute cron remains the recovery path if this
+    // single wake-up is rejected or the network is temporarily unavailable.
+    await requestDeletionContinuation({
+      supabaseUrl,
+      serverToken: continuationToken,
+      jobId: outcome.jobId,
+    });
+  } catch (error) {
+    console.error(
+      "Could not wake the next project deletion worker; cron will recover the durable job",
+      error,
+    );
   }
 }
 
@@ -327,24 +363,36 @@ Deno.serve(async (request) => {
 
   const providedToken = bearerToken(request) || request.headers.get("x-cron-secret")?.trim() || "";
   const cronSecret = Deno.env.get("TASK_REMINDER_CRON_SECRET")?.trim() ?? "";
-  const isCronRequest = Boolean(
-    cronSecret && providedToken && safeEqual(cronSecret, providedToken),
+  const isServerRequest = isTrustedDeletionWorkerToken(
+    providedToken,
+    serviceRoleKey,
+    cronSecret,
   );
   let targetJobId: string | undefined;
+  let body: { jobId?: unknown };
 
-  if (!isCronRequest) {
+  try {
+    body = await request.json() as { jobId?: unknown };
+  } catch {
+    return json(request, { error: "A JSON body is required." }, 400);
+  }
+
+  if (isServerRequest) {
+    if (body.jobId !== undefined) {
+      if (typeof body.jobId !== "string" || !isUuid(body.jobId)) {
+        return json(request, { error: "A valid project deletion jobId is required." }, 400);
+      }
+      targetJobId = body.jobId;
+    }
+  }
+
+  if (!isServerRequest) {
     const authorization = request.headers.get("Authorization")?.trim() ?? "";
     const accessToken = bearerToken(request);
     if (!authorization || !accessToken) {
       return json(request, { error: "Authentication required" }, 401);
     }
 
-    let body: { jobId?: unknown };
-    try {
-      body = await request.json() as { jobId?: unknown };
-    } catch {
-      return json(request, { error: "A JSON body is required." }, 400);
-    }
     if (typeof body.jobId !== "string" || !isUuid(body.jobId)) {
       return json(request, { error: "A valid project deletion jobId is required." }, 400);
     }
@@ -375,11 +423,20 @@ Deno.serve(async (request) => {
   }
 
   EdgeRuntime.waitUntil(
-    runDeletionWorker(supabaseUrl, serviceRoleKey, targetJobId),
+    runDeletionWorkerWithContinuation(
+      supabaseUrl,
+      serviceRoleKey,
+      cronSecret || serviceRoleKey,
+      targetJobId,
+    ),
   );
   return json(
     request,
-    { accepted: true, jobId: targetJobId ?? null, mode: isCronRequest ? "queue" : "job" },
+    {
+      accepted: true,
+      jobId: targetJobId ?? null,
+      mode: targetJobId ? "job" : "queue",
+    },
     202,
   );
 });

@@ -66,6 +66,7 @@ import {
   onSupabaseAuthChange,
   requestSupabasePasswordReset,
   renameSupabaseWorkspace,
+  resumeSupabaseWorkspaceDeletion,
   signInWithSupabaseGoogle,
   signInWithSupabaseEmail,
   signUpWithSupabaseEmail,
@@ -217,6 +218,10 @@ import {
   type ProjectDashboardTask,
 } from "./services/projectDashboard";
 import type { ProjectDeletionStatus } from "./services/projectDeletion.ts";
+import {
+  projectDeletionPhaseLabel,
+  projectDeletionServerActivityLabel,
+} from "./utils/projectDeletionUi.ts";
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
@@ -365,11 +370,19 @@ function chooseWorkspace(
   preferredProjectId: string | null,
   fallbackProjectId?: string,
 ): SupabaseWorkspace | null {
-  if (!items.length) return null;
+  const available = items.filter((item) => !item.deletionPending);
+  if (!available.length) return null;
   return (
-    items.find((item) => item.projectId === preferredProjectId) ??
-    items.find((item) => item.projectId === fallbackProjectId) ??
-    items[0]
+    available.find((item) => item.projectId === preferredProjectId) ??
+    available.find((item) => item.projectId === fallbackProjectId) ??
+    available[0]
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && "name" in error
+      && (error as { name?: unknown }).name === "AbortError",
   );
 }
 
@@ -507,23 +520,6 @@ function reportGedcomImportBatchProgress(
   });
 }
 
-function projectDeletionPhaseLabel(phase: string): string {
-  const labels: Record<string, string> = {
-    queued: "Готуємо видалення",
-    storage_cleanup: "Очищаємо резервні копії та вкладення",
-    finalizing: "Завершуємо видалення",
-    completed: "Проєкт видалено",
-    project_members: "Очищаємо учасників проєкту",
-    project_invitations: "Очищаємо запрошення",
-    persons: "Видаляємо осіб",
-    person_relations: "Видаляємо родинні зв’язки",
-    findings: "Видаляємо знахідки",
-    documents: "Видаляємо документи",
-    family_trees: "Видаляємо родові дерева",
-  };
-  return labels[phase] ?? "Очищаємо дані проєкту";
-}
-
 export default function App() {
   const app = useAppDatabase();
   const location = useLocation();
@@ -551,7 +547,9 @@ export default function App() {
     projectId: string;
     projectName: string;
     progress: ProjectDeletionStatus | null;
+    recentProcessedDelta: number;
   } | null>(null);
+  const workspaceDeletionAbortRef = useRef<AbortController | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
   const [scanViewer, setScanViewer] = useState<ActiveDocumentScanViewer | null>(null);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
@@ -832,6 +830,11 @@ export default function App() {
       routerNavigate("/projects", { replace: true });
       return;
     }
+    if (requestedWorkspace.deletionPending) {
+      if (workspace?.projectId === requestedWorkspace.projectId) setWorkspace(null);
+      routerNavigate("/projects", { replace: true });
+      return;
+    }
     if (workspace?.projectId !== requestedWorkspace.projectId) {
       setWorkspace(requestedWorkspace);
       localStorage.setItem(ACTIVE_WORKSPACE_KEY, requestedWorkspace.projectId);
@@ -919,11 +922,12 @@ export default function App() {
           undefined,
           session.user.id,
         );
-        const ensuredWorkspace = fetchedWorkspaces[0] ?? await ensureSupabaseWorkspace(
-          session,
-          currentAccount,
-          fetchedWorkspaces,
-        );
+        const ensuredWorkspace = fetchedWorkspaces.find((item) => !item.deletionPending)
+          ?? await ensureSupabaseWorkspace(
+            session,
+            currentAccount,
+            fetchedWorkspaces,
+          );
         if (!active) return;
 
         const availableWorkspaces = fetchedWorkspaces.length
@@ -2161,6 +2165,10 @@ export default function App() {
   const switchWorkspace = (projectId: string) => {
     const nextWorkspace = workspaces.find((item) => item.projectId === projectId);
     if (!nextWorkspace) return;
+    if (nextWorkspace.deletionPending) {
+      notify(`Проєкт «${nextWorkspace.projectName}» зараз видаляється. Відкрийте прогрес видалення.`, true);
+      return;
+    }
     setWorkspace(nextWorkspace);
     localStorage.setItem(ACTIVE_WORKSPACE_KEY, nextWorkspace.projectId);
     routerNavigate(projectDashboardPath(nextWorkspace.projectSlug));
@@ -2209,36 +2217,70 @@ export default function App() {
     }
   };
 
-  const removeWorkspace = async (projectId: string) => {
-    if (isCreatingWorkspace) return;
-    const targetWorkspace = workspaces.find((item) => item.projectId === projectId);
-    if (!targetWorkspace) return;
-    if (targetWorkspace.role !== "owner") {
-      notify("Видаляти можна лише проєкти, де ви власник.", true);
-      return;
-    }
-    if (workspaces.length <= 1) {
-      notify("Не можна видалити останній проєкт.", true);
-      return;
+  const continueWorkspaceDeletionInBackground = () => {
+    const deletingProjectId = workspaceDeletion?.projectId;
+    if (!deletingProjectId) return;
+    workspaceDeletionAbortRef.current?.abort();
+    workspaceDeletionAbortRef.current = null;
+    setWorkspaceDeletion(null);
+    setIsCreatingWorkspace(false);
+    notify("Видалення проєкту продовжується у фоні.");
+
+    if (workspace?.projectId === deletingProjectId) {
+      setWorkspace(null);
+      localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+      routerNavigate("/projects");
     }
 
-    const confirmed = window.confirm(
-      `Видалити проєкт «${targetWorkspace.projectName}»? Цю дію не можна скасувати.`,
-    );
-    if (!confirmed) return;
+    void listSupabaseWorkspaces().then((refreshed) => {
+      setWorkspaces(refreshed);
+      setWorkspace((current) => {
+        if (!current || current.projectId === deletingProjectId) return null;
+        return refreshed.find(
+          (candidate) => candidate.projectId === current.projectId && !candidate.deletionPending,
+        ) ?? current;
+      });
+    }).catch((error: unknown) => {
+      notify(describeError(error, "Не вдалося оновити список проєктів."), true);
+    });
+  };
+
+  const resumeWorkspaceDeletion = async (projectId: string) => {
+    if (isCreatingWorkspace) return;
+    const targetWorkspace = workspaces.find((item) => item.projectId === projectId);
+    if (!targetWorkspace?.deletionPending) return;
+    if (!targetWorkspace.deletionJobId) {
+      notify("Завдання видалення ще не доступне. Оновіть сторінку після застосування міграцій.", true);
+      return;
+    }
 
     setIsCreatingWorkspace(true);
     setWorkspaceDeletion({
       projectId,
       projectName: targetWorkspace.projectName,
       progress: null,
+      recentProcessedDelta: 0,
     });
+    const abortController = new AbortController();
+    workspaceDeletionAbortRef.current = abortController;
     try {
-      const refreshed = await deleteSupabaseWorkspace(projectId, {
+      const refreshed = await resumeSupabaseWorkspaceDeletion(targetWorkspace, {
+        signal: abortController.signal,
         onProgress: (progress) => {
-          setWorkspaceDeletion((current) => current?.projectId === projectId
-            ? { ...current, progress }
-            : current);
+          setWorkspaceDeletion((current) => {
+            if (current?.projectId !== projectId) return current;
+            const previousRows = current.progress?.processedRows;
+            const processedDelta = previousRows === undefined
+              ? 0
+              : Math.max(0, progress.processedRows - previousRows);
+            return {
+              ...current,
+              progress,
+              recentProcessedDelta: processedDelta > 0
+                ? processedDelta
+                : current.recentProcessedDelta,
+            };
+          });
         },
       });
       clearProjectResearchCache(projectId);
@@ -2262,10 +2304,99 @@ export default function App() {
       }
       notify(`Проєкт «${targetWorkspace.projectName}» видалено.`);
     } catch (error) {
-      notify(describeError(error, "Не вдалося видалити проєкт."), true);
+      if (!isAbortError(error)) {
+        notify(describeError(error, "Не вдалося продовжити видалення проєкту."), true);
+      }
     } finally {
-      setWorkspaceDeletion(null);
-      setIsCreatingWorkspace(false);
+      if (workspaceDeletionAbortRef.current === abortController) {
+        workspaceDeletionAbortRef.current = null;
+        setWorkspaceDeletion(null);
+        setIsCreatingWorkspace(false);
+      }
+    }
+  };
+
+  const removeWorkspace = async (projectId: string) => {
+    if (isCreatingWorkspace) return;
+    const targetWorkspace = workspaces.find((item) => item.projectId === projectId);
+    if (!targetWorkspace) return;
+    if (targetWorkspace.deletionPending) {
+      await resumeWorkspaceDeletion(projectId);
+      return;
+    }
+    if (targetWorkspace.role !== "owner") {
+      notify("Видаляти можна лише проєкти, де ви власник.", true);
+      return;
+    }
+    if (workspaces.filter((item) => !item.deletionPending).length <= 1) {
+      notify("Не можна видалити останній проєкт.", true);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Видалити проєкт «${targetWorkspace.projectName}»? Цю дію не можна скасувати.`,
+    );
+    if (!confirmed) return;
+
+    setIsCreatingWorkspace(true);
+    setWorkspaceDeletion({
+      projectId,
+      projectName: targetWorkspace.projectName,
+      progress: null,
+      recentProcessedDelta: 0,
+    });
+    const abortController = new AbortController();
+    workspaceDeletionAbortRef.current = abortController;
+    try {
+      const refreshed = await deleteSupabaseWorkspace(projectId, {
+        signal: abortController.signal,
+        onProgress: (progress) => {
+          setWorkspaceDeletion((current) => {
+            if (current?.projectId !== projectId) return current;
+            const previousRows = current.progress?.processedRows;
+            const processedDelta = previousRows === undefined
+              ? 0
+              : Math.max(0, progress.processedRows - previousRows);
+            return {
+              ...current,
+              progress,
+              recentProcessedDelta: processedDelta > 0
+                ? processedDelta
+                : current.recentProcessedDelta,
+            };
+          });
+        },
+      });
+      clearProjectResearchCache(projectId);
+      clearProjectPeopleCache(projectId);
+      clearProjectDocumentsCache(projectId);
+      clearProjectWorkRecordsCache(projectId);
+      clearProjectAnalysisRecordsCache(projectId);
+      clearProjectCustomStructureCache(projectId);
+      const nextWorkspace = chooseWorkspace(
+        refreshed,
+        workspace?.projectId === projectId ? null : workspace?.projectId ?? null,
+      );
+      setWorkspaces(refreshed);
+      setWorkspace(nextWorkspace);
+      if (nextWorkspace) {
+        localStorage.setItem(ACTIVE_WORKSPACE_KEY, nextWorkspace.projectId);
+        routerNavigate(projectDashboardPath(nextWorkspace.projectSlug));
+      } else {
+        localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+        routerNavigate("/projects");
+      }
+      notify(`Проєкт «${targetWorkspace.projectName}» видалено.`);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        notify(describeError(error, "Не вдалося видалити проєкт."), true);
+      }
+    } finally {
+      if (workspaceDeletionAbortRef.current === abortController) {
+        workspaceDeletionAbortRef.current = null;
+        setWorkspaceDeletion(null);
+        setIsCreatingWorkspace(false);
+      }
     }
   };
 
@@ -2273,6 +2404,10 @@ export default function App() {
     if (isCreatingWorkspace) return;
     const targetWorkspace = workspaces.find((item) => item.projectId === projectId);
     if (!targetWorkspace) return;
+    if (targetWorkspace.deletionPending) {
+      notify("Проєкт не можна перейменувати, поки він видаляється.", true);
+      return;
+    }
     if (targetWorkspace.role !== "owner") {
       notify("Перейменовувати проєкт може лише його власник.", true);
       return;
@@ -4760,6 +4895,7 @@ export default function App() {
     <ProjectsPage
       workspaces={workspaces}
       onOpen={switchWorkspace}
+      onOpenDeletion={(projectId) => void resumeWorkspaceDeletion(projectId)}
       onCreate={() => void createWorkspace()}
       creating={isCreatingWorkspace}
     />
@@ -4802,6 +4938,7 @@ export default function App() {
         onCreateWorkspace={() => void createWorkspace()}
         onRenameWorkspace={(projectId) => void renameWorkspace(projectId)}
         onDeleteWorkspace={(projectId) => void removeWorkspace(projectId)}
+        onOpenWorkspaceDeletion={(projectId) => void resumeWorkspaceDeletion(projectId)}
         onOpenTeam={() => setTeamOpen(true)}
         isAccountSigningIn={isAccountSigningIn}
         isCreatingWorkspace={isCreatingWorkspace}
@@ -4887,21 +5024,41 @@ export default function App() {
               <span style={{ width: `${workspaceDeletion.progress?.progressPercent ?? 0}%` }} />
             </div>
             {workspaceDeletion.progress ? (
-              <p>
-                Видалено {workspaceDeletion.progress.processedRows.toLocaleString("uk-UA")}
-                {workspaceDeletion.progress.totalRows > 0
-                  ? ` із ${workspaceDeletion.progress.totalRows.toLocaleString("uk-UA")} записів`
-                  : " записів"}.
-                {workspaceDeletion.progress.totalTables > 0
-                  ? ` Етапів: ${workspaceDeletion.progress.completedTables.toLocaleString("uk-UA")} із ${workspaceDeletion.progress.totalTables.toLocaleString("uk-UA")}.`
-                  : ""}
-              </p>
+              <>
+                <p>
+                  Видалено {workspaceDeletion.progress.processedRows.toLocaleString("uk-UA")}
+                  {workspaceDeletion.progress.totalRows > 0
+                    ? ` із ${workspaceDeletion.progress.totalRows.toLocaleString("uk-UA")} записів`
+                    : " записів"}.
+                  {workspaceDeletion.progress.totalTables > 0
+                    ? ` Етапів: ${workspaceDeletion.progress.completedTables.toLocaleString("uk-UA")} із ${workspaceDeletion.progress.totalTables.toLocaleString("uk-UA")}.`
+                    : ""}
+                </p>
+                <p className="workspace-deletion-activity">
+                  {projectDeletionServerActivityLabel(workspaceDeletion.progress.updatedAt)}
+                  {workspaceDeletion.recentProcessedDelta > 0 ? (
+                    <span>
+                      За останній активний пакет видалено ще {workspaceDeletion.recentProcessedDelta.toLocaleString("uk-UA")} записів.
+                    </span>
+                  ) : null}
+                </p>
+              </>
             ) : (
               <p>Будь ласка, зачекайте. Дані видаляються невеликими пакетами.</p>
             )}
             <small>
-              Видалення виконується на сервері. Можна закрити цю вкладку — фоновий процес продовжить роботу, а повторна команда безпечно відкриє те саме завдання.
+              Відсоток оновлюється після завершення поточного розділу, тому на великих етапах може певний час не змінюватися. Видалення виконується на сервері. Можна закрити цю вкладку — фоновий процес продовжить роботу, а повторна команда безпечно відкриє те саме завдання.
             </small>
+            <div className="workspace-deletion-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={continueWorkspaceDeletionInBackground}
+                disabled={!workspaceDeletion.progress?.jobId}
+              >
+                Закрити й продовжити у фоні
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

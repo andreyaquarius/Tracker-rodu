@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   createProjectDeletionOperations,
   isTransientProjectDeletionError,
+  resumeProjectDeletion,
   runProjectDeletion,
+  shouldWakeResumedProjectDeletion,
   type ProjectDeletionOperations,
   type ProjectDeletionRpc,
   type ProjectDeletionStatus,
@@ -186,10 +188,150 @@ test("a completed start response returns without waking or polling", async () =>
   assert.equal(statusCalls, 0);
 });
 
+test("resuming a queued deletion reuses the durable job without starting another", async () => {
+  const calls: string[] = [];
+  const operations: ProjectDeletionOperations = {
+    start: async (projectId) => {
+      calls.push(`start:${projectId}`);
+      return status("running");
+    },
+    wake: async (jobId) => { calls.push(`wake:${jobId}`); },
+    getStatus: async (jobId) => {
+      calls.push(`status:${jobId}`);
+      return calls.filter((call) => call.startsWith("status:")).length === 1
+        ? status("queued", { processedRows: 250 })
+        : status("completed", { processedRows: 500, progressPercent: 100 });
+    },
+  };
+
+  const result = await resumeProjectDeletion(
+    operations,
+    "project-1",
+    "job-1",
+    {
+      retryDelayMs: 0,
+      pollIntervalMs: 0,
+      waitForNextPoll: async () => undefined,
+    },
+  );
+  await Promise.resolve();
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(calls, [
+    "status:job-1",
+    "wake:job-1",
+    "status:job-1",
+  ]);
+  assert.equal(calls.includes("start:project-1"), false);
+});
+
+test("a targeted wake can resume an existing failed durable job", async () => {
+  let statusReads = 0;
+  let wakeCalls = 0;
+  let startCalls = 0;
+  const result = await resumeProjectDeletion({
+    start: async () => {
+      startCalls += 1;
+      return status("queued", { error: null });
+    },
+    wake: async () => { wakeCalls += 1; },
+    getStatus: async () => {
+      statusReads += 1;
+      return statusReads === 1
+        ? status("failed", { error: "temporary worker error" })
+        : status("completed", { progressPercent: 100 });
+    },
+  }, "project-1", "job-1", {
+    retryDelayMs: 0,
+    pollIntervalMs: 0,
+    waitForNextPoll: async () => undefined,
+  });
+  await Promise.resolve();
+
+  assert.equal(result.status, "completed");
+  assert.equal(startCalls, 1);
+  assert.equal(wakeCalls, 1);
+});
+
+test("failed resume refuses a replacement job id", async () => {
+  let wakeCalls = 0;
+  await assert.rejects(
+    resumeProjectDeletion({
+      start: async () => status("queued", { jobId: "job-2" }),
+      wake: async () => { wakeCalls += 1; },
+      getStatus: async () => status("failed", { error: "temporary" }),
+    }, "project-1", "job-1", {
+      retryDelayMs: 0,
+      pollIntervalMs: 0,
+      waitForNextPoll: async () => undefined,
+    }),
+    /інше завдання видалення/i,
+  );
+  assert.equal(wakeCalls, 0);
+});
+
+test("viewing a fresh running deletion only polls and does not start a duplicate worker chain", async () => {
+  let wakeCalls = 0;
+  let statusReads = 0;
+  const fresh = new Date().toISOString();
+  const result = await resumeProjectDeletion({
+    start: async () => status("running", { updatedAt: fresh }),
+    wake: async () => { wakeCalls += 1; },
+    getStatus: async () => {
+      statusReads += 1;
+      return statusReads === 1
+        ? status("running", { updatedAt: fresh })
+        : status("completed", { progressPercent: 100 });
+    },
+  }, "project-1", "job-1", {
+    retryDelayMs: 0,
+    pollIntervalMs: 0,
+    waitForNextPoll: async () => undefined,
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(wakeCalls, 0);
+});
+
+test("resume wake policy recovers stale jobs but leaves active jobs alone", () => {
+  const now = Date.parse("2026-07-13T20:00:00Z");
+  assert.equal(shouldWakeResumedProjectDeletion(status("queued"), now), true);
+  assert.equal(shouldWakeResumedProjectDeletion(status("failed"), now), true);
+  assert.equal(shouldWakeResumedProjectDeletion(
+    status("running", { updatedAt: "2026-07-13T19:59:10Z" }),
+    now,
+  ), false);
+  assert.equal(shouldWakeResumedProjectDeletion(
+    status("running", { updatedAt: "2026-07-13T19:57:59Z" }),
+    now,
+  ), true);
+});
+
+test("detaching client polling aborts locally without changing the durable job", async () => {
+  const controller = new AbortController();
+  let statusCalls = 0;
+  await assert.rejects(
+    runProjectDeletion({
+      start: async () => status("queued"),
+      wake: async () => undefined,
+      getStatus: async () => {
+        statusCalls += 1;
+        return status("running");
+      },
+    }, "project-1", {
+      signal: controller.signal,
+      retryDelayMs: 0,
+      pollIntervalMs: 0,
+      waitForNextPoll: async () => { controller.abort(); },
+    }),
+    (error: unknown) => error instanceof Error && error.name === "AbortError",
+  );
+  assert.equal(statusCalls, 0);
+});
+
 test("project deletion transient classification excludes validation and permission errors", () => {
   assert.equal(isTransientProjectDeletionError({ status: 503, message: "Service unavailable" }), true);
   assert.equal(isTransientProjectDeletionError(new Error("Failed to fetch")), true);
   assert.equal(isTransientProjectDeletionError({ code: "23505", message: "duplicate key" }), false);
   assert.equal(isTransientProjectDeletionError({ code: "42501", message: "permission denied" }), false);
 });
-

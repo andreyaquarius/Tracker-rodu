@@ -15,6 +15,7 @@ interface TopBarProps {
   onCreateWorkspace: () => void;
   onRenameWorkspace: (projectId: string) => void;
   onDeleteWorkspace: (projectId: string) => void;
+  onOpenWorkspaceDeletion: (projectId: string) => void;
   onOpenTeam: () => void;
   isAccountSigningIn: boolean;
   isCreatingWorkspace: boolean;
@@ -40,6 +41,7 @@ export function TopBar({
   onCreateWorkspace,
   onRenameWorkspace,
   onDeleteWorkspace,
+  onOpenWorkspaceDeletion,
   onOpenTeam,
   isAccountSigningIn,
   isCreatingWorkspace,
@@ -138,7 +140,7 @@ export function TopBar({
                     key={item.projectId}
                     className={`workspace-switcher-item ${
                       workspace?.projectId === item.projectId ? "active" : ""
-                    }`}
+                    } ${item.deletionPending ? "pending" : ""}`}
                   >
                     <button
                       className="workspace-switcher-select"
@@ -147,12 +149,31 @@ export function TopBar({
                         onSwitchWorkspace(item.projectId);
                       }}
                       type="button"
-                      disabled={isCreatingWorkspace}
+                      disabled={isCreatingWorkspace || item.deletionPending}
                     >
                       <strong>{item.projectName}</strong>
-                      <small>{roleLabel(item.role)}</small>
+                      <small>
+                        {roleLabel(item.role)}
+                        {item.deletionPending ? " · Видаляється" : ""}
+                      </small>
                     </button>
-                    {item.role === "owner" ? (
+                    {item.deletionPending ? (
+                      <div className="workspace-item-actions">
+                        <button
+                          className="workspace-deletion-progress"
+                          onClick={() => {
+                            closeAccountMenu();
+                            onOpenWorkspaceDeletion(item.projectId);
+                          }}
+                          type="button"
+                          disabled={isCreatingWorkspace || !item.deletionJobId}
+                          aria-label={`Переглянути видалення проєкту ${item.projectName}`}
+                          title="Переглянути видалення"
+                        >
+                          Переглянути
+                        </button>
+                      </div>
+                    ) : item.role === "owner" ? (
                       <div className="workspace-item-actions">
                         <button
                           className="workspace-rename"

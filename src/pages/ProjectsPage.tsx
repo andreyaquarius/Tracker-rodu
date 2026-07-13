@@ -3,6 +3,7 @@ import type { SupabaseWorkspace } from "../services/supabaseAuth";
 interface ProjectsPageProps {
   workspaces: SupabaseWorkspace[];
   onOpen: (projectId: string) => void;
+  onOpenDeletion: (projectId: string) => void;
   onCreate: () => void;
   creating: boolean;
 }
@@ -16,6 +17,7 @@ function roleLabel(role: SupabaseWorkspace["role"]): string {
 export function ProjectsPage({
   workspaces,
   onOpen,
+  onOpenDeletion,
   onCreate,
   creating,
 }: ProjectsPageProps) {
@@ -37,7 +39,24 @@ export function ProjectsPage({
         </button>
       </div>
       <div className="project-route-grid">
-        {workspaces.map((workspace) => (
+        {workspaces.map((workspace) => workspace.deletionPending ? (
+          <article
+            className="panel project-route-card project-route-card-pending"
+            key={workspace.projectId}
+            aria-label={`Проєкт ${workspace.projectName} видаляється`}
+          >
+            <strong>{workspace.projectName}</strong>
+            <span>{roleLabel(workspace.role)} · Видаляється</span>
+            <button
+              type="button"
+              className="button button-secondary project-deletion-open"
+              onClick={() => onOpenDeletion(workspace.projectId)}
+              disabled={creating || !workspace.deletionJobId}
+            >
+              Переглянути видалення
+            </button>
+          </article>
+        ) : (
           <button
             type="button"
             className="panel project-route-card"

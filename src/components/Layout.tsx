@@ -32,6 +32,7 @@ interface LayoutProps {
   onCreateWorkspace: () => void;
   onRenameWorkspace: (projectId: string) => void;
   onDeleteWorkspace: (projectId: string) => void;
+  onOpenWorkspaceDeletion: (projectId: string) => void;
   onOpenTeam: () => void;
   isAccountSigningIn: boolean;
   isCreatingWorkspace: boolean;
@@ -92,6 +93,7 @@ export function Layout(props: LayoutProps) {
             onCreateWorkspace={props.onCreateWorkspace}
             onRenameWorkspace={props.onRenameWorkspace}
             onDeleteWorkspace={props.onDeleteWorkspace}
+            onOpenWorkspaceDeletion={props.onOpenWorkspaceDeletion}
             onOpenTeam={props.onOpenTeam}
             isAccountSigningIn={props.isAccountSigningIn}
             isCreatingWorkspace={props.isCreatingWorkspace}

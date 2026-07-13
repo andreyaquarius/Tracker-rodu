@@ -416,6 +416,10 @@ p { color: var(--muted); line-height: 1.7; }
   border-color: #9eb1aa;
   background: #e7f0eb;
 }
+.workspace-switcher-item.pending {
+  border-color: #d4b57f;
+  background: #fbf5e8;
+}
 .workspace-switcher-select {
   width: 100%;
   padding: 10px 11px;
@@ -423,6 +427,10 @@ p { color: var(--muted); line-height: 1.7; }
   text-align: left;
   background: transparent;
   border: 0;
+}
+.workspace-switcher-select:disabled {
+  cursor: not-allowed;
+  opacity: 1;
 }
 .workspace-switcher-item strong,
 .workspace-switcher-item small {
@@ -1014,6 +1022,16 @@ tbody tr:hover { background: #fbfaf5; }
   gap: 14px;
   overflow-x: hidden;
   overflow-y: auto;
+}
+.workspace-deletion-progress {
+  min-height: 32px;
+  padding: 5px 8px;
+  color: var(--green-800);
+  background: #fffdfa;
+  border: 1px solid #c7d5cf;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 800;
 }
 .modal.gedcom-import-modal {
   width: min(900px, 100%);
@@ -4700,6 +4718,9 @@ tbody tr:hover { background: #fbfaf5; }
 .project-route-card span { margin-top: 8px; color: var(--muted); }
 .project-route-card small { margin-top: auto; color: var(--green-800); font-weight: 700; }
 .project-route-card:hover { border-color: var(--green-600); transform: translateY(-1px); }
+.project-route-card-pending { cursor: default; border-color: #d4b57f; background: #fbf7ed; }
+.project-route-card-pending:hover { border-color: #d4b57f; transform: none; }
+.project-route-card-pending .project-deletion-open { margin-top: auto; }
 .toast { position: fixed; right: 22px; bottom: 22px; z-index: 200; max-width: 420px; padding: 13px 17px; color: white; background: var(--green-900); border-radius: 10px; box-shadow: var(--shadow); font-size: 12px; }
 .toast-error { background: var(--red); }
 
@@ -4761,10 +4782,28 @@ tbody tr:hover { background: #fbfaf5; }
   margin: 14px 0 5px;
 }
 
+.workspace-deletion-card .workspace-deletion-activity {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  color: var(--green-800);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspace-deletion-activity span {
+  color: var(--muted);
+}
+
 .workspace-deletion-card small {
   display: block;
   color: var(--muted);
   line-height: 1.45;
+}
+.workspace-deletion-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
 }
 .sidebar-scrim { display: none; }
 
