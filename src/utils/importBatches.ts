@@ -15,6 +15,8 @@ export interface ImportBatchProgress {
 export interface RunImportBatchesOptions {
   concurrency?: number;
   onProgress?: (progress: ImportBatchProgress) => void;
+  /** Awaited immediately before each database mutation batch. */
+  beforeBatch?: () => Promise<void>;
 }
 
 export interface AdaptiveImportBatchOptions {
@@ -44,6 +46,7 @@ export interface ImportPhaseProgress extends ImportBatchProgress {
 
 export interface ImportPhaseProgressOptions {
   onProgress?: (progress: ImportPhaseProgress) => void;
+  beforeBatch?: () => Promise<void>;
 }
 
 export const DEFAULT_IMPORT_BATCH_ITEMS = 200;
@@ -256,6 +259,7 @@ export async function runImportBatches<T>(
       nextBatchIndex += 1;
       const batch = batches[batchIndex];
       try {
+        await options.beforeBatch?.();
         await worker(batch, batchIndex);
       } catch (error) {
         hasError = true;

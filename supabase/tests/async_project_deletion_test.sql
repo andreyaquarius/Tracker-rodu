@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(28);
+select plan(33);
 
 select has_table(
   'private',
@@ -45,6 +45,12 @@ select has_function(
   'mark_project_deletion_storage_cleaned',
   array['uuid'],
   'the service worker can acknowledge Storage API cleanup'
+);
+select has_function(
+  'public',
+  'clear_project_records_for_restore',
+  array['uuid', 'integer'],
+  'backup restore clears project content through a bounded RPC'
 );
 select ok(
   has_function_privilege(
@@ -122,6 +128,11 @@ select ok(
   ),
   'every installed deletion phase has a project_id-leading index'
 );
+select is(
+  private.project_deletion_uncovered_table_names(),
+  array[]::text[],
+  'every public project-owned table is covered by a deletion phase'
+);
 select ok(
   pg_catalog.pg_get_functiondef(
     'public.family_tree_bump_graph_version()'::regprocedure
@@ -190,6 +201,11 @@ values
     'd2000000-0000-0000-0000-000000000102',
     'd2000000-0000-0000-0000-000000000001',
     'Administrator deletion test'
+  ),
+  (
+    'd2000000-0000-0000-0000-000000000103',
+    'd2000000-0000-0000-0000-000000000001',
+    'Backup restore clear test'
   );
 
 insert into public.researches (id, project_id, title, created_by)
@@ -199,6 +215,32 @@ select
   'Deletion research ' || series,
   'd2000000-0000-0000-0000-000000000001'::uuid
 from generate_series(1, 5) series;
+
+insert into public.researches (id, project_id, title, created_by)
+select
+  ('d3000000-0000-0000-0000-' || lpad(series::text, 12, '0'))::uuid,
+  'd2000000-0000-0000-0000-000000000103'::uuid,
+  'Restore research ' || series,
+  'd2000000-0000-0000-0000-000000000001'::uuid
+from generate_series(1, 3) series;
+
+insert into public.project_invitations (project_id, email, role, invited_by)
+values (
+  'd2000000-0000-0000-0000-000000000103'::uuid,
+  'restore-invite@example.test',
+  'editor',
+  'd2000000-0000-0000-0000-000000000001'::uuid
+);
+
+insert into public.activity_log (
+  project_id, actor_id, action, entity_type, details
+) values (
+  'd2000000-0000-0000-0000-000000000103'::uuid,
+  'd2000000-0000-0000-0000-000000000001'::uuid,
+  'restore_test',
+  'project',
+  '{}'::jsonb
+);
 
 set local role authenticated;
 select set_config(
@@ -219,6 +261,57 @@ select set_config(
   'request.jwt.claims',
   '{"sub":"d2000000-0000-0000-0000-000000000001","role":"authenticated"}',
   true
+);
+select is(
+  (
+    public.clear_project_records_for_restore(
+      'd2000000-0000-0000-0000-000000000103'::uuid,
+      2
+    ) ->> 'deletedRows'
+  )::integer,
+  2,
+  'one backup-restore clear call obeys the requested batch limit'
+);
+do $$
+declare
+  payload jsonb;
+begin
+  loop
+    payload := public.clear_project_records_for_restore(
+      'd2000000-0000-0000-0000-000000000103'::uuid,
+      2
+    );
+    exit when (payload ->> 'complete')::boolean;
+  end loop;
+end;
+$$;
+select is(
+  (
+    select count(*)::integer
+    from public.researches
+    where project_id = 'd2000000-0000-0000-0000-000000000103'::uuid
+  ),
+  0,
+  'backup restore removes all prior project content'
+);
+select ok(
+  exists (
+    select 1 from public.projects
+    where id = 'd2000000-0000-0000-0000-000000000103'::uuid
+  )
+  and exists (
+    select 1 from public.project_members
+    where project_id = 'd2000000-0000-0000-0000-000000000103'::uuid
+  )
+  and exists (
+    select 1 from public.project_invitations
+    where project_id = 'd2000000-0000-0000-0000-000000000103'::uuid
+  )
+  and exists (
+    select 1 from public.activity_log
+    where project_id = 'd2000000-0000-0000-0000-000000000103'::uuid
+  ),
+  'backup restore preserves workspace access and the audit trail'
 );
 select set_config(
   'test.project_deletion_job_id',

@@ -19,6 +19,12 @@ import {
   gedcomPersonSearchLabel,
   searchGedcomPeople,
 } from "../utils/gedcomPersonSearch";
+import {
+  completeGedcomImportOperation,
+  registerGedcomImportTree,
+  rollbackGedcomImportOperationToCompletion,
+  stopGedcomImportHeartbeat,
+} from "../services/gedcomImportOperation.ts";
 import { Modal } from "./Modal";
 
 export interface GedcomImportArchivePayload {
@@ -45,7 +51,8 @@ interface GedcomImportButtonProps {
     relations: PersonRelation[];
     rootPersonId?: string;
     archive: GedcomImportArchivePayload;
-  }) => Promise<void>;
+    importOperationId?: string;
+  }) => Promise<{ treeId: string; archiveBatchId?: string } | void>;
 }
 
 type GedcomImportPreview = {
@@ -176,6 +183,7 @@ export function GedcomImportButton({
       detail: `Осіб: ${preview.people.length}, джерел: ${preview.documents.length}, звʼязків: ${preview.relations.length}, знахідок: ${preview.findings.length}.`,
     });
     let activeStage: GedcomImportStage = "people-relations";
+    let importOperationId = "";
     try {
       let committed: GedcomImportReconciliationPayload = {
         people: preview.people,
@@ -191,7 +199,10 @@ export function GedcomImportButton({
         const reconciled = await onImportGedcom(committed, {
           onProgress: (nextProgress) => setProgress(nextProgress),
         });
-        if (reconciled) committed = reconciled;
+        if (reconciled) {
+          committed = reconciled;
+          importOperationId = reconciled.importOperationId ?? "";
+        }
       } else {
         await onImportPersons(preview.personRecords);
         for (const relation of preview.relations) {
@@ -205,7 +216,7 @@ export function GedcomImportButton({
       });
       if (onCreateFamilyTree) {
         activeStage = "create-tree";
-        await onCreateFamilyTree({
+        const createdTree = await onCreateFamilyTree({
           fileName: preview.fileName,
           people: committed.people,
           relations: committed.relations,
@@ -214,7 +225,14 @@ export function GedcomImportButton({
             ...preview.archive,
             personIdByXref: committed.personIdByXref,
           },
+          importOperationId: importOperationId || undefined,
         });
+        if (importOperationId && createdTree?.treeId) {
+          await registerGedcomImportTree(importOperationId, createdTree.treeId);
+        }
+      }
+      if (importOperationId) {
+        await completeGedcomImportOperation(importOperationId);
       }
       setProgress({ step: "Імпорт завершено", percent: 100, detail: "Дані збережено." });
       window.alert([
@@ -224,6 +242,23 @@ export function GedcomImportButton({
       setPreview(null);
       setRootSearchQuery("");
     } catch (error) {
+      if (importOperationId) {
+        try {
+          const rollback = await rollbackGedcomImportOperationToCompletion(importOperationId);
+          console.info("GEDCOM import orchestration rollback requested", {
+            importOperationId,
+            status: rollback.status,
+            rolledBackRows: rollback.rolledBackRows,
+            remainingRows: rollback.remainingRows,
+          });
+        } catch (rollbackError) {
+          // The scheduled worker will resume the durable rolling_back operation.
+          console.error("GEDCOM import orchestration rollback failed", {
+            importOperationId,
+            rollbackError,
+          });
+        }
+      }
       const stageError = toGedcomImportStageError(activeStage, error);
       console.error("GEDCOM import commit stage failed", {
         fileName: preview.fileName,
@@ -238,6 +273,7 @@ export function GedcomImportButton({
       });
       window.alert(stageError.message);
     } finally {
+      if (importOperationId) stopGedcomImportHeartbeat(importOperationId);
       setProgress(null);
       setBusy(false);
     }

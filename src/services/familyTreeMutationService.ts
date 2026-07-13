@@ -11,6 +11,8 @@
 } from "../types/familyTree";
 import type { EntityId, Person, PersonRelation } from "../types";
 import { getSupabaseClient } from "./supabaseAuth.ts";
+import { deleteFamilyTree } from "./familyTreeAdminService.ts";
+import { registerGedcomImportTree } from "./gedcomImportOperation.ts";
 import { buildFamilyTreeProjection } from "../utils/familyTreeProjection.ts";
 import {
   buildLegacyFamilyTreeImportPlan,
@@ -160,6 +162,8 @@ export interface CreateFamilyTreeFromLegacyImportInput {
   relations: PersonRelation[];
   rootPersonId?: EntityId;
   makeDefault?: boolean;
+  /** Durable rollback operation used by GEDCOM imports. */
+  rollbackOperationId?: EntityId;
 }
 
 export interface CreateFamilyTreeFromLegacyImportResult {
@@ -298,8 +302,10 @@ export async function createFamilyTreeFromLegacyImport(
     title: input.title,
     rootPersonId,
     makeDefault: input.makeDefault ?? true,
+    rollbackOperationId: input.rollbackOperationId,
   });
 
+  try {
   const projection = buildFamilyTreeProjection({
     projectId: input.projectId,
     treeId,
@@ -447,6 +453,18 @@ export async function createFamilyTreeFromLegacyImport(
   }
 
   return legacyImportResult(input, treeId, rootPersonId, projection);
+  } catch (error) {
+    try {
+      await deleteFamilyTree({ projectId: input.projectId, treeId });
+    } catch (cleanupError) {
+      console.error("Failed to discard a partially created GEDCOM family tree", {
+        projectId: input.projectId,
+        treeId,
+        cleanupError,
+      });
+    }
+    throw error;
+  }
 }
 
 export async function addParentToPerson(input: AddParentToPersonInput): Promise<EntityId> {
@@ -1100,6 +1118,7 @@ async function createImportedFamilyTree(input: {
   title: string;
   rootPersonId: EntityId;
   makeDefault: boolean;
+  rollbackOperationId?: EntityId;
 }): Promise<EntityId> {
   const client = getSupabaseClient();
   const existing = await client
@@ -1110,7 +1129,11 @@ async function createImportedFamilyTree(input: {
     .order("created_at", { ascending: true });
   if (existing.error) throw existing.error;
   const existingTrees = (existing.data as FamilyTreeIdRow[] | null) ?? [];
-  const reusableEmptyTree = existingTrees.find((tree) => !tree.root_person_id);
+  // A rollback-enabled import must own its tree row. Reusing a pre-existing
+  // empty tree would make an import rollback delete or mutate user data.
+  const reusableEmptyTree = input.rollbackOperationId
+    ? undefined
+    : existingTrees.find((tree) => !tree.root_person_id);
   const title = input.title.trim() || "GEDCOM import";
 
   if (reusableEmptyTree) {
@@ -1139,16 +1162,38 @@ async function createImportedFamilyTree(input: {
       title,
       description: "",
       root_person_id: input.rootPersonId,
-      is_default: !existingTrees.length,
+      // Register rollback ownership before changing the project's default.
+      is_default: input.rollbackOperationId ? false : !existingTrees.length,
       privacy_status: "private",
-      settings: { source: "gedcom_import" },
+      settings: {
+        source: "gedcom_import",
+        ...(input.rollbackOperationId
+          ? { rollback_operation_id: input.rollbackOperationId }
+          : {}),
+      },
     })
     .select("id")
     .single();
   if (error) throw error;
   const treeId = (data as IdRow).id;
-  if (input.makeDefault) await setImportedFamilyTreeDefault(input.projectId, treeId);
-  return treeId;
+  try {
+    if (input.rollbackOperationId) {
+      await registerGedcomImportTree(input.rollbackOperationId, treeId);
+    }
+    if (input.makeDefault) await setImportedFamilyTreeDefault(input.projectId, treeId);
+    return treeId;
+  } catch (creationError) {
+    try {
+      await deleteFamilyTree({ projectId: input.projectId, treeId });
+    } catch (cleanupError) {
+      console.error("Failed to discard an unregistered GEDCOM family tree", {
+        projectId: input.projectId,
+        treeId,
+        cleanupError,
+      });
+    }
+    throw creationError;
+  }
 }
 
 async function setImportedFamilyTreeDefault(projectId: EntityId, treeId: EntityId): Promise<void> {

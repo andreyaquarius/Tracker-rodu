@@ -2,7 +2,6 @@ import type {
   AppEntity,
   DocumentRecord,
   Finding,
-  FindingParticipant,
   Person,
   PersonRelation,
 } from "../types";
@@ -38,6 +37,8 @@ export interface GedcomImportReconciliationResult extends GedcomImportReconcilia
   personIdRemap: Record<string, string>;
   documentIdRemap: Record<string, string>;
   findingIdRemap: Record<string, string>;
+  /** Durable rollback journal kept open until the family tree is committed. */
+  importOperationId?: string;
 }
 
 export interface GedcomImportExecutionProgress {
@@ -63,7 +64,12 @@ export function deriveGedcomImportSourceKey(draft: GedcomImportDraft): string {
   return `gedcom-content:${hash128(canonical)}`;
 }
 
-/** Reuses committed IDs and rewrites every dependent reference before retry persistence. */
+/**
+ * Reuses committed IDs and rewrites every dependent reference before retry
+ * persistence. A matched Tracker record remains canonical: GEDCOM retries do
+ * not overwrite it implicitly. Besides protecting user edits, this means a
+ * failed import only has to roll back records created by that operation.
+ */
 export function reconcileGedcomImportForRetry(
   incoming: GedcomImportReconciliationPayload,
   existing: GedcomImportReconciliationExisting,
@@ -79,7 +85,7 @@ export function reconcileGedcomImportForRetry(
     personIdRemap.set(person.id, id);
     if (!match) return person;
     claimedPeople.add(match.id);
-    return { ...person, id, createdAt: match.createdAt };
+    return match;
   });
 
   const claimedDocuments = new Set<string>();
@@ -93,7 +99,7 @@ export function reconcileGedcomImportForRetry(
     documentIdRemap.set(document.id, id);
     if (!match) return document;
     claimedDocuments.add(match.id);
-    return { ...document, id, createdAt: match.createdAt };
+    return match;
   });
 
   const remappedRelations = incoming.relations.map((relation) => ({
@@ -104,7 +110,7 @@ export function reconcileGedcomImportForRetry(
   const relationBuckets = bucketBy(existing.relations, relationIdentityKey);
   const relations = remappedRelations.map((relation) => {
     const match = shiftBucket(relationBuckets, relationIdentityKey(relation));
-    return match ? { ...relation, id: match.id, createdAt: match.createdAt } : relation;
+    return match ?? relation;
   });
 
   const remappedFindings = incoming.findings.map((finding) => remapFinding(
@@ -118,14 +124,7 @@ export function reconcileGedcomImportForRetry(
     const match = shiftBucket(findingBuckets, findingIdentityKey(finding));
     const id = match?.id ?? finding.id;
     findingIdRemap.set(finding.id, id);
-    return {
-      ...finding,
-      id,
-      createdAt: match?.createdAt ?? finding.createdAt,
-      participants: match
-        ? reconcileParticipants(finding.participants, match.participants)
-        : finding.participants,
-    };
+    return match ?? finding;
   });
 
   return {
@@ -221,21 +220,6 @@ function findingIdentityKey(finding: Finding): string {
     finding.page,
     finding.description,
   ]);
-}
-
-function participantIdentityKey(participant: FindingParticipant): string {
-  return JSON.stringify([participant.role, participant.name, participant.notes]);
-}
-
-function reconcileParticipants(
-  incoming: FindingParticipant[],
-  existing: FindingParticipant[],
-): FindingParticipant[] {
-  const buckets = bucketBy(existing, participantIdentityKey);
-  return incoming.map((participant) => {
-    const match = shiftBucket(buckets, participantIdentityKey(participant));
-    return match ? { ...participant, id: match.id } : participant;
-  });
 }
 
 function uniqueIdentityIndex<T>(

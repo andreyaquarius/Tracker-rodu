@@ -358,6 +358,7 @@ export async function importProjectPeople(
     });
   }, {
     concurrency: PERSON_IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("persons", options.onProgress),
   });
   const relationRows = relations.map((relation) => relationToRow(projectId, relation));
@@ -370,6 +371,7 @@ export async function importProjectPeople(
     });
   }, {
     concurrency: RELATION_IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("relations", options.onProgress),
   });
 }

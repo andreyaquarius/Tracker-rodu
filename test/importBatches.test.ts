@@ -181,6 +181,32 @@ test("does not invoke a batch worker or report progress for empty input", async 
   assert.equal(calls, 0);
 });
 
+test("awaits the operation fence before every mutation batch", async () => {
+  const events: string[] = [];
+  await runImportBatches([[1], [2]], async (batch) => {
+    events.push(`write:${batch[0]}`);
+  }, {
+    concurrency: 1,
+    beforeBatch: async () => {
+      events.push("fence");
+    },
+  });
+  assert.deepEqual(events, ["fence", "write:1", "fence", "write:2"]);
+
+  let writes = 0;
+  await assert.rejects(
+    runImportBatches([[1]], async () => {
+      writes += 1;
+    }, {
+      beforeBatch: async () => {
+        throw new Error("operation is rolling back");
+      },
+    }),
+    /rolling back/,
+  );
+  assert.equal(writes, 0);
+});
+
 test("rejects invalid batch limits", () => {
   assert.throws(() => chunkImportRows([1], { maxItems: 0 }), RangeError);
   assert.throws(() => chunkImportRows([1], { maxBytes: 1 }), RangeError);

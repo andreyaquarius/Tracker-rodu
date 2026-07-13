@@ -33,6 +33,7 @@ import { PaginationControls } from "../components/PaginationControls";
 import { usePagination } from "../hooks/usePagination";
 import { useWorkspaceWindows } from "../components/WorkspaceWindows";
 import { createFamilyTreeFromLegacyImport } from "../services/familyTreeMutationService";
+import { registerGedcomImportTree } from "../services/gedcomImportOperation.ts";
 import type {
   GedcomImportExecutionOptions,
   GedcomImportReconciliationPayload,
@@ -382,14 +383,21 @@ export function PersonsPage({
               onImportPersons={(records) => onImportRecords("persons", records)}
               onImportGedcom={onImportGedcom}
               onSaveRelation={onSaveRelation}
-              onCreateFamilyTree={projectId ? async ({ fileName, people, relations, rootPersonId }) => {
-                await createFamilyTreeFromLegacyImport({
+              onCreateFamilyTree={projectId ? async ({ fileName, people, relations, rootPersonId, importOperationId }) => {
+                const result = await createFamilyTreeFromLegacyImport({
                   projectId,
                   title: `GEDCOM: ${fileName}`,
                   persons: people,
                   relations,
                   rootPersonId,
+                  rollbackOperationId: importOperationId,
                 });
+                if (result && importOperationId) {
+                  // Keep this registration next to creation as a defensive,
+                  // idempotent barrier before the callback returns.
+                  await registerGedcomImportTree(importOperationId, result.treeId);
+                }
+                return result ? { treeId: result.treeId } : undefined;
               } : undefined}
             />
           ) : null}

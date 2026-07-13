@@ -617,6 +617,7 @@ async function replaceImportedTaskPersons(
     if (error) throw error;
   }, {
     concurrency: REFERENCE_DELETE_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("task-person-delete", options.onProgress),
   });
 
@@ -634,6 +635,7 @@ async function replaceImportedTaskPersons(
     if (error) throw error;
   }, {
     concurrency: IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("task-person-insert", options.onProgress),
   });
 }
@@ -658,6 +660,7 @@ async function replaceImportedFindingParticipants(
     if (error) throw error;
   }, {
     concurrency: REFERENCE_DELETE_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("finding-participant-delete", options.onProgress),
   });
 
@@ -671,6 +674,7 @@ async function replaceImportedFindingParticipants(
     if (error) throw error;
   }, {
     concurrency: FINDING_IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("finding-participant-upsert", options.onProgress),
   });
 }
@@ -695,6 +699,7 @@ export async function importProjectWorkRecords(
     if (error) throw error;
   }, {
     concurrency: IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("tasks", options.onProgress),
   });
   if (tasks.length) {
@@ -711,6 +716,7 @@ export async function importProjectWorkRecords(
     if (error) throw error;
   }, {
     concurrency: FINDING_IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("findings", options.onProgress),
   });
   if (findings.length) {

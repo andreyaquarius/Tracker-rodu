@@ -14,8 +14,12 @@ import {
   type GedcomArchiveStoredXrefRow,
 } from "../utils/gedcomArchive.ts";
 import { getSupabaseClient } from "./supabaseAuth.ts";
+import { registerGedcomImportArchive } from "./gedcomImportOperation.ts";
 
-export type SaveGedcomArchiveInput = GedcomArchiveInput;
+export type SaveGedcomArchiveInput = GedcomArchiveInput & {
+  /** Registers the archive before xref persistence so a partial save is recoverable. */
+  rollbackOperationId?: EntityId;
+};
 
 export interface ReadLatestGedcomArchiveInput {
   projectId: EntityId;
@@ -61,7 +65,16 @@ export async function saveGedcomArchive(
   input: SaveGedcomArchiveInput,
 ): Promise<GedcomArchiveSnapshot> {
   const client = getSupabaseClient();
-  const batchPayload = buildGedcomArchiveBatchPayload(input);
+  const baseBatchPayload = buildGedcomArchiveBatchPayload(input);
+  const batchPayload = input.rollbackOperationId
+    ? {
+        ...baseBatchPayload,
+        raw_metadata: {
+          ...baseBatchPayload.raw_metadata,
+          rollback_operation_id: input.rollbackOperationId,
+        },
+      }
+    : baseBatchPayload;
   let batch: GedcomImportBatchRow | null = null;
 
   try {
@@ -72,6 +85,9 @@ export async function saveGedcomArchive(
       .single();
     if (batchResult.error) throw batchResult.error;
     batch = batchResult.data as GedcomImportBatchRow;
+    if (input.rollbackOperationId) {
+      await registerGedcomImportArchive(input.rollbackOperationId, batch.id);
+    }
 
     const xrefRows = buildGedcomArchiveXrefRows({
       ...input,
@@ -95,12 +111,24 @@ export async function saveGedcomArchive(
     );
   } catch (error) {
     if (batch) {
-      await markGedcomArchiveBatchFailed(
-        batch.id,
-        input.projectId,
-        batchPayload.warnings,
-        error,
-      );
+      try {
+        const removal = await client
+          .from("gedcom_import_batches")
+          .delete()
+          .eq("project_id", input.projectId)
+          .eq("id", batch.id);
+        if (removal.error) throw removal.error;
+      } catch {
+        // Keep a small diagnostic row only when the cleanup itself is
+        // unavailable. xref rows cascade when a later project/import cleanup
+        // removes this failed batch.
+        await markGedcomArchiveBatchFailed(
+          batch.id,
+          input.projectId,
+          batchPayload.warnings,
+          error,
+        );
+      }
     }
     throw error;
   }

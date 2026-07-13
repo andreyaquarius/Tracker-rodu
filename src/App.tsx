@@ -201,6 +201,12 @@ import {
   type GedcomImportReconciliationPayload,
   type GedcomImportReconciliationResult,
 } from "./utils/gedcomImportReconciliation.ts";
+import {
+  createGedcomImportBatchFence,
+  prepareGedcomImportOperation,
+  rollbackGedcomImportOperationToCompletion,
+  startGedcomImportHeartbeat,
+} from "./services/gedcomImportOperation.ts";
 import type { ImportPhaseProgress } from "./utils/importBatches.ts";
 import {
   dataGroupsForPage,
@@ -3535,6 +3541,13 @@ export default function App() {
     const storedDocumentIds = new Set(storedDocuments.documents.map((document) => document.id));
     const storedFindingIds = new Set(storedWorkRecords.findings.map((finding) => finding.id));
     const storedRelationIds = new Set(storedPeople.relations.map((relation) => relation.id));
+    // Reconciled existing records are canonical and intentionally read-only
+    // during GEDCOM import. Persisting only new rows keeps rollback atomic even
+    // if a browser closes between batches and preserves edits made in Tracker.
+    const peopleToImport = reconciled.people.filter((person) => !storedPersonIds.has(person.id));
+    const documentsToImport = reconciled.documents.filter((document) => !storedDocumentIds.has(document.id));
+    const findingsToImport = reconciled.findings.filter((finding) => !storedFindingIds.has(finding.id));
+    const relationsToImport = reconciled.relations.filter((relation) => !storedRelationIds.has(relation.id));
     const hasNewPeople = reconciled.people.some((person) => !storedPersonIds.has(person.id));
     const hasNewDocuments = reconciled.documents.some((document) => !storedDocumentIds.has(document.id));
     const hasNewFindings = reconciled.findings.some((finding) => !storedFindingIds.has(finding.id));
@@ -3581,17 +3594,37 @@ export default function App() {
       }
     };
 
+    let importOperationId = "";
     try {
+      const operation = await prepareGedcomImportOperation({
+        projectId,
+        sourceKey: reconciled.importSourceKey,
+        personIds: peopleToImport.map((person) => person.id),
+        relationIds: relationsToImport.map((relation) => relation.id),
+        documentIds: documentsToImport.map((document) => document.id),
+        findingIds: findingsToImport.map((finding) => finding.id),
+      });
+      importOperationId = operation.operationId;
+      startGedcomImportHeartbeat(importOperationId);
+      const assertImportBatchActive = createGedcomImportBatchFence(importOperationId);
+      options?.onProgress?.({
+        step: "Готуємо безпечний імпорт",
+        percent: 47,
+        detail: `Зареєстровано ${operation.registeredRows.toLocaleString("uk-UA")} нових записів для автоматичного відкату у разі помилки.`,
+      });
       await runPersistenceStage(
         "people-relations",
         "Не вдалося зберегти осіб і родинні зв’язки.",
         { people: reconciled.people.length, relations: reconciled.relations.length },
         () => importProjectPeople(
           projectId,
-          reconciled.people,
-          reconciled.relations,
+          peopleToImport,
+          relationsToImport,
           researchIds,
-          { onProgress: (progress) => reportGedcomImportBatchProgress(options, progress) },
+          {
+            beforeBatch: assertImportBatchActive,
+            onProgress: (progress) => reportGedcomImportBatchProgress(options, progress),
+          },
         ),
       );
       options?.onProgress?.({
@@ -3599,17 +3632,20 @@ export default function App() {
         percent: 56,
         detail: `Осіб: ${reconciled.people.length.toLocaleString("uk-UA")}, звʼязків: ${reconciled.relations.length.toLocaleString("uk-UA")}.`,
       });
-      if (reconciled.documents.length) {
+      if (documentsToImport.length) {
         await runPersistenceStage(
           "documents",
           "Не вдалося зберегти джерела і документи.",
           { documents: reconciled.documents.length },
           () => importProjectDocuments(
             projectId,
-            reconciled.documents,
+            documentsToImport,
             [],
             researchIds,
-            { onProgress: (progress) => reportGedcomImportBatchProgress(options, progress) },
+            {
+              beforeBatch: assertImportBatchActive,
+              onProgress: (progress) => reportGedcomImportBatchProgress(options, progress),
+            },
           ),
         );
       }
@@ -3618,7 +3654,7 @@ export default function App() {
         percent: 58,
         detail: `Джерел і документів: ${reconciled.documents.length.toLocaleString("uk-UA")}.`,
       });
-      if (reconciled.findings.length) {
+      if (findingsToImport.length) {
         await runPersistenceStage(
           "findings",
           "Не вдалося зберегти події і знахідки.",
@@ -3626,11 +3662,14 @@ export default function App() {
           () => importProjectWorkRecords(
             projectId,
             [],
-            reconciled.findings,
+            findingsToImport,
             researchIds,
             documentIds,
             new Set(nextPersons.map((person) => person.id)),
-            { onProgress: (progress) => reportGedcomImportBatchProgress(options, progress) },
+            {
+              beforeBatch: assertImportBatchActive,
+              onProgress: (progress) => reportGedcomImportBatchProgress(options, progress),
+            },
           ),
         );
       }
@@ -3652,8 +3691,27 @@ export default function App() {
         detail: "Переходимо до формування родового дерева.",
       });
       void subscriptionAccess.refreshSubscription();
-      return reconciled;
+      return { ...reconciled, importOperationId };
     } catch (error) {
+      if (importOperationId) {
+        try {
+          const rollback = await rollbackGedcomImportOperationToCompletion(importOperationId);
+          console.info("GEDCOM import rollback requested", {
+            projectId,
+            importOperationId,
+            status: rollback.status,
+            rolledBackRows: rollback.rolledBackRows,
+            remainingRows: rollback.remainingRows,
+          });
+        } catch (rollbackError) {
+          // The durable operation remains recoverable by the scheduled worker.
+          console.error("GEDCOM import foreground rollback failed", {
+            projectId,
+            importOperationId,
+            rollbackError,
+          });
+        }
+      }
       if (error instanceof GedcomImportStageError) throw error;
       throw new Error(describeError(error, "Не вдалося зберегти GEDCOM-імпорт."));
     }
