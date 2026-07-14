@@ -188,6 +188,7 @@ export interface PreviousNodePosition {
 }
 
 export type FamilyTreeLayoutMode = "family-graph" | "descendant-forest";
+export type FamilyTreeLineageGroupDepth = 0 | 1 | 2 | 3;
 
 export interface FamilyTreeLayoutOptions {
   focusPersonId: PersonId;
@@ -204,6 +205,10 @@ export interface FamilyTreeLayoutOptions {
   activeParentSetByChild?: Readonly<Record<PersonId, UnionId>>;
   /** Direct root-to-focus lineage used to keep its partnership visually primary. */
   primaryLineagePersonIds?: readonly PersonId[];
+  /** Person relative to whom highlighted cards are direct ancestors. */
+  lineageTargetPersonId?: PersonId;
+  /** 0 = one fill; 1/2/3 = branches split at parents/grandparents/great-grandparents. */
+  lineageGroupDepth?: FamilyTreeLineageGroupDepth;
   collapsedPersonIds?: readonly PersonId[];
   previousPositions?: readonly PreviousNodePosition[];
   cardWidth?: number;
@@ -222,6 +227,8 @@ export type LayoutNodeKind =
   | "continuation"
   | "placeholder";
 
+export type LayoutLineageRole = "focus" | "direct-ancestor";
+
 export interface LayoutNode {
   occurrenceId: OccurrenceId;
   personId?: PersonId;
@@ -232,6 +239,10 @@ export interface LayoutNode {
   width: number;
   height: number;
   orderKey: string;
+  /** Occurrence-level role; the same person may be direct in one branch and collateral in another. */
+  lineageRole?: LayoutLineageRole;
+  /** Zero-based palette slot for a direct ancestral sector. */
+  lineageGroup?: number;
   referenceToOccurrenceId?: OccurrenceId;
   referenceReason?: "pedigree-collapse" | "already-visible" | "cycle";
   continuation?: TreeContinuation;

@@ -79,7 +79,13 @@ export function Layout(props: LayoutProps) {
           desktopCollapsed={sidebarCollapsed}
           onToggleDesktopCollapsed={() => setSidebarCollapsed((current) => !current)}
         />
-        <div className="main-shell">
+        <div
+          className={
+            props.page === "familyTree"
+              ? "main-shell main-shell-family-tree"
+              : "main-shell"
+          }
+        >
           <TopBar
             account={props.account}
             workspace={props.workspace}

@@ -60,7 +60,7 @@ test("person cards expose a separate labelled descendants command", () => {
     personCard,
     /onShowAllDescendants\(personId, node\.occurrenceId\)/,
   );
-  assert.match(personCard, /<span aria-hidden="true">⇊<\/span>/);
+  assert.match(personCard, /<PersonCardActionIcon kind="descendants" \/>/);
 });
 
 test("the semantic list offers the same person-and-occurrence command", () => {

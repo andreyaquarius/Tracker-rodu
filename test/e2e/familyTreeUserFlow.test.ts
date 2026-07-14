@@ -136,13 +136,21 @@ test("production tree viewport fills its host without reserving empty optional r
   );
   assert.match(
     appCss,
-    /@media\s*\(max-width:\s*850px\)[\s\S]*?\.family-tree-v2-shell\s*\{[^}]*min-height:\s*620px;[^}]*height:\s*calc\(100dvh - 118px\);/,
+    /@media\s*\(max-width:\s*850px\)[\s\S]*?\.family-tree-v2-shell\s*\{[^}]*flex:\s*1 1 0;[^}]*min-height:\s*0;[^}]*height:\s*100%;/,
+  );
+  assert.match(
+    appCss,
+    /\.family-tree-page\s*\{[^}]*flex:\s*1 1 0;[^}]*height:\s*auto;[^}]*min-height:\s*0;/s,
+  );
+  assert.doesNotMatch(
+    appCss,
+    /\.family-tree-page\s*\{[^}]*min-height:\s*720px;/s,
   );
   assert.match(camera, /new ResizeObserver/);
   assert.match(camera, /observer\.observe\(element\)/);
 });
 
-test("production tree defaults to ancestors while descendants and cousins remain explicit opt-ins", () => {
+test("production keeps the base request compact while priming the focus family and optional cousins", () => {
   const page = readFileSync(
     new URL("../../src/pages/ProductionFamilyTreePage.tsx", import.meta.url),
     "utf8",
@@ -166,6 +174,13 @@ test("production tree defaults to ancestors while descendants and cousins remain
     page,
     /checked=\{collateralDepth > 0\}[\s\S]*?setCollateralDepth\(event\.target\.checked \? 1 : 0\)/,
   );
+  assert.match(page, /defaultVisibleFamilyPersonId:\s*focusPersonId/);
+  assert.match(
+    page,
+    /includeCousinDescendantsByDefault:[\s\S]*?appearance\.showCousinDescendantsByDefault/,
+  );
+  assert.match(neighborhoodHook, /nextDefaultBranchExpansion/);
+  assert.match(neighborhoodHook, /setBaseLoadRevision\(value => value \+ 1\)/);
 
   // The RPC owns the loaded scope. The production layout renders every entity
   // already returned by the initial request or a per-person branch request.

@@ -4,6 +4,8 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { LayoutNode, TreePerson } from "../types.ts";
 import { formatDateForDisplay } from "../../../utils/dateHelpers.ts";
 import { branchControlPresentation } from "./branchControlPresentation.ts";
+import { BranchControlIcon } from "./BranchControlIcon.tsx";
+import { PersonCardActionIcon } from "./PersonCardActionIcon.tsx";
 import {
   leaseTreePersonPhotoSource,
   type TreePersonPhotoSourceResolver,
@@ -60,11 +62,14 @@ export function PersonCard({
 }: PersonCardProps): ReactElement {
   if (node.kind === "continuation") {
     const presentation = branchControlPresentation(node.continuation);
+    const direction = node.continuation?.direction ?? "children";
     return (
       <button
         type="button"
         className="ft-continuation"
-        title={presentation.title}
+        data-direction={direction}
+        data-has-count={presentation.count ? "true" : "false"}
+        data-tooltip={presentation.ariaLabel}
         aria-label={presentation.ariaLabel}
         aria-expanded={presentation.expanded}
         onClick={() =>
@@ -72,9 +77,16 @@ export function PersonCard({
           onExpandContinuation?.(node.continuation.token, node)
         }
       >
-        <span aria-hidden="true">{presentation.icon}</span>
+        <span className="ft-branch-control-icon" aria-hidden="true">
+          <BranchControlIcon
+            direction={direction}
+            expanded={presentation.expanded}
+          />
+        </span>
         {presentation.count ? (
-          <small>{presentation.count}</small>
+          <span className="ft-branch-control-count" aria-hidden="true">
+            {presentation.count}
+          </span>
         ) : null}
       </button>
     );
@@ -126,6 +138,11 @@ export function PersonCard({
     .map(part => part[0]?.toUpperCase())
     .join("");
   const life = years(person);
+  const lineageDescription = node.lineageRole === "direct-ancestor"
+    ? ", прямий предок"
+    : node.lineageRole === "focus"
+      ? ", фокусна особа"
+      : "";
 
   return (
     <article
@@ -134,7 +151,9 @@ export function PersonCard({
       data-reference={node.kind === "reference" ? "true" : "false"}
       data-selected={selected ? "true" : "false"}
       data-collapsed={branchesCollapsed ? "true" : "false"}
-      aria-label={`${name}, ${life}${branchesCollapsed ? ", відкриті додаткові гілки згорнуто" : ""}`}
+      data-lineage={node.lineageRole ?? "collateral"}
+      data-lineage-group={node.lineageGroup}
+      aria-label={`${name}, ${life}${lineageDescription}${branchesCollapsed ? ", відкриті додаткові гілки згорнуто" : ""}`}
     >
       <button
         type="button"
@@ -157,42 +176,53 @@ export function PersonCard({
         <span className="ft-card-actions">
           <button
             type="button"
+            className="ft-card-action"
+            data-action="focus"
+            data-tooltip={`Показати дерево від ${name}`}
+            aria-pressed={node.lineageRole === "focus"}
             aria-label={`Зробити ${name} фокусною особою`}
-            title="Показати дерево від цієї особи"
             onClick={() => onFocus?.(personId)}
           >
-            ◎
+            <PersonCardActionIcon kind="focus" />
           </button>
           {onShowAllDescendants ? (
             <button
               type="button"
+              className="ft-card-action"
+              data-action="descendants"
+              data-tooltip={`Показати всіх нащадків особи ${name}`}
               aria-label={`Показати всіх нащадків особи ${name}`}
-              title={`Показати всіх нащадків особи ${name}`}
               onClick={() =>
                 onShowAllDescendants(personId, node.occurrenceId)
               }
             >
-              <span aria-hidden="true">⇊</span>
+              <PersonCardActionIcon kind="descendants" />
             </button>
           ) : null}
           {branchesCollapsible && onToggleBranches && node.kind === "person" ? (
             <button
               type="button"
+              className="ft-card-action"
+              data-action="toggle-branches"
+              data-tooltip={branchesCollapsed ? "Розгорнути раніше відкриті гілки" : "Згорнути відкриті гілки"}
               aria-expanded={!branchesCollapsed}
               aria-label={`${branchesCollapsed ? "Розгорнути раніше відкриті" : "Згорнути відкриті"} гілки особи ${name}`}
-              title={branchesCollapsed ? "Розгорнути раніше відкриті гілки" : "Згорнути відкриті гілки"}
               onClick={() => onToggleBranches(personId, node.occurrenceId)}
             >
-              <span aria-hidden="true">{branchesCollapsed ? "▸" : "▾"}</span>
+              <PersonCardActionIcon
+                kind={branchesCollapsed ? "expand-branches" : "collapse-branches"}
+              />
             </button>
           ) : null}
           <button
             type="button"
+            className="ft-card-action ft-card-action--add"
+            data-action="add-relative"
+            data-tooltip="Додати родича"
             aria-label={`Додати родича для ${name}`}
-            title="Додати родича"
             onClick={() => onAddRelative?.(personId)}
           >
-            ＋
+            <span className="ft-card-add-glyph" aria-hidden="true">＋</span>
           </button>
         </span>
       ) : null}

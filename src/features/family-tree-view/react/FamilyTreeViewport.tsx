@@ -37,6 +37,8 @@ export interface FamilyTreeViewportProps {
   graph: FamilyGraphData;
   options: FamilyTreeLayoutOptions;
   className?: string;
+  lineageColor?: string;
+  lineagePalette?: readonly string[];
   selectedPersonId?: string;
   preserveAnchorOccurrenceId?: OccurrenceId;
   /** May lower, but never raise, the hard ceiling of 600 mounted cards. */
@@ -78,6 +80,8 @@ export function FamilyTreeViewport({
   graph,
   options,
   className,
+  lineageColor,
+  lineagePalette,
   selectedPersonId,
   preserveAnchorOccurrenceId,
   maxRenderedNodes,
@@ -189,6 +193,14 @@ export function FamilyTreeViewport({
     }
     return counts;
   }, [layoutState.layout?.nodes]);
+  const hasDirectLineage = useMemo(
+    () => (layoutState.layout?.nodes ?? []).some(
+      node =>
+        node.lineageRole === "focus" ||
+        node.lineageRole === "direct-ancestor",
+    ),
+    [layoutState.layout?.nodes],
+  );
   const familyControls = useMemo(
     () =>
       layoutState.layout
@@ -222,6 +234,13 @@ export function FamilyTreeViewport({
   const compact = camera.camera.zoom < 0.48;
   const rootStyle = {
     "--ft-zoom": String(camera.camera.zoom),
+    "--ft-direct-lineage-color": lineageColor ?? "#2f7465",
+    ...Object.fromEntries(
+      Array.from({ length: 8 }, (_, index) => [
+        `--ft-lineage-group-${index}`,
+        lineagePalette?.[index] ?? lineageColor ?? "#2f7465",
+      ]),
+    ),
   } as CSSProperties;
 
   return (
@@ -230,7 +249,7 @@ export function FamilyTreeViewport({
       style={rootStyle}
       aria-label="Робочий простір родового дерева"
     >
-      <div className="ft-toolbar">
+      <div className="ft-toolbar" role="toolbar" aria-label="Керування полотном дерева">
         <span className="ft-toolbar-status" aria-live="polite">
           {layoutState.loading
             ? "Будую дерево…"
@@ -238,6 +257,12 @@ export function FamilyTreeViewport({
               ? `Помилка: ${layoutState.error.message}`
               : `Змонтовано ${visibleNodes.length} із ${layoutState.layout?.nodes.length ?? 0} карток`}
         </span>
+        {hasDirectLineage ? (
+          <span className="ft-lineage-legend" aria-label="Кольором позначено фокусну особу та прямих предків">
+            <span className="ft-lineage-swatch" aria-hidden="true" />
+            Пряма гілка
+          </span>
+        ) : null}
         <button type="button" onClick={() => camera.zoomBy(0.82)} aria-label="Зменшити масштаб">
           −
         </button>
@@ -283,11 +308,11 @@ export function FamilyTreeViewport({
         <div
           ref={camera.containerRef}
           className="ft-viewport"
-          onPointerDown={camera.onPointerDown}
-          onPointerMove={camera.onPointerMove}
-          onPointerUp={camera.onPointerUp}
-          onPointerCancel={camera.onPointerUp}
-          onWheel={camera.onWheel}
+          onPointerDownCapture={camera.onPointerDown}
+          onPointerMoveCapture={camera.onPointerMove}
+          onPointerUpCapture={camera.onPointerUp}
+          onPointerCancelCapture={camera.onPointerUp}
+          onLostPointerCapture={camera.onPointerUp}
         >
           {layoutState.layout ? (
             <TreeEdgeCanvas
