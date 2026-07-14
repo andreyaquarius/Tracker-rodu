@@ -196,5 +196,9 @@ test("production keeps the base request compact while priming the focus family a
   assert.match(neighborhoodHook, /maxNodes: branchMaxNodes/);
   assert.doesNotMatch(page, /setMaxNodes/);
   assert.match(page, /token\.endsWith\(":other-parent-sets"\)/);
+  assert.match(
+    page,
+    /setAnchorOccurrenceId\(node\.sourceOccurrenceId \?\? node\.occurrenceId\)/,
+  );
   assert.match(page, /await neighborhood\.expandContinuation\(token, node\);/);
 });

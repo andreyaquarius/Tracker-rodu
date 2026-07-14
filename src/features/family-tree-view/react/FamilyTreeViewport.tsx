@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -145,7 +146,7 @@ export function FamilyTreeViewport({
     options.focusPersonId,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (layoutState.anchorShift) {
       camera.compensateWorldShift(layoutState.anchorShift);
     }

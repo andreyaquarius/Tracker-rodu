@@ -2477,6 +2477,7 @@ test("continuation controls stay attached to cards without changing pedigree coo
     const source = decorated.nodes.find(
       node => node.occurrenceId === control.sourceOccurrenceId,
     )!;
+    assert.equal(source.personId, control.continuation?.personId);
     assert.ok(control.x >= source.x);
     assert.ok(control.x + control.width <= source.x + source.width);
     assert.ok(control.y > source.y + source.height);

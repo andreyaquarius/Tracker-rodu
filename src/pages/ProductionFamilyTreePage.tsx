@@ -1473,7 +1473,11 @@ function LoadedFamilyTree({
       return isSpecialFamilyTreePerspective(current) &&
         current.sessionId === requestSessionId;
     };
-    setAnchorOccurrenceId(node.occurrenceId);
+    // Anchor the owning person card, not the temporary continuation button.
+    // The button can disappear or receive another occurrence id after the
+    // branch is composed, while the card remains stable across both expansion
+    // and collapse. This lets the viewport compensate every layout reflow.
+    setAnchorOccurrenceId(node.sourceOccurrenceId ?? node.occurrenceId);
     if (token.startsWith("local:")) {
       if (node.continuation?.expanded) {
         await neighborhood.expandContinuation(token, node);

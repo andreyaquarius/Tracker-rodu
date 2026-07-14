@@ -245,6 +245,8 @@ export interface LayoutNode {
   lineageGroup?: number;
   referenceToOccurrenceId?: OccurrenceId;
   referenceReason?: "pedigree-collapse" | "already-visible" | "cycle";
+  /** Person-card occurrence that owns an auxiliary continuation control. */
+  sourceOccurrenceId?: OccurrenceId;
   continuation?: TreeContinuation;
   placeholderLabel?: string;
   actionPersonId?: PersonId;
