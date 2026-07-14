@@ -54,3 +54,37 @@ test("tree card keeps full names and life dates readable without a single-line e
   assert.match(css, /\.ft-card-copy small[\s\S]*?-webkit-line-clamp:\s*2/);
   assert.doesNotMatch(css.match(/\.ft-card-copy strong,[\s\S]*?\n\}/)?.[0] ?? "", /white-space:\s*nowrap/);
 });
+
+test("tree cards expose and explain the direct lineage fill without replacing other states", () => {
+  const card = readFileSync(
+    new URL("../src/features/family-tree-view/react/PersonCard.tsx", import.meta.url),
+    "utf8",
+  );
+  const viewport = readFileSync(
+    new URL("../src/features/family-tree-view/react/FamilyTreeViewport.tsx", import.meta.url),
+    "utf8",
+  );
+  const semanticList = readFileSync(
+    new URL("../src/features/family-tree-view/react/FamilyTreeSemanticList.tsx", import.meta.url),
+    "utf8",
+  );
+  const css = readFileSync(
+    new URL("../src/features/family-tree-view/react/familyTree.css", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(card, /data-lineage=\{node\.lineageRole \?\? "collateral"\}/);
+  assert.match(card, /data-lineage-group=\{node\.lineageGroup\}/);
+  assert.match(card, /прямий предок/);
+  assert.match(card, /фокусна особа/);
+  assert.match(viewport, /Пряма гілка/);
+  assert.match(viewport, /--ft-lineage-group-/);
+  assert.match(semanticList, /data-lineage-group=\{node\.lineageGroup\}/);
+  assert.match(css, /--ft-direct-lineage-color:/);
+  assert.match(css, /\.ft-person-card\[data-lineage="direct-ancestor"\][\s\S]*?background:\s*var\(--ft-card-lineage-fill\)/);
+  assert.doesNotMatch(css, /data-lineage="direct-lineage"/);
+  assert.match(css, /\.ft-person-card\[data-lineage="direct-ancestor"\] \.ft-card-actions button[\s\S]*?background:\s*var\(--ft-card-lineage-fill\)/);
+  assert.match(css, /\.ft-person-card\[data-lineage-group="0"\][\s\S]*?--ft-card-lineage-color:\s*var\(--ft-lineage-group-0\)/);
+  assert.match(css, /\.ft-person-card\[data-reference="true"\][\s\S]*?border-style:\s*dashed/);
+  assert.match(css, /\.ft-person-card\[data-selected="true"\][\s\S]*?box-shadow:/);
+});

@@ -90,6 +90,39 @@ test("tree tools window exposes GEDCOM and clearly marks future modules", () => 
   assert.match(toolsWindow, /onSelectTree\(event\.target\.value\)/);
 });
 
+test("tree tools expose persistent direct-lineage palettes and per-branch colors", () => {
+  assert.match(toolsWindow, /Налаштування дерева/);
+  assert.match(toolsWindow, /Заливка прямої гілки/);
+  assert.match(toolsWindow, /value: "parents"/);
+  assert.match(toolsWindow, /value: "grandparents"/);
+  assert.match(toolsWindow, /value: "great-grandparents"/);
+  assert.match(toolsWindow, /STANDARD_DIRECT_LINEAGE_PALETTES\.map/);
+  assert.match(toolsWindow, /Стандартні набори кольорів/);
+  assert.match(toolsWindow, /Автоматично від основного кольору/);
+  assert.match(toolsWindow, /Кольори окремих гілок/);
+  assert.match(toolsWindow, /Родичі при відкритті дерева/);
+  assert.match(toolsWindow, /Показувати двоюрідні гілки за замовчуванням/);
+  assert.match(toolsWindow, /checked=\{appearance\.showCousinDescendantsByDefault\}/);
+  assert.match(toolsWindow, /showCousinDescendantsByDefault: event\.target\.checked/);
+  assert.match(toolsWindow, /Відновити стандартні кольори/);
+  assert.match(toolsWindow, /onAppearanceChange\(\{[\s\S]*?\.\.\.appearance,[\s\S]*?directLineageBranchColors: \[\]/);
+  assert.match(toolsWindow, /Батьківська гілка/);
+  assert.match(toolsWindow, /Материнська гілка/);
+  assert.match(toolsWindow, /Батько діда по батькові/);
+  assert.match(toolsWindow, /Мати бабусі по матері/);
+  assert.match(toolsWindow, /const colors = \[\.\.\.lineagePalette\]/);
+  assert.match(toolsWindow, /colors\[index\] = color/);
+  assert.match(toolsWindow, /directLineageBranchColors: colors/);
+  assert.match(productionPage, /readFamilyTreeAppearance\(projectId, selectedEntry\.id\)/);
+  assert.match(productionPage, /writeFamilyTreeAppearance\(projectId, selectedEntry\.id, normalized\)/);
+  assert.match(productionPage, /lineagePalette=\{lineagePalette\}/);
+  assert.match(productionPage, /defaultVisibleFamilyPersonId:\s*focusPersonId/);
+  assert.match(productionPage, /includeCousinDescendantsByDefault:[\s\S]*?appearance\.showCousinDescendantsByDefault/);
+  assert.match(productionPage, /Показати бічні гілки зараз/);
+  assert.match(styles, /\.family-tree-lineage-branches/);
+  assert.match(styles, /\.family-tree-lineage-branch-color/);
+});
+
 test("circular ancestor chart uses an isolated bounded direct-ancestor session", () => {
   assert.match(circularChart, /ancestorDepth:\s*generations/);
   assert.match(circularChart, /descendantDepth:\s*0/);

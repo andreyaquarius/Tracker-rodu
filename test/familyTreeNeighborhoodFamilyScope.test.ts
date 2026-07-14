@@ -40,6 +40,18 @@ test("hook exposes reversible family-scope expansion independent from person bra
   assert.match(hook, /collapsedFamilyScopeIds/);
 });
 
+test("hook primes the focus family and optional cousin descendants only after the base response", () => {
+  assert.match(hook, /defaultVisibleFamilyPersonId\?: PersonId/);
+  assert.match(hook, /includeCousinDescendantsByDefault\?: boolean/);
+  assert.match(hook, /expandPersonContinuation/);
+  assert.match(hook, /setBaseLoadRevision\(value => value \+ 1\)/);
+  assert.match(hook, /nextDefaultBranchExpansion\(\{/);
+  assert.match(hook, /focusPersonId: defaultVisibleFamilyPersonId/);
+  assert.match(hook, /includeCousinDescendants:\s*includeCousinDescendantsByDefault/);
+  assert.match(hook, /await expandPersonContinuation\(next\.continuation\)/);
+  assert.match(hook, /await expandFamilyContinuation\(next\.continuation\)/);
+});
+
 test("hook exposes cancellation and aborts every request without clearing the loaded graph", () => {
   assert.match(hook, /canceled: boolean/);
   assert.match(hook, /cancel: \(\) => void/);
@@ -75,7 +87,7 @@ test("new base loads, reloads and branch expansions clear the canceled state", (
   assert.ok(baseLoadStart >= 0 && baseLoadEnd > baseLoadStart);
   assert.match(hook.slice(baseLoadStart, baseLoadEnd), /setCanceled\(false\)/);
 
-  const personBranchStart = hook.indexOf("const expandContinuation");
+  const personBranchStart = hook.indexOf("const expandPersonContinuation");
   const familyBranchStart = hook.indexOf("const expandFamilyContinuation");
   const togglesStart = hook.indexOf("const togglePersonBranches");
   assert.ok(

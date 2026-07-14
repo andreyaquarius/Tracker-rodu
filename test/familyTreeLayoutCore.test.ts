@@ -67,6 +67,12 @@ function run(
       ...(options.primaryLineagePersonIds === undefined
         ? {}
         : { primaryLineagePersonIds: options.primaryLineagePersonIds }),
+      ...(options.lineageTargetPersonId === undefined
+        ? {}
+        : { lineageTargetPersonId: options.lineageTargetPersonId }),
+      ...(options.lineageGroupDepth === undefined
+        ? {}
+        : { lineageGroupDepth: options.lineageGroupDepth }),
       ...(options.previousPositions === undefined
         ? {}
         : { previousPositions: options.previousPositions }),
@@ -292,6 +298,113 @@ function assertNoUnrelatedFamilyRouteIntersections(
         ? { x: left.start.x, y: (overlapStart + overlapEnd) / 2 }
         : { x: (overlapStart + overlapEnd) / 2, y: left.start.y };
       assertPointAllowed(point, left, right);
+    }
+  }
+}
+
+interface SidePartnerRail {
+  readonly familyUnionId: string;
+  readonly side: "left" | "right";
+  readonly partnerCenter: number;
+  readonly distanceFromHub: number;
+  readonly y: number;
+}
+
+function assertBalancedSidePartnerRailLanes(
+  result: LayoutResult,
+  hubPersonId: string,
+  familyUnionIds: readonly string[],
+  context: string,
+): void {
+  const epsilon = 0.001;
+  const hubCards = result.nodes.filter(node => node.personId === hubPersonId);
+  assert.equal(hubCards.length, 1, `${context}: one canonical hub card`);
+  const hub = hubCards[0]!;
+  const hubCenter = hub.x + hub.width / 2;
+  const nodesByOccurrenceId = new Map(
+    result.nodes.map(node => [node.occurrenceId, node]),
+  );
+  const rails = familyUnionIds.flatMap((familyUnionId): SidePartnerRail[] => {
+    const union = result.unions.find(
+      candidate => candidate.unionId === familyUnionId,
+    );
+    assert.ok(union, `${context}: missing ${familyUnionId}`);
+    const partnership = result.edges.find(
+      edge =>
+        edge.unionOccurrenceId === union.occurrenceId &&
+        (edge.kind === "partnership" ||
+          edge.kind === "separated-partnership"),
+    );
+    assert.ok(partnership, `${context}: missing ${familyUnionId} partnership`);
+    if (partnership.points.length !== 4) return [];
+
+    const horizontalSegments = partnership.points
+      .slice(1)
+      .flatMap((end, index) => {
+        const start = partnership.points[index]!;
+        return Math.abs(start.y - end.y) <= epsilon &&
+          Math.abs(start.x - end.x) > epsilon
+          ? [{ start, end }]
+          : [];
+      });
+    assert.equal(
+      horizontalSegments.length,
+      1,
+      `${context}: ${familyUnionId} must have one horizontal side rail`,
+    );
+    const partner = union.memberOccurrenceIds
+      .map(occurrenceId => nodesByOccurrenceId.get(occurrenceId))
+      .find(node => node?.personId !== hubPersonId);
+    assert.ok(partner, `${context}: missing ${familyUnionId} side partner`);
+    const partnerCenter = partner.x + partner.width / 2;
+    assert.ok(
+      Math.abs(partnerCenter - hubCenter) > epsilon,
+      `${context}: ${familyUnionId} partner must sit beside the hub`,
+    );
+    const rail = horizontalSegments[0]!;
+    assert.ok(
+      rail.start.y < Math.min(hub.y, partner.y) - epsilon,
+      `${context}: ${familyUnionId} side rail must run above the cards`,
+    );
+    return [{
+      familyUnionId,
+      side: partnerCenter < hubCenter ? "left" : "right",
+      partnerCenter,
+      distanceFromHub: Math.abs(partnerCenter - hubCenter),
+      y: rail.start.y,
+    }];
+  });
+
+  const left = rails
+    .filter(rail => rail.side === "left")
+    .sort((a, b) => a.distanceFromHub - b.distanceFromHub);
+  const right = rails
+    .filter(rail => rail.side === "right")
+    .sort((a, b) => a.distanceFromHub - b.distanceFromHub);
+  assert.ok(left.length > 0, `${context}: missing a left side-partner rail`);
+  assert.ok(right.length > 0, `${context}: missing a right side-partner rail`);
+  assert.ok(
+    Math.abs(left[0]!.y - right[0]!.y) <= epsilon,
+    `${context}: nearest left/right side-partner rails must share one level: ` +
+      JSON.stringify({ left: left[0], right: right[0] }),
+  );
+
+  for (const sameSideRails of [left, right]) {
+    for (let leftIndex = 0; leftIndex < sameSideRails.length; leftIndex += 1) {
+      for (
+        let rightIndex = leftIndex + 1;
+        rightIndex < sameSideRails.length;
+        rightIndex += 1
+      ) {
+        assert.ok(
+          Math.abs(
+            sameSideRails[leftIndex]!.y - sameSideRails[rightIndex]!.y,
+          ) > epsilon,
+          `${context}: ${sameSideRails[leftIndex]!.familyUnionId} and ` +
+            `${sameSideRails[rightIndex]!.familyUnionId} need separate ` +
+            `${sameSideRails[leftIndex]!.side} rail lanes`,
+        );
+      }
     }
   }
 }
@@ -916,6 +1029,7 @@ test("direct ancestor side branches remain chronological after pedigree grid pla
     descendantDepth: 0,
     collateralDepth: 1,
     showAllParentSets: true,
+    lineageGroupDepth: 2,
   });
 
   assert.deepEqual(
@@ -934,6 +1048,28 @@ test("direct ancestor side branches remain chronological after pedigree grid pla
       maternal: ["maternal-older", "mother", "maternal-younger"],
     },
   );
+  const lineageRole = (personId: string) =>
+    result.nodes.find(node => node.personId === personId)?.lineageRole;
+  assert.equal(lineageRole("focus"), "focus");
+  assert.equal(lineageRole("father"), "direct-ancestor");
+  assert.equal(lineageRole("mother"), "direct-ancestor");
+  assert.equal(lineageRole("paternal-grandfather"), "direct-ancestor");
+  assert.equal(lineageRole("paternal-grandmother"), "direct-ancestor");
+  assert.equal(lineageRole("maternal-grandfather"), "direct-ancestor");
+  assert.equal(lineageRole("maternal-grandmother"), "direct-ancestor");
+  assert.equal(lineageRole("paternal-older"), undefined);
+  assert.equal(lineageRole("paternal-younger"), undefined);
+  assert.equal(lineageRole("maternal-older"), undefined);
+  assert.equal(lineageRole("maternal-younger"), undefined);
+  const lineageGroup = (personId: string) =>
+    result.nodes.find(node => node.personId === personId)?.lineageGroup;
+  assert.equal(lineageGroup("focus"), undefined);
+  assert.equal(lineageGroup("father"), undefined);
+  assert.equal(lineageGroup("mother"), undefined);
+  assert.equal(lineageGroup("paternal-grandfather"), 0);
+  assert.equal(lineageGroup("paternal-grandmother"), 1);
+  assert.equal(lineageGroup("maternal-grandfather"), 2);
+  assert.equal(lineageGroup("maternal-grandmother"), 3);
   assertNoCardOverlap(result, "chronological direct ancestor side branches");
 });
 
@@ -1821,6 +1957,7 @@ test("pedigree collapse creates one canonical and one reference occurrence", () 
     descendantDepth: 0,
     collateralDepth: 0,
     showAllParentSets: true,
+    lineageGroupDepth: 2,
   });
   const occurrences = result.nodes.filter(
     node => node.personId === "shared-ancestor",
@@ -1832,6 +1969,22 @@ test("pedigree collapse creates one canonical and one reference occurrence", () 
   assert.ok(canonical);
   assert.ok(reference);
   assert.equal(reference.referenceToOccurrenceId, canonical.occurrenceId);
+  assert.deepEqual(
+    occurrences.map(node => node.lineageRole),
+    ["direct-ancestor", "direct-ancestor"],
+  );
+  const collapseGroups = occurrences
+    .map(node => node.lineageGroup)
+    .filter((value): value is number => value !== undefined)
+    .sort();
+  assert.equal(collapseGroups.length, 2);
+  assert.ok(collapseGroups[0]! < 2);
+  assert.ok(collapseGroups[1]! >= 2);
+  assert.notEqual(
+    collapseGroups[0],
+    collapseGroups[1],
+    "each pedigree-collapse occurrence keeps the color of its concrete branch",
+  );
   assertNoCardOverlap(result, "pedigree collapse");
 });
 
@@ -2652,6 +2805,179 @@ test("layout coordinates are independent of input array order", () => {
   assert.deepEqual(
     projectLayout(run(graph, { focusPersonId: "focus" })),
     projectLayout(run(reversed, { focusPersonId: "focus" })),
+  );
+});
+
+test("family graph keeps children and partner rails from an uncle's marriages disjoint", () => {
+  const firstMarriageChildren = Array.from(
+    { length: 5 },
+    (_, index) => `uncle-first-child-${index + 1}`,
+  );
+  const secondMarriageChildren = ["uncle-second-child-1"];
+  const thirdMarriageChildren = ["uncle-third-child-1"];
+  const graph: FamilyGraphData = {
+    persons: [
+      person("focus", "unknown", "2000"),
+      person("father", "male", "1970"),
+      person("mother", "female", "1972"),
+      person("paternal-grandfather", "male", "1940"),
+      person("paternal-grandmother", "female", "1942"),
+      person("uncle", "male", "1968"),
+      person("uncle-partner-1", "female", "1970"),
+      person("uncle-partner-2", "female", "1974"),
+      person("uncle-partner-3", "female", "1976"),
+      ...firstMarriageChildren.map((childId, index) =>
+        person(childId, "unknown", String(1990 + index)),
+      ),
+      ...secondMarriageChildren.map(childId =>
+        person(childId, "unknown", "2001"),
+      ),
+      ...thirdMarriageChildren.map(childId =>
+        person(childId, "unknown", "2003"),
+      ),
+    ],
+    unions: [
+      {
+        id: "focus-parents",
+        kind: "parent-set",
+        memberIds: ["father", "mother"],
+      },
+      {
+        id: "paternal-grandparents",
+        kind: "partnership",
+        memberIds: ["paternal-grandfather", "paternal-grandmother"],
+      },
+      {
+        id: "uncle-first-marriage",
+        kind: "partnership",
+        memberIds: ["uncle", "uncle-partner-1"],
+        displayOrder: "01",
+      },
+      {
+        id: "uncle-second-marriage",
+        kind: "partnership",
+        memberIds: ["uncle", "uncle-partner-2"],
+        displayOrder: "02",
+      },
+      {
+        id: "uncle-third-marriage",
+        kind: "partnership",
+        memberIds: ["uncle", "uncle-partner-3"],
+        displayOrder: "03",
+      },
+    ],
+    parentChildRelations: [
+      ...parentRelations(["father", "mother"], "focus", "focus-parents"),
+      ...parentRelations(
+        ["paternal-grandfather", "paternal-grandmother"],
+        "father",
+        "paternal-grandparents",
+      ),
+      ...parentRelations(
+        ["paternal-grandfather", "paternal-grandmother"],
+        "uncle",
+        "paternal-grandparents",
+      ),
+      ...firstMarriageChildren.flatMap(childId =>
+        parentRelations(
+          ["uncle", "uncle-partner-1"],
+          childId,
+          "uncle-first-marriage",
+        ),
+      ),
+      ...secondMarriageChildren.flatMap(childId =>
+        parentRelations(
+          ["uncle", "uncle-partner-2"],
+          childId,
+          "uncle-second-marriage",
+        ),
+      ),
+      ...thirdMarriageChildren.flatMap(childId =>
+        parentRelations(
+          ["uncle", "uncle-partner-3"],
+          childId,
+          "uncle-third-marriage",
+        ),
+      ),
+    ],
+  };
+  const result = run(graph, {
+    focusPersonId: "focus",
+    layoutMode: "family-graph",
+    ancestorDepth: 2,
+    descendantDepth: 0,
+    collateralDepth: 3,
+    maxVisibleNodes: 100,
+    showAllParentSets: true,
+  });
+  const nodesByOccurrenceId = new Map(
+    result.nodes.map(node => [node.occurrenceId, node]),
+  );
+  const expectedChildrenByUnion = new Map<string, readonly string[]>([
+    ["uncle-first-marriage", firstMarriageChildren],
+    ["uncle-second-marriage", secondMarriageChildren],
+    ["uncle-third-marriage", thirdMarriageChildren],
+  ]);
+  const childBusIntervals = [...expectedChildrenByUnion].map(
+    ([unionId, expectedChildren]) => {
+      const union = result.unions.find(candidate => candidate.unionId === unionId);
+      assert.ok(union, `missing ${unionId}`);
+      const renderedChildren = union.childOccurrenceIds.map(occurrenceId =>
+        nodesByOccurrenceId.get(occurrenceId)?.personId,
+      );
+      assert.deepEqual(
+        new Set(renderedChildren),
+        new Set(expectedChildren),
+        `${unionId} must own only its actual children`,
+      );
+      const buses = result.edges.filter(
+        edge =>
+          edge.kind === "siblings-bus" &&
+          edge.unionOccurrenceId === union.occurrenceId,
+      );
+      assert.equal(buses.length, 1, `${unionId} must have one children bus`);
+      const bus = buses[0]!;
+      return {
+        unionId,
+        left: Math.min(bus.points[0]!.x, bus.points[1]!.x),
+        right: Math.max(bus.points[0]!.x, bus.points[1]!.x),
+      };
+    },
+  ).sort((left, right) => left.left - right.left);
+
+  assert.equal(
+    result.nodes.filter(node => node.personId === "uncle").length,
+    1,
+    "all marriages must reuse one canonical uncle card",
+  );
+  for (let index = 1; index < childBusIntervals.length; index += 1) {
+    assert.ok(
+      childBusIntervals[index - 1]!.right + 12 <=
+        childBusIntervals[index]!.left,
+      `children from different marriages need disjoint bus corridors: ` +
+        JSON.stringify(childBusIntervals),
+    );
+  }
+  assertNoCardOverlap(result, "uncle with three marriages");
+  assertFamilyRoutesConnected(result, "uncle with three marriages");
+  assertNoUnrelatedFamilyRouteIntersections(
+    result,
+    [
+      "uncle-first-marriage",
+      "uncle-second-marriage",
+      "uncle-third-marriage",
+    ],
+    "uncle with three marriages",
+  );
+  assertBalancedSidePartnerRailLanes(
+    result,
+    "uncle",
+    [
+      "uncle-first-marriage",
+      "uncle-second-marriage",
+      "uncle-third-marriage",
+    ],
+    "uncle with three marriages",
   );
 });
 
@@ -3907,6 +4233,12 @@ test("multiple partners keep the focus-line family primary and place side childr
       familyUnionIds,
       context,
     );
+    assertBalancedSidePartnerRailLanes(
+      result,
+      "multi-hub",
+      familyUnionIds,
+      context,
+    );
   };
 
   const result = run(projection.graph, options);
@@ -4198,6 +4530,12 @@ test("four side partners retain isolated family corridors around one primary lin
     assertNoCardOverlap(result, context);
     assertFamilyRoutesConnected(result, context);
     assertNoUnrelatedFamilyRouteIntersections(result, allUnionIds, context);
+    assertBalancedSidePartnerRailLanes(
+      result,
+      "five-hub",
+      hubUnionIds,
+      context,
+    );
   };
 
   const result = run(projection.graph, options);

@@ -18,6 +18,7 @@ import type {
   FamilyGraphData,
   LayoutNode,
   PersonId,
+  TreeContinuation,
 } from "../types.ts";
 import { MAX_RENDERED_FAMILY_TREE_NODES } from "./renderLimits.ts";
 import {
@@ -33,6 +34,7 @@ import {
   type FamilyTreeBranchLayer,
 } from "../data/branchLayers.ts";
 import type { FamilyTreeBranchVisibilitySnapshot } from "../state/familyTreePerspectiveState.ts";
+import { nextDefaultBranchExpansion } from "../state/defaultBranchExpansion.ts";
 export type { FamilyTreeBranchVisibilitySnapshot } from "../state/familyTreePerspectiveState.ts";
 
 const EMPTY_GRAPH: FamilyGraphData = {
@@ -61,6 +63,10 @@ export interface UseFamilyTreeNeighborhoodInput {
   collateralDepth?: number;
   maxNodes?: number;
   permissionFingerprint?: string;
+  /** Opens only this person's partners and direct-child family scopes after the base paint. */
+  defaultVisibleFamilyPersonId?: PersonId;
+  /** Also opens first cousins, parents' first cousins and their descendant scopes. */
+  includeCousinDescendantsByDefault?: boolean;
 }
 
 export type FamilyTreeBranchRestoreResult =
@@ -82,6 +88,9 @@ export interface UseFamilyTreeNeighborhoodResult {
   error: Error | undefined;
   canceled: boolean;
   cancel: () => void;
+  expandPersonContinuation: (
+    continuation: TreeContinuation,
+  ) => Promise<void>;
   expandContinuation: (token: string, node: LayoutNode) => Promise<void>;
   expandFamilyContinuation: (
     continuation: FamilyContinuation,
@@ -113,6 +122,8 @@ export function useFamilyTreeNeighborhood({
   collateralDepth = 0,
   maxNodes = 400,
   permissionFingerprint,
+  defaultVisibleFamilyPersonId,
+  includeCousinDescendantsByDefault = false,
 }: UseFamilyTreeNeighborhoodInput): UseFamilyTreeNeighborhoodResult {
   const scopeKey = [
     treeId,
@@ -123,12 +134,15 @@ export function useFamilyTreeNeighborhood({
     maxNodes,
     permissionFingerprint ?? "",
     sessionKey,
+    defaultVisibleFamilyPersonId ?? "",
+    includeCousinDescendantsByDefault ? "cousins" : "compact",
   ].join("\u001f");
   const [graph, setGraph] = useState<FamilyGraphData>(EMPTY_GRAPH);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error>();
   const [canceled, setCanceled] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [baseLoadRevision, setBaseLoadRevision] = useState(0);
   const graphRef = useRef<FamilyGraphData>(EMPTY_GRAPH);
   const baseGraphRef = useRef<FamilyGraphData>(EMPTY_GRAPH);
   const graphScopeRef = useRef(scopeKey);
@@ -260,6 +274,7 @@ export function useFamilyTreeNeighborhood({
         commit(normalizedResponse);
         baseLoadingRef.current = false;
         syncLoading();
+        setBaseLoadRevision(value => value + 1);
       })
       .catch(reason => {
         if (
@@ -303,10 +318,9 @@ export function useFamilyTreeNeighborhood({
     treeId,
   ]);
 
-  const expandContinuation = useCallback(
-    async (token: string, node: LayoutNode): Promise<void> => {
-      const continuation = node.continuation;
-      if (!continuation || continuation.token !== token) return;
+  const expandPersonContinuation = useCallback(
+    async (continuation: TreeContinuation): Promise<void> => {
+      const token = continuation.token;
       const layerKey = familyTreeBranchKey(
         continuation.personId,
         continuation.direction,
@@ -445,6 +459,15 @@ export function useFamilyTreeNeighborhood({
       syncLoading,
       treeId,
     ],
+  );
+
+  const expandContinuation = useCallback(
+    async (token: string, node: LayoutNode): Promise<void> => {
+      const continuation = node.continuation;
+      if (!continuation || continuation.token !== token) return;
+      await expandPersonContinuation(continuation);
+    },
+    [expandPersonContinuation],
   );
 
   const expandFamilyContinuation = useCallback(
@@ -632,6 +655,52 @@ export function useFamilyTreeNeighborhood({
     ],
   );
 
+  useEffect(() => {
+    if (!enabled || !defaultVisibleFamilyPersonId || baseLoadRevision === 0) {
+      return;
+    }
+    let stopped = false;
+    const epoch = requestEpochRef.current;
+    const attemptedPersonContinuationIds = new Set<string>();
+    const attemptedFamilyScopeIds = new Set<string>();
+
+    void (async () => {
+      while (
+        !stopped &&
+        epoch === requestEpochRef.current &&
+        graphScopeRef.current === scopeKey
+      ) {
+        const next = nextDefaultBranchExpansion({
+          graph: graphRef.current,
+          focusPersonId: defaultVisibleFamilyPersonId,
+          includeCousinDescendants: includeCousinDescendantsByDefault,
+          attemptedPersonContinuationIds,
+          attemptedFamilyScopeIds,
+        });
+        if (!next) return;
+        if (next.kind === "person") {
+          attemptedPersonContinuationIds.add(next.continuation.id);
+          await expandPersonContinuation(next.continuation);
+        } else {
+          attemptedFamilyScopeIds.add(next.continuation.scope.id);
+          await expandFamilyContinuation(next.continuation);
+        }
+      }
+    })();
+
+    return () => {
+      stopped = true;
+    };
+  }, [
+    baseLoadRevision,
+    defaultVisibleFamilyPersonId,
+    enabled,
+    expandFamilyContinuation,
+    expandPersonContinuation,
+    includeCousinDescendantsByDefault,
+    scopeKey,
+  ]);
+
   const togglePersonBranches = useCallback((personId: PersonId): void => {
     const keys = [...branchLayersRef.current.values()]
       .filter(isFamilyTreePersonBranchLayer)
@@ -776,6 +845,7 @@ export function useFamilyTreeNeighborhood({
     error: enabled && scopeIsCurrent ? error : undefined,
     canceled,
     cancel,
+    expandPersonContinuation,
     expandContinuation,
     expandFamilyContinuation,
     branchTogglePersonIds,

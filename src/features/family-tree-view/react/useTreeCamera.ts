@@ -8,7 +8,6 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import type {
   CameraState,
@@ -16,6 +15,15 @@ import type {
   LayoutNode,
   WorldViewport,
 } from "../types.ts";
+import {
+  applyPinchToCamera,
+  clampTreeZoom,
+  pinchSnapshot,
+  wheelZoomFactor,
+  zoomCameraAtClientPoint,
+  type CameraViewportRect,
+  type PinchGestureSnapshot,
+} from "./treeCameraMath.ts";
 
 export interface TreeCameraController {
   containerRef: RefObject<HTMLDivElement | null>;
@@ -25,18 +33,21 @@ export interface TreeCameraController {
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
   zoomBy: (factor: number) => void;
   fitBounds: (bounds: LayoutBounds, padding?: number) => void;
   centerNode: (node: LayoutNode) => void;
   compensateWorldShift: (shift: { x: number; y: number }) => void;
 }
 
-const MIN_ZOOM = 0.045;
-const MAX_ZOOM = 4;
+function viewportRect(element: HTMLDivElement): CameraViewportRect {
+  const rect = element.getBoundingClientRect();
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
 
-function clampZoom(value: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+function isInteractiveMouseTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(
+    target.closest("button, a, input, select, textarea, [role='button']"),
+  );
 }
 
 export function useTreeCamera(
@@ -47,7 +58,7 @@ export function useTreeCamera(
   const cameraRef = useRef(camera);
   const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 });
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const lastPinchDistance = useRef<number | undefined>(undefined);
+  const lastPinch = useRef<PinchGestureSnapshot | undefined>(undefined);
 
   const updateCamera = useCallback((next: CameraState): void => {
     cameraRef.current = next;
@@ -65,10 +76,60 @@ export function useTreeCamera(
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const preventBrowserGesture = (event: Event): void => {
+      if (event.cancelable) event.preventDefault();
+    };
+    const preventTouchZoom = (event: TouchEvent): void => {
+      if (event.touches.length >= 2 && event.cancelable) event.preventDefault();
+    };
+    const handleWheel = (event: WheelEvent): void => {
+      if (event.cancelable) event.preventDefault();
+      const factor = wheelZoomFactor({
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        viewportHeight: element.clientHeight,
+        ctrlKey: event.ctrlKey,
+      });
+      updateCamera(
+        zoomCameraAtClientPoint(
+          cameraRef.current,
+          viewportRect(element),
+          { x: event.clientX, y: event.clientY },
+          factor,
+        ),
+      );
+    };
+
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    element.addEventListener("touchmove", preventTouchZoom, { passive: false });
+    element.addEventListener("gesturestart", preventBrowserGesture, { passive: false });
+    element.addEventListener("gesturechange", preventBrowserGesture, { passive: false });
+    element.addEventListener("gestureend", preventBrowserGesture, { passive: false });
+    return () => {
+      element.removeEventListener("wheel", handleWheel);
+      element.removeEventListener("touchmove", preventTouchZoom);
+      element.removeEventListener("gesturestart", preventBrowserGesture);
+      element.removeEventListener("gesturechange", preventBrowserGesture);
+      element.removeEventListener("gestureend", preventBrowserGesture);
+    };
+  }, [updateCamera]);
+
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>): void => {
-      event.currentTarget.setPointerCapture(event.pointerId);
+      if (event.pointerType === "mouse") {
+        if (event.button !== 0 || isInteractiveMouseTarget(event.target)) return;
+      }
+      if (pointers.current.has(event.pointerId)) return;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Capture may be unavailable for a pointer that ended between events.
+      }
       pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      lastPinch.current = pinchSnapshot([...pointers.current.values()]);
     },
     [],
   );
@@ -77,6 +138,7 @@ export function useTreeCamera(
     (event: ReactPointerEvent<HTMLDivElement>): void => {
       const previous = pointers.current.get(event.pointerId);
       if (!previous) return;
+      if (event.pointerType !== "mouse" && event.cancelable) event.preventDefault();
       const current = { x: event.clientX, y: event.clientY };
       pointers.current.set(event.pointerId, current);
 
@@ -93,14 +155,18 @@ export function useTreeCamera(
       }
 
       if (pointers.current.size === 2) {
-        const [first, second] = [...pointers.current.values()];
-        const distance = Math.hypot(second!.x - first!.x, second!.y - first!.y);
-        const previousDistance = lastPinchDistance.current;
-        lastPinchDistance.current = distance;
-        if (!previousDistance || previousDistance <= 0) return;
-        const factor = distance / previousDistance;
-        const active = cameraRef.current;
-        updateCamera({ ...active, zoom: clampZoom(active.zoom * factor) });
+        const currentPinch = pinchSnapshot([...pointers.current.values()]);
+        const previousPinch = lastPinch.current;
+        lastPinch.current = currentPinch;
+        if (!currentPinch || !previousPinch) return;
+        updateCamera(
+          applyPinchToCamera(
+            cameraRef.current,
+            viewportRect(event.currentTarget),
+            previousPinch,
+            currentPinch,
+          ),
+        );
       }
     },
     [updateCamera],
@@ -109,7 +175,7 @@ export function useTreeCamera(
   const onPointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>): void => {
       pointers.current.delete(event.pointerId);
-      if (pointers.current.size < 2) lastPinchDistance.current = undefined;
+      lastPinch.current = pinchSnapshot([...pointers.current.values()]);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -117,29 +183,10 @@ export function useTreeCamera(
     [],
   );
 
-  const onWheel = useCallback(
-    (event: ReactWheelEvent<HTMLDivElement>): void => {
-      event.preventDefault();
-      const rect = event.currentTarget.getBoundingClientRect();
-      const active = cameraRef.current;
-      const screenX = event.clientX - rect.left - rect.width / 2;
-      const screenY = event.clientY - rect.top - rect.height / 2;
-      const worldX = active.x + screenX / active.zoom;
-      const worldY = active.y + screenY / active.zoom;
-      const zoom = clampZoom(active.zoom * Math.exp(-event.deltaY * 0.0015));
-      updateCamera({
-        x: worldX - screenX / zoom,
-        y: worldY - screenY / zoom,
-        zoom,
-      });
-    },
-    [updateCamera],
-  );
-
   const zoomBy = useCallback(
     (factor: number): void => {
       const active = cameraRef.current;
-      updateCamera({ ...active, zoom: clampZoom(active.zoom * factor) });
+      updateCamera({ ...active, zoom: clampTreeZoom(active.zoom * factor) });
     },
     [updateCamera],
   );
@@ -148,7 +195,7 @@ export function useTreeCamera(
     (bounds: LayoutBounds, padding = 72): void => {
       const width = Math.max(1, bounds.right - bounds.left);
       const height = Math.max(1, bounds.bottom - bounds.top);
-      const zoom = clampZoom(
+      const zoom = clampTreeZoom(
         Math.min(
           Math.max(1, viewportSize.width - padding * 2) / width,
           Math.max(1, viewportSize.height - padding * 2) / height,
@@ -201,7 +248,6 @@ export function useTreeCamera(
     onPointerDown,
     onPointerMove,
     onPointerUp,
-    onWheel,
     zoomBy,
     fitBounds,
     centerNode,

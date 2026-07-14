@@ -130,6 +130,7 @@ function runDescendantFixture(
   fixture: DescendantFixture,
   rootPersonId: PersonId,
   originalFocusPersonId?: PersonId,
+  lineageGroupDepth: 0 | 1 | 2 | 3 = 0,
 ): LayoutResult {
   const projection = buildAllDescendantsProjection({
     graph: fixture.graph,
@@ -147,6 +148,8 @@ function runDescendantFixture(
       showAllParentSets: true,
       showUnknownParentPlaceholders: false,
       primaryLineagePersonIds: projection.focusLineagePersonIds,
+      lineageTargetPersonId: originalFocusPersonId ?? rootPersonId,
+      lineageGroupDepth,
     },
   };
   return layoutDescendantForest(input);
@@ -658,6 +661,64 @@ test("descendant forest keeps adjacent nested family routes and cards disjoint",
     fixture.graph.persons.length,
   );
   assertStrictForestGeometry(result, fixture, "adjacent nested descendant forest");
+});
+
+test("descendant forest marks the root-to-focus lineage without coloring side branches", () => {
+  const fixture = new DescendantFixtureBuilder()
+    .person("root", "male")
+    .person("root-partner", "female")
+    .person("line-child", "male")
+    .person("side-child", "female")
+    .person("shared-partner", "female")
+    .person("original-focus", "male")
+    .person("side-grandchild", "female")
+    .family(
+      "root-family",
+      ["root", "root-partner"],
+      ["line-child", "side-child"],
+    )
+    .family(
+      "line-family",
+      ["line-child", "shared-partner"],
+      ["original-focus"],
+    )
+    .family(
+      "side-family",
+      ["side-child", "shared-partner"],
+      ["side-grandchild"],
+    )
+    .build();
+  const result = runDescendantFixture(
+    fixture,
+    "root",
+    "original-focus",
+    2,
+  );
+  const roleFor = (personId: string) =>
+    result.nodes.find(node => node.personId === personId)?.lineageRole;
+
+  assert.equal(roleFor("root"), "direct-ancestor");
+  assert.equal(roleFor("root-partner"), "direct-ancestor");
+  assert.equal(roleFor("line-child"), "direct-ancestor");
+  assert.equal(roleFor("original-focus"), "focus");
+  assert.equal(roleFor("side-child"), undefined);
+  assert.equal(roleFor("side-grandchild"), undefined);
+  const sharedPartnerOccurrences = result.nodes.filter(
+    node => node.personId === "shared-partner",
+  );
+  assert.equal(
+    sharedPartnerOccurrences.length,
+    1,
+    "descendant layout reuses one canonical card for the same person",
+  );
+  assert.equal(sharedPartnerOccurrences[0]?.lineageRole, "direct-ancestor");
+  const lineageGroupFor = (personId: string) =>
+    result.nodes.find(node => node.personId === personId)?.lineageGroup;
+  assert.equal(lineageGroupFor("original-focus"), undefined);
+  assert.equal(lineageGroupFor("line-child"), undefined);
+  assert.equal(lineageGroupFor("root"), 0);
+  assert.equal(lineageGroupFor("root-partner"), 1);
+  assert.equal(lineageGroupFor("side-child"), undefined);
 });
 
 test("descendant forest isolates five partner families and their nested descendants", () => {

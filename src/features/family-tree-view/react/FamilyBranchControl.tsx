@@ -2,6 +2,7 @@
 
 import type { ReactElement } from "react";
 import type { FamilyContinuation, TreePerson } from "../types.ts";
+import { BranchControlIcon } from "./BranchControlIcon.tsx";
 
 export interface FamilyBranchControlProps {
   continuation: FamilyContinuation;
@@ -37,13 +38,21 @@ export function FamilyBranchControl({
     <button
       type="button"
       className="ft-family-continuation"
-      title={`${action} цієї пари`}
+      data-direction="family-children"
+      data-has-count={count ? "true" : "false"}
+      data-tooltip={label}
       aria-label={label}
       aria-expanded={expanded}
       onClick={() => onToggle?.(continuation)}
     >
-      <span aria-hidden="true">{expanded ? "▴" : "↓"}</span>
-      {count ? <small>{count}</small> : null}
+      <span className="ft-branch-control-icon" aria-hidden="true">
+        <BranchControlIcon direction="family-children" expanded={expanded} />
+      </span>
+      {count ? (
+        <span className="ft-branch-control-count" aria-hidden="true">
+          {count}
+        </span>
+      ) : null}
     </button>
   );
 }

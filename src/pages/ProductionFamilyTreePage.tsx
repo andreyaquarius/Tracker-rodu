@@ -62,6 +62,7 @@ import type {
   TreeUnion,
 } from "../features/family-tree-view/types";
 import { useFamilyTreeMutations } from "../hooks/useFamilyTreeMutations";
+import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 import {
   createFamilyTreeFromLegacyImport,
   type FamilyTreeBuilderAction,
@@ -85,6 +86,15 @@ import type {
   ScanAttachment,
 } from "../types";
 import { moveFamilyTreeFocus, pushFamilyTreeFocus } from "../utils/familyTreeFocusHistory.ts";
+import {
+  DEFAULT_FAMILY_TREE_APPEARANCE,
+  directLineageGroupingDepth,
+  directLineagePalette,
+  normalizeFamilyTreeAppearance,
+  readFamilyTreeAppearance,
+  writeFamilyTreeAppearance,
+  type FamilyTreeAppearancePreferences,
+} from "../utils/familyTreeAppearance.ts";
 import { formatDateForDisplay } from "../utils/dateHelpers.ts";
 import { exportFamilyTreeGraphToGedcom } from "../utils/gedcom";
 import type {
@@ -153,6 +163,10 @@ export function ProductionFamilyTreePage({
   const [treeToolsNotice, setTreeToolsNotice] = useState("");
   const [exportingGedcom, setExportingGedcom] = useState(false);
   const [gedcomResearchId, setGedcomResearchId] = useState("");
+  const [treeAppearance, setTreeAppearance] =
+    useState<FamilyTreeAppearancePreferences>({
+      ...DEFAULT_FAMILY_TREE_APPEARANCE,
+    });
   const preferredTreeIdRef = useRef("");
   const mutations = useFamilyTreeMutations();
 
@@ -204,6 +218,24 @@ export function ProductionFamilyTreePage({
     entryPoints.find((entry) => entry.isDefault) ??
     entryPoints[0] ??
     null;
+
+  useEffect(() => {
+    setTreeAppearance(
+      projectId && selectedEntry?.id
+        ? readFamilyTreeAppearance(projectId, selectedEntry.id)
+        : { ...DEFAULT_FAMILY_TREE_APPEARANCE },
+    );
+  }, [projectId, selectedEntry?.id]);
+
+  const updateTreeAppearance = useCallback((
+    value: FamilyTreeAppearancePreferences,
+  ) => {
+    const normalized = normalizeFamilyTreeAppearance(value);
+    setTreeAppearance(normalized);
+    if (projectId && selectedEntry?.id) {
+      writeFamilyTreeAppearance(projectId, selectedEntry.id, normalized);
+    }
+  }, [projectId, selectedEntry?.id]);
   const searchCircularAncestorFocusPersons = useCallback((query: string) => {
     const normalizedQuery = query.trim().toLocaleLowerCase("uk");
     if (!normalizedQuery) return [];
@@ -431,6 +463,7 @@ export function ProductionFamilyTreePage({
           persons={persons}
           readOnly={readOnly}
           canCreate={canCreate}
+          appearance={treeAppearance}
           treeToolsOpen={treeToolsOpen}
           onOpenTreeTools={openTreeTools}
           onFocusPersonChange={setActiveTreeFocusPersonId}
@@ -461,12 +494,14 @@ export function ProductionFamilyTreePage({
           canImportGedcom={canImportGedcom && (!researchRequired || Boolean(gedcomResearchId))}
           canExportGedcom={Boolean(selectedEntry?.id && selectedEntry.rootPersonId)}
           exportingGedcom={exportingGedcom}
+          appearance={treeAppearance}
           notice={treeToolsNotice}
           onSelectTree={setSelectedTreeId}
           onSelectResearch={setGedcomResearchId}
           onImportGedcom={selectGedcomFile}
           onExportGedcom={() => void exportGedcom()}
           onOpenCircularChart={openCircularAncestorChart}
+          onAppearanceChange={updateTreeAppearance}
           onClose={() => setTreeToolsOpen(false)}
         />
       ) : null}
@@ -506,6 +541,7 @@ function LoadedFamilyTree({
   persons,
   readOnly,
   canCreate,
+  appearance,
   treeToolsOpen,
   onOpenTreeTools,
   onFocusPersonChange,
@@ -516,6 +552,7 @@ function LoadedFamilyTree({
   persons: Person[];
   readOnly: boolean;
   canCreate: boolean;
+  appearance: FamilyTreeAppearancePreferences;
   treeToolsOpen: boolean;
   onOpenTreeTools: () => void;
   onFocusPersonChange: (personId: string) => void;
@@ -558,6 +595,7 @@ function LoadedFamilyTree({
   focusPersonIdRef.current = focusPersonId;
   const shellRef = useRef<HTMLElement>(null);
   const perspectiveBarRef = useRef<HTMLDivElement>(null);
+  const viewSettingsRef = useDismissibleDetails();
   const mutations = useFamilyTreeMutations();
   const pedigreeNeighborhood = useFamilyTreeNeighborhood({
     client,
@@ -568,6 +606,9 @@ function LoadedFamilyTree({
     collateralDepth,
     maxNodes,
     sessionKey: "pedigree",
+    defaultVisibleFamilyPersonId: focusPersonId,
+    includeCousinDescendantsByDefault:
+      appearance.showCousinDescendantsByDefault,
   });
   const specialFocusPersonId = perspective.kind === "family-corridor"
     ? perspective.returnTo.focusPersonId
@@ -729,6 +770,17 @@ function LoadedFamilyTree({
     : perspective.kind === "family-corridor"
       ? corridorProjection?.perspectiveFocusPersonId ?? perspective.returnTo.focusPersonId
       : perspective.rootPersonId;
+  const lineageTargetPersonId = perspective.kind === "all-descendants"
+    ? allDescendantsProjection?.focusLineagePersonIds.includes(
+        perspective.returnTo.focusPersonId,
+      )
+      ? perspective.returnTo.focusPersonId
+      : perspective.rootPersonId
+    : layoutFocusPersonId;
+  const lineagePalette = useMemo(
+    () => directLineagePalette(appearance),
+    [appearance],
+  );
   const perspectiveKey = familyTreePerspectiveKey(perspective, focusPersonId);
   const corridorBreadcrumbs = useMemo(
     () => perspective.kind === "family-corridor"
@@ -779,8 +831,15 @@ function LoadedFamilyTree({
     descendantDepth: MAX_RENDERED_FAMILY_TREE_NODES,
     collateralDepth: MAX_RENDERED_FAMILY_TREE_NODES,
     maxVisibleNodes: logicalSceneNodeBudget,
+    lineageTargetPersonId,
+    lineageGroupDepth: directLineageGroupingDepth(
+      appearance.directLineageGrouping,
+    ),
     showAllParentSets,
-    showUnknownParentPlaceholders: !readOnly && canCreate,
+    // The footer already exposes the complete add-relative menu. Rendering a
+    // second dashed plus on the canvas duplicates that action and crowds the
+    // branch controls, especially on compact and touch layouts.
+    showUnknownParentPlaceholders: false,
     activeParentSetByChild,
     ...(perspective.kind === "all-descendants"
       ? {
@@ -791,11 +850,11 @@ function LoadedFamilyTree({
   }), [
     activeParentSetByChild,
     allDescendantsProjection?.focusLineagePersonIds,
-    canCreate,
+    appearance.directLineageGrouping,
     layoutFocusPersonId,
+    lineageTargetPersonId,
     logicalSceneNodeBudget,
     perspective.kind,
-    readOnly,
     showAllParentSets,
   ]);
 
@@ -929,7 +988,7 @@ function LoadedFamilyTree({
     setSelectedPersonId(rootPersonId);
     setFamilyContinuationOwnerByScope(new Map());
     setAnchorOccurrenceId(undefined);
-    setNotice("Відкрито окрему перспективу всіх нащадків.");
+    setNotice("");
   }
 
   useEffect(() => {
@@ -1172,7 +1231,7 @@ function LoadedFamilyTree({
           ? new Map([[continuation.scope.id, activeOwnerPersonId]])
           : new Map(),
       );
-      setNotice(`Відкрито лінію нащадків: ${familyScopeLabel(graph, continuation.scope)}.`);
+      setNotice("");
       return;
     }
 
@@ -1480,7 +1539,7 @@ function LoadedFamilyTree({
       className="family-tree-v2-shell"
       aria-busy={activeLoading}
     >
-      <div className="panel family-tree-v2-host-toolbar" aria-label="Параметри родового дерева">
+      <div className="panel family-tree-v2-host-toolbar" role="toolbar" aria-label="Параметри родового дерева">
         <button
           type="button"
           className="button button-secondary family-tree-v2-tools-trigger"
@@ -1510,6 +1569,7 @@ function LoadedFamilyTree({
             type="search"
             value={searchQuery}
             placeholder="Ім’я, прізвище, рік або місце"
+            aria-label="Знайти особу"
             aria-expanded={Boolean(normalizedSearch)}
             aria-controls="family-tree-v2-search-results"
             onChange={(event) => setSearchQuery(event.target.value)}
@@ -1529,6 +1589,9 @@ function LoadedFamilyTree({
           ) : null}
         </label>
 
+        <details ref={viewSettingsRef} className="family-tree-v2-view-settings">
+          <summary className="button button-secondary" aria-controls="family-tree-v2-view-settings-panel">Параметри</summary>
+          <div id="family-tree-v2-view-settings-panel" className="family-tree-v2-view-settings-panel">
         <label>
           <span>Предків</span>
           <input type="number" min={0} value={ancestorDepth} disabled={specialPerspectiveActive} onChange={(event) => setAncestorDepth(nonNegativeInteger(event.target.value, 7))} />
@@ -1539,7 +1602,7 @@ function LoadedFamilyTree({
         </label>
         <label className="checkbox-line">
           <input type="checkbox" checked={collateralDepth > 0} disabled={specialPerspectiveActive} onChange={(event) => setCollateralDepth(event.target.checked ? 1 : 0)} />
-          <span>Показувати кузенів</span>
+          <span>Показати бічні гілки зараз</span>
         </label>
         <label className="checkbox-line">
           <input type="checkbox" checked={showAllParentSets} disabled={specialPerspectiveActive} onChange={(event) => setShowAllParentSets(event.target.checked)} />
@@ -1559,38 +1622,43 @@ function LoadedFamilyTree({
             </select>
           </label>
         ) : null}
-        <button type="button" className="button button-secondary" onClick={() => void toggleFullscreen()}>
+          </div>
+        </details>
+        <button type="button" className="button button-secondary family-tree-v2-fullscreen" onClick={() => void toggleFullscreen()}>
           {isFullscreen ? "Згорнути" : "На весь екран"}
         </button>
-        <button type="button" className="button button-secondary" disabled={activeLoading} onClick={activeReload}>
+        <button type="button" className="button button-secondary family-tree-v2-reload" disabled={activeLoading} onClick={activeReload}>
           {activeLoading ? "Оновлення…" : "Оновити"}
         </button>
       </div>
 
-      {notice ? <div className="family-tree-v2-notice" role="status">{notice}</div> : null}
-      {activeError ? <div className="form-error" role="alert">{activeError.message}</div> : null}
-      {layoutWarnings.length ? (
-        <details className="family-tree-v2-warnings">
-          <summary>Попередження схеми: {layoutWarnings.length}</summary>
-          <ul>{layoutWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-        </details>
+      {notice || activeError || layoutWarnings.length ? (
+        <div className="family-tree-v2-status-strip">
+          {notice ? <div className="family-tree-v2-notice" role="status">{notice}</div> : null}
+          {activeError ? <div className="form-error" role="alert">{activeError.message}</div> : null}
+          {layoutWarnings.length ? (
+            <details className="family-tree-v2-warnings">
+              <summary>Попередження схеми: {layoutWarnings.length}</summary>
+              <ul>{layoutWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+            </details>
+          ) : null}
+        </div>
       ) : null}
 
       {perspective.kind === "family-corridor" ? (
         <>
           <div
             ref={perspectiveBarRef}
-            className="family-tree-v2-perspective-bar"
+            className="family-tree-v2-perspective-bar family-tree-v2-perspective-bar-compact"
             role="region"
             aria-label="Режим лінії нащадків"
             tabIndex={-1}
           >
-            <div className="family-tree-v2-perspective-title">
-              <span>Лінія нащадків</span>
-              <strong>{corridorLabel}</strong>
-              <small>Інші гілки тимчасово приховано.</small>
-            </div>
+            <strong className="family-tree-v2-perspective-heading">
+              Лінія нащадків: <span>{corridorLabel}</span>
+            </strong>
             <SpecialPerspectiveProgress
+              compact
               loading={specialNeighborhood.loading}
               canceled={specialNeighborhood.canceled}
               error={specialNeighborhood.error}
@@ -1598,16 +1666,19 @@ function LoadedFamilyTree({
               mountedNodeLimit={MAX_RENDERED_FAMILY_TREE_NODES}
             />
             <div className="family-tree-v2-perspective-actions">
+              {specialNeighborhood.loading ? (
+                <button type="button" className="button button-secondary" onClick={specialNeighborhood.cancel}>
+                  Зупинити
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="button button-secondary"
-                disabled={!specialNeighborhood.loading}
-                onClick={specialNeighborhood.cancel}
+                aria-label="Повернутися до родового дерева"
+                title="Повернутися до родового дерева"
+                onClick={leaveFamilyCorridor}
               >
-                Зупинити
-              </button>
-              <button type="button" className="button button-secondary" onClick={leaveFamilyCorridor}>
-                ← Повернутися до родового дерева
+                ← До дерева
               </button>
             </div>
           </div>
@@ -1645,17 +1716,16 @@ function LoadedFamilyTree({
       {perspective.kind === "all-descendants" ? (
         <div
           ref={perspectiveBarRef}
-          className="family-tree-v2-perspective-bar"
+          className="family-tree-v2-perspective-bar family-tree-v2-perspective-bar-compact"
           role="region"
           aria-label="Режим усіх нащадків"
           tabIndex={-1}
         >
-          <div className="family-tree-v2-perspective-title">
-            <span>Усі нащадки</span>
-            <strong>{allDescendantsLabel}</strong>
-            <small>Окремий граф; базове родове дерево не змінено.</small>
-          </div>
+          <strong className="family-tree-v2-perspective-heading">
+            Нащадки: <span>{allDescendantsLabel}</span>
+          </strong>
           <SpecialPerspectiveProgress
+            compact
             loading={progressiveDescendants.loading}
             canceled={progressiveDescendants.canceled}
             error={progressiveDescendants.error}
@@ -1666,16 +1736,19 @@ function LoadedFamilyTree({
             truncated={allDescendantsTruncated}
           />
           <div className="family-tree-v2-perspective-actions">
+            {progressiveDescendants.loading ? (
+              <button type="button" className="button button-secondary" onClick={progressiveDescendants.cancel}>
+                Зупинити
+              </button>
+            ) : null}
             <button
               type="button"
               className="button button-secondary"
-              disabled={!progressiveDescendants.loading}
-              onClick={progressiveDescendants.cancel}
+              aria-label="Повернутися до родового дерева"
+              title="Повернутися до родового дерева"
+              onClick={leaveFamilyCorridor}
             >
-              Зупинити
-            </button>
-            <button type="button" className="button button-secondary" onClick={leaveFamilyCorridor}>
-              ← Повернутися до родового дерева
+              ← До дерева
             </button>
           </div>
         </div>
@@ -1707,6 +1780,8 @@ function LoadedFamilyTree({
         className="family-tree-v2-viewport"
         graph={displayedGraph}
         options={layoutOptions}
+        lineageColor={appearance.directLineageColor}
+        lineagePalette={lineagePalette}
         maxRenderedNodes={MAX_RENDERED_FAMILY_TREE_NODES}
         initialCamera={cameraSnapshotsRef.current.get(perspectiveKey)}
         onCameraChange={rememberCamera}
@@ -1783,6 +1858,7 @@ function LoadedFamilyTree({
 }
 
 function SpecialPerspectiveProgress({
+  compact = false,
   loading,
   canceled,
   error,
@@ -1792,6 +1868,7 @@ function SpecialPerspectiveProgress({
   mountedNodeLimit,
   truncated = false,
 }: {
+  compact?: boolean;
   loading: boolean;
   canceled: boolean;
   error?: Error;
@@ -1810,6 +1887,10 @@ function SpecialPerspectiveProgress({
         : truncated
           ? `Показано ${loadedPersons} осіб із завантаженої частини гілки`
           : `Завантажено ${loadedPersons}`;
+
+  if (compact) {
+    return <span className="visually-hidden" aria-live="polite">{status}</span>;
+  }
 
   return (
     <div className="family-tree-v2-perspective-progress" aria-live="polite">

@@ -48,6 +48,8 @@ interface LayoutSettings {
   generationGap: number;
   previousPositions: ReadonlyMap<string, PreviousNodePosition>;
   primaryLineagePersonIds: ReadonlySet<PersonId>;
+  lineageTargetPersonId: PersonId;
+  lineageGroupDepth: 0 | 1 | 2 | 3;
   gapCache: Map<string, number>;
 }
 
@@ -298,6 +300,11 @@ function normalizedSettings(input: FamilyTreeLayoutInput): LayoutSettings {
     primaryLineagePersonIds: new Set(
       input.options.primaryLineagePersonIds ?? [],
     ),
+    lineageTargetPersonId:
+      input.options.lineageTargetPersonId ?? input.options.focusPersonId,
+    lineageGroupDepth: [1, 2, 3].includes(input.options.lineageGroupDepth ?? 0)
+      ? (input.options.lineageGroupDepth as 1 | 2 | 3)
+      : 0,
     gapCache: new Map(),
   };
 }
@@ -509,12 +516,14 @@ function orderBundleNodes(
  */
 function deriveAncestorSectorPaths(
   scene: OccurrenceScene,
+  focusOccurrenceId = scene.focusOccurrenceId,
+  includeCollateralSectors = true,
 ): ReadonlyMap<string, readonly number[]> {
   const paths = new Map<string, readonly number[]>();
-  if (!scene.focusOccurrenceId) return paths;
+  if (!focusOccurrenceId) return paths;
 
   const nodesById = new Map(scene.nodes.map(node => [node.occurrenceId, node]));
-  const focus = nodesById.get(scene.focusOccurrenceId);
+  const focus = nodesById.get(focusOccurrenceId);
   if (!focus) return paths;
   paths.set(focus.occurrenceId, []);
 
@@ -618,6 +627,8 @@ function deriveAncestorSectorPaths(
       });
     }
   }
+
+  if (!includeCollateralSectors) return paths;
 
   // Side branches and partners retain the nearest semantic ancestor sector.
   // Choosing the longest prefix prevents a grandparent's collateral family
@@ -1163,7 +1174,7 @@ interface DescendantFamilyPlacement {
 
 interface DescendantLayoutPlan {
   familyPlacementById: ReadonlyMap<string, DescendantFamilyPlacement>;
-  /** Number of interleaved partner-rail slots above each child row. */
+  /** Number of reusable partner-rail levels above each child row. */
   partnerRailSlotCountByCorridor: ReadonlyMap<number, number>;
 }
 
@@ -1190,10 +1201,14 @@ function planDescendantForest(
   const structuralNodes = scene.nodes.filter(
     node => node.kind === "person" || node.kind === "reference",
   );
+  const focusNode = structuralNodes.find(
+    node => node.occurrenceId === scene.focusOccurrenceId,
+  );
   if (
     !scene.focusOccurrenceId ||
+    !focusNode ||
     structuralNodes.length === 0 ||
-    structuralNodes.some(node => node.generation > 0)
+    structuralNodes.some(node => node.generation > focusNode.generation)
   ) {
     return undefined;
   }
@@ -1774,8 +1789,7 @@ function planDescendantForest(
     );
     if (!parentBundle) continue;
     const corridor = parentBundle.generation + 0.5;
-    const slot =
-      placement.laneIndex * 2 + (placement.side === "right" ? 1 : 0);
+    const slot = placement.laneIndex;
     partnerRailSlotCountByCorridor.set(
       corridor,
       Math.max(partnerRailSlotCountByCorridor.get(corridor) ?? 0, slot + 1),
@@ -2465,13 +2479,41 @@ function positionGenerationRows(
   for (const node of nodes) node.y = yForGeneration(node.generation);
 }
 
+function ancestorLineageGroup(
+  path: readonly number[],
+  depth: 0 | 1 | 2 | 3,
+): number | undefined {
+  if (depth === 0 || path.length < depth) return undefined;
+  let group = 0;
+  for (const token of path.slice(0, depth)) {
+    const role = Math.floor(token / 1_000_000);
+    const fallbackIndex = token % 1_000;
+    const side = role <= 1 ? 0 : role >= 4 ? 1 : fallbackIndex > 0 ? 1 : 0;
+    group = group * 2 + side;
+  }
+  return group;
+}
+
+function assignAncestorLineage(
+  node: SceneNode,
+  path: readonly number[],
+  focusOccurrenceId: string,
+  settings: LayoutSettings,
+): void {
+  node.lineageRole = node.occurrenceId === focusOccurrenceId
+    ? "focus"
+    : "direct-ancestor";
+  const group = ancestorLineageGroup(path, settings.lineageGroupDepth);
+  if (group !== undefined) node.lineageGroup = group;
+}
+
 function applyDirectAncestorGrid(
   scene: OccurrenceScene,
   nodes: readonly SceneNode[],
   settings: LayoutSettings,
   personsById: ReadonlyMap<string, TreePerson>,
-): boolean {
-  if (!scene.focusOccurrenceId) return false;
+): DescendantLayoutPlan | undefined {
+  if (!scene.focusOccurrenceId) return undefined;
   const ancestorPaths = deriveAncestorSectorPaths(scene);
   const pedigreeNodes = nodes.filter(
     node => node.kind === "person" || node.kind === "reference",
@@ -2505,10 +2547,31 @@ function applyDirectAncestorGrid(
       } => Boolean(entry),
     );
 
+  // Keep lineage semantics on the concrete occurrence. A canonical person can
+  // be a direct ancestor in one pedigree-collapse path and collateral in
+  // another, so a person-id set in React would highlight the wrong card.
+  for (const { node, path } of directEntries) {
+    assignAncestorLineage(
+      node,
+      path,
+      scene.focusOccurrenceId,
+      settings,
+    );
+  }
+
   const directByOccurrenceId = new Map(
     directEntries.map(entry => [entry.node.occurrenceId, entry]),
   );
-  if (!directByOccurrenceId.has(scene.focusOccurrenceId)) return false;
+  if (!directByOccurrenceId.has(scene.focusOccurrenceId)) return undefined;
+
+  const globalFamilyIds = new Set(
+    structuralFamilyBlocks(scene.unions).map(family => family.id),
+  );
+  const pedigreeFamilyPlacementById = new Map<
+    string,
+    DescendantFamilyPlacement
+  >();
+  const pedigreePartnerRailSlotCountByCorridor = new Map<number, number>();
 
   // Every collateral family belongs to the nearest direct ancestor sector.
   // Re-layout that entire branch in its own local coordinate system before
@@ -2550,7 +2613,7 @@ function applyDirectAncestorGrid(
           }),
       ),
     ].sort(compareCodePoints);
-    if (partnershipAnchorIds.length > 1) return false;
+    if (partnershipAnchorIds.length > 1) return undefined;
     const prefixAnchor = directAnchors.find(
       anchor =>
         anchor.occurrenceId !== scene.focusOccurrenceId &&
@@ -2568,7 +2631,7 @@ function applyDirectAncestorGrid(
       prefixAnchor ??
       (pathAnchors.length === 1 ? pathAnchors[0] : undefined) ??
       focusAnchor;
-    if (!owner) return false;
+    if (!owner) return undefined;
     ownerByOccurrenceId.set(node.occurrenceId, owner.occurrenceId);
   }
 
@@ -2656,13 +2719,22 @@ function applyDirectAncestorGrid(
         localBundleState.bundleByOccurrenceId,
         personsById,
       );
-      solveBundlePositions(
+      const localDescendantPlan = planDescendantForest(
         localScene,
         localBundleState.bundles,
         localBundleState.bundleByOccurrenceId,
         localLayers,
         localSettings,
       );
+      if (!localDescendantPlan) {
+        solveBundlePositions(
+          localScene,
+          localBundleState.bundles,
+          localBundleState.bundleByOccurrenceId,
+          localLayers,
+          localSettings,
+        );
+      }
       const locallyPositioned = positionNodes(
         localBundleState.bundles,
         localSettings,
@@ -2727,6 +2799,51 @@ function applyDirectAncestorGrid(
         !hasChronologicalSiblingRow &&
         ((desiredSide === "left" && branchCenter > 0) ||
           (desiredSide === "right" && branchCenter < 0));
+
+      // Keep the family-star geometry produced by the dedicated descendant
+      // solver. The global router needs these junctions and rail lanes too;
+      // otherwise a side marriage falls back to the couple midpoint and its
+      // vertical stem can cut through a neighboring marriage's child bus.
+      let mergedLocalPlacement = false;
+      for (const [familyId, placement] of
+        localDescendantPlan?.familyPlacementById ?? []) {
+        if (
+          !globalFamilyIds.has(familyId) ||
+          !pedigreeOccurrenceIds.has(placement.hubOccurrenceId) ||
+          (placement.partnerOccurrenceId !== undefined &&
+            !pedigreeOccurrenceIds.has(placement.partnerOccurrenceId))
+        ) {
+          continue;
+        }
+        const transformedPlacement: DescendantFamilyPlacement = {
+          ...placement,
+        };
+        if (mirror && transformedPlacement.side) {
+          transformedPlacement.side =
+            transformedPlacement.side === "left" ? "right" : "left";
+        }
+        if (
+          mirror &&
+          transformedPlacement.junctionOffsetFromPartnerCenter !== undefined
+        ) {
+          transformedPlacement.junctionOffsetFromPartnerCenter =
+            -transformedPlacement.junctionOffsetFromPartnerCenter;
+        }
+        pedigreeFamilyPlacementById.set(familyId, transformedPlacement);
+        mergedLocalPlacement = true;
+      }
+      if (mergedLocalPlacement) {
+        for (const [corridor, slotCount] of
+          localDescendantPlan?.partnerRailSlotCountByCorridor ?? []) {
+          pedigreePartnerRailSlotCountByCorridor.set(
+            corridor,
+            Math.max(
+              pedigreePartnerRailSlotCountByCorridor.get(corridor) ?? 0,
+              slotCount,
+            ),
+          );
+        }
+      }
       for (const { ownedNode, localNode } of localOwned) {
         const rawRelativeLeft = localNode.x - anchorCenter;
         const relativeLeft = mirror
@@ -2765,11 +2882,11 @@ function applyDirectAncestorGrid(
           .map(occurrenceId => localNodeById.get(occurrenceId))
           .filter((candidate): candidate is SceneNode => Boolean(candidate));
         if (members.length === 0 || children.length === 0) continue;
-        const unionX =
-          members.reduce(
-            (sum, member) => sum + member.x + member.width / 2,
-            0,
-          ) / members.length;
+        const unionX = familyJunctionX(
+          family,
+          members,
+          localDescendantPlan,
+        );
         const routeCenters = [
           unionX,
           ...children.map(child => child.x + child.width / 2),
@@ -2812,11 +2929,11 @@ function applyDirectAncestorGrid(
     };
   });
 
-  if (branchLayoutFailed) return false;
+  if (branchLayoutFailed) return undefined;
   const grid = layoutDirectAncestors(items, {
     sectorGap: settings.partnerGap,
   });
-  if (!grid) return false;
+  if (!grid) return undefined;
   for (const { node } of directEntries) {
     const center = grid.centerByOccurrenceId.get(node.occurrenceId)!;
     node.x = center - node.width / 2;
@@ -2827,7 +2944,65 @@ function applyDirectAncestorGrid(
       if (relativeLeft !== undefined) ownedNode.x = center + relativeLeft;
     }
   }
-  return true;
+  return pedigreeFamilyPlacementById.size > 0
+    ? {
+        familyPlacementById: pedigreeFamilyPlacementById,
+        partnerRailSlotCountByCorridor:
+          pedigreePartnerRailSlotCountByCorridor,
+      }
+    : undefined;
+}
+
+/**
+ * Descendant mode deliberately uses a different solver and therefore never
+ * enters applyDirectAncestorGrid(). Its projection already supplies the
+ * canonical root-to-original-focus lineage. Transfer that semantic marker to
+ * the concrete cards after occurrence construction so the renderer can use
+ * the same visual language in every perspective.
+ */
+function applyPrimaryDescendantLineage(
+  scene: OccurrenceScene,
+  nodes: readonly SceneNode[],
+  settings: LayoutSettings,
+): void {
+  if (!settings.primaryLineagePersonIds.size || !scene.focusOccurrenceId) return;
+  const requestedTarget = scene.primaryOccurrenceByPersonId.get(
+    settings.lineageTargetPersonId,
+  );
+  const requestedNode = nodes.find(
+    node => node.occurrenceId === requestedTarget,
+  );
+  const targetOccurrenceId =
+    requestedNode?.personId &&
+    settings.primaryLineagePersonIds.has(requestedNode.personId)
+      ? requestedNode.occurrenceId
+      : scene.focusOccurrenceId;
+  const ancestorPaths = deriveAncestorSectorPaths(
+    scene,
+    targetOccurrenceId,
+    false,
+  );
+
+  // Reverse-walk from the original pedigree focus. This uses concrete
+  // parent-child occurrences, so a person repeated as a lateral partner does
+  // not inherit the direct-line fill from their other occurrence.
+  for (const node of nodes) {
+    const path = ancestorPaths.get(node.occurrenceId);
+    if (
+      !path ||
+      (node.kind !== "person" && node.kind !== "reference") ||
+      !node.personId ||
+      !settings.primaryLineagePersonIds.has(node.personId)
+    ) {
+      continue;
+    }
+    assignAncestorLineage(
+      node,
+      path,
+      targetOccurrenceId,
+      settings,
+    );
+  }
 }
 
 function positionAuxiliaryNodes(
@@ -2925,9 +3100,10 @@ function sideFamilyPlacement(
 }
 
 function partnerRailSlot(placement: DescendantFamilyPlacement): number {
-  return (
-    placement.laneIndex * 2 + (placement.side === "right" ? 1 : 0)
-  );
+  // Left and right routes occupy disjoint horizontal half-planes around the
+  // shared hub, so they can reuse the same visual level. Only additional
+  // partners on the same side need a higher rail.
+  return placement.laneIndex;
 }
 
 function partnerRailReservedHeight(
@@ -3000,7 +3176,7 @@ function sideFamilyRouteGeometry(
   ].filter(
     candidate =>
       candidate.mode === "side-partner" &&
-      candidate.parentBundleId === placement.parentBundleId &&
+      candidate.hubOccurrenceId === placement.hubOccurrenceId &&
       candidate.side === placement.side,
   );
   const sideCount = Math.max(1, sameSidePlacements.length);
@@ -3689,6 +3865,13 @@ export function layoutGraphEngine(
     };
   }
 
+  // The descendant DAG planner can replace a non-owning ingress with a
+  // convergence portal. Capture lineage roles on the original occurrences
+  // before that geometry-only rewrite.
+  if (mode === "descendant-forest") {
+    applyPrimaryDescendantLineage(scene, scene.nodes, settings);
+  }
+
   const { bundles, bundleByOccurrenceId } = buildBundles(scene, settings);
   const layers = initializeLayers(
     bundles,
@@ -3729,7 +3912,12 @@ export function layoutGraphEngine(
   }
   const structuralNodes = positionNodes(bundles, settings);
   if (mode === "family-graph") {
-    applyDirectAncestorGrid(scene, structuralNodes, settings, personsById);
+    descendantLayoutPlan = applyDirectAncestorGrid(
+      scene,
+      structuralNodes,
+      settings,
+      personsById,
+    );
   }
   const structuralFamilies = structuralFamilyBlocks(scene.unions);
   const structuralNodesById = new Map(

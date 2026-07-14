@@ -130,9 +130,18 @@ export function FamilyTreeSemanticList({
                 const branchesCollapsed = Boolean(
                   personId && collapsedBranchPersonIds?.has(personId),
                 );
+                const lineageLabel = node.lineageRole === "direct-ancestor"
+                  ? "Прямий предок"
+                  : node.lineageRole === "focus"
+                    ? "Фокусна особа"
+                    : undefined;
                 return (
                   <li key={node.occurrenceId}>
-                    <div className="ft-semantic-person-row">
+                    <div
+                      className="ft-semantic-person-row"
+                      data-lineage={node.lineageRole ?? "collateral"}
+                      data-lineage-group={node.lineageGroup}
+                    >
                       <button
                         type="button"
                         onClick={() =>
@@ -142,6 +151,7 @@ export function FamilyTreeSemanticList({
                         {person?.displayName ?? "Особа"}
                         {node.kind === "reference" ? " (повторне входження)" : ""}
                         {branchesCollapsed ? " (додаткові гілки згорнуто)" : ""}
+                        {lineageLabel ? ` — ${lineageLabel}` : ""}
                       </button>
                       {personId && onShowAllDescendants ? (
                         <button
