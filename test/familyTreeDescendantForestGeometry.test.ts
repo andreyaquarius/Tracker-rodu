@@ -419,11 +419,29 @@ function assertNoLineThroughUnrelatedCardInteriors(
   geometry: FamilyGeometryIndex,
   context: string,
 ): void {
+  const partnerOccurrencesByOccurrenceId = new Map<string, Set<string>>();
+  for (const union of result.unions.filter(union => union.kind === "partnership")) {
+    for (const memberId of union.memberOccurrenceIds) {
+      const partners = partnerOccurrencesByOccurrenceId.get(memberId) ?? new Set<string>();
+      for (const partnerId of union.memberOccurrenceIds) {
+        if (partnerId !== memberId) partners.add(partnerId);
+      }
+      partnerOccurrencesByOccurrenceId.set(memberId, partners);
+    }
+  }
   for (const segment of geometry.segments) {
     const familyPeople = geometry.familyPeopleByKey.get(segment.familyKey);
     assert.ok(familyPeople, `${context}: unknown family ${segment.familyKey}`);
     for (const node of result.nodes) {
       if (node.personId && familyPeople.has(node.personId)) continue;
+      const isPartnerLine =
+        segment.edge.kind === "partnership" ||
+        segment.edge.kind === "separated-partnership";
+      const isAnotherPartnerOfTheSameHub = isPartnerLine &&
+        [segment.edge.sourceId, segment.edge.targetId].some(endpointId =>
+          partnerOccurrencesByOccurrenceId.get(endpointId)?.has(node.occurrenceId),
+        );
+      if (isAnotherPartnerOfTheSameHub) continue;
       assert.equal(
         segmentCrossesCardInterior(segment, node),
         false,

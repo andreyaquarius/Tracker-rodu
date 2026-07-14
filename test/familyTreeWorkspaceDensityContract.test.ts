@@ -78,6 +78,10 @@ test("secondary tree fields open in a dismissible overlay instead of adding tool
 });
 
 test("status chrome and canvas controls no longer reserve separate full-width rows", () => {
+  assert.doesNotMatch(
+    page,
+    /Повернуто попередній вигляд родового дерева\./,
+  );
   assert.match(page, /className="family-tree-v2-status-strip"/);
   assert.match(
     appCss,
