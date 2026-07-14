@@ -181,8 +181,9 @@ function assertFamilyRoutesConnected(
 /**
  * Different family routes may meet only at a shared card endpoint. They must
  * never cross, form an unrelated T-junction, or reuse a positive-length lane.
- * The caller supplies domain union ids so merged/non-structural layout edges
- * outside the scenario do not create false positives.
+ * Multiple partnerships use distinct parallel side-to-side lines. The caller
+ * supplies domain union ids so merged/non-structural layout edges outside the
+ * scenario do not create false positives.
  */
 function assertNoUnrelatedFamilyRouteIntersections(
   result: LayoutResult,
@@ -302,7 +303,7 @@ function assertNoUnrelatedFamilyRouteIntersections(
   }
 }
 
-interface SidePartnerRail {
+interface SidePartnerLine {
   readonly familyUnionId: string;
   readonly side: "left" | "right";
   readonly partnerCenter: number;
@@ -310,7 +311,7 @@ interface SidePartnerRail {
   readonly y: number;
 }
 
-function assertBalancedSidePartnerRailLanes(
+function assertParallelSidePartnerLines(
   result: LayoutResult,
   hubPersonId: string,
   familyUnionIds: readonly string[],
@@ -324,7 +325,7 @@ function assertBalancedSidePartnerRailLanes(
   const nodesByOccurrenceId = new Map(
     result.nodes.map(node => [node.occurrenceId, node]),
   );
-  const rails = familyUnionIds.flatMap((familyUnionId): SidePartnerRail[] => {
+  const rails = familyUnionIds.flatMap((familyUnionId): SidePartnerLine[] => {
     const union = result.unions.find(
       candidate => candidate.unionId === familyUnionId,
     );
@@ -336,7 +337,7 @@ function assertBalancedSidePartnerRailLanes(
           edge.kind === "separated-partnership"),
     );
     assert.ok(partnership, `${context}: missing ${familyUnionId} partnership`);
-    if (partnership.points.length !== 4) return [];
+    if (partnership.points.length !== 2) return [];
 
     const horizontalSegments = partnership.points
       .slice(1)
@@ -350,7 +351,7 @@ function assertBalancedSidePartnerRailLanes(
     assert.equal(
       horizontalSegments.length,
       1,
-      `${context}: ${familyUnionId} must have one horizontal side rail`,
+      `${context}: ${familyUnionId} must have one horizontal side line`,
     );
     const partner = union.memberOccurrenceIds
       .map(occurrenceId => nodesByOccurrenceId.get(occurrenceId))
@@ -362,13 +363,32 @@ function assertBalancedSidePartnerRailLanes(
       `${context}: ${familyUnionId} partner must sit beside the hub`,
     );
     const rail = horizontalSegments[0]!;
+    const side = partnerCenter < hubCenter ? "left" : "right";
+    const expectedHubPortX = side === "left" ? hub.x : hub.x + hub.width;
+    const expectedPartnerPortX = side === "left"
+      ? partner.x + partner.width
+      : partner.x;
     assert.ok(
-      rail.start.y < Math.min(hub.y, partner.y) - epsilon,
-      `${context}: ${familyUnionId} side rail must run above the cards`,
+      rail.start.y > Math.max(hub.y, partner.y) + epsilon &&
+        rail.start.y <
+          Math.min(hub.y + hub.height, partner.y + partner.height) - epsilon,
+      `${context}: ${familyUnionId} must run through side ports inside the card row`,
+    );
+    assert.ok(
+      partnership.points.some(point =>
+        Math.abs(point.x - expectedHubPortX) <= epsilon,
+      ),
+      `${context}: ${familyUnionId} must leave the hub through its ${side} side`,
+    );
+    assert.ok(
+      partnership.points.some(point =>
+        Math.abs(point.x - expectedPartnerPortX) <= epsilon,
+      ),
+      `${context}: ${familyUnionId} must enter the partner through the facing side`,
     );
     return [{
       familyUnionId,
-      side: partnerCenter < hubCenter ? "left" : "right",
+      side,
       partnerCenter,
       distanceFromHub: Math.abs(partnerCenter - hubCenter),
       y: rail.start.y,
@@ -381,14 +401,8 @@ function assertBalancedSidePartnerRailLanes(
   const right = rails
     .filter(rail => rail.side === "right")
     .sort((a, b) => a.distanceFromHub - b.distanceFromHub);
-  assert.ok(left.length > 0, `${context}: missing a left side-partner rail`);
-  assert.ok(right.length > 0, `${context}: missing a right side-partner rail`);
-  assert.ok(
-    Math.abs(left[0]!.y - right[0]!.y) <= epsilon,
-    `${context}: nearest left/right side-partner rails must share one level: ` +
-      JSON.stringify({ left: left[0], right: right[0] }),
-  );
-
+  assert.ok(left.length > 0, `${context}: missing a left side-partner line`);
+  assert.ok(right.length > 0, `${context}: missing a right side-partner line`);
   for (const sameSideRails of [left, right]) {
     for (let leftIndex = 0; leftIndex < sameSideRails.length; leftIndex += 1) {
       for (
@@ -401,10 +415,17 @@ function assertBalancedSidePartnerRailLanes(
             sameSideRails[leftIndex]!.y - sameSideRails[rightIndex]!.y,
           ) > epsilon,
           `${context}: ${sameSideRails[leftIndex]!.familyUnionId} and ` +
-            `${sameSideRails[rightIndex]!.familyUnionId} need separate ` +
-            `${sameSideRails[leftIndex]!.side} rail lanes`,
+            `${sameSideRails[rightIndex]!.familyUnionId} need distinct parallel ` +
+            `${sameSideRails[leftIndex]!.side} side ports`,
         );
       }
+    }
+    for (let index = 1; index < sameSideRails.length; index += 1) {
+      assert.ok(
+        sameSideRails[index]!.y < sameSideRails[index - 1]!.y - epsilon,
+        `${context}: farther ${sameSideRails[index]!.side} partners must use ` +
+          `the next parallel line above the nearer partner`,
+      );
     }
   }
 }
@@ -2808,7 +2829,7 @@ test("layout coordinates are independent of input array order", () => {
   );
 });
 
-test("family graph keeps children and partner rails from an uncle's marriages disjoint", () => {
+test("family graph keeps children and parallel partner lines from an uncle's marriages disjoint", () => {
   const firstMarriageChildren = Array.from(
     { length: 5 },
     (_, index) => `uncle-first-child-${index + 1}`,
@@ -2969,7 +2990,7 @@ test("family graph keeps children and partner rails from an uncle's marriages di
     ],
     "uncle with three marriages",
   );
-  assertBalancedSidePartnerRailLanes(
+  assertParallelSidePartnerLines(
     result,
     "uncle",
     [
@@ -3174,6 +3195,11 @@ test("neighboring expanded ancestor families reflow into disjoint child corridor
   assert.ok(
     horizontalGap >= 12,
     `neighboring child buses must be horizontally disjoint with a visible gap: ${JSON.stringify({ firstBus, secondBus, horizontalGap })}`,
+  );
+  assert.equal(
+    firstBus.y,
+    secondBus.y,
+    "disjoint family buses in one generation corridor must share one height",
   );
 
   type Segment = {
@@ -4233,7 +4259,7 @@ test("multiple partners keep the focus-line family primary and place side childr
       familyUnionIds,
       context,
     );
-    assertBalancedSidePartnerRailLanes(
+    assertParallelSidePartnerLines(
       result,
       "multi-hub",
       familyUnionIds,
@@ -4530,7 +4556,7 @@ test("four side partners retain isolated family corridors around one primary lin
     assertNoCardOverlap(result, context);
     assertFamilyRoutesConnected(result, context);
     assertNoUnrelatedFamilyRouteIntersections(result, allUnionIds, context);
-    assertBalancedSidePartnerRailLanes(
+    assertParallelSidePartnerLines(
       result,
       "five-hub",
       hubUnionIds,
@@ -4663,13 +4689,17 @@ test("a visible childless partner remains a deterministic side satellite in a lo
     assert.ok(emptyPartnership);
     assert.equal(
       emptyPartnership.points.length,
-      4,
-      `${context}: the childless partner must use a side rail`,
+      2,
+      `${context}: the childless partner must use one direct side line`,
     );
     assert.ok(
-      Math.min(...emptyPartnership.points.map(point => point.y)) <
-        Math.min(hub.y, emptyPartner.y),
-      `${context}: the side rail must run above the partner row`,
+      emptyPartnership.points.every(
+        point =>
+          point.y > Math.max(hub.y, emptyPartner.y) &&
+          point.y <
+            Math.min(hub.y + hub.height, emptyPartner.y + emptyPartner.height),
+      ),
+      `${context}: the partnership must connect side ports inside the row`,
     );
 
     assertNoCardOverlap(result, context);
@@ -4784,8 +4814,8 @@ test("a root-only descendant family stays centered below the hub beside a childl
   assert.ok(childlessRoute);
   assert.equal(
     childlessRoute.points.length,
-    4,
-    "the childless partner must use the side-satellite rail",
+    2,
+    "the childless partner must use a direct side-to-side line",
   );
   assert.equal(
     result.edges.filter(edge => edge.kind === "siblings-bus").length,

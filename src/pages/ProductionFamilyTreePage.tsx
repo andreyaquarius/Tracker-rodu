@@ -1095,7 +1095,7 @@ function LoadedFamilyTree({
 
   function leaveFamilyCorridor() {
     leaveSpecialPerspective();
-    setNotice("Повернуто попередній вигляд родового дерева.");
+    setNotice("");
   }
 
   function selectCorridorBreadcrumb(index: number) {

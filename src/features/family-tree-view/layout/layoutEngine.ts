@@ -1168,14 +1168,14 @@ interface DescendantFamilyPlacement {
   side?: "left" | "right";
   /** Zero is the satellite nearest the primary family on this side. */
   laneIndex: number;
+  /** Total number of side partnerships sharing this side of the hub. */
+  sidePartnerCount?: number;
   /** The family stem uses the free contour gap beside the satellite. */
   junctionOffsetFromPartnerCenter?: number;
 }
 
 interface DescendantLayoutPlan {
   familyPlacementById: ReadonlyMap<string, DescendantFamilyPlacement>;
-  /** Number of reusable partner-rail levels above each child row. */
-  partnerRailSlotCountByCorridor: ReadonlyMap<number, number>;
 }
 
 /**
@@ -1578,6 +1578,7 @@ function planDescendantForest(
         });
 
         const sideLaneCount = { left: 0, right: 0 };
+        const sidePlacements: DescendantFamilyPlacement[] = [];
         const satellites = orderedStarLayouts.slice(1).sort(
           (left, right) =>
             compareCodePoints(
@@ -1644,7 +1645,7 @@ function planDescendantForest(
           if (side === "left") occupiedLeft = satellite.layout.left;
           else occupiedRight = satellite.layout.right;
           const laneIndex = sideLaneCount[side]++;
-          familyPlacementById.set(satellite.layout.group.family.id, {
+          const sidePlacement: DescendantFamilyPlacement = {
             familyId: satellite.layout.group.family.id,
             parentBundleId: bundle.id,
             mode: "side-partner",
@@ -1652,8 +1653,17 @@ function planDescendantForest(
             partnerOccurrenceId: satellite.partnerOccurrenceId,
             side,
             laneIndex,
+            sidePartnerCount: 0,
             junctionOffsetFromPartnerCenter,
-          });
+          };
+          familyPlacementById.set(
+            satellite.layout.group.family.id,
+            sidePlacement,
+          );
+          sidePlacements.push(sidePlacement);
+        }
+        for (const sidePlacement of sidePlacements) {
+          sidePlacement.sidePartnerCount = sideLaneCount[sidePlacement.side!];
         }
 
         // Re-centre the bundle around the actual card box. The descendant
@@ -1781,21 +1791,7 @@ function planDescendantForest(
     );
     for (const bundle of bundles) bundle.x -= focusCenter;
   }
-  const partnerRailSlotCountByCorridor = new Map<number, number>();
-  for (const placement of familyPlacementById.values()) {
-    if (placement.mode !== "side-partner" || !placement.side) continue;
-    const parentBundle = bundles.find(
-      bundle => bundle.id === placement.parentBundleId,
-    );
-    if (!parentBundle) continue;
-    const corridor = parentBundle.generation + 0.5;
-    const slot = placement.laneIndex;
-    partnerRailSlotCountByCorridor.set(
-      corridor,
-      Math.max(partnerRailSlotCountByCorridor.get(corridor) ?? 0, slot + 1),
-    );
-  }
-  return { familyPlacementById, partnerRailSlotCountByCorridor };
+  return { familyPlacementById };
 }
 
 /**
@@ -2128,7 +2124,6 @@ function packDescendantFallbackLayers(
     });
 
   const familyPlacementById = new Map<string, DescendantFamilyPlacement>();
-  const partnerRailSlotCountByCorridor = new Map<number, number>();
   const claimedBundles = new Set<string>();
   for (const convergence of terminalConvergences) {
     if ([...convergence.reachable].some(id => claimedBundles.has(id))) continue;
@@ -2194,13 +2189,6 @@ function packDescendantFallbackLayers(
     }
     for (const [familyId, placement] of subPlan.familyPlacementById) {
       familyPlacementById.set(familyId, placement);
-    }
-    for (const [corridor, count] of
-      subPlan.partnerRailSlotCountByCorridor) {
-      partnerRailSlotCountByCorridor.set(
-        corridor,
-        Math.max(partnerRailSlotCountByCorridor.get(corridor) ?? 0, count),
-      );
     }
   }
 
@@ -2426,7 +2414,7 @@ function packDescendantFallbackLayers(
   }
 
   return familyPlacementById.size > 0
-    ? { familyPlacementById, partnerRailSlotCountByCorridor }
+    ? { familyPlacementById }
     : undefined;
 }
 
@@ -2571,7 +2559,6 @@ function applyDirectAncestorGrid(
     string,
     DescendantFamilyPlacement
   >();
-  const pedigreePartnerRailSlotCountByCorridor = new Map<number, number>();
 
   // Every collateral family belongs to the nearest direct ancestor sector.
   // Re-layout that entire branch in its own local coordinate system before
@@ -2801,7 +2788,7 @@ function applyDirectAncestorGrid(
           (desiredSide === "right" && branchCenter < 0));
 
       // Keep the family-star geometry produced by the dedicated descendant
-      // solver. The global router needs these junctions and rail lanes too;
+      // solver. The global router needs these junctions and side-line ports too;
       // otherwise a side marriage falls back to the couple midpoint and its
       // vertical stem can cut through a neighboring marriage's child bus.
       let mergedLocalPlacement = false;
@@ -2831,18 +2818,6 @@ function applyDirectAncestorGrid(
         }
         pedigreeFamilyPlacementById.set(familyId, transformedPlacement);
         mergedLocalPlacement = true;
-      }
-      if (mergedLocalPlacement) {
-        for (const [corridor, slotCount] of
-          localDescendantPlan?.partnerRailSlotCountByCorridor ?? []) {
-          pedigreePartnerRailSlotCountByCorridor.set(
-            corridor,
-            Math.max(
-              pedigreePartnerRailSlotCountByCorridor.get(corridor) ?? 0,
-              slotCount,
-            ),
-          );
-        }
       }
       for (const { ownedNode, localNode } of localOwned) {
         const rawRelativeLeft = localNode.x - anchorCenter;
@@ -2947,8 +2922,6 @@ function applyDirectAncestorGrid(
   return pedigreeFamilyPlacementById.size > 0
     ? {
         familyPlacementById: pedigreeFamilyPlacementById,
-        partnerRailSlotCountByCorridor:
-          pedigreePartnerRailSlotCountByCorridor,
       }
     : undefined;
 }
@@ -3087,9 +3060,6 @@ const SIBLING_BUS_LANE_GAP = 12;
 // the child card border.
 const SIBLING_BUS_PARENT_CLEARANCE = 44;
 const SIBLING_BUS_CHILD_CLEARANCE = 14;
-const PARTNER_RAIL_CARD_CLEARANCE = 12;
-const PARTNER_RAIL_LANE_GAP = 12;
-const PARTNER_RAIL_BUS_MARGIN = 8;
 
 function sideFamilyPlacement(
   familyId: string,
@@ -3097,26 +3067,6 @@ function sideFamilyPlacement(
 ): DescendantFamilyPlacement | undefined {
   const placement = descendantPlan?.familyPlacementById.get(familyId);
   return placement?.mode === "side-partner" ? placement : undefined;
-}
-
-function partnerRailSlot(placement: DescendantFamilyPlacement): number {
-  // Left and right routes occupy disjoint horizontal half-planes around the
-  // shared hub, so they can reuse the same visual level. Only additional
-  // partners on the same side need a higher rail.
-  return placement.laneIndex;
-}
-
-function partnerRailReservedHeight(
-  corridor: number,
-  descendantPlan: DescendantLayoutPlan | undefined,
-): number {
-  const slotCount =
-    descendantPlan?.partnerRailSlotCountByCorridor.get(corridor) ?? 0;
-  return slotCount > 0
-    ? PARTNER_RAIL_CARD_CLEARANCE +
-        (slotCount - 1) * PARTNER_RAIL_LANE_GAP +
-        PARTNER_RAIL_BUS_MARGIN
-    : 0;
 }
 
 function familyJunctionX(
@@ -3151,7 +3101,7 @@ interface SideFamilyRouteGeometry {
   placement: DescendantFamilyPlacement;
   hub: SceneNode;
   partner: SceneNode;
-  railY: number;
+  lineY: number;
   hubPortX: number;
   partnerPortX: number;
   junctionX: number;
@@ -3171,35 +3121,24 @@ function sideFamilyRouteGeometry(
     member => member.occurrenceId === placement.partnerOccurrenceId,
   );
   if (!hub || !partner) return undefined;
-  const sameSidePlacements = [
-    ...(descendantPlan?.familyPlacementById.values() ?? []),
-  ].filter(
-    candidate =>
-      candidate.mode === "side-partner" &&
-      candidate.hubOccurrenceId === placement.hubOccurrenceId &&
-      candidate.side === placement.side,
-  );
-  const sideCount = Math.max(1, sameSidePlacements.length);
-  const maxPortOffset = hub.width * 0.32;
-  const minPortOffset = hub.width * 0.08;
-  const portOffset = sideCount <= 1
-    ? maxPortOffset
-    : maxPortOffset -
-      placement.laneIndex *
-        ((maxPortOffset - minPortOffset) / (sideCount - 1));
-  const hubCenter = hub.x + hub.width / 2;
+  const sideCount = Math.max(1, placement.sidePartnerCount ?? 1);
+  const portProgress = (placement.laneIndex + 1) / (sideCount + 1);
+  const lineY = Math.max(hub.y, partner.y) +
+    Math.min(hub.height, partner.height) * (0.46 - portProgress * 0.18);
+  const hubPortX = placement.side === "left" ? hub.x : hub.x + hub.width;
+  const partnerPortX = placement.side === "left"
+    ? partner.x + partner.width
+    : partner.x;
   return {
     placement,
     hub,
     partner,
-    railY:
-      Math.min(hub.y, partner.y) -
-      PARTNER_RAIL_CARD_CLEARANCE -
-      partnerRailSlot(placement) * PARTNER_RAIL_LANE_GAP,
-    hubPortX: placement.side === "left"
-      ? hubCenter - portOffset
-      : hubCenter + portOffset,
-    partnerPortX: partner.x + partner.width / 2,
+    lineY,
+    // Match the familiar genealogy convention: each partnership owns a
+    // parallel horizontal line between facing side ports. Intermediate cards
+    // visually occlude longer lines because cards render above the edge canvas.
+    hubPortX,
+    partnerPortX,
     junctionX: familyJunctionX(family, members, descendantPlan),
   };
 }
@@ -3278,12 +3217,8 @@ function createSiblingBusLanePlan(
 function requiredGenerationGapByCorridor(
   lanePlan: SiblingBusLanePlan,
   baseGap: number,
-  descendantPlan?: DescendantLayoutPlan,
 ): ReadonlyMap<number, number> {
-  const corridors = new Set([
-    ...lanePlan.laneCountByCorridor.keys(),
-    ...(descendantPlan?.partnerRailSlotCountByCorridor.keys() ?? []),
-  ]);
+  const corridors = new Set(lanePlan.laneCountByCorridor.keys());
   return new Map(
     [...corridors].map(corridor => {
       const laneCount = lanePlan.laneCountByCorridor.get(corridor) ?? 1;
@@ -3293,8 +3228,7 @@ function requiredGenerationGapByCorridor(
           baseGap,
           SIBLING_BUS_PARENT_CLEARANCE +
             SIBLING_BUS_CHILD_CLEARANCE +
-            Math.max(0, laneCount - 1) * SIBLING_BUS_LANE_GAP +
-            partnerRailReservedHeight(corridor, descendantPlan),
+            Math.max(0, laneCount - 1) * SIBLING_BUS_LANE_GAP,
         ),
       ];
     }),
@@ -3312,7 +3246,6 @@ function siblingBusYByFamily(
   families: readonly StructuralFamilyBlock[],
   nodesById: ReadonlyMap<string, SceneNode>,
   lanePlan: SiblingBusLanePlan,
-  descendantPlan?: DescendantLayoutPlan,
 ): ReadonlyMap<string, number> {
   const entriesByCorridor = new Map<number, SiblingBusRouteEntry[]>();
   for (const family of families) {
@@ -3345,27 +3278,15 @@ function siblingBusYByFamily(
   const busYByFamily = new Map<string, number>();
   for (const [corridor, entries] of entriesByCorridor) {
     const laneCount = lanePlan.laneCountByCorridor.get(corridor) ?? 1;
-    if (laneCount <= 1) {
-      const railSafeBottom =
-        Math.min(...entries.map(entry => entry.childTop)) -
-        SIBLING_BUS_CHILD_CLEARANCE -
-        partnerRailReservedHeight(corridor, descendantPlan);
-      for (const entry of entries) {
-        busYByFamily.set(
-          entry.familyId,
-          Math.min(entry.baseBusY, railSafeBottom),
-        );
-      }
-      continue;
-    }
-
+    // Calculate one shared origin for the entire between-generation corridor.
+    // Disjoint family intervals can reuse lane 0 and must therefore have the
+    // same Y; only genuinely overlapping intervals move to another lane.
     const top =
       Math.max(...entries.map(entry => entry.parentBottom)) +
       SIBLING_BUS_PARENT_CLEARANCE;
     const bottom =
       Math.min(...entries.map(entry => entry.childTop)) -
-      SIBLING_BUS_CHILD_CLEARANCE -
-      partnerRailReservedHeight(corridor, descendantPlan);
+      SIBLING_BUS_CHILD_CLEARANCE;
     const routeHeight = SIBLING_BUS_LANE_GAP * (laneCount - 1);
     const averageBaseY =
       entries.reduce((sum, entry) => sum + entry.baseBusY, 0) /
@@ -3401,7 +3322,6 @@ function routeEdges(
     families,
     nodesById,
     lanePlan,
-    descendantPlan,
   );
 
   interface SharedChildApproach {
@@ -3555,7 +3475,7 @@ function routeEdges(
           right.x - (left.x + left.width) <= settings.partnerGap * 1.5
         );
       });
-    const sideRailY = sideRoute?.railY;
+    const sideRailY = sideRoute?.lineY;
     const partnershipJunctionY =
       partnership && members.length >= 2
         ? sideRailY !== undefined
@@ -3621,10 +3541,8 @@ function routeEdges(
             ? "separated-partnership"
             : "partnership",
         points: [
-          { x: sideRoute.hubPortX, y: sideRoute.hub.y },
-          { x: sideRoute.hubPortX, y: sideRoute.railY },
-          { x: sideRoute.partnerPortX, y: sideRoute.railY },
-          { x: sideRoute.partnerPortX, y: sideRoute.partner.y },
+          { x: sideRoute.hubPortX, y: sideRoute.lineY },
+          { x: sideRoute.partnerPortX, y: sideRoute.lineY },
         ],
       });
     } else if (partnership && members.length >= 2) {
@@ -3659,8 +3577,8 @@ function routeEdges(
       }
     } else if (sideRoute) {
       for (const member of members) {
-        const portX = member.occurrenceId === sideRoute.hub.occurrenceId
-          ? sideRoute.hubPortX
+          const portX = member.occurrenceId === sideRoute.hub.occurrenceId
+            ? sideRoute.hubPortX
           : member.occurrenceId === sideRoute.partner.occurrenceId
             ? sideRoute.partnerPortX
             : member.x + member.width / 2;
@@ -3671,9 +3589,8 @@ function routeEdges(
           unionOccurrenceId: anchorUnion.occurrenceId,
           kind: "union-stem",
           points: [
-            { x: portX, y: member.y },
-            { x: portX, y: sideRoute.railY },
-            { x: sideRoute.junctionX, y: sideRoute.railY },
+            { x: portX, y: sideRoute.lineY },
+            { x: sideRoute.junctionX, y: sideRoute.lineY },
           ],
         });
       }
@@ -3934,7 +3851,6 @@ export function layoutGraphEngine(
     requiredGenerationGapByCorridor(
       siblingBusLanePlan,
       settings.generationGap,
-      descendantLayoutPlan,
     ),
   );
   const nodes = positionAuxiliaryNodes(scene, structuralNodes);
