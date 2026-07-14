@@ -770,7 +770,10 @@ export default function App() {
       return;
     }
 
-    upsertMetaName("robots", "noindex, nofollow");
+    upsertMetaName(
+      "robots",
+      "noindex, nofollow, noarchive, nosnippet, noimageindex",
+    );
     upsertCanonical(null);
   }, [account, route]);
 
