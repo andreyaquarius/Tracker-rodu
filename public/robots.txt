@@ -1,11 +1,11 @@
 User-agent: *
 Allow: /
 
-Disallow: /projects/
-Disallow: /settings/
-Disallow: /admin/
-Disallow: /account/
-Disallow: /subscription/
-Disallow: /auth/
+Disallow: /projects
+Disallow: /settings
+Disallow: /admin
+Disallow: /account
+Disallow: /subscription
+Disallow: /auth
 
 Sitemap: https://trekerrodu.com.ua/sitemap.xml

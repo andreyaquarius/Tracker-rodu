@@ -79,8 +79,16 @@ if (cname !== "trekerrodu.com.ua") {
 const robots = readDistFile("robots.txt");
 expectIncludes(robots, "User-agent: *", "robots.txt");
 expectIncludes(robots, "Allow: /", "robots.txt");
-expectIncludes(robots, "Disallow: /projects/", "robots.txt");
-expectIncludes(robots, "Disallow: /settings/", "robots.txt");
+for (const path of [
+  "/projects",
+  "/settings",
+  "/admin",
+  "/account",
+  "/subscription",
+  "/auth",
+]) {
+  expectIncludes(robots, `Disallow: ${path}\n`, "robots.txt");
+}
 expectIncludes(robots, "Sitemap: https://trekerrodu.com.ua/sitemap.xml", "robots.txt");
 expectNotIncludes(robots, "Disallow: /\n", "robots.txt");
 
@@ -118,7 +126,11 @@ expectIncludes(index, '"@type":"WebSite"', "index.html JSON-LD");
 expectIncludes(index, '"@type":"WebApplication"', "index.html JSON-LD");
 
 const notFound = readDistFile("404.html");
-expectIncludes(notFound, 'name="robots" content="noindex, nofollow"', "404.html");
+expectIncludes(
+  notFound,
+  'name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex"',
+  "404.html",
+);
 expectIncludes(notFound, "Сторінку не знайдено", "404.html");
 expectIncludes(notFound, "Повернутися на головну", "404.html");
 expectNotIncludes(notFound, 'rel="canonical"', "404.html");
