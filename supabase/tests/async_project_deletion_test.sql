@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(33);
+select plan(34);
 
 select has_table(
   'private',
@@ -58,7 +58,7 @@ select ok(
     'public.start_project_deletion(uuid)',
     'EXECUTE'
   )
-  and has_function_privilege(
+  and not has_function_privilege(
     'authenticated',
     'public.process_project_deletion(uuid,integer)',
     'EXECUTE'
@@ -70,6 +70,11 @@ select ok(
   )
   and not has_function_privilege(
     'anon',
+    'public.process_project_deletion(uuid,integer)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'service_role',
     'public.process_project_deletion(uuid,integer)',
     'EXECUTE'
   )
@@ -351,6 +356,23 @@ select is(
   'starting deletion twice reuses the active job'
 );
 
+select throws_ok(
+  format(
+    'select public.process_project_deletion(%L::uuid, 2)',
+    current_setting('test.project_deletion_job_id')
+  ),
+  '42501',
+  'permission denied for function process_project_deletion',
+  'a browser session cannot execute destructive deletion batches directly'
+);
+
+reset role;
+set local role service_role;
+select set_config(
+  'request.jwt.claims',
+  '{"role":"service_role"}',
+  true
+);
 select set_config(
   'test.first_deletion_payload',
   public.process_project_deletion(
@@ -363,6 +385,14 @@ select is(
   (current_setting('test.first_deletion_payload')::jsonb ->> 'processedRows')::bigint,
   2::bigint,
   'one process call deletes no more than the requested two-row batch'
+);
+
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"d2000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
 );
 select is(
   (
@@ -394,6 +424,14 @@ select set_config(
   '{"sub":"d2000000-0000-0000-0000-000000000001","role":"authenticated"}',
   true
 );
+
+reset role;
+set local role service_role;
+select set_config(
+  'request.jwt.claims',
+  '{"role":"service_role"}',
+  true
+);
 do $$
 declare
   payload jsonb;
@@ -408,6 +446,13 @@ begin
 end;
 $$;
 
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"d2000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
 select is(
   public.get_project_deletion_status(
     current_setting('test.project_deletion_job_id')::uuid

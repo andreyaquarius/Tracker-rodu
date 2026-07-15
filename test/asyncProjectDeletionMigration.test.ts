@@ -16,6 +16,13 @@ const schemaContractMigration = readFileSync(
   ),
   "utf8",
 );
+const securityIsolationMigration = readFileSync(
+  new URL(
+    "../supabase/migrations/202607150001_security_advisor_definer_api_isolation.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const migrationsDirectory = new URL("../supabase/migrations/", import.meta.url);
 const allMigrations = readdirSync(migrationsDirectory)
   .filter((name) => name.endsWith(".sql"))
@@ -35,7 +42,7 @@ test("project deletion uses a durable private resumable job", () => {
   assert.match(migration, /processed_rows bigint not null default 0/i);
 });
 
-test("project deletion is exposed only as authenticated owner-admin RPCs", () => {
+test("project deletion separates authenticated control RPCs from service-only processing", () => {
   assert.match(
     migration,
     /create or replace function public\.start_project_deletion\(target_project_id uuid\)[\s\S]*?PROJECT_DELETE_ACCESS_REQUIRED/i,
@@ -45,7 +52,15 @@ test("project deletion is exposed only as authenticated owner-admin RPCs", () =>
     /revoke execute on function public\.start_project_deletion\(uuid\)\s+from public, anon/i,
   );
   assert.match(
-    migration,
+    securityIsolationMigration,
+    /create function public\.process_project_deletion[\s\S]*?SERVICE_ROLE_REQUIRED/i,
+  );
+  assert.match(
+    securityIsolationMigration,
+    /grant execute on function public\.process_project_deletion\(uuid, integer\)\s+to service_role/i,
+  );
+  assert.doesNotMatch(
+    securityIsolationMigration,
     /grant execute on function public\.process_project_deletion\(uuid, integer\)\s+to authenticated/i,
   );
   assert.match(
