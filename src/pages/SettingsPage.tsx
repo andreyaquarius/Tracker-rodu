@@ -1,6 +1,7 @@
 import type { AppDatabase, SectionParentKey } from "../types";
 import { CustomSectionBuilder } from "../components/CustomSectionBuilder";
 import { AiAgentSettings } from "../components/AiAgentSettings";
+import { openAnalyticsPreferences } from "../services/siteAnalytics";
 
 export function SettingsPage({
   db,
@@ -106,11 +107,23 @@ export function SettingsPage({
       <section className="panel privacy-panel">
         <span className="card-icon">✓</span>
         <div>
-          <h2>Приватність за задумом</h2>
+          <h2>Приватність і аналітика</h2>
           <p>
             Налаштування спільного проєкту зберігаються у захищеній базі та
             доступні на всіх пристроях. Змінювати їх може власник проєкту.
           </p>
+          <p>
+            Google Analytics не отримує приватні маршрути, дані проєктів або дії
+            всередині застосунку. Ви можете будь-коли змінити згоду на обмежену
+            аналітику публічних відвідувань, входів і загального активного часу.
+          </p>
+          <button
+            type="button"
+            className="button button-secondary analytics-preferences-button"
+            onClick={openAnalyticsPreferences}
+          >
+            Налаштування аналітики
+          </button>
         </div>
       </section>
     </>
