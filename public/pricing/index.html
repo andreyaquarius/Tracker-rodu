@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.google-analytics.com https://region1.google-analytics.com; font-src 'self' data:; connect-src 'self' https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com"
+    />
     <meta name="theme-color" content="#173f38" />
     <meta
       name="description"
@@ -165,5 +169,6 @@
         <a href="/terms">Умови користування</a>
       </footer>
     </main>
+    <script type="module" src="/site-analytics.js" data-analytics-mode="auto-public"></script>
   </body>
 </html>

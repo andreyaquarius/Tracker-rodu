@@ -49,11 +49,11 @@ const CONTENT_SECURITY_POLICY = [
   "base-uri 'self'",
   "object-src 'none'",
   "form-action 'self'",
-  `script-src 'self' ${JSON_LD_SCRIPT_HASH} https://accounts.google.com https://apis.google.com https://www.gstatic.com`,
+  `script-src 'self' ${JSON_LD_SCRIPT_HASH} https://accounts.google.com https://apis.google.com https://www.gstatic.com https://www.googletagmanager.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.googleapis.com https://content.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://www.gstatic.com",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.googleapis.com https://content.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://www.gstatic.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com",
   "frame-src https://accounts.google.com https://content.googleapis.com https://drive.google.com",
 ].join("; ");
 
