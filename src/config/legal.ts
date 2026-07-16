@@ -3,8 +3,8 @@ export const legalConfig = {
   brandName: "Trekerrodu",
   siteUrl: "https://trekerrodu.com.ua",
   currentRevision: {
-    id: "2026-06-22",
-    label: "22 червня 2026 року",
+    id: "2026-07-16",
+    label: "16 липня 2026 року",
   },
   operator: {
     displayName: "Власник вебзастосунку «Трекер Роду»",
