@@ -457,7 +457,7 @@ export function ProductionFamilyTreePage({
         </section>
       ) : selectedEntry ? (
         <LoadedFamilyTree
-          key={selectedEntry.id}
+          key={`family-tree:${selectedEntry.id}`}
           projectId={projectId}
           entryPoint={selectedEntry}
           persons={persons}
@@ -508,7 +508,7 @@ export function ProductionFamilyTreePage({
 
       {selectedEntry?.id && circularChartFocusPersonId ? (
         <CircularAncestorChartWindow
-          key={selectedEntry.id}
+          key={`circular-ancestor-chart:${selectedEntry.id}`}
           treeId={selectedEntry.id}
           focusPersonId={circularChartFocusPersonId}
           focusPersonLabel={circularChartFocusPersonLabel}

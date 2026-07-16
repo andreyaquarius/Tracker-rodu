@@ -173,7 +173,8 @@ test("circular chart can change its central person and select any rendered secto
   assert.match(circularChart, /setSelectedOccurrenceId\(drag\.occurrenceId\)/);
   assert.match(circularChart, /openPerson\(selectedOccurrence\.personId\)/);
   assert.match(circularChart, /setFallbackFullscreen\(false\)/);
-  assert.match(productionPage, /key=\{selectedEntry\.id\}/);
+  assert.match(productionPage, /key=\{`family-tree:\$\{selectedEntry\.id\}`\}/);
+  assert.match(productionPage, /key=\{`circular-ancestor-chart:\$\{selectedEntry\.id\}`\}/);
   assert.match(productionPage, /searchFocusPersons=\{searchCircularAncestorFocusPersons\}/);
   assert.match(productionPage, /onFocusPersonChange=\{setCircularChartFocusPersonId\}/);
   assert.doesNotMatch(productionPage, /key=\{`\$\{selectedEntry\.id\}:\$\{circularChartFocusPersonId\}`\}/);
