@@ -4855,6 +4855,7 @@ tbody tr:hover { background: #fbfaf5; }
 .setting-toggle input { width: 20px; min-height: 20px; }
 .privacy-panel { max-width: 760px; margin-top: 15px; padding: 22px; display: flex; gap: 16px; }
 .privacy-panel h2, .privacy-panel p { margin-bottom: 4px; }
+.analytics-preferences-button { margin-top: 12px; }
 
 .login-page { min-height: 100vh; display: grid; grid-template-columns: 1.2fr .8fr; background: var(--green-950); }
 .login-copy { padding: 7vw; display: flex; flex-direction: column; justify-content: flex-start; color: white; background:

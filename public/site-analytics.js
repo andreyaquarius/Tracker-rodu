@@ -14,6 +14,17 @@ const CONSENT_GRANTED = "granted";
 const CONSENT_DENIED = "denied";
 const TAG_ID_PATTERN = /^G-[A-Z0-9]+$/;
 
+function safeWebOrigin(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:"
+      ? parsed.origin
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function normalizePublicAnalyticsPath(value) {
   if (typeof value !== "string" || !value) return null;
   const withoutQuery = value.split(/[?#]/, 1)[0] || "/";
@@ -28,12 +39,8 @@ export function normalizePublicAnalyticsPath(value) {
 export function publicAnalyticsContext(pathname, origin = "https://trekerrodu.com.ua") {
   const path = normalizePublicAnalyticsPath(pathname);
   if (!path) return null;
-  let safeOrigin;
-  try {
-    safeOrigin = new URL(origin).origin;
-  } catch {
-    return null;
-  }
+  const safeOrigin = safeWebOrigin(origin);
+  if (!safeOrigin) return null;
   return Object.freeze({
     pagePath: path,
     pageLocation: `${safeOrigin}${path}`,
@@ -44,8 +51,10 @@ export function publicAnalyticsContext(pathname, origin = "https://trekerrodu.co
 export function safeAnalyticsReferrer(referrer, siteOrigin = "https://trekerrodu.com.ua") {
   if (typeof referrer !== "string" || !referrer) return "";
   try {
-    const site = new URL(siteOrigin).origin;
+    const site = safeWebOrigin(siteOrigin);
+    if (!site) return "";
     const source = new URL(referrer);
+    if (source.protocol !== "https:" && source.protocol !== "http:") return "";
     if (source.origin !== site) return `${source.origin}/`;
     const path = normalizePublicAnalyticsPath(source.pathname);
     return path ? `${site}${path}` : "";

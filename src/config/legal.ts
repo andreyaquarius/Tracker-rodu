@@ -23,6 +23,7 @@ export const legalConfig = {
     auth: "Supabase Auth, Google Auth",
     storage: "Supabase Storage, Google Drive за підключенням користувача",
     ai: "Google Gemini через серверні функції або власний API-ключ користувача",
+    analytics: "Google Analytics 4",
     email: "Resend або SMTP-провайдер, якщо поштові повідомлення увімкнено",
     payments: null,
   },

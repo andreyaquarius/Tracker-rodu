@@ -39,6 +39,12 @@ verify_jwt = false
 [functions.search-places]
 verify_jwt = true
 
+# Receives only an anonymous per-document client/session identifier and a
+# bounded active-second count. The function also validates the caller's JWT in
+# code before relaying the aggregate to Google Analytics.
+[functions.track-authenticated-engagement]
+verify_jwt = true
+
 [functions.genehelp]
 verify_jwt = true
 

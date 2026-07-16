@@ -75,6 +75,17 @@ import {
   type SupabaseAccount,
   type SupabaseWorkspace,
 } from "./services/supabaseAuth";
+import {
+  activatePublicAnalyticsPage,
+  beginAnalyticsAuth,
+  cancelAnalyticsAuth,
+  reportPendingAuthSuccess,
+  suspendPublicAnalytics,
+} from "./services/siteAnalytics";
+import {
+  flushAndStopAuthenticatedEngagement,
+  setAuthenticatedEngagementEnabled,
+} from "./services/authenticatedEngagement";
 import { useSubscription } from "./hooks/useSubscription";
 import {
   loadAppFeatureFlags,
@@ -777,6 +788,30 @@ export default function App() {
     upsertCanonical(null);
   }, [account, route]);
 
+  useEffect(() => {
+    if (passwordRecovery) {
+      suspendPublicAnalytics();
+      return;
+    }
+    if (route.kind === "public") {
+      activatePublicAnalyticsPage(location.pathname);
+      return;
+    }
+    if (route.kind === "root" && !account && (authReady || !isSupabaseConfigured)) {
+      activatePublicAnalyticsPage("/");
+      return;
+    }
+    suspendPublicAnalytics();
+  }, [account, authReady, location.pathname, passwordRecovery, route.kind]);
+
+  useEffect(() => {
+    const privateAuthenticatedSession = Boolean(account) &&
+      !passwordRecovery &&
+      route.kind !== "root" &&
+      route.kind !== "public";
+    setAuthenticatedEngagementEnabled(privateAuthenticatedSession);
+  }, [account, passwordRecovery, route.kind]);
+
   const describeError = useCallback((error: unknown, fallback: string) => {
     if (subscriptionErrorCode(error)) return subscriptionErrorMessage(error);
     const timeoutMessage = databaseStatementTimeoutMessage(error);
@@ -818,10 +853,11 @@ export default function App() {
     if (!account || isAccountSigningIn || passwordRecovery) return;
 
     if (route.kind === "root") {
-      routerNavigate(
-        workspace ? projectDashboardPath(workspace.projectSlug) : "/projects",
-        { replace: true },
-      );
+      const privatePath = workspace
+        ? projectDashboardPath(workspace.projectSlug)
+        : "/projects";
+      suspendPublicAnalytics();
+      window.location.replace(privatePath);
       return;
     }
     if (route.kind === "unknown") {
@@ -925,7 +961,10 @@ export default function App() {
       }
 
       setIsAccountSigningIn(true);
+      const authAnalyticsPromise = reportPendingAuthSuccess().catch(() => false);
       workspaceSetupRef.current = (async () => {
+        await authAnalyticsPromise;
+        if (!active) return;
         setAccount(currentAccount);
         const fetchedWorkspaces = await listSupabaseWorkspaces(
           undefined,
@@ -2126,13 +2165,35 @@ export default function App() {
   const signIn = async () => {
     setLoginError("");
     setIsAccountSigningIn(true);
+    beginAnalyticsAuth("google");
     try {
       await signInWithSupabaseGoogle();
     } catch (error) {
+      cancelAnalyticsAuth();
       const message = error instanceof Error ? error.message : "Не вдалося увійти через Google.";
       setLoginError(message);
       setIsAccountSigningIn(false);
       notify(message, true);
+    }
+  };
+
+  const signInWithEmail = async (email: string, password: string) => {
+    beginAnalyticsAuth("email");
+    try {
+      await signInWithSupabaseEmail(email, password);
+    } catch (error) {
+      cancelAnalyticsAuth();
+      throw error;
+    }
+  };
+
+  const signUpWithEmail = async (name: string, email: string, password: string) => {
+    beginAnalyticsAuth("email");
+    try {
+      return await signUpWithSupabaseEmail(name, email, password);
+    } catch (error) {
+      cancelAnalyticsAuth();
+      throw error;
     }
   };
 
@@ -2147,6 +2208,7 @@ export default function App() {
 
   const signOutAccount = async () => {
     try {
+      await flushAndStopAuthenticatedEngagement().catch(() => undefined);
       clearGoogleDriveSession();
       await signOutFromSupabase();
       setAccount(null);
@@ -2478,8 +2540,8 @@ export default function App() {
     return (
       <LoginPage
         onGoogle={() => void signIn()}
-        onEmailSignIn={signInWithSupabaseEmail}
-        onEmailSignUp={signUpWithSupabaseEmail}
+        onEmailSignIn={signInWithEmail}
+        onEmailSignUp={signUpWithEmail}
         onPasswordResetRequest={requestSupabasePasswordReset}
         onPasswordUpdate={completePasswordRecovery}
         passwordRecovery={passwordRecovery}
