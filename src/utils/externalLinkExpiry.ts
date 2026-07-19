@@ -17,6 +17,8 @@ const directExpiryKeys = new Set([
   "se",
 ]);
 const MAX_DATE_MILLISECONDS = 8_640_000_000_000_000;
+const MYHERITAGE_PHOTO_HOSTNAME = "sites-cf.mhcache.com";
+const MAX_SIGNED_PATH_SEGMENT_LENGTH = 512;
 
 /** Reads only a deadline explicitly encoded by the source URL. */
 export function externalLinkExpiry(
@@ -51,6 +53,9 @@ export function externalLinkExpiry(
     const expiryMs = parseExpiryTimestamp(rawValue);
     if (expiryMs !== null) return knownExpiry(expiryMs, nowMs);
   }
+
+  const providerExpiryMs = parseMyHeritagePhotoExpiry(url);
+  if (providerExpiryMs !== null) return knownExpiry(providerExpiryMs, nowMs);
 
   return { kind: "unknown" };
 }
@@ -120,6 +125,52 @@ function parseCompactUtcTimestamp(value: string): number | null {
     Number(match[6]),
   );
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * MyHeritage photo exports place the signed deadline in a base64url path
+ * segment (`k=…&s=…&e=<unix-seconds>`) instead of the query string. Decode
+ * only the exact HTTPS CDN host and read only the deadline; signature values
+ * are never returned or logged.
+ */
+function parseMyHeritagePhotoExpiry(url: URL): number | null {
+  if (
+    url.protocol !== "https:"
+    || url.hostname.toLocaleLowerCase("en-US") !== MYHERITAGE_PHOTO_HOSTNAME
+    || (url.port !== "" && url.port !== "443")
+    || url.username
+    || url.password
+  ) {
+    return null;
+  }
+
+  for (const segment of url.pathname.split("/")) {
+    const decoded = decodeBase64UrlSegment(segment);
+    if (!decoded) continue;
+    const signed = new URLSearchParams(decoded);
+    if (!signed.has("k") || !signed.has("s") || !signed.has("e")) continue;
+    const expiryMs = parseExpiryTimestamp(signed.get("e")?.trim() ?? "");
+    if (expiryMs !== null) return expiryMs;
+  }
+  return null;
+}
+
+function decodeBase64UrlSegment(value: string): string {
+  if (
+    value.length < 8
+    || value.length > MAX_SIGNED_PATH_SEGMENT_LENGTH
+    || !/^[a-z0-9_-]+$/iu.test(value)
+  ) {
+    return "";
+  }
+  const standard = value.replace(/-/gu, "+").replace(/_/gu, "/");
+  const padded = standard.padEnd(standard.length + ((4 - (standard.length % 4)) % 4), "=");
+  try {
+    const decoded = atob(padded);
+    return /^[\x20-\x7e]+$/u.test(decoded) ? decoded : "";
+  } catch {
+    return "";
+  }
 }
 
 function ukrainianDayUnit(value: number): string {

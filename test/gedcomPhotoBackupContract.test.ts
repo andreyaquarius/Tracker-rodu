@@ -18,6 +18,9 @@ test("photo backup UI requires explicit consent and explains the unknown lifetim
   assert.match(modal, /Не зараз/);
   assert.match(modal, /можуть перестати працювати будь-коли/);
   assert.match(modal, /Зрозуміло, завершити/);
+  assert.match(modal, /повторний імпорт цього самого файла їх не відновить/);
+  assert.match(modal, /Створіть у MyHeritage новий експорт із фото/);
+  assert.match(modal, /copyableGedcomPhotoBackupPlan/);
   assert.match(modal, /beforeunload/);
   assert.match(modal, /progress\.processed \/ progress\.total/);
   assert.doesNotMatch(modal, /disabled=\{busy \|\| \(!driveReady/);

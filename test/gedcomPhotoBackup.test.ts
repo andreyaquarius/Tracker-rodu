@@ -4,6 +4,7 @@ import type { Person, ScanAttachment } from "../src/types/index.ts";
 import {
   backupGedcomPhotosToGoogleDrive,
   buildGedcomPhotoBackupPlan,
+  copyableGedcomPhotoBackupPlan,
   applyPersonPhotoBackups,
   attachLocalGedcomPhotoFiles,
   redactExternalPhotoSource,
@@ -65,6 +66,27 @@ test("uses selected originals when a remote GEDCOM photo cannot be fetched", () 
   assert.equal(resolution.plan.candidates[0]?.localFile, selected);
 });
 
+test("does not request expired MyHeritage photo links and accepts a local replacement", () => {
+  const signedPath = "az10ZXN0JnM9c2lnJmU9MTc4NDEwOTYwMA";
+  const imported = person("incoming", [
+    photo("remote", `https://sites-cf.mhcache.com/e/1/${signedPath}/500070_portrait_A.jpg`),
+  ], "remote");
+  const plan = buildGedcomPhotoBackupPlan(
+    [imported],
+    {},
+    [],
+    Date.parse("2026-07-19T12:00:00.000Z"),
+  );
+
+  assert.equal(plan.expiredCount, 1);
+  assert.equal(plan.knownExpiryCount, 1);
+  assert.equal(copyableGedcomPhotoBackupPlan(plan).candidates.length, 0);
+
+  const selected = new File(["portrait"], "remote.jpg", { type: "image/jpeg" });
+  const resolution = attachLocalGedcomPhotoFiles(plan, [selected]);
+  assert.equal(copyableGedcomPhotoBackupPlan(resolution.plan).candidates.length, 1);
+});
+
 test("does not offer a photo already copied to Drive on a repeated import", () => {
   const source = "https://cdn.example/photo.jpg";
   const imported = person("new-id", [photo("incoming-photo", source)]);
@@ -99,6 +121,36 @@ test("signed URL credentials are ignored for identity and removed after Drive ba
   assert.equal(plan.alreadyStoredCount, 1);
   assert.equal(stored.sourceReference?.includes("Signature"), false);
   assert.match(stored.sourceReference ?? "", /id=42/u);
+});
+
+test("a refreshed MyHeritage link replaces the same photo by stable PHOTO_RIN", () => {
+  const expired = photo("old-photo", "https://sites-cf.mhcache.com/e/1/old/photo.jpg", {
+    sourceExternalId: "MH:P500070",
+  });
+  const refreshed = photo("new-photo", "https://sites-cf.mhcache.com/e/1/fresh/photo.jpg", {
+    sourceExternalId: "MH:P500070",
+  });
+  const plan = buildGedcomPhotoBackupPlan(
+    [person("incoming", [refreshed], "new-photo")],
+    { incoming: "canonical" },
+    [person("canonical", [expired], "old-photo")],
+  );
+
+  assert.equal(plan.candidates.length, 1);
+  assert.equal(plan.candidates[0]?.allowAppend, false);
+
+  const stored = storedPhoto(plan.candidates[0]!);
+  const applied = applyPersonPhotoBackups(person("canonical", [expired], "old-photo"), [{
+    source: refreshed,
+    stored,
+    requestedPrimary: true,
+    allowAppend: false,
+  }]);
+
+  assert.equal(applied.person.photos?.length, 1);
+  assert.equal(applied.person.photos?.[0]?.storage, "google-drive");
+  assert.equal(applied.person.photos?.[0]?.id, "old-photo");
+  assert.equal(applied.person.photos?.[0]?.sourceExternalId, "MH:P500070");
 });
 
 test("copies independent photos with partial failure and persists successful replacements", async () => {

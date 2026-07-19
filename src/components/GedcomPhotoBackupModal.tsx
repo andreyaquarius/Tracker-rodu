@@ -9,7 +9,10 @@ import type {
   GedcomPhotoBackupProgress,
   GedcomPhotoBackupResult,
 } from "../services/gedcomPhotoBackup.ts";
-import { attachLocalGedcomPhotoFiles } from "../services/gedcomPhotoBackup.ts";
+import {
+  attachLocalGedcomPhotoFiles,
+  copyableGedcomPhotoBackupPlan,
+} from "../services/gedcomPhotoBackup.ts";
 import { externalLinkExpiry, formatExternalLinkExpiry } from "../utils/externalLinkExpiry.ts";
 import { Modal } from "./Modal";
 
@@ -42,6 +45,10 @@ export function GedcomPhotoBackupModal({
     [localFiles, plan],
   );
   const effectivePlan = localSelection.plan;
+  const copyablePlan = useMemo(
+    () => copyableGedcomPhotoBackupPlan(effectivePlan),
+    [effectivePlan],
+  );
   const busy = phase === "authorizing" || phase === "copying";
   const expiryNotice = useMemo(() => expirySummary(effectivePlan), [effectivePlan]);
 
@@ -72,7 +79,7 @@ export function GedcomPhotoBackupModal({
   };
 
   const startBackup = async (
-    retryPlan = effectivePlan,
+    retryPlan = copyablePlan,
     previousResult: GedcomPhotoBackupResult | null = null,
   ) => {
     if (!onBackup || !retryPlan.candidates.length) return;
@@ -128,10 +135,16 @@ export function GedcomPhotoBackupModal({
                 Їх можна додати пізніше вручну з профілів осіб.
               </p>
             ) : null}
+            {effectivePlan.expiredCount ? (
+              <p>
+                У цьому GEDCOM прострочено {effectivePlan.expiredCount.toLocaleString("uk-UA")} посилань на фото.
+                Сам файл містить лише адреси, а не зображення, тому повторний імпорт цього самого файла їх не відновить.
+              </p>
+            ) : null}
             <p>Метадані й початкові адреси залишаться у профілях, але саме зображення без Drive-копії не гарантується.</p>
             <p>Кеш браузера не має гарантованого строку зберігання й може бути очищений браузером або користувачем у будь-який момент.</p>
             <div className="details-actions">
-              {effectivePlan.candidates.length && onBackup ? (
+              {copyablePlan.candidates.length && onBackup ? (
                 <button type="button" className="button button-primary" onClick={() => setPhase("offer")}>
                   Повернутися і зберегти фото
                 </button>
@@ -172,7 +185,7 @@ export function GedcomPhotoBackupModal({
         ) : (
           <>
             <div className="gedcom-photo-backup__stats">
-              <PhotoStat value={effectivePlan.candidates.length} label="можна скопіювати" />
+              <PhotoStat value={copyablePlan.candidates.length} label="можна скопіювати" />
               <PhotoStat value={effectivePlan.personCount} label="осіб із фото" />
               <PhotoStat value={effectivePlan.missingLocalCount} label="потребують файла" />
               <PhotoStat value={effectivePlan.alreadyStoredCount} label="вже у Drive" />
@@ -193,8 +206,18 @@ export function GedcomPhotoBackupModal({
               {expiryNotice ? <p>{expiryNotice}</p> : null}
               {effectivePlan.expiredCount ? (
                 <p className="form-error">
-                  Для {effectivePlan.expiredCount.toLocaleString("uk-UA")} фото зазначений строк уже минув.
-                  Спробуємо використати локальну кешовану копію, якщо вона ще є.
+                  Для {effectivePlan.expiredCount.toLocaleString("uk-UA")} фото строк дії посилань MyHeritage уже минув.
+                  GEDCOM містить лише посилання, а не самі зображення. Створіть у MyHeritage новий експорт із фото
+                  та імпортуйте щойно завантажений файл одразу — тоді застосунок пакетно збереже доступні фото у Google Drive.
+                  {" "}
+                  <a
+                    href="https://www.myheritage.com/help/en/articles/12851303-do-my-photos-transfer-with-a-gedcom-file"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Чому GEDCOM не містить самих фото
+                  </a>
+                  .
                 </p>
               ) : null}
               {effectivePlan.unsupportedHttpCount ? (
@@ -294,7 +317,7 @@ export function GedcomPhotoBackupModal({
             </details>
 
             <div className="details-actions">
-              {effectivePlan.candidates.length && onBackup ? (
+              {copyablePlan.candidates.length && onBackup ? (
                 <button
                   type="button"
                   className="button button-primary"
@@ -303,11 +326,11 @@ export function GedcomPhotoBackupModal({
                 >
                   {busy
                     ? "Зберігаємо…"
-                    : `${isGoogleDriveAuthorized() ? "Зберегти" : "Підключити Google Drive і зберегти"} ${effectivePlan.candidates.length.toLocaleString("uk-UA")} фото`}
+                    : `${isGoogleDriveAuthorized() ? "Зберегти" : "Підключити Google Drive і зберегти"} ${copyablePlan.candidates.length.toLocaleString("uk-UA")} фото`}
                 </button>
               ) : null}
               <button type="button" className="button button-secondary" disabled={busy} onClick={closeDialog}>
-                {effectivePlan.candidates.length ? "Не зараз" : "Завершити"}
+                {copyablePlan.candidates.length ? "Не зараз" : "Завершити"}
               </button>
             </div>
           </>

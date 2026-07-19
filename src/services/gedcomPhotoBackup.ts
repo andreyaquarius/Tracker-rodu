@@ -124,7 +124,7 @@ export function buildGedcomPhotoBackupPlan(
       if (photo.sourceKind !== "gedcom") continue;
       peopleWithPhotos.add(personId);
       const sourceReference = photo.sourceReference?.trim() || photo.storagePath.trim();
-      const identity = normalizedPhotoSource(sourceReference);
+      const identity = photoSourceIdentity(photo);
       const candidateIdentity = `${personId}:${identity}`;
       if (seen.has(candidateIdentity)) continue;
       seen.add(candidateIdentity);
@@ -320,6 +320,24 @@ export async function backupGedcomPhotosToGoogleDrive(
   };
 }
 
+/**
+ * Never issue network requests for links whose explicit deadline has elapsed.
+ * A user-selected local original remains copyable even when its old source URL
+ * is expired.
+ */
+export function copyableGedcomPhotoBackupPlan(
+  plan: GedcomPhotoBackupPlan,
+): GedcomPhotoBackupPlan {
+  const candidates = plan.candidates.filter((candidate) => (
+    Boolean(candidate.localFile)
+    || candidate.expiry.kind === "unknown"
+    || !candidate.expiry.expired
+  ));
+  return candidates.length === plan.candidates.length
+    ? plan
+    : { ...plan, candidates };
+}
+
 export function attachLocalGedcomPhotoFiles(
   plan: GedcomPhotoBackupPlan,
   selectedFiles: readonly File[],
@@ -411,11 +429,16 @@ export function applyPersonPhotoBackups(
     const sourceReference = replacement.source.sourceReference
       || replacement.source.storagePath;
     const sourceIdentity = normalizedPhotoSource(sourceReference);
+    const sourceExternalIdentity = normalizedPhotoExternalId(
+      replacement.source.sourceExternalId,
+    );
     const existingIndex = photos.findIndex((photo) => {
       const currentSourceIdentity = normalizedPhotoSource(
         photo.sourceReference || photo.storagePath,
       );
-      return currentSourceIdentity === sourceIdentity
+      const currentExternalIdentity = normalizedPhotoExternalId(photo.sourceExternalId);
+      return (Boolean(sourceExternalIdentity) && currentExternalIdentity === sourceExternalIdentity)
+        || currentSourceIdentity === sourceIdentity
         || (!currentSourceIdentity && photo.id === replacement.source.id);
     });
     if (existingIndex >= 0) {
@@ -521,7 +544,13 @@ function errorMessage(error: unknown): string {
 }
 
 function photoSourceIdentity(photo: ScanAttachment): string {
+  const externalIdentity = normalizedPhotoExternalId(photo.sourceExternalId);
+  if (externalIdentity) return `external:${externalIdentity}`;
   return normalizedPhotoSource(photo.sourceReference || photo.storagePath);
+}
+
+function normalizedPhotoExternalId(value: string | undefined): string {
+  return value?.trim().toLocaleLowerCase("en-US") ?? "";
 }
 
 export function normalizedPhotoSource(value: string): string {
@@ -581,15 +610,10 @@ function gedcomPhotoDeduplicationKey(
   photo: ScanAttachment,
   sourceReference: string,
 ): string {
-  let identity = normalizedPhotoSource(sourceReference);
-  if (photo.sourceExternalId) {
-    try {
-      const url = new URL(sourceReference);
-      identity = `${url.origin}${url.pathname}:${photo.sourceExternalId}`;
-    } catch {
-      identity = `${identity}:${photo.sourceExternalId}`;
-    }
-  }
+  const externalIdentity = normalizedPhotoExternalId(photo.sourceExternalId);
+  const identity = externalIdentity
+    ? `external:${externalIdentity}`
+    : normalizedPhotoSource(sourceReference);
   const scopedIdentity = `${personId}:${identity}`;
   return `gedcom-photo-${stableHash(scopedIdentity, 2166136261)}-${stableHash(scopedIdentity, 3335557771)}`;
 }
