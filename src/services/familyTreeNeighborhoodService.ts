@@ -11,7 +11,10 @@ import {
   createCachedNeighborhoodClient,
 } from "../features/family-tree-view/data/neighborhoodClient.ts";
 import { getSupabaseClient } from "./supabaseAuth.ts";
-import { databaseStatementTimeoutMessage } from "../utils/databaseErrors.ts";
+import {
+  databaseStatementTimeoutMessage,
+  isDatabaseStatementTimeout,
+} from "../utils/databaseErrors.ts";
 import { familyTreeNeighborhoodRpcCandidates } from "../utils/familyTreeNeighborhoodRpc.ts";
 import { selectFamilyTreeEntryPointForPerson } from "../utils/familyTreePersonNavigation.ts";
 
@@ -119,7 +122,11 @@ function createAbortableSupabaseRpcClient(): FamilyTreeNeighborhoodClient {
         );
         payload = await response.json().catch(() => undefined) as unknown;
         const hasFallback = index < rpcCandidates.length - 1;
-        if (response.ok || !hasFallback || !isMissingRpcFunction(payload)) break;
+        if (
+          response.ok ||
+          !hasFallback ||
+          (!isMissingRpcFunction(payload) && !isDatabaseStatementTimeout(payload))
+        ) break;
       }
       if (!response) throw new Error("Не вдалося розпочати завантаження родового дерева.");
       if (!response.ok) {

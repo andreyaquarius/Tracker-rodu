@@ -15,7 +15,7 @@ const hook = readFileSync(
   "utf8",
 );
 
-test("production neighborhood transport prefers v2 and falls back only for a missing RPC", () => {
+test("production neighborhood transport prefers v2 and falls back for a missing or timed-out RPC", () => {
   assert.deepEqual(familyTreeNeighborhoodRpcCandidates({}), [
     "get_family_tree_neighborhood_v2",
     "get_family_tree_neighborhood_v1",
@@ -24,8 +24,9 @@ test("production neighborhood transport prefers v2 and falls back only for a mis
     "get_family_tree_root_lineage_v1",
     "get_family_tree_neighborhood_v1",
   ]);
-  assert.match(service, /!hasFallback \|\| !isMissingRpcFunction\(payload\)/);
+  assert.match(service, /!isMissingRpcFunction\(payload\) && !isDatabaseStatementTimeout\(payload\)/);
   assert.match(service, /code === "PGRST202" \|\| code === "42883"/);
+  assert.match(service, /isDatabaseStatementTimeout/);
 });
 
 test("family expansion uses the dedicated scoped RPC and forwards cache guards", () => {

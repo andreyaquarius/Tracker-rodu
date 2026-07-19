@@ -59,8 +59,14 @@
 
 ## 3. Google Cloud (OAuth / Drive / API key)
 
-- 🔴 **OAuth client** (`VITE_GOOGLE_CLIENT_ID`): Authorized JavaScript origins і redirect URIs — лише `https://trekerrodu.com.ua` (+ staging за потреби).
-- 🟠 Drive scope лишити мінімальним — `drive.file` (вже так).
+- 🔴 Увімкнути **Google Drive API** у тому самому Google Cloud project, де створений OAuth client.
+- 🔴 **OAuth client** (`VITE_GOOGLE_CLIENT_ID`) має бути типу **Web application**. У `Authorized JavaScript origins` додати точні origins `https://trekerrodu.com.ua` (і окремо `https://www.trekerrodu.com.ua`, лише якщо цей хост реально використовується). Для GIS token popup redirect URI не потрібен.
+- 🔴 У **Google Auth Platform → Data Access** лишити тільки мінімальний scope `https://www.googleapis.com/auth/drive.file`. Не додавати `drive.readonly`, `drive` або інші scopes доступу до всього диска.
+- 🔴 У **Audience** вибрати `External`: для тестування додати конкретні адреси в `Test users`, а перед загальним доступом перевести застосунок у `In production`.
+- 🔴 У **Branding** вказати назву, support email, homepage `https://trekerrodu.com.ua`, privacy policy `https://trekerrodu.com.ua/privacy`, terms `https://trekerrodu.com.ua/terms`; додати й підтвердити authorized domain `trekerrodu.com.ua` через Search Console.
+- 🔴 У фронтенд і GitHub додавати лише публічний OAuth client ID як `VITE_GOOGLE_CLIENT_ID`. OAuth client secret у браузерній збірці не використовується й не повинен зберігатися у frontend secrets.
+- 🟠 Після видалення широкого scope тестові користувачі мають відкликати старий grant у Google Account Connections і підключити Drive повторно.
+- 🟠 Для Google Workspace адміністратор домену може окремо обмежувати OAuth-застосунки; у такому разі він має дозволити конкретний OAuth client ID і scope `drive.file` у **API controls**.
 - 🔴 **F-12:** ключ `VITE_GOOGLE_API_KEY` у локальному `.env` **не використовується** і відсутній у збірці. Видалити рядок із локального `.env`; якщо ключ реальний — **відкликати** або обмежити (HTTP-referrer + API restrictions) у Google Cloud.
 
 ---

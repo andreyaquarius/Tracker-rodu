@@ -1,7 +1,4 @@
-const GOOGLE_DRIVE_SCOPE = [
-  "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/drive.readonly",
-].join(" ");
+const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_DRIVE_API = "https://www.googleapis.com/drive/v3";
 const GOOGLE_DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const GOOGLE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
@@ -29,6 +26,7 @@ type GoogleAccounts = {
     initTokenClient: (options: {
       client_id: string;
       scope: string;
+      include_granted_scopes?: boolean;
       callback: (response: GoogleTokenResponse) => void;
       error_callback?: (error: { type?: string }) => void;
     }) => GoogleTokenClient;
@@ -685,6 +683,7 @@ async function requestGoogleDriveAccessToken(prompt: GoogleDrivePrompt): Promise
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: GOOGLE_DRIVE_SCOPE,
+      include_granted_scopes: false,
       callback: (response) => {
         window.clearTimeout(timeoutId);
         if (response.error || !response.access_token) {

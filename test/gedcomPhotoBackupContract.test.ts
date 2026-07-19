@@ -94,6 +94,16 @@ test("Drive uploads use a deterministic deduplication property", () => {
   assert.match(backup, /deduplicationKey: candidate\.deduplicationKey/);
 });
 
+test("Drive OAuth requests only the per-file scope and ignores old broad grants", () => {
+  const drive = source("../src/services/googleDriveStorage.ts");
+  assert.match(
+    drive,
+    /const GOOGLE_DRIVE_SCOPE = "https:\/\/www\.googleapis\.com\/auth\/drive\.file";/,
+  );
+  assert.doesNotMatch(drive, /drive\.readonly/);
+  assert.match(drive, /include_granted_scopes:\s*false/);
+});
+
 function source(relative: string): string {
   return readFileSync(new URL(relative, import.meta.url), "utf8");
 }
