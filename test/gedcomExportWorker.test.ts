@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import {
+  GEDCOM_EXPORT_ERROR_MAX_LENGTH,
+  formatGedcomExportError,
+} from "../supabase/functions/_shared/gedcomExportProcessor.ts";
 
 const edgeWorker = readFileSync(
   new URL("../supabase/functions/process-gedcom-exports/index.ts", import.meta.url),
@@ -75,9 +79,53 @@ test("shared processor pages tree data and records a durable completed or failed
   assert.match(processor, /gedcom_xref_maps/);
   assert.match(processor, /complete_gedcom_export/);
   assert.match(processor, /fail_gedcom_export/);
+  assert.match(processor, /const message = formatGedcomExportError\(error\)/);
+  assert.match(nodeRunner, /error: formatGedcomExportError\(jobError\)/);
+  assert.match(nodeRunner, /error: formatGedcomExportError\(emailWakeError\)/);
   assert.match(processor, /target_attempt:\s*job\.attempts/);
   assert.match(processor, /GEDCOM_EXPORT_LEASE_LOST/);
   assert.match(processor, /target_person_count:\s*projection\.nodes\.length/);
+});
+
+test("GEDCOM worker preserves useful structured failure details without leaking request data", () => {
+  const formatted = formatGedcomExportError({
+    code: "42703",
+    message: "column persons.privacy_status does not exist",
+    details: "The requested column could not be resolved.",
+    hint: "Check the deployed migrations.",
+    status: 400,
+    request: {
+      headers: { authorization: "Bearer must-never-appear" },
+      body: "private payload",
+    },
+  });
+  const parsed = JSON.parse(formatted) as Record<string, string>;
+
+  assert.equal(parsed.code, "42703");
+  assert.equal(parsed.message, "column persons.privacy_status does not exist");
+  assert.equal(parsed.details, "The requested column could not be resolved.");
+  assert.equal(parsed.hint, "Check the deployed migrations.");
+  assert.equal(parsed.status, "400");
+  assert.equal(Object.hasOwn(parsed, "request"), false);
+  assert.equal(Object.hasOwn(parsed, "headers"), false);
+  assert.doesNotMatch(formatted, /must-never-appear|private payload/i);
+});
+
+test("GEDCOM failure formatting redacts credentials and remains bounded valid JSON", () => {
+  const formatted = formatGedcomExportError(Object.assign(
+    new Error(`Upload failed with Bearer ${"a".repeat(80)} and sb_secret_${"b".repeat(80)} ${"x".repeat(5_000)}`),
+    {
+      code: "storage_error",
+      details: `authorization: sbp_${"c".repeat(80)} ${"d".repeat(5_000)}`,
+      internalContext: { serviceRoleKey: "do-not-log" },
+    },
+  ));
+
+  assert.ok(formatted.length <= GEDCOM_EXPORT_ERROR_MAX_LENGTH);
+  assert.doesNotThrow(() => JSON.parse(formatted));
+  assert.match(formatted, /\[REDACTED\]/);
+  assert.match(formatted, /\[REDACTED_KEY\]/);
+  assert.doesNotMatch(formatted, /sb_secret_|sbp_|do-not-log/);
 });
 
 test("export completion closes the project-deletion race and removes orphaned uploads", () => {
