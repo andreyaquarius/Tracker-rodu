@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { ScanAttachment } from "../types";
 import {
   attachAttachmentReference,
+  attachPickedGoogleDriveFiles,
   deleteScanFile,
   type DriveAttachmentPreview,
   type DriveAttachRange,
@@ -10,6 +11,7 @@ import {
   downloadScan,
   getScanBlob,
   inspectAttachmentReference,
+  isGoogleWorkspaceDriveFile,
   MAX_ATTACHMENT_SIZE_MB,
   openScan,
   saveScan,
@@ -18,6 +20,8 @@ import {
   authorizeGoogleDrive,
   isGoogleDriveAuthorized,
   prepareGoogleDriveAuthorization,
+  prepareGoogleDrivePicker,
+  pickGoogleDriveFiles,
 } from "../services/googleDriveStorage";
 
 type UploadProgressState = {
@@ -56,6 +60,7 @@ export function ScanAttachmentsEditor({
 }) {
   const [uploading, setUploading] = useState(false);
   const [driveReady, setDriveReady] = useState(false);
+  const [pickerReady, setPickerReady] = useState(false);
   const [driveConnected, setDriveConnected] = useState(isGoogleDriveAuthorized());
   const [error, setError] = useState("");
   const [driveAttachOpen, setDriveAttachOpen] = useState(false);
@@ -79,6 +84,20 @@ export function ScanAttachmentsEditor({
             ? loadError.message
             : "Не вдалося підготувати підключення хмарного сховища.",
         );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void prepareGoogleDrivePicker()
+      .then(() => {
+        if (active) setPickerReady(true);
+      })
+      .catch(() => {
+        // The button retries loading. A Picker failure must not block local uploads.
       });
     return () => {
       active = false;
@@ -189,11 +208,60 @@ export function ScanAttachmentsEditor({
     }
   };
 
+  const pickFromDrive = async () => {
+    if (uploadBlockedMessage) {
+      setError(uploadBlockedMessage);
+      return;
+    }
+    setAttachingDriveFile(true);
+    setError("");
+    try {
+      const remaining = maxFiles ? Math.max(0, maxFiles - scans.length) : undefined;
+      const selected = await pickGoogleDriveFiles({
+        multiselect: remaining === undefined || remaining > 1,
+        maxItems: remaining,
+        title: maxFiles === 1
+          ? "Оберіть документ із Google Drive"
+          : "Оберіть документи з Google Drive",
+      });
+      setPickerReady(true);
+      setDriveConnected(true);
+      if (!selected.length) return;
+
+      const existingDriveIds = new Set(
+        scans
+          .filter((scan) => scan.storage === "google-drive")
+          .map((scan) => scan.storagePath),
+      );
+      const unique = selected.filter((file, index) => (
+        !existingDriveIds.has(file.id)
+        && selected.findIndex((candidate) => candidate.id === file.id) === index
+      ));
+      if (!unique.length) {
+        setError("Усі вибрані файли вже прикріплено.");
+        return;
+      }
+      if (maxFiles && scans.length + unique.length > maxFiles) {
+        throw new Error(limitMessage || "Вибрано більше файлів, ніж дозволено для цього поля.");
+      }
+      const attached = await attachPickedGoogleDriveFiles(unique, policy);
+      onChange([...scans, ...attached]);
+    } catch (pickError) {
+      setError(pickError instanceof Error
+        ? pickError.message
+        : "Не вдалося вибрати файли з Google Drive.");
+    } finally {
+      setAttachingDriveFile(false);
+    }
+  };
+
   const remove = async (scan: ScanAttachment) => {
     if (!window.confirm(`Видалити файл «${scan.name}»?`)) return;
     setError("");
     try {
-      await deleteScanFile(scan, { force: policy === "finding" });
+      await deleteScanFile(scan, {
+        force: policy === "finding" && scan.deleteOnRemove !== false,
+      });
       onChange(scans.filter((item) => item.id !== scan.id));
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Не вдалося видалити файл.");
@@ -295,10 +363,22 @@ export function ScanAttachmentsEditor({
           <button
             type="button"
             className="button button-secondary scan-upload-button"
+            disabled={attachingDriveFile || limitReached}
+            onClick={() => void pickFromDrive()}
+          >
+            {attachingDriveFile
+              ? "Відкриття Google Drive…"
+              : pickerReady
+                ? "Обрати з Google Drive"
+                : "Підготовка Google Drive…"}
+          </button>
+          <button
+            type="button"
+            className="button button-secondary scan-upload-button"
             disabled={limitReached}
             onClick={() => setDriveAttachOpen(true)}
           >
-            З посилання
+            Зовнішнє посилання
           </button>
         </div>
         <input
@@ -549,7 +629,7 @@ function GoogleDriveAttachModal({
         </div>
         <div className="drive-attach-body">
           <label>
-            <span>Посилання на документ, сторінку або папку Google Drive</span>
+            <span>Посилання на зовнішній документ або сторінку джерела</span>
             <input
               value={fileReference}
               onChange={(event) => {
@@ -557,10 +637,14 @@ function GoogleDriveAttachModal({
                 setPreview(null);
                 setModalError("");
               }}
-              placeholder="https://uk.wikisource.org/wiki/... або https://drive.google.com/..."
+              placeholder="https://uk.wikisource.org/wiki/... або https://archive.org/..."
               autoFocus
             />
           </label>
+          <p className="form-help">
+            Приватний файл Google Drive додавайте кнопкою «Обрати з Google Drive» — так Google
+            надає застосунку доступ саме до вибраного файла.
+          </p>
           <button
             type="button"
             className="button button-secondary"
@@ -662,6 +746,7 @@ function ScanRow({
   const [preview, setPreview] = useState<ScanPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const unavailable = scan.availability === "missing-local";
+  const googleWorkspaceFile = isGoogleWorkspaceDriveFile(scan.mimeType);
 
   useEffect(() => {
     return () => {
@@ -684,6 +769,10 @@ function ScanRow({
   };
 
   const previewScan = async () => {
+    if (googleWorkspaceFile) {
+      await run(() => openScan(scan));
+      return;
+    }
     if (onPreview) {
       onPreview(scan, scanGroup);
       return;
@@ -720,6 +809,8 @@ function ScanRow({
               ? "Локальний файл GEDCOM недоступний"
               : scan.storage === "external-url"
               ? storageLabel(scan)
+              : googleWorkspaceFile
+                ? "Google Drive · файл Google Workspace"
               : `${formatFileSize(scan.size)} · ${storageLabel(scan)}`}
           </small>
           {unavailable && scan.statusMessage ? <em>{scan.statusMessage}</em> : null}
@@ -729,14 +820,20 @@ function ScanRow({
           {!unavailable ? (
             <>
               <button type="button" className="text-button" onClick={() => void previewScan()}>
-                {previewLoading ? "Відкриття…" : "Переглянути"}
+                {previewLoading
+                  ? "Відкриття…"
+                  : googleWorkspaceFile
+                    ? "Відкрити у Google"
+                    : "Переглянути"}
               </button>
-              <button type="button" className="text-button" onClick={() => void run(() => openScan(scan))}>
-                {scan.storage === "external-url" ? "Відкрити джерело" : "Google Drive"}
-              </button>
+              {!googleWorkspaceFile ? (
+                <button type="button" className="text-button" onClick={() => void run(() => openScan(scan))}>
+                  {scan.storage === "external-url" ? "Відкрити джерело" : "Google Drive"}
+                </button>
+              ) : null}
             </>
           ) : null}
-          {!unavailable && scan.storage !== "external-url" ? (
+          {!unavailable && scan.storage !== "external-url" && !googleWorkspaceFile ? (
             <button type="button" className="text-button" onClick={() => void run(() => downloadScan(scan))}>
               Завантажити
             </button>

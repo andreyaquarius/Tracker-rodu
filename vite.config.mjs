@@ -54,7 +54,7 @@ const CONTENT_SECURITY_POLICY = [
   "img-src 'self' data: https:",
   "font-src 'self' data:",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.googleapis.com https://content.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://www.gstatic.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com",
-  "frame-src https://accounts.google.com https://content.googleapis.com https://drive.google.com",
+  "frame-src https://accounts.google.com https://content.googleapis.com https://drive.google.com https://docs.google.com",
 ].join("; ");
 
 function injectSecurityMeta() {

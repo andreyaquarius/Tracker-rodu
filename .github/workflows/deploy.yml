@@ -39,6 +39,8 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_PICKER_API_KEY: ${{ secrets.VITE_GOOGLE_PICKER_API_KEY }}
+          VITE_GOOGLE_DRIVE_APP_ID: ${{ secrets.VITE_GOOGLE_DRIVE_APP_ID }}
         run: |
           if [ -z "$VITE_SUPABASE_URL" ]; then
             echo "::error::Repository secret VITE_SUPABASE_URL is missing."
@@ -52,6 +54,14 @@ jobs:
             echo "::error::Repository secret VITE_GOOGLE_CLIENT_ID is missing."
             exit 1
           fi
+          if [ -z "$VITE_GOOGLE_PICKER_API_KEY" ]; then
+            echo "::error::Repository secret VITE_GOOGLE_PICKER_API_KEY is missing."
+            exit 1
+          fi
+          if [ -z "$VITE_GOOGLE_DRIVE_APP_ID" ]; then
+            echo "::error::Repository secret VITE_GOOGLE_DRIVE_APP_ID is missing."
+            exit 1
+          fi
 
       - name: Typecheck
         run: npm run lint
@@ -62,6 +72,8 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_PICKER_API_KEY: ${{ secrets.VITE_GOOGLE_PICKER_API_KEY }}
+          VITE_GOOGLE_DRIVE_APP_ID: ${{ secrets.VITE_GOOGLE_DRIVE_APP_ID }}
         run: npm run build
 
       - name: Verify prerendered public output

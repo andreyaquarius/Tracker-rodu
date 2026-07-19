@@ -2,6 +2,7 @@ const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_DRIVE_API = "https://www.googleapis.com/drive/v3";
 const GOOGLE_DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const GOOGLE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+const GOOGLE_PICKER_SCRIPT = "https://apis.google.com/js/api.js";
 
 type StoredToken = {
   accessToken: string;
@@ -34,10 +35,80 @@ type GoogleAccounts = {
   };
 };
 
+type GooglePickerDocument = Record<string, unknown> & {
+  id?: string;
+  name?: string;
+  mimeType?: string;
+  url?: string;
+  sizeBytes?: number | string;
+  resourceKey?: string;
+};
+
+type GooglePickerResponse = Record<string, unknown> & {
+  action?: string;
+  docs?: GooglePickerDocument[];
+};
+
+type GooglePickerDocsView = {
+  setIncludeFolders: (includeFolders: boolean) => GooglePickerDocsView;
+  setSelectFolderEnabled: (enabled: boolean) => GooglePickerDocsView;
+  setMode: (mode: string) => GooglePickerDocsView;
+};
+
+type GooglePicker = {
+  setVisible: (visible: boolean) => void;
+};
+
+type GooglePickerBuilder = {
+  addView: (view: GooglePickerDocsView) => GooglePickerBuilder;
+  enableFeature: (feature: string) => GooglePickerBuilder;
+  setAppId: (appId: string) => GooglePickerBuilder;
+  setCallback: (callback: (response: GooglePickerResponse) => void) => GooglePickerBuilder;
+  setDeveloperKey: (apiKey: string) => GooglePickerBuilder;
+  setLocale: (locale: string) => GooglePickerBuilder;
+  setMaxItems: (maxItems: number) => GooglePickerBuilder;
+  setOAuthToken: (accessToken: string) => GooglePickerBuilder;
+  setOrigin: (origin: string) => GooglePickerBuilder;
+  setTitle: (title: string) => GooglePickerBuilder;
+  build: () => GooglePicker;
+};
+
+type GooglePickerApi = {
+  Action: { PICKED: string; CANCEL: string; ERROR: string };
+  DocsView: new (viewId: string) => GooglePickerDocsView;
+  DocsViewMode: { LIST: string };
+  Document: {
+    ID: string;
+    NAME: string;
+    MIME_TYPE: string;
+    URL: string;
+    SIZE_BYTES?: string;
+    RESOURCE_KEY?: string;
+  };
+  Feature: { MULTISELECT_ENABLED: string };
+  PickerBuilder: new () => GooglePickerBuilder;
+  Response: { ACTION: string; DOCUMENTS: string };
+  ViewId: { DOCS: string };
+};
+
+type GoogleApiLoader = {
+  load: (
+    api: string,
+    options: {
+      callback: () => void;
+      onerror: () => void;
+      timeout: number;
+      ontimeout: () => void;
+    },
+  ) => void;
+};
+
 type GoogleWindow = Window & {
   google?: {
-    accounts: GoogleAccounts;
+    accounts?: GoogleAccounts;
+    picker?: GooglePickerApi;
   };
+  gapi?: GoogleApiLoader;
 };
 
 type DriveFile = {
@@ -49,10 +120,13 @@ type DriveFile = {
   md5Checksum?: string;
   modifiedTime?: string;
   headRevisionId?: string;
+  resourceKey?: string;
   trashed?: boolean;
 };
 
 let googleScriptPromise: Promise<void> | null = null;
+let googlePickerScriptPromise: Promise<void> | null = null;
+let googlePickerApiPromise: Promise<void> | null = null;
 let tokenRequestPromise: Promise<string> | null = null;
 let activeToken: StoredToken | null = null;
 const folderPromises = new Map<string, Promise<string>>();
@@ -94,10 +168,134 @@ export interface GoogleDriveFileMetadata {
   md5Checksum?: string;
   modifiedTime?: string;
   headRevisionId?: string;
+  resourceKey?: string;
+}
+
+export interface GoogleDrivePickerFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  webViewLink: string;
+  resourceKey?: string;
+}
+
+export interface GoogleDrivePickerOptions {
+  multiselect?: boolean;
+  maxItems?: number;
+  title?: string;
 }
 
 export function prepareGoogleDriveAuthorization(): Promise<void> {
   return loadGoogleIdentityServices();
+}
+
+export function prepareGoogleDrivePicker(): Promise<void> {
+  return loadGooglePickerApi();
+}
+
+export async function pickGoogleDriveFiles(
+  options: GoogleDrivePickerOptions = {},
+): Promise<GoogleDrivePickerFile[]> {
+  const apiKey = import.meta.env.VITE_GOOGLE_PICKER_API_KEY?.trim() ?? "";
+  const appId = import.meta.env.VITE_GOOGLE_DRIVE_APP_ID?.trim() ?? "";
+  const missingConfiguration = [
+    !apiKey ? "VITE_GOOGLE_PICKER_API_KEY" : "",
+    !appId ? "VITE_GOOGLE_DRIVE_APP_ID" : "",
+  ].filter(Boolean);
+  if (missingConfiguration.length) {
+    throw new Error(
+      `Для вибору файлів із Google Drive не налаштовано ${missingConfiguration.join(" та ")}.`,
+    );
+  }
+
+  const [accessToken] = await Promise.all([
+    getGoogleDriveAccessToken(false, "consent"),
+    loadGooglePickerApi(),
+  ]);
+  const pickerApi = (window as GoogleWindow).google?.picker;
+  if (!pickerApi) {
+    throw new Error("Не вдалося завантажити вікно вибору файлів Google Drive.");
+  }
+
+  const docsView = new pickerApi.DocsView(pickerApi.ViewId.DOCS)
+    .setIncludeFolders(false)
+    .setSelectFolderEnabled(false)
+    .setMode(pickerApi.DocsViewMode.LIST);
+
+  return new Promise<GoogleDrivePickerFile[]>((resolve, reject) => {
+    let settled = false;
+    const finish = (files: GoogleDrivePickerFile[]) => {
+      if (settled) return;
+      settled = true;
+      resolve(files);
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    try {
+      let builder = new pickerApi.PickerBuilder()
+        .addView(docsView)
+        .setOAuthToken(accessToken)
+        .setDeveloperKey(apiKey)
+        .setAppId(appId)
+        .setOrigin(window.location.origin)
+        .setLocale("uk")
+        .setTitle(options.title?.trim() || "Оберіть документи з Google Drive")
+        .setCallback((response) => {
+          const action = String(
+            response[pickerApi.Response.ACTION]
+            ?? response.action
+            ?? "",
+          );
+          if (action === pickerApi.Action.CANCEL) {
+            finish([]);
+            return;
+          }
+          if (action === pickerApi.Action.ERROR) {
+            fail(new Error("Google Drive повідомив про помилку під час вибору файлів."));
+            return;
+          }
+          if (action !== pickerApi.Action.PICKED) return;
+
+          const rawDocuments = response[pickerApi.Response.DOCUMENTS] ?? response.docs;
+          const documents = Array.isArray(rawDocuments)
+            ? rawDocuments as GooglePickerDocument[]
+            : [];
+          const files = documents.flatMap((document) => {
+            const id = pickerStringField(document, pickerApi.Document.ID, "id");
+            if (!id) return [];
+            const resourceKeyField = pickerApi.Document.RESOURCE_KEY;
+            const resourceKey = resourceKeyField
+              ? pickerStringField(document, resourceKeyField, "resourceKey")
+              : pickerStringField(document, "resourceKey");
+            return [{
+              id,
+              name: pickerStringField(document, pickerApi.Document.NAME, "name") || "Файл Google Drive",
+              mimeType: pickerStringField(document, pickerApi.Document.MIME_TYPE, "mimeType") || "application/octet-stream",
+              size: pickerNumberField(document, pickerApi.Document.SIZE_BYTES, "sizeBytes"),
+              webViewLink: pickerStringField(document, pickerApi.Document.URL, "url")
+                || googleDriveViewUrl(id, resourceKey),
+              resourceKey: resourceKey || undefined,
+            }];
+          });
+          finish(files);
+        });
+      if (options.multiselect !== false) {
+        builder = builder.enableFeature(pickerApi.Feature.MULTISELECT_ENABLED);
+      }
+      const maxItems = Math.floor(options.maxItems ?? 0);
+      if (maxItems > 0) builder = builder.setMaxItems(maxItems);
+      builder.build().setVisible(true);
+    } catch (error) {
+      fail(error instanceof Error
+        ? error
+        : new Error("Не вдалося відкрити вікно вибору Google Drive."));
+    }
+  });
 }
 
 export function isGoogleDriveAuthorized(): boolean {
@@ -233,11 +431,15 @@ async function findFileByDeduplicationKey(
   };
 }
 
-export async function downloadFileFromGoogleDrive(fileId: string): Promise<Blob> {
+export async function downloadFileFromGoogleDrive(
+  fileId: string,
+  resourceKey?: string,
+): Promise<Blob> {
   let response: Response;
   try {
     response = await driveFetch(
-      `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media`,
+      `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+      { headers: googleDriveResourceKeyHeaders(fileId, resourceKey) },
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
@@ -251,9 +453,13 @@ export async function downloadFileFromGoogleDrive(fileId: string): Promise<Blob>
   return response.blob();
 }
 
-export async function getGoogleDriveFileMetadata(fileId: string): Promise<GoogleDriveFileMetadata> {
+export async function getGoogleDriveFileMetadata(
+  fileId: string,
+  resourceKey?: string,
+): Promise<GoogleDriveFileMetadata> {
   const response = await driveFetch(
-    `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,size,webViewLink,md5Checksum,modifiedTime,headRevisionId,trashed`,
+    `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,md5Checksum,modifiedTime,headRevisionId,resourceKey,trashed`,
+    { headers: googleDriveResourceKeyHeaders(fileId, resourceKey) },
   );
   const file = await response.json() as DriveFile & { trashed?: boolean };
   if (!file.id || file.trashed) {
@@ -267,14 +473,18 @@ export async function getGoogleDriveFileMetadata(fileId: string): Promise<Google
     name: file.name,
     mimeType: file.mimeType || "application/octet-stream",
     size: Number(file.size ?? 0),
-    webViewLink: file.webViewLink || googleDriveViewUrl(file.id),
+    webViewLink: file.webViewLink || googleDriveViewUrl(file.id, file.resourceKey || resourceKey),
     md5Checksum: file.md5Checksum,
     modifiedTime: file.modifiedTime,
     headRevisionId: file.headRevisionId,
+    resourceKey: file.resourceKey || resourceKey,
   };
 }
 
-export async function listGoogleDriveFolderFiles(folderId: string): Promise<GoogleDriveFileMetadata[]> {
+export async function listGoogleDriveFolderFiles(
+  folderId: string,
+  resourceKey?: string,
+): Promise<GoogleDriveFileMetadata[]> {
   const files: GoogleDriveFileMetadata[] = [];
   let pageToken = "";
   const escapedFolderId = escapeDriveQueryValue(folderId);
@@ -284,13 +494,18 @@ export async function listGoogleDriveFolderFiles(folderId: string): Promise<Goog
     const params = new URLSearchParams({
       q: query,
       spaces: "drive",
-      fields: "nextPageToken,files(id,name,mimeType,size,webViewLink,md5Checksum,modifiedTime,headRevisionId,trashed)",
+      includeItemsFromAllDrives: "true",
+      supportsAllDrives: "true",
+      fields: "nextPageToken,files(id,name,mimeType,size,webViewLink,md5Checksum,modifiedTime,headRevisionId,resourceKey,trashed)",
       pageSize: "1000",
       orderBy: "name_natural",
     });
     if (pageToken) params.set("pageToken", pageToken);
 
-    const response = await driveFetch(`${GOOGLE_DRIVE_API}/files?${params.toString()}`);
+    const response = await driveFetch(
+      `${GOOGLE_DRIVE_API}/files?${params.toString()}`,
+      { headers: googleDriveResourceKeyHeaders(folderId, resourceKey) },
+    );
     const result = await response.json() as { nextPageToken?: string; files?: DriveFile[] };
     for (const file of result.files ?? []) {
       if (!file.id || !file.name || file.trashed) continue;
@@ -299,10 +514,11 @@ export async function listGoogleDriveFolderFiles(folderId: string): Promise<Goog
         name: file.name,
         mimeType: file.mimeType || "application/octet-stream",
         size: Number(file.size ?? 0),
-        webViewLink: file.webViewLink || googleDriveViewUrl(file.id),
+        webViewLink: file.webViewLink || googleDriveViewUrl(file.id, file.resourceKey),
         md5Checksum: file.md5Checksum,
         modifiedTime: file.modifiedTime,
         headRevisionId: file.headRevisionId,
+        resourceKey: file.resourceKey,
       });
     }
     pageToken = result.nextPageToken ?? "";
@@ -321,13 +537,15 @@ export async function deleteFileFromGoogleDrive(fileId: string): Promise<void> {
   );
 }
 
-export function googleDriveViewUrl(fileId: string): string {
-  return `https://drive.google.com/open?id=${encodeURIComponent(fileId)}`;
+export function googleDriveViewUrl(fileId: string, resourceKey?: string): string {
+  const params = new URLSearchParams({ id: fileId });
+  if (isSafeGoogleDriveIdentifier(resourceKey)) params.set("resourcekey", resourceKey);
+  return `https://drive.google.com/open?${params.toString()}`;
 }
 
 export function clearGoogleDriveSession(): void {
   if (activeToken) {
-    (window as GoogleWindow).google?.accounts.oauth2.revoke?.(activeToken.accessToken);
+    (window as GoogleWindow).google?.accounts?.oauth2.revoke?.(activeToken.accessToken);
   }
   activeToken = null;
   tokenRequestPromise = null;
@@ -488,6 +706,46 @@ function safeDriveAppProperty(value: string): string {
 
 function escapeDriveQueryValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function isSafeGoogleDriveIdentifier(value: string | undefined): value is string {
+  return Boolean(value && /^[a-zA-Z0-9_-]+$/.test(value));
+}
+
+function googleDriveResourceKeyHeaders(
+  fileId: string,
+  resourceKey?: string,
+): HeadersInit | undefined {
+  if (!isSafeGoogleDriveIdentifier(fileId) || !isSafeGoogleDriveIdentifier(resourceKey)) {
+    return undefined;
+  }
+  return {
+    "X-Goog-Drive-Resource-Keys": `${fileId}/${resourceKey}`,
+  };
+}
+
+function pickerStringField(
+  document: GooglePickerDocument,
+  ...keys: Array<string | undefined>
+): string {
+  for (const key of keys) {
+    if (!key) continue;
+    const value = document[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function pickerNumberField(
+  document: GooglePickerDocument,
+  ...keys: Array<string | undefined>
+): number {
+  for (const key of keys) {
+    if (!key) continue;
+    const value = Number(document[key]);
+    if (Number.isFinite(value) && value >= 0) return value;
+  }
+  return 0;
 }
 
 async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
@@ -668,19 +926,20 @@ async function requestGoogleDriveAccessToken(prompt: GoogleDrivePrompt): Promise
   if (!clientId) {
     throw new Error("У налаштуваннях застосунку не вказано VITE_GOOGLE_CLIENT_ID.");
   }
-  if (!(window as GoogleWindow).google?.accounts.oauth2) {
+  if (!(window as GoogleWindow).google?.accounts?.oauth2) {
     await loadGoogleIdentityServices();
   }
   const google = (window as GoogleWindow).google;
-  if (!google) {
+  if (!google?.accounts?.oauth2) {
     throw new Error("Не вдалося завантажити сервіс авторизації Google.");
   }
+  const oauth2 = google.accounts.oauth2;
 
   return new Promise<string>((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
       reject(new Error("Підключення хмарного сховища не було завершено."));
     }, 90_000);
-    const client = google.accounts.oauth2.initTokenClient({
+    const client = oauth2.initTokenClient({
       client_id: clientId,
       scope: GOOGLE_DRIVE_SCOPE,
       include_granted_scopes: false,
@@ -717,7 +976,7 @@ async function requestGoogleDriveAccessToken(prompt: GoogleDrivePrompt): Promise
 }
 
 function loadGoogleIdentityServices(): Promise<void> {
-  if ((window as GoogleWindow).google?.accounts.oauth2) return Promise.resolve();
+  if ((window as GoogleWindow).google?.accounts?.oauth2) return Promise.resolve();
   if (googleScriptPromise) return googleScriptPromise;
   googleScriptPromise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(
@@ -737,6 +996,83 @@ function loadGoogleIdentityServices(): Promise<void> {
     document.head.appendChild(script);
   });
   return googleScriptPromise;
+}
+
+function loadGooglePickerApi(): Promise<void> {
+  if ((window as GoogleWindow).google?.picker) return Promise.resolve();
+  if (googlePickerApiPromise) return googlePickerApiPromise;
+  googlePickerApiPromise = loadGooglePickerScript()
+    .then(() => new Promise<void>((resolve, reject) => {
+      const googleWindow = window as GoogleWindow;
+      if (googleWindow.google?.picker) {
+        resolve();
+        return;
+      }
+      if (!googleWindow.gapi?.load) {
+        reject(new Error("Не вдалося завантажити Google Picker API."));
+        return;
+      }
+      googleWindow.gapi.load("picker", {
+        callback: () => {
+          if (googleWindow.google?.picker) {
+            resolve();
+          } else {
+            reject(new Error("Google Picker API завантажився некоректно."));
+          }
+        },
+        onerror: () => reject(new Error("Не вдалося завантажити Google Picker API.")),
+        timeout: 20_000,
+        ontimeout: () => reject(new Error("Перевищено час очікування Google Picker API.")),
+      });
+    }))
+    .catch((error) => {
+      googlePickerApiPromise = null;
+      throw error;
+    });
+  return googlePickerApiPromise;
+}
+
+function loadGooglePickerScript(): Promise<void> {
+  if ((window as GoogleWindow).gapi?.load) return Promise.resolve();
+  if (googlePickerScriptPromise) return googlePickerScriptPromise;
+  googlePickerScriptPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      `script[src="${GOOGLE_PICKER_SCRIPT}"]`,
+    );
+    const handleLoad = () => {
+      if ((window as GoogleWindow).gapi?.load) {
+        resolve();
+      } else {
+        document.querySelector<HTMLScriptElement>(
+          `script[src="${GOOGLE_PICKER_SCRIPT}"]`,
+        )?.remove();
+        reject(new Error("Не вдалося ініціалізувати Google Picker API."));
+      }
+    };
+    const handleError = () => {
+      existing?.remove();
+      reject(new Error("Не вдалося завантажити Google Picker API."));
+    };
+    if (existing) {
+      existing.addEventListener("load", handleLoad, { once: true });
+      existing.addEventListener("error", handleError, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = GOOGLE_PICKER_SCRIPT;
+    script.async = true;
+    script.defer = true;
+    script.onload = handleLoad;
+    script.onerror = () => {
+      script.remove();
+      reject(new Error("Не вдалося завантажити Google Picker API."));
+    };
+    document.head.appendChild(script);
+  }).catch((error) => {
+    googlePickerScriptPromise = null;
+    throw error;
+  });
+  return googlePickerScriptPromise;
 }
 
 async function googleApiError(response: Response): Promise<string> {

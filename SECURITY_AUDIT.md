@@ -49,8 +49,8 @@
   │           ├─ review-hypothesis                            (service_role + Gemini)
   │           └─ send-project-invitation                     (anon-scoped + Resend)
   │
-  ├─ Google Identity Services (OAuth токен, scope drive.file)
-  │     └─ Google Drive API → вкладення зберігаються в Drive КОЖНОГО користувача
+  ├─ Google Identity Services + Picker (OAuth токен, scope drive.file)
+  │     └─ Google Drive API → файли, створені застосунком або явно вибрані користувачем
   │
   └─ localStorage: сесія Supabase + кеш проєктних даних (tracker-rodu-project-*)
 ```
@@ -59,7 +59,7 @@
 
 1. **Модель тенант-ізоляції — проєкт.** Кожна доменна таблиця має `project_id`. Доступ визначається членством у `project_members` (ролі `owner` / `editor` / `viewer`). Це коректно реалізовано через RLS.
 2. **Клієнт використовує лише публічний ключ** `sb_publishable_…` (новий формат Supabase). `service_role` живе тільки в Edge Functions. Підтверджено скануванням `dist/`.
-3. **Вкладення зберігаються в Google Drive користувача** (`scope=drive.file` — застосунок бачить лише власні файли). Бакети Supabase Storage `project-attachments` / `project-backups` приватні; бакет бекапів доступний лише власнику проєкту.
+3. **Вкладення зберігаються в Google Drive користувача** (`scope=drive.file` — застосунок бачить створені ним або явно вибрані через Google Picker файли). Бакети Supabase Storage `project-attachments` / `project-backups` приватні; бакет бекапів доступний лише власнику проєкту.
 4. **Серверна логіка мінімальна** — 6 Edge Functions. SSR немає, тому низка класів вразливостей (SSTI, серверний SSRF з боку застосунку) переважно не застосовна; основна поверхня — RLS, клієнтський XSS і Edge Functions.
 
 ---
@@ -126,7 +126,7 @@
 
 ### 3.6 Зовнішні інтеграції
 
-- **Google Identity Services / Drive API** (`drive.file`) — зберігання вкладень у Drive користувача.
+- **Google Identity Services / Picker / Drive API** (`drive.file`) — створення вкладень і робота з файлами, які користувач явно вибрав.
 - **Google Gemini** (`generativelanguage.googleapis.com`) — серверний виклик з `review-hypothesis`/`test-ai-key` ключем користувача.
 - **Resend** (`api.resend.com`) — листи-запрошення.
 - **GitHub Pages** — хостинг, домен `trekerrodu.com.ua`.
