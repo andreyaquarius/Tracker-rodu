@@ -404,6 +404,8 @@ function sourceDraftFromRecord(record: GedcomRecord, lineLookup: GedcomLineLooku
     author: multilineChildValue(lineLookup, children, "AUTH"),
     publication: multilineChildValue(lineLookup, children, "PUBL"),
     text: multilineChildValue(lineLookup, children, "TEXT"),
+    url: multilineChildValue(lineLookup, children, "_URL")
+      || multilineChildValue(lineLookup, children, "WWW"),
     sourceType: decodeGedcomAtSigns(childValueByTag(children, "_TYPE")),
     mediaType: decodeGedcomAtSigns(childValueByTag(children, "_MEDI")),
     rin: decodeGedcomAtSigns(childValueByTag(children, "RIN")),
@@ -418,6 +420,8 @@ function citationDraftFromLine(lineLookup: GedcomLineLookup, line: GedcomLine): 
   return {
     sourceXref: line.value,
     page: multilineChildValue(lineLookup, children, "PAGE"),
+    url: multilineChildValue(lineLookup, children, "_URL")
+      || multilineChildValue(lineLookup, children, "WWW"),
     eventType: eventLine ? collectGedcomMultilineValue(lineLookup, eventLine) : "",
     role: eventLine ? multilineChildValue(lineLookup, childrenOfLine(lineLookup, eventLine), "ROLE") : "",
     quality: decodeGedcomAtSigns(childValueByTag(children, "QUAY")),

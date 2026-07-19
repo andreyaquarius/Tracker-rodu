@@ -1,5 +1,6 @@
 import type { ScanAttachment } from "../types";
 import type { GedcomImportMediaDraft } from "../types/familyTree";
+import { externalLinkExpiry } from "./externalLinkExpiry.ts";
 
 export interface PersonPhotoState {
   photos: ScanAttachment[];
@@ -94,6 +95,7 @@ function gedcomMediaPhoto(
   const sourceReference = media.file.trim();
   const remote = /^https?:\/\//i.test(sourceReference);
   const format = normalizedImageFormat(media.format, sourceReference);
+  const expiry = remote ? externalLinkExpiry(sourceReference) : { kind: "unknown" as const };
   return {
     id: idFactory(),
     name: media.title.trim() || fileNameFromReference(sourceReference),
@@ -107,6 +109,9 @@ function gedcomMediaPhoto(
     availability: remote ? "available" : "missing-local",
     sourceKind: "gedcom",
     sourceReference,
+    ...(media.photoRin.trim() ? { sourceExternalId: media.photoRin.trim() } : {}),
+    ...(expiry.kind === "known" ? { sourceExpiresAt: expiry.expiresAt } : {}),
+    ...(remote ? { sourceDurability: expiry.kind === "known" ? "temporary" : "unknown" } : {}),
     ...(remote
       ? {}
       : {

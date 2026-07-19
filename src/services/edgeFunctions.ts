@@ -1,4 +1,4 @@
-import { getSupabaseClient } from "./supabaseAuth";
+import { getSupabaseClient } from "./supabaseAuth.ts";
 
 type EdgeFunctionOptions = {
   connectionErrorMessage?: string;

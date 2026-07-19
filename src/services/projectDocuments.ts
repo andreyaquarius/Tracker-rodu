@@ -211,6 +211,22 @@ export async function getProjectDocument(
   return data ? documentFromRow(data as DocumentRow) : null;
 }
 
+export async function listProjectDocumentsByIds(
+  projectId: string,
+  documentIds: readonly string[],
+): Promise<DocumentRecord[]> {
+  const uniqueIds = [...new Set(documentIds.filter(Boolean))];
+  if (!uniqueIds.length) return [];
+  const { data, error } = await getSupabaseClient()
+    .from("documents")
+    .select(DOCUMENT_SELECT)
+    .eq("project_id", projectId)
+    .in("id", uniqueIds)
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data as DocumentRow[]).map(documentFromRow);
+}
+
 export async function getProjectYearMatrixRecord(
   projectId: string,
   recordId: string,

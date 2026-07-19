@@ -58,6 +58,7 @@ let googleScriptPromise: Promise<void> | null = null;
 let tokenRequestPromise: Promise<string> | null = null;
 let activeToken: StoredToken | null = null;
 const folderPromises = new Map<string, Promise<string>>();
+const deduplicatedUploadPromises = new Map<string, Promise<GoogleDriveUploadedFile>>();
 const GOOGLE_DRIVE_CONNECTION_KEY = "tracker-rodu-google-drive-connected";
 
 export interface GoogleDriveProjectTarget {
@@ -73,6 +74,8 @@ export interface GoogleDriveUploadProgress {
 
 export interface GoogleDriveUploadOptions {
   folderPath?: string[];
+  /** Stable, non-secret key used to resume an interrupted logical upload. */
+  deduplicationKey?: string;
   onProgress?: (progress: GoogleDriveUploadProgress) => void;
 }
 
@@ -123,16 +126,49 @@ export async function uploadFileToGoogleDrive(
   attachmentId: string,
   options: GoogleDriveUploadOptions = {},
 ): Promise<GoogleDriveUploadedFile> {
+  const deduplicationKey = safeDriveAppProperty(options.deduplicationKey ?? "");
+  if (!deduplicationKey) {
+    return uploadNewFileToGoogleDrive(target, file, attachmentId, options, "");
+  }
+
+  const promiseKey = `${target.projectId}:${deduplicationKey}`;
+  const active = deduplicatedUploadPromises.get(promiseKey);
+  if (active) return active;
+  const upload = uploadNewFileToGoogleDrive(
+    target,
+    file,
+    attachmentId,
+    options,
+    deduplicationKey,
+  ).finally(() => {
+    deduplicatedUploadPromises.delete(promiseKey);
+  });
+  deduplicatedUploadPromises.set(promiseKey, upload);
+  return upload;
+}
+
+async function uploadNewFileToGoogleDrive(
+  target: GoogleDriveProjectTarget,
+  file: File,
+  attachmentId: string,
+  options: GoogleDriveUploadOptions,
+  deduplicationKey: string,
+): Promise<GoogleDriveUploadedFile> {
   const projectFolderId = await ensureProjectFolder(target);
   const folderId = options.folderPath?.length
     ? await ensureNestedFolderPath(target, projectFolderId, options.folderPath)
     : projectFolderId;
+  if (deduplicationKey) {
+    const existing = await findFileByDeduplicationKey(target, deduplicationKey);
+    if (existing) return existing;
+  }
   const metadata = {
     name: file.name,
     parents: [folderId],
     appProperties: {
       trackerRoduProjectId: target.projectId,
       trackerRoduAttachmentId: attachmentId,
+      ...(deduplicationKey ? { trackerRoduDeduplicationKey: deduplicationKey } : {}),
     },
   };
   const boundary = `tracker-rodu-${attachmentId}`;
@@ -168,6 +204,32 @@ export async function uploadFileToGoogleDrive(
     md5Checksum: uploaded.md5Checksum,
     modifiedTime: uploaded.modifiedTime,
     headRevisionId: uploaded.headRevisionId,
+  };
+}
+
+async function findFileByDeduplicationKey(
+  target: GoogleDriveProjectTarget,
+  deduplicationKey: string,
+): Promise<GoogleDriveUploadedFile | null> {
+  const escapedProjectId = escapeDriveQueryValue(target.projectId);
+  const escapedKey = escapeDriveQueryValue(deduplicationKey);
+  const query = [
+    "trashed=false",
+    `appProperties has { key='trackerRoduProjectId' and value='${escapedProjectId}' }`,
+    `appProperties has { key='trackerRoduDeduplicationKey' and value='${escapedKey}' }`,
+  ].join(" and ");
+  const response = await driveFetch(
+    `${GOOGLE_DRIVE_API}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,webViewLink,md5Checksum,modifiedTime,headRevisionId)&pageSize=2`,
+  );
+  const result = await response.json() as { files?: DriveFile[] };
+  const existing = result.files?.[0];
+  if (!existing?.id) return null;
+  return {
+    id: existing.id,
+    webViewLink: existing.webViewLink || googleDriveViewUrl(existing.id),
+    md5Checksum: existing.md5Checksum,
+    modifiedTime: existing.modifiedTime,
+    headRevisionId: existing.headRevisionId,
   };
 }
 
@@ -416,6 +478,10 @@ function safeDriveFolderName(value: string): string {
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, " ")
     .slice(0, 140);
+}
+
+function safeDriveAppProperty(value: string): string {
+  return value.trim().replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 120);
 }
 
 function escapeDriveQueryValue(value: string): string {

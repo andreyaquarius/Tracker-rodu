@@ -3,6 +3,20 @@ export interface FamilyTreeFocusHistoryState {
   index: number;
 }
 
+export interface FamilyTreeScopedFocus {
+  treeId: string;
+  centralPersonId: string;
+}
+
+export function scopedFamilyTreeFocusPersonId(
+  focus: FamilyTreeScopedFocus | null,
+  selectedTreeId?: string | null,
+): string {
+  return focus && selectedTreeId && focus.treeId === selectedTreeId
+    ? focus.centralPersonId
+    : "";
+}
+
 export function pushFamilyTreeFocus(
   history: readonly string[],
   index: number,

@@ -14,6 +14,7 @@
     "test:db": "supabase test db",
     "test:e2e": "node --test \"test/e2e/**/*.test.ts\"",
     "benchmark:family-tree": "node --test test/familyTreePerformance.test.ts",
+    "benchmark:gedcom": "node scripts/benchmark-gedcom-export.ts",
     "functions:serve:index-finding": "supabase functions serve index-finding-fragment --env-file .env.functions.local --no-verify-jwt",
     "verify:pages": "node scripts/verify-pages-build.mjs",
     "qa:family-tree": "node scripts/family-tree-visual-qa.ts"

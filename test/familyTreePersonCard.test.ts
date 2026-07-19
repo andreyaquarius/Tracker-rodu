@@ -76,7 +76,7 @@ test("tree cards expose and explain the direct lineage fill without replacing ot
   assert.match(card, /data-lineage=\{node\.lineageRole \?\? "collateral"\}/);
   assert.match(card, /data-lineage-group=\{node\.lineageGroup\}/);
   assert.match(card, /прямий предок/);
-  assert.match(card, /фокусна особа/);
+  assert.match(card, /коренева особа/);
   assert.match(viewport, /Пряма гілка/);
   assert.match(viewport, /--ft-lineage-group-/);
   assert.match(semanticList, /data-lineage-group=\{node\.lineageGroup\}/);

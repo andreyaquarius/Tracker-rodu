@@ -23,6 +23,11 @@ export interface ScanAttachment {
   availability?: "available" | "missing-local";
   sourceKind?: "gedcom";
   sourceReference?: string;
+  /** Provider-side identifier such as GEDCOM _PHOTO_RIN. */
+  sourceExternalId?: string;
+  /** Exact expiry encoded by the original URL; never a guessed provider TTL. */
+  sourceExpiresAt?: string;
+  sourceDurability?: "temporary" | "unknown";
   statusMessage?: string;
 }
 
@@ -262,6 +267,7 @@ export interface Finding extends BaseEntity {
   description: string;
   file: string;
   page: string;
+  sourceUrl: string;
   summary: string;
   transcription: string;
   conclusion: string;

@@ -35,6 +35,10 @@ import { useProgressiveDescendantGraph } from "../features/family-tree-view/reac
 import { buildFamilyCorridorProjection } from "../features/family-tree-view/state/familyCorridorProjection";
 import { buildAllDescendantsProjection } from "../features/family-tree-view/state/allDescendantsProjection";
 import {
+  buildRootLineageProjection,
+  mergeRootLineageOverlay,
+} from "../features/family-tree-view/state/rootLineageProjection";
+import {
   graphVersionsConflict,
   mergeNeighborhood,
   permissionFingerprintsConflict,
@@ -67,8 +71,8 @@ import {
   createFamilyTreeFromLegacyImport,
   type FamilyTreeBuilderAction,
 } from "../services/familyTreeMutationService";
-import { getFamilyTreeGraph } from "../services/familyTreeGraphService";
-import { readLatestGedcomArchive, saveGedcomArchive } from "../services/gedcomArchiveService.ts";
+import { saveGedcomArchive } from "../services/gedcomArchiveService.ts";
+import { requestGedcomExport } from "../services/gedcomExportService.ts";
 import { registerGedcomImportTree } from "../services/gedcomImportOperation.ts";
 import { getScanPreviewSource } from "../services/scanStorage.ts";
 import {
@@ -78,14 +82,16 @@ import {
 } from "../services/familyTreeNeighborhoodService";
 import type {
   AppEntity,
-  DocumentRecord,
-  Finding,
   Person,
   PersonRelation,
   Research,
   ScanAttachment,
 } from "../types";
-import { moveFamilyTreeFocus, pushFamilyTreeFocus } from "../utils/familyTreeFocusHistory.ts";
+import {
+  moveFamilyTreeFocus,
+  pushFamilyTreeFocus,
+  scopedFamilyTreeFocusPersonId,
+} from "../utils/familyTreeFocusHistory.ts";
 import {
   DEFAULT_FAMILY_TREE_APPEARANCE,
   directLineageGroupingDepth,
@@ -96,14 +102,24 @@ import {
   type FamilyTreeAppearancePreferences,
 } from "../utils/familyTreeAppearance.ts";
 import { formatDateForDisplay } from "../utils/dateHelpers.ts";
-import { exportFamilyTreeGraphToGedcom } from "../utils/gedcom";
 import type {
   GedcomImportExecutionOptions,
   GedcomImportReconciliationPayload,
   GedcomImportReconciliationResult,
 } from "../utils/gedcomImportReconciliation.ts";
+import type {
+  GedcomPhotoBackupPlan,
+  GedcomPhotoBackupProgress,
+  GedcomPhotoBackupResult,
+} from "../services/gedcomPhotoBackup.ts";
 
 const FAMILY_TREE_GEDCOM_INPUT_ID = "family-tree-tools-gedcom-input";
+const HOME_LINEAGE_ANCESTOR_DEPTH = 16;
+const HOME_LINEAGE_MAX_NODES = 600;
+const GEDCOM_EXPORT_PRIVACY_CONFIRMATION =
+  "GEDCOM-файл може містити персональні та приватні дані, зокрема відомості про живих осіб. " +
+  "Файл буде сформовано у фоновому режимі, а захищене посилання для завантаження надійде на email вашого облікового запису. " +
+  "Продовжити експорт?";
 
 async function resolveFamilyTreePhotoSource(photo: ScanAttachment) {
   const source = await getScanPreviewSource(photo);
@@ -116,9 +132,9 @@ async function resolveFamilyTreePhotoSource(photo: ScanAttachment) {
 
 export interface ProductionFamilyTreePageProps {
   projectId?: string;
+  initialTreeId?: string;
+  initialFocusPersonId?: string;
   persons?: Person[];
-  documents?: DocumentRecord[];
-  findings?: Finding[];
   researches?: Research[];
   readOnly?: boolean;
   canCreate?: boolean;
@@ -131,25 +147,36 @@ export interface ProductionFamilyTreePageProps {
     input: GedcomImportReconciliationPayload,
     options?: GedcomImportExecutionOptions,
   ) => Promise<GedcomImportReconciliationResult | void>;
+  onBackupGedcomPhotos?: (
+    plan: GedcomPhotoBackupPlan,
+    onProgress: (progress: GedcomPhotoBackupProgress) => void,
+  ) => Promise<GedcomPhotoBackupResult>;
   onSaveRelation?: (
     relation: PersonRelation,
   ) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onOpenPerson?: (personId: string) => void;
+  onActiveContextChange?: (context: {
+    projectId: string;
+    treeId: string;
+    rootPersonId: string;
+  }) => void;
 }
 
 export function ProductionFamilyTreePage({
   projectId,
+  initialTreeId,
+  initialFocusPersonId,
   persons = [],
-  documents = [],
-  findings = [],
   researches = [],
   readOnly = false,
   canCreate = true,
   researchRequired = false,
   onImportRecords,
   onImportGedcom,
+  onBackupGedcomPhotos,
   onSaveRelation,
   onOpenPerson,
+  onActiveContextChange,
 }: ProductionFamilyTreePageProps) {
   const [entryPoints, setEntryPoints] = useState<FamilyTreeEntryPoint[]>([]);
   const [selectedTreeId, setSelectedTreeId] = useState("");
@@ -158,7 +185,10 @@ export function ProductionFamilyTreePage({
   const [reloadRevision, setReloadRevision] = useState(0);
   const [rootDialogOpen, setRootDialogOpen] = useState(false);
   const [treeToolsOpen, setTreeToolsOpen] = useState(false);
-  const [activeTreeFocusPersonId, setActiveTreeFocusPersonId] = useState("");
+  const [activeTreeFocus, setActiveTreeFocus] = useState<{
+    treeId: string;
+    centralPersonId: string;
+  } | null>(null);
   const [circularChartFocusPersonId, setCircularChartFocusPersonId] = useState("");
   const [treeToolsNotice, setTreeToolsNotice] = useState("");
   const [exportingGedcom, setExportingGedcom] = useState(false);
@@ -195,7 +225,7 @@ export function ProductionFamilyTreePage({
       .then((entries) => {
         if (!active) return;
         setEntryPoints(entries);
-        const requestedTreeId = preferredTreeIdRef.current;
+        const requestedTreeId = preferredTreeIdRef.current || initialTreeId?.trim() || "";
         preferredTreeIdRef.current = "";
         const preferred = entries.find((entry) => entry.id === requestedTreeId) ??
           entries.find((entry) => entry.isDefault) ??
@@ -212,12 +242,33 @@ export function ProductionFamilyTreePage({
     return () => {
       active = false;
     };
-  }, [projectId, reloadRevision]);
+  }, [initialTreeId, projectId, reloadRevision]);
 
   const selectedEntry = entryPoints.find((entry) => entry.id === selectedTreeId) ??
     entryPoints.find((entry) => entry.isDefault) ??
     entryPoints[0] ??
     null;
+  const routedFocusPersonId = !initialTreeId?.trim() || selectedEntry?.id === initialTreeId.trim()
+    ? initialFocusPersonId
+    : undefined;
+  const activeTreeFocusPersonId = scopedFamilyTreeFocusPersonId(activeTreeFocus, selectedEntry?.id);
+  const handleActiveTreeFocusPersonChange = useCallback((personId: string) => {
+    if (!selectedEntry?.id) return;
+    setActiveTreeFocus((current) => (
+      current?.treeId === selectedEntry.id && current.centralPersonId === personId
+        ? current
+        : { treeId: selectedEntry.id, centralPersonId: personId }
+    ));
+  }, [selectedEntry?.id]);
+
+  useEffect(() => {
+    if (!projectId || !selectedEntry?.id || !selectedEntry.rootPersonId) return;
+    onActiveContextChange?.({
+      projectId,
+      treeId: selectedEntry.id,
+      rootPersonId: selectedEntry.rootPersonId,
+    });
+  }, [onActiveContextChange, projectId, selectedEntry?.id, selectedEntry?.rootPersonId]);
 
   useEffect(() => {
     setTreeAppearance(
@@ -259,9 +310,14 @@ export function ProductionFamilyTreePage({
   );
 
   useEffect(() => {
-    setActiveTreeFocusPersonId(selectedEntry?.rootPersonId ?? "");
+    const initialVisualFocusPersonId = routedFocusPersonId?.trim() || selectedEntry?.rootPersonId || "";
+    setActiveTreeFocus(
+      selectedEntry?.id && initialVisualFocusPersonId
+        ? { treeId: selectedEntry.id, centralPersonId: initialVisualFocusPersonId }
+        : null,
+    );
     setCircularChartFocusPersonId("");
-  }, [selectedEntry?.id, selectedEntry?.rootPersonId]);
+  }, [routedFocusPersonId, selectedEntry?.id, selectedEntry?.rootPersonId]);
 
   async function createRoot(payload: FamilyTreePersonDialogSubmit) {
     if (!projectId || payload.action !== "create_root") return;
@@ -354,48 +410,41 @@ export function ProductionFamilyTreePage({
 
   async function exportGedcom() {
     if (!projectId || !selectedEntry?.id) return;
+    if (!window.confirm(GEDCOM_EXPORT_PRIVACY_CONFIRMATION)) {
+      setTreeToolsNotice("Експорт GEDCOM скасовано.");
+      return;
+    }
     setExportingGedcom(true);
-    setTreeToolsNotice("Готуємо повний GEDCOM-файл активного дерева…");
+    setTreeToolsNotice("Надсилаємо запит на фоновий експорт GEDCOM…");
     try {
-      const exportGraph = await getFamilyTreeGraph({
-        projectId,
-        treeId: selectedEntry.id,
-        rootPersonId: selectedEntry.rootPersonId || undefined,
-        mode: "family",
-        unlimitedDepth: true,
-        includeAssociations: true,
-        includeDisproven: true,
-        includePrivateLiving: true,
-        problemsMode: true,
-      });
-      const livingCount = exportGraph.nodes.filter((node) => node.isLiving).length;
-      if (livingCount > 0) {
-        const confirmed = window.confirm(
-          `GEDCOM-файл міститиме ${livingCount} живих осіб. У файлі буде позначка приватності RESN privacy. Перед завантаженням на сторонній ресурс перевірте його налаштування приватності. Експортувати файл?`,
+      const status = await requestGedcomExport(projectId, selectedEntry.id);
+      if ((status.status === "failed" && !status.retryable) || status.status === "expired") {
+        throw new Error(
+          status.error ||
+            (status.status === "expired"
+              ? "Термін дії попереднього експорту завершився. Спробуйте ще раз."
+              : "Фоновий експорт GEDCOM завершився з помилкою."),
         );
-        if (!confirmed) {
-          setTreeToolsNotice("Експорт GEDCOM скасовано.");
-          return;
-        }
       }
-      const result = exportFamilyTreeGraphToGedcom(exportGraph, {
-        sourceName: "Трекер Роду",
-        createdAt: new Date(),
-        preservedRecords: (await readLatestGedcomArchive({ projectId, treeId: selectedEntry.id }))?.records,
-        documents,
-        findings,
-      });
-      downloadTextFile(
-        result.text,
-        "family-tree.ged",
-        "text/plain;charset=utf-8",
-      );
-      setTreeToolsNotice(
-        `GEDCOM експортовано: ${exportGraph.nodes.length} осіб.` +
-          (result.warnings.length
-            ? ` Попереджень: ${result.warnings.length}.`
-            : ""),
-      );
+      if (status.status === "completed") {
+        if (status.emailStatus === "sent") {
+          setTreeToolsNotice(
+            "GEDCOM-файл уже готовий. Захищене посилання для завантаження надіслано на вашу email-адресу.",
+          );
+        } else if (status.emailStatus === "failed") {
+          setTreeToolsNotice(
+            "GEDCOM-файл уже готовий, але не вдалося надіслати email із посиланням. Спробуйте повторити запит пізніше.",
+          );
+        } else {
+          setTreeToolsNotice(
+            "GEDCOM-файл уже готовий. Email із захищеним посиланням готується до надсилання.",
+          );
+        }
+      } else {
+        setTreeToolsNotice(
+          "Запит на експорт GEDCOM прийнято. Файл формується у фоновому режимі; коли він буде готовий, захищене посилання для завантаження надійде на вашу email-адресу.",
+        );
+      }
     } catch (exportError) {
       setTreeToolsNotice(
         exportError instanceof Error
@@ -466,8 +515,9 @@ export function ProductionFamilyTreePage({
           appearance={treeAppearance}
           treeToolsOpen={treeToolsOpen}
           onOpenTreeTools={openTreeTools}
-          onFocusPersonChange={setActiveTreeFocusPersonId}
+          onFocusPersonChange={handleActiveTreeFocusPersonChange}
           onOpenPerson={onOpenPerson}
+          initialFocusPersonId={routedFocusPersonId}
         />
       ) : null}
 
@@ -479,6 +529,7 @@ export function ProductionFamilyTreePage({
           researchRequired={researchRequired}
           onImportPersons={(records) => onImportRecords("persons", records)}
           onImportGedcom={onImportGedcom}
+          onBackupGedcomPhotos={onBackupGedcomPhotos}
           onSaveRelation={onSaveRelation}
           onCreateFamilyTree={(input) => createTreeFromGedcom(input)}
         />
@@ -546,6 +597,7 @@ function LoadedFamilyTree({
   onOpenTreeTools,
   onFocusPersonChange,
   onOpenPerson,
+  initialFocusPersonId,
 }: {
   projectId: string;
   entryPoint: FamilyTreeEntryPoint;
@@ -557,11 +609,20 @@ function LoadedFamilyTree({
   onOpenTreeTools: () => void;
   onFocusPersonChange: (personId: string) => void;
   onOpenPerson?: (personId: string) => void;
+  initialFocusPersonId?: string;
 }) {
   const client = useMemo(() => createTrackerNeighborhoodClient(), []);
   const homePersonId = entryPoint.rootPersonId!;
-  const [focusHistory, setFocusHistory] = useState([homePersonId]);
-  const [focusIndex, setFocusIndex] = useState(0);
+  const requestedFocusPersonId = initialFocusPersonId?.trim() || homePersonId;
+  const [focusHistory, setFocusHistory] = useState(() => (
+    requestedFocusPersonId === homePersonId
+      ? [homePersonId]
+      : [homePersonId, requestedFocusPersonId]
+  ));
+  const [focusIndex, setFocusIndex] = useState(() => (
+    requestedFocusPersonId === homePersonId ? 0 : 1
+  ));
+  const appliedRouteFocusRef = useRef(requestedFocusPersonId);
   const focusPersonId = focusHistory[focusIndex] ?? homePersonId;
   useEffect(() => {
     onFocusPersonChange(focusPersonId);
@@ -597,6 +658,12 @@ function LoadedFamilyTree({
   const perspectiveBarRef = useRef<HTMLDivElement>(null);
   const viewSettingsRef = useDismissibleDetails();
   const mutations = useFamilyTreeMutations();
+  const homeLineageOverlayActive =
+    perspective.kind !== "pedigree" || focusPersonId !== homePersonId;
+  const homeLineageRequestKey = homeLineageOverlayActive
+    ? `${entryPoint.id}:${homePersonId}`
+    : "";
+  const [homeLineageEnabledKey, setHomeLineageEnabledKey] = useState("");
   const pedigreeNeighborhood = useFamilyTreeNeighborhood({
     client,
     treeId: entryPoint.id,
@@ -609,6 +676,46 @@ function LoadedFamilyTree({
     defaultVisibleFamilyPersonId: focusPersonId,
     includeCousinDescendantsByDefault:
       appearance.showCousinDescendantsByDefault,
+  });
+  useEffect(() => {
+    if (!homeLineageOverlayActive) {
+      setHomeLineageEnabledKey(current => current ? "" : current);
+      return;
+    }
+    const primaryGraphIsReady =
+      !pedigreeNeighborhood.loading &&
+      !pedigreeNeighborhood.error &&
+      pedigreeNeighborhood.graph.persons.some(person =>
+        person.id === focusPersonId
+      );
+    if (!primaryGraphIsReady) return;
+    setHomeLineageEnabledKey(current =>
+      current === homeLineageRequestKey ? current : homeLineageRequestKey
+    );
+  }, [
+    focusPersonId,
+    homeLineageOverlayActive,
+    homeLineageRequestKey,
+    pedigreeNeighborhood.error,
+    pedigreeNeighborhood.graph.persons,
+    pedigreeNeighborhood.loading,
+  ]);
+  const homeLineageRequestEnabled =
+    homeLineageOverlayActive &&
+    homeLineageEnabledKey === homeLineageRequestKey;
+  const homeLineageNeighborhood = useFamilyTreeNeighborhood({
+    client,
+    treeId: entryPoint.id,
+    focusPersonId: homePersonId,
+    enabled: homeLineageRequestEnabled,
+    sessionKey: homeLineageOverlayActive
+      ? `home-lineage:${entryPoint.id}:${homePersonId}`
+      : "home-lineage-idle",
+    structuralOnly: true,
+    ancestorDepth: HOME_LINEAGE_ANCESTOR_DEPTH,
+    descendantDepth: 0,
+    collateralDepth: 0,
+    maxNodes: HOME_LINEAGE_MAX_NODES,
   });
   const specialFocusPersonId = perspective.kind === "family-corridor"
     ? perspective.returnTo.focusPersonId
@@ -743,9 +850,10 @@ function LoadedFamilyTree({
         unionIds: perspective.scope.unionIds,
       },
       originalFocusPersonId: perspective.returnTo.focusPersonId,
+      lineageAnchorPersonId: homePersonId,
       activeNestedFamilies: activeNestedFamilyScopes,
     });
-  }, [activeNestedFamilyScopes, graph, perspective]);
+  }, [activeNestedFamilyScopes, graph, homePersonId, perspective]);
   const allDescendantsProjection = useMemo(
     () => perspective.kind === "all-descendants"
       ? buildAllDescendantsProjection({
@@ -756,27 +864,73 @@ function LoadedFamilyTree({
       : undefined,
     [graph, perspective],
   );
-  const displayedGraphWithoutPhotos = perspective.kind === "pedigree"
-    ? pedigreeGraph
-    : perspective.kind === "family-corridor"
-      ? corridorProjection?.graph ?? graph
-      : allDescendantsProjection?.graph ?? graph;
-  const displayedGraph = useMemo(
-    () => attachTrackerPersonPhotos(displayedGraphWithoutPhotos, persons),
-    [displayedGraphWithoutPhotos, persons],
-  );
   const layoutFocusPersonId = perspective.kind === "pedigree"
     ? focusPersonId
     : perspective.kind === "family-corridor"
       ? corridorProjection?.perspectiveFocusPersonId ?? perspective.returnTo.focusPersonId
       : perspective.rootPersonId;
-  const lineageTargetPersonId = perspective.kind === "all-descendants"
-    ? allDescendantsProjection?.focusLineagePersonIds.includes(
-        perspective.returnTo.focusPersonId,
-      )
-      ? perspective.returnTo.focusPersonId
-      : perspective.rootPersonId
-    : layoutFocusPersonId;
+  const perspectiveGraph = perspective.kind === "pedigree"
+    ? pedigreeGraph
+    : perspective.kind === "family-corridor"
+      ? corridorProjection?.graph ?? graph
+      : allDescendantsProjection?.graph ?? graph;
+  const rootLineageSourceGraph = useMemo(() => {
+    let source = graph;
+    if (perspective.kind !== "pedigree") {
+      source = mergeRootLineageOverlay(source, {
+        ...perspective.returnTo.pedigreeGraph,
+        continuations: [],
+        familyContinuations: [],
+      });
+    }
+    if (homeLineageOverlayActive) {
+      source = mergeRootLineageOverlay(source, {
+        ...homeLineageNeighborhood.graph,
+        continuations: [],
+        familyContinuations: [],
+      });
+    }
+    return source;
+  }, [
+    graph,
+    homeLineageNeighborhood.graph,
+    homeLineageOverlayActive,
+    perspective,
+  ]);
+  const rootLineageProjection = useMemo(
+    () => homeLineageOverlayActive
+      ? buildRootLineageProjection({
+          graph: rootLineageSourceGraph,
+          rootPersonId: homePersonId,
+          connectPersonId: layoutFocusPersonId,
+        })
+      : undefined,
+    [
+      homeLineageOverlayActive,
+      homePersonId,
+      layoutFocusPersonId,
+      rootLineageSourceGraph,
+    ],
+  );
+  // Perspective projectors intentionally discard unrelated records. Apply the
+  // persisted root closure afterwards so every mode receives the same fill
+  // source while retaining its own visual focus and continuations.
+  const displayedGraphWithoutPhotos = useMemo(
+    () => rootLineageProjection?.hasRoot
+      ? mergeRootLineageOverlay(
+          perspectiveGraph,
+          rootLineageProjection.graph,
+        )
+      : perspectiveGraph,
+    [perspectiveGraph, rootLineageProjection],
+  );
+  const displayedGraph = useMemo(
+    () => attachTrackerPersonPhotos(displayedGraphWithoutPhotos, persons),
+    [displayedGraphWithoutPhotos, persons],
+  );
+  // Camera/layout focus is temporary. The direct-lineage fill is a stable
+  // property of the persisted tree and is always rooted at its home person.
+  const lineageTargetPersonId = homePersonId;
   const lineagePalette = useMemo(
     () => directLineagePalette(appearance),
     [appearance],
@@ -822,6 +976,19 @@ function LoadedFamilyTree({
           32,
       )
     : MAX_RENDERED_FAMILY_TREE_NODES;
+  const geometryLineagePersonIds = useMemo(
+    () => [...new Set([
+      ...(perspective.kind === "all-descendants"
+        ? allDescendantsProjection?.focusLineagePersonIds ?? []
+        : []),
+      ...(rootLineageProjection?.bridgePersonIds ?? []),
+    ])],
+    [
+      allDescendantsProjection?.focusLineagePersonIds,
+      perspective.kind,
+      rootLineageProjection?.bridgePersonIds,
+    ],
+  );
   const layoutOptions = useMemo<FamilyTreeLayoutOptions>(() => ({
     focusPersonId: layoutFocusPersonId,
     layoutMode: perspective.kind === "all-descendants"
@@ -832,6 +999,9 @@ function LoadedFamilyTree({
     collateralDepth: MAX_RENDERED_FAMILY_TREE_NODES,
     maxVisibleNodes: logicalSceneNodeBudget,
     lineageTargetPersonId,
+    ...(rootLineageProjection?.bridgePersonIds.length
+      ? { lineageBridgePersonIds: rootLineageProjection.bridgePersonIds }
+      : {}),
     lineageGroupDepth: directLineageGroupingDepth(
       appearance.directLineageGrouping,
     ),
@@ -841,20 +1011,18 @@ function LoadedFamilyTree({
     // branch controls, especially on compact and touch layouts.
     showUnknownParentPlaceholders: false,
     activeParentSetByChild,
-    ...(perspective.kind === "all-descendants"
-      ? {
-          primaryLineagePersonIds:
-            allDescendantsProjection?.focusLineagePersonIds ?? [],
-        }
+    ...(geometryLineagePersonIds.length
+      ? { primaryLineagePersonIds: geometryLineagePersonIds }
       : {}),
   }), [
     activeParentSetByChild,
-    allDescendantsProjection?.focusLineagePersonIds,
     appearance.directLineageGrouping,
+    geometryLineagePersonIds,
     layoutFocusPersonId,
     lineageTargetPersonId,
     logicalSceneNodeBudget,
     perspective.kind,
+    rootLineageProjection?.bridgePersonIds,
     showAllParentSets,
   ]);
 
@@ -970,7 +1138,20 @@ function LoadedFamilyTree({
     if (isSpecialFamilyTreePerspective(perspective)) {
       restorePedigreeSnapshot(perspective.returnTo, true);
     } else {
-      pedigreeNeighborhood.reload();
+      reloadPedigreeView();
+    }
+  }
+
+  function reloadPedigreeView() {
+    setHomeLineageEnabledKey("");
+    pedigreeNeighborhood.reload();
+  }
+
+  function reloadSpecialView() {
+    if (perspective.kind === "all-descendants") {
+      progressiveDescendants.reload();
+    } else {
+      specialNeighborhood.reload();
     }
   }
 
@@ -1062,6 +1243,7 @@ function LoadedFamilyTree({
         unionIds: continuation.scope.unionIds,
       },
       originalFocusPersonId: perspective.returnTo.focusPersonId,
+      lineageAnchorPersonId: homePersonId,
     });
     void specialNeighborhood
       .expandFamilyContinuation(
@@ -1143,6 +1325,16 @@ function LoadedFamilyTree({
     setAnchorOccurrenceId(undefined);
   }
 
+  useEffect(() => {
+    const personId = initialFocusPersonId?.trim();
+    if (!personId || appliedRouteFocusRef.current === personId) return;
+    appliedRouteFocusRef.current = personId;
+    changeFocus(personId);
+    // Route focus is applied once per URL change. Mutable visual state is
+    // intentionally excluded so an ordinary tree interaction cannot replay it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFocusPersonId]);
+
   function moveFocusHistoryBy(delta: -1 | 1) {
     if (isSpecialFamilyTreePerspective(perspective)) return;
     const next = moveFamilyTreeFocus(focusHistory, focusIndex, delta);
@@ -1171,6 +1363,7 @@ function LoadedFamilyTree({
         unionIds: continuation.scope.unionIds,
       },
       originalFocusPersonId: focusPersonId,
+      lineageAnchorPersonId: homePersonId,
     });
     return new Set(prospectiveCorridor.graph.persons.map(person => person.id));
   }
@@ -1515,9 +1708,12 @@ function LoadedFamilyTree({
   const activeError = perspective.kind === "all-descendants"
     ? progressiveDescendants.error
     : neighborhood.error;
-  const activeReload = perspective.kind === "all-descendants"
-    ? progressiveDescendants.reload
-    : neighborhood.reload;
+  const activeReload = perspective.kind === "pedigree"
+      ? reloadPedigreeView
+      : reloadSpecialView;
+  const homeLineageError = homeLineageOverlayActive
+    ? homeLineageNeighborhood.error
+    : undefined;
   const specialPerspectiveLoadedPersons = perspective.kind === "all-descendants"
     ? progressiveDescendants.loadedPersons
     : specialNeighborhood.graph.persons.length;
@@ -1534,7 +1730,7 @@ function LoadedFamilyTree({
     neighborhood.error &&
     !graph.persons.length
   ) {
-    return <FamilyTreeErrorState message={neighborhood.error.message} onRetry={neighborhood.reload} />;
+    return <FamilyTreeErrorState message={neighborhood.error.message} onRetry={reloadPedigreeView} />;
   }
 
   return (
@@ -1636,10 +1832,23 @@ function LoadedFamilyTree({
         </button>
       </div>
 
-      {notice || activeError || layoutWarnings.length ? (
+      {notice || activeError || homeLineageError || layoutWarnings.length ? (
         <div className="family-tree-v2-status-strip">
           {notice ? <div className="family-tree-v2-notice" role="status">{notice}</div> : null}
           {activeError ? <div className="form-error" role="alert">{activeError.message}</div> : null}
+          {homeLineageError ? (
+            <div className="form-error family-tree-v2-root-lineage-error" role="alert">
+              <span>Не вдалося завантажити гілку кореневої особи: {homeLineageError.message}</span>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={homeLineageNeighborhood.reload}
+                disabled={homeLineageNeighborhood.loading}
+              >
+                {homeLineageNeighborhood.loading ? "Повторення…" : "Повторити гілку"}
+              </button>
+            </div>
+          ) : null}
           {layoutWarnings.length ? (
             <details className="family-tree-v2-warnings">
               <summary>Попередження схеми: {layoutWarnings.length}</summary>
@@ -2063,20 +2272,4 @@ function personLabel(person: Person | undefined): string {
 function nonNegativeInteger(value: string, fallback: number): number {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
-}
-
-function downloadTextFile(
-  text: string,
-  fileName: string,
-  mimeType: string,
-): void {
-  const blob = new Blob([text], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }

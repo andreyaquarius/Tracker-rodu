@@ -1382,6 +1382,13 @@ export function EntityModal({
   };
 
   const fieldRequired = (field: FieldConfig) => {
+    if (
+      config.collection === "findings"
+      && field.key === "participants"
+      && String(form.findingType ?? "").trim().toLocaleLowerCase("uk") === "джерело"
+    ) {
+      return false;
+    }
     if (config.collection === "archiveRequests" && field.key === "requestDate") {
       const status = String(form.status ?? "чернетка").trim() || "чернетка";
       return status !== "чернетка";
@@ -1400,6 +1407,7 @@ export function EntityModal({
       : [];
     if (
       config.collection === "findings" &&
+      String(form.findingType ?? "").trim().toLocaleLowerCase("uk") !== "джерело" &&
       !participants.some((participant) => participant.name.trim())
     ) {
       window.alert("Додайте принаймні одну особу, згадану в записі.");

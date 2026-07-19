@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { familyTreeNeighborhoodRpcCandidates } from "../src/utils/familyTreeNeighborhoodRpc.ts";
 
 const service = readFileSync(
   new URL("../src/services/familyTreeNeighborhoodService.ts", import.meta.url),
@@ -15,12 +16,15 @@ const hook = readFileSync(
 );
 
 test("production neighborhood transport prefers v2 and falls back only for a missing RPC", () => {
-  const v2 = service.indexOf("get_family_tree_neighborhood_v2");
-  const v1 = service.indexOf("get_family_tree_neighborhood_v1");
-
-  assert.ok(v2 >= 0);
-  assert.ok(v1 > v2);
-  assert.match(service, /!response\.ok && isMissingRpcFunction\(payload\)/);
+  assert.deepEqual(familyTreeNeighborhoodRpcCandidates({}), [
+    "get_family_tree_neighborhood_v2",
+    "get_family_tree_neighborhood_v1",
+  ]);
+  assert.deepEqual(familyTreeNeighborhoodRpcCandidates({ structuralOnly: true }), [
+    "get_family_tree_root_lineage_v1",
+    "get_family_tree_neighborhood_v1",
+  ]);
+  assert.match(service, /!hasFallback \|\| !isMissingRpcFunction\(payload\)/);
   assert.match(service, /code === "PGRST202" \|\| code === "42883"/);
 });
 

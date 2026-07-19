@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
@@ -25,8 +25,13 @@ function restoreSpaRedirect(): void {
 
 restoreSpaRedirect();
 
+// A data router gives form screens a real navigation blocker.  The app still
+// owns all route rendering in <App />, so this is intentionally a single
+// catch-all route rather than a second route configuration.
+const router = createBrowserRouter([
+  { path: "*", element: <App /> },
+]);
+
 createRoot(document.getElementById("root")!).render(
-  <BrowserRouter>
-    <App />
-  </BrowserRouter>,
+  <RouterProvider router={router} />,
 );

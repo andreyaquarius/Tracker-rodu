@@ -293,6 +293,7 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
       { key: "description", label: "Опис" },
       { key: "file", label: "Справа" },
       { key: "page", label: "Аркуш або сторінка" },
+      { key: "sourceUrl", label: "Посилання на джерело", type: "url", wide: true },
       {
         key: "scans",
         label: "Файл знахідки",

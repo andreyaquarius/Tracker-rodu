@@ -21,6 +21,7 @@ import { normalizePersonGender } from "./personGender";
 import { normalizePersonRelation } from "./personRelation";
 import { normalizePersonStatus } from "./personStatus";
 import { normalizeTaskReminderFields } from "./taskReminders";
+import { extractFindingSourceUrl } from "./findingSourceUrl.ts";
 
 export function createEmptyDatabase(): AppDatabase {
   return {
@@ -85,6 +86,17 @@ export function normalizeDatabase(value: unknown): AppDatabase {
     );
     return {
       ...item,
+      sourceUrl: extractFindingSourceUrl(
+        item.sourceUrl,
+        item.file,
+        item.page,
+        item.summary,
+        item.description,
+        item.transcription,
+        item.notes,
+        item.archive,
+        item.fund,
+      ),
       participants,
       people: participantSummary(participants, typeof item.findingType === "string" ? item.findingType : ""),
       personsText: typeof item.personsText === "string" ? item.personsText : item.people ?? "",
@@ -313,6 +325,17 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
     })),
     findings: source.findings.map((item) => ({
       ...item,
+      sourceUrl: extractFindingSourceUrl(
+        item.sourceUrl,
+        item.file,
+        item.page,
+        item.summary,
+        item.description,
+        item.transcription,
+        item.notes,
+        item.archive,
+        item.fund,
+      ),
       id: mapRequired(findings, item.id),
       researchId: mapReference(researches, item.researchId),
       documentId: mapReference(documents, item.documentId),

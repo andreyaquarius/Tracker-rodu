@@ -1,0 +1,57 @@
+name: Process GEDCOM exports
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gedcom-export-worker
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      # Temporary rollout fallback. Remove after every environment uses sb_secret_ keys.
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TASK_REMINDER_CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+    steps:
+      - name: Verify GEDCOM export worker secrets
+        run: |
+          if [ -z "$SUPABASE_PROJECT_REF" ] || { [ -z "$SUPABASE_SECRET_KEY" ] && [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; } || [ -z "$TASK_REMINDER_CRON_SECRET" ]; then
+            echo "::error::SUPABASE_PROJECT_REF, SUPABASE_SECRET_KEY and TASK_REMINDER_CRON_SECRET are required (legacy SUPABASE_SERVICE_ROLE_KEY is accepted only as a rollout fallback)."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Process queued GEDCOM exports
+        run: node scripts/process-gedcom-export-jobs.ts
+
+      - name: Retry export emails and clean expired files
+        if: always()
+        run: |
+          curl --fail-with-body --retry 3 --retry-all-errors \
+            --request POST \
+            --header "Authorization: Bearer $TASK_REMINDER_CRON_SECRET" \
+            --header "Content-Type: application/json" \
+            --data '{}' \
+            "https://$SUPABASE_PROJECT_REF.supabase.co/functions/v1/process-gedcom-exports"

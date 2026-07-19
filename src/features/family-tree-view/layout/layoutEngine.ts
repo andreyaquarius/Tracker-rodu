@@ -2926,30 +2926,35 @@ function applyDirectAncestorGrid(
     : undefined;
 }
 
+interface ConfiguredLineageStyle {
+  role: "focus" | "direct-ancestor";
+  group?: number;
+}
+
 /**
- * Descendant mode deliberately uses a different solver and therefore never
- * enters applyDirectAncestorGrid(). Its projection already supplies the
- * canonical root-to-original-focus lineage. Transfer that semantic marker to
- * the concrete cards after occurrence construction so the renderer can use
- * the same visual language in every perspective.
+ * Captures fill semantics before either coordinate solver can rewrite the
+ * occurrence graph. Descendant convergence replaces one incoming occurrence
+ * with a geometry-only portal, so deriving ancestry after that rewrite would
+ * lose the non-owning person's parents.
  */
-function applyPrimaryDescendantLineage(
+function buildConfiguredDirectLineage(
   scene: OccurrenceScene,
-  nodes: readonly SceneNode[],
   settings: LayoutSettings,
-): void {
-  if (!settings.primaryLineagePersonIds.size || !scene.focusOccurrenceId) return;
+): ReadonlyMap<string, ConfiguredLineageStyle> {
+  const styles = new Map<string, ConfiguredLineageStyle>();
   const requestedTarget = scene.primaryOccurrenceByPersonId.get(
     settings.lineageTargetPersonId,
   );
-  const requestedNode = nodes.find(
+  const requestedNode = scene.nodes.find(
     node => node.occurrenceId === requestedTarget,
   );
-  const targetOccurrenceId =
-    requestedNode?.personId &&
-    settings.primaryLineagePersonIds.has(requestedNode.personId)
-      ? requestedNode.occurrenceId
-      : scene.focusOccurrenceId;
+  if (
+    !requestedNode?.personId ||
+    (requestedNode.kind !== "person" && requestedNode.kind !== "reference")
+  ) {
+    return styles;
+  }
+  const targetOccurrenceId = requestedNode.occurrenceId;
   const ancestorPaths = deriveAncestorSectorPaths(
     scene,
     targetOccurrenceId,
@@ -2959,22 +2964,41 @@ function applyPrimaryDescendantLineage(
   // Reverse-walk from the original pedigree focus. This uses concrete
   // parent-child occurrences, so a person repeated as a lateral partner does
   // not inherit the direct-line fill from their other occurrence.
-  for (const node of nodes) {
+  for (const node of scene.nodes) {
     const path = ancestorPaths.get(node.occurrenceId);
     if (
       !path ||
       (node.kind !== "person" && node.kind !== "reference") ||
-      !node.personId ||
-      !settings.primaryLineagePersonIds.has(node.personId)
+      !node.personId
     ) {
       continue;
     }
-    assignAncestorLineage(
-      node,
-      path,
-      targetOccurrenceId,
-      settings,
-    );
+    const group = ancestorLineageGroup(path, settings.lineageGroupDepth);
+    styles.set(node.occurrenceId, {
+      role: node.occurrenceId === targetOccurrenceId
+        ? "focus"
+        : "direct-ancestor",
+      ...(group === undefined ? {} : { group }),
+    });
+  }
+  return styles;
+}
+
+/**
+ * Applies the immutable root-lineage snapshot after layout. Visual focus and
+ * geometry may move freely without changing which concrete cards are filled.
+ */
+function applyConfiguredDirectLineage(
+  nodes: readonly SceneNode[],
+  styles: ReadonlyMap<string, ConfiguredLineageStyle>,
+): void {
+  for (const node of nodes) {
+    delete node.lineageRole;
+    delete node.lineageGroup;
+    const style = styles.get(node.occurrenceId);
+    if (!style) continue;
+    node.lineageRole = style.role;
+    if (style.group !== undefined) node.lineageGroup = style.group;
   }
 }
 
@@ -3782,12 +3806,7 @@ export function layoutGraphEngine(
     };
   }
 
-  // The descendant DAG planner can replace a non-owning ingress with a
-  // convergence portal. Capture lineage roles on the original occurrences
-  // before that geometry-only rewrite.
-  if (mode === "descendant-forest") {
-    applyPrimaryDescendantLineage(scene, scene.nodes, settings);
-  }
+  const configuredLineage = buildConfiguredDirectLineage(scene, settings);
 
   const { bundles, bundleByOccurrenceId } = buildBundles(scene, settings);
   const layers = initializeLayers(
@@ -3854,6 +3873,7 @@ export function layoutGraphEngine(
     ),
   );
   const nodes = positionAuxiliaryNodes(scene, structuralNodes);
+  applyConfiguredDirectLineage(nodes, configuredLineage);
   const routed = routeEdges(
     scene,
     nodes,

@@ -132,7 +132,7 @@ test("circular ancestor chart uses an isolated bounded direct-ancestor session",
   assert.match(circularChart, /const MAX_GENERATIONS = 16/);
   assert.match(circularChart, /Поколінь предків/);
   assert.match(circularChart, /Доступний список/);
-  assert.match(productionPage, /onFocusPersonChange=\{setActiveTreeFocusPersonId\}/);
+  assert.match(productionPage, /onFocusPersonChange=\{handleActiveTreeFocusPersonChange\}/);
   assert.match(productionPage, /<CircularAncestorChartWindow/);
 });
 
@@ -180,21 +180,27 @@ test("circular chart can change its central person and select any rendered secto
   assert.doesNotMatch(productionPage, /key=\{`\$\{selectedEntry\.id\}:\$\{circularChartFocusPersonId\}`\}/);
 });
 
-test("production tree reuses the real GEDCOM importer and exports the complete tree", () => {
+test("tree pages reuse the real importer and queue GEDCOM exports on the server", () => {
   assert.match(importButton, /hideTrigger\?: boolean/);
   assert.match(importButton, /id=\{inputId\}/);
   assert.match(productionPage, /<GedcomImportButton/);
   assert.match(productionPage, /hideTrigger/);
   assert.match(productionPage, /onImportPersons=\{\(records\) => onImportRecords\("persons", records\)\}/);
   assert.match(productionPage, /createFamilyTreeFromLegacyImport/);
-  assert.match(
-    productionPage,
-    /getFamilyTreeGraph\(\{[\s\S]*?treeId:\s*selectedEntry\.id,[\s\S]*?mode:\s*"family",[\s\S]*?unlimitedDepth:\s*true,/,
-  );
-  assert.match(productionPage, /exportFamilyTreeGraphToGedcom/);
-  assert.match(productionPage, /includePrivateLiving:\s*true/);
-  assert.match(productionPage, /RESN privacy/);
-  assert.match(productionPage, /downloadTextFile/);
+  assert.match(productionPage, /requestGedcomExport\(projectId, selectedEntry\.id\)/);
+  assert.match(familyTreePage, /requestGedcomExport\(projectId, treeId\)/);
+  assert.match(productionPage, /персональні та приватні дані/);
+  assert.match(familyTreePage, /персональні та приватні дані/);
+  assert.match(productionPage, /Запит на експорт GEDCOM прийнято/);
+  assert.match(familyTreePage, /Запит на експорт GEDCOM прийнято/);
+  assert.match(productionPage, /надійде на вашу email-адресу/);
+  assert.match(familyTreePage, /надійде на вашу email-адресу/);
+  for (const page of [productionPage, familyTreePage]) {
+    assert.doesNotMatch(page, /getFamilyTreeGraph/);
+    assert.doesNotMatch(page, /exportFamilyTreeGraphToGedcom/);
+    assert.doesNotMatch(page, /readLatestGedcomArchive/);
+    assert.doesNotMatch(page, /function downloadTextFile/);
+  }
 });
 
 test("App wires existing import callbacks into the production tree module", () => {

@@ -31,6 +31,7 @@ import {
   GEDCOM_XREF_CUSTOM_FIELD,
   parseGedcomMetadata,
 } from "./gedcomMetadata.ts";
+import { resolvedFindingSourceUrl } from "./findingSourceUrl.ts";
 
 type GedcomFamily = {
   key: string;
@@ -47,6 +48,23 @@ type GedcomFamily = {
   notes: string;
   evidenceStatus: string;
   confidence: number;
+};
+
+type IndexedPreservedRecord = {
+  record: GedcomPreservedRecord;
+  index: number;
+};
+
+type PreservedRecordIndex = {
+  head?: GedcomPreservedRecord;
+  individualByInternalId: Map<string, IndexedPreservedRecord>;
+  individualByPointer: Map<string, IndexedPreservedRecord>;
+  familyByPointer: Map<string, GedcomPreservedRecord>;
+};
+
+type RawFamilyDescriptor = {
+  record: GedcomPreservedRecord;
+  children: string[];
 };
 
 const GEDCOM_MONTHS: Record<string, string> = {
@@ -80,11 +98,23 @@ export function exportFamilyTreeProjectionToGedcom(
 ): GedcomExportResult {
   const warnings: FamilyTreeGraphIssue[] = [];
   const preservedRecords = collectPreservedRecords(projection.nodes, options.preservedRecords ?? []);
-  const individualXrefs = buildIndividualXrefs(projection.nodes, preservedRecords);
+  const preservedRecordIndex = indexPreservedRecords(preservedRecords);
+  const individualXrefs = buildIndividualXrefs(
+    projection.nodes,
+    preservedRecords,
+    preservedRecordIndex.individualByInternalId,
+  );
   const documentSourceXrefs = buildDocumentSourceXrefs(options.documents ?? [], preservedRecords);
+  const findingSourceXrefs = buildFindingSourceXrefs(
+    options.findings ?? [],
+    preservedRecords,
+    documentSourceXrefs,
+  );
   const families = buildGedcomFamilies(projection, warnings);
   const familyXrefs = buildFamilyXrefs(families, preservedRecords, individualXrefs);
   const familyPointersByPerson = buildFamilyPointersByPerson(families, familyXrefs);
+  const associationsByPerson = indexAssociationsByPerson(projection.associationEdges);
+  const findingsByPerson = indexFindingsByPerson(options.findings ?? []);
   const lines: string[] = [];
   const sourceName = options.sourceName || "Treker Rodu";
   const submitterXref = "@SUB1@";
@@ -96,7 +126,7 @@ export function exportFamilyTreeProjectionToGedcom(
 
   addLine(lines, 0, "HEAD");
   addLine(lines, 1, "SOUR", sanitizeGedcomValue(sourceName));
-  addPreservedOriginalHeaderSource(lines, preservedRecords.find((record) => record.tag === "HEAD"));
+  addPreservedOriginalHeaderSource(lines, preservedRecordIndex.head);
   addLine(lines, 1, "DEST", "ANY");
   addLine(lines, 1, "DATE", formatGedcomDate(createdAt.toISOString().slice(0, 10)));
   addLine(lines, 1, "CHAR", "UTF-8");
@@ -108,7 +138,7 @@ export function exportFamilyTreeProjectionToGedcom(
     addLine(lines, 1, "_ROOT", rootXref);
     addLine(lines, 1, "_TRK_ROOT", rootXref);
   }
-  addPreservedHeaderExtensions(lines, preservedRecords.find((record) => record.tag === "HEAD"));
+  addPreservedHeaderExtensions(lines, preservedRecordIndex.head);
 
   for (const node of projection.nodes) {
     addIndividual(
@@ -116,10 +146,16 @@ export function exportFamilyTreeProjectionToGedcom(
       node,
       individualXrefs,
       familyPointersByPerson,
-      projection.associationEdges,
+      associationsByPerson.get(node.personId) ?? [],
+      findingsByPerson.get(node.personId) ?? [],
       options,
-      preservedPersonRecord(node.personId, individualXrefs, preservedRecords),
+      preservedPersonRecord(
+        node.personId,
+        individualXrefs,
+        preservedRecordIndex,
+      ),
       documentSourceXrefs,
+      findingSourceXrefs,
     );
   }
 
@@ -130,7 +166,7 @@ export function exportFamilyTreeProjectionToGedcom(
       familyXrefs[family.key],
       individualXrefs,
       warnings,
-      preservedRecords.find((record) => record.tag === "FAM" && record.pointer === familyXrefs[family.key]),
+      preservedRecordIndex.familyByPointer.get(familyXrefs[family.key]),
     );
   }
 
@@ -140,6 +176,13 @@ export function exportFamilyTreeProjectionToGedcom(
     submitterXref,
   ]));
   addDocumentSourceRecords(lines, options.documents ?? [], documentSourceXrefs, preservedRecords);
+  addFindingSourceRecords(
+    lines,
+    options.findings ?? [],
+    findingSourceXrefs,
+    documentSourceXrefs,
+    preservedRecords,
+  );
 
   addLine(lines, 0, "SUBM", "", submitterXref);
   addLine(lines, 1, "NAME", sanitizeGedcomValue(options.submitterName || sourceName));
@@ -273,6 +316,7 @@ function graphToProjection(graph: FamilyTreeGraphDto): FamilyTreeProjection {
       occurrenceByPersonId.set(occurrence.personId, occurrence);
     }
   }
+  const kinshipEdgesByPair = indexKinshipEdgesByPair(graph);
   const nodes: FamilyTreeProjectionNode[] = graphNodes.map((node) => {
     const primaryName = node.primaryName ?? node.names[0] ?? fallbackName(graph.projectId, node.personId, node.displayName);
     const occurrence = occurrenceByPersonId.get(node.personId);
@@ -288,7 +332,14 @@ function graphToProjection(graph: FamilyTreeGraphDto): FamilyTreeProjection {
       status: node.status as Person["status"],
       isLiving: node.isLiving,
       privacyStatus: node.privacyStatus,
-      rootRelationshipLabel: occurrence ? familyTreeKinshipLabel(graph, occurrence, node) : undefined,
+      rootRelationshipLabel: occurrence
+        ? familyTreeKinshipLabelForExport(
+            graph,
+            occurrence,
+            node,
+            kinshipEdgesByPair,
+          )
+        : undefined,
       hasDates: events.some((event) => event.eventDate || event.dateFrom || event.dateTo || event.dateText),
       hasPlaces: events.some((event) => event.placeName),
       metadata: node.metadata,
@@ -315,6 +366,11 @@ function graphToProjection(graph: FamilyTreeGraphDto): FamilyTreeProjection {
       legacyRelationId: edge.relationshipId,
       metadata: edge.metadata,
     }));
+  const connectedPersonIds = new Set<string>();
+  for (const edge of edges) {
+    connectedPersonIds.add(edge.fromPersonId);
+    connectedPersonIds.add(edge.toPersonId);
+  }
   return {
     projectId: graph.projectId,
     treeId: graph.treeId,
@@ -332,16 +388,54 @@ function graphToProjection(graph: FamilyTreeGraphDto): FamilyTreeProjection {
     })),
     stats: {
       persons: nodes.length,
-      connectedPersons: new Set(edges.flatMap((edge) => [edge.fromPersonId, edge.toPersonId])).size,
-      isolatedPersons: nodes.filter((node) =>
-        !edges.some((edge) => edge.fromPersonId === node.personId || edge.toPersonId === node.personId),
-      ).length,
+      connectedPersons: connectedPersonIds.size,
+      isolatedPersons: nodes.filter((node) => !connectedPersonIds.has(node.personId)).length,
       parentChildEdges: edges.filter((edge) => edge.kind === "parent_child").length,
       partnerEdges: edges.filter((edge) => edge.kind === "partner").length,
       associationEdges: edges.filter((edge) => edge.kind === "association").length,
       skippedLegacyRelations: 0,
     },
   };
+}
+
+function indexKinshipEdgesByPair(
+  graph: FamilyTreeGraphDto,
+): Map<string, FamilyTreeGraphDto["edges"][number]> {
+  const result = new Map<string, FamilyTreeGraphDto["edges"][number]>();
+  for (const edge of graph.edges) {
+    if (edge.kind !== "parent_child" && edge.kind !== "partner") continue;
+    const key = undirectedPersonPairKey(edge.fromPersonId, edge.toPersonId);
+    // familyTreeKinshipLabel historically used Array.prototype.find, so the
+    // first matching edge in graph order is authoritative.
+    if (!result.has(key)) result.set(key, edge);
+  }
+  return result;
+}
+
+function familyTreeKinshipLabelForExport(
+  graph: FamilyTreeGraphDto,
+  occurrence: FamilyTreeGraphDto["occurrences"][number],
+  person: FamilyTreeGraphDto["nodes"][number],
+  edgesByPair: Map<string, FamilyTreeGraphDto["edges"][number]>,
+): string {
+  const pathEdges: FamilyTreeGraphDto["edges"] = [];
+  const includedPairs = new Set<string>();
+  for (let index = 0; index < occurrence.path.length - 1; index += 1) {
+    const key = undirectedPersonPairKey(
+      occurrence.path[index],
+      occurrence.path[index + 1],
+    );
+    if (includedPairs.has(key)) continue;
+    const edge = edgesByPair.get(key);
+    if (!edge) continue;
+    includedPairs.add(key);
+    pathEdges.push(edge);
+  }
+  return familyTreeKinshipLabel({ ...graph, edges: pathEdges }, occurrence, person);
+}
+
+function undirectedPersonPairKey(first: string, second: string): string {
+  return first < second ? `${first}\u0000${second}` : `${second}\u0000${first}`;
 }
 
 function fallbackName(projectId: string, personId: string, displayName: string): FamilyTreePersonName {
@@ -376,9 +470,11 @@ function addIndividual(
   individualXrefs: Record<string, string>,
   familyPointersByPerson: Map<string, { fams: string[]; famc: Array<{ xref: string; pedi: string | null }> }>,
   associationEdges: FamilyTreeProjectionEdge[],
+  findings: Finding[],
   options: GedcomExportOptions,
   preservedRecord?: GedcomPreservedRecord,
   documentSourceXrefs: Record<string, string> = {},
+  findingSourceXrefs: Record<string, string> = {},
 ): void {
   const personXref = individualXrefs[node.personId];
   const pointers = familyPointersByPerson.get(node.personId);
@@ -457,7 +553,7 @@ function addIndividual(
 
   addMappedPersonProfile(lines, profile, preservedRecord);
   addPreservedIndividualExtensions(lines, preservedRecord, currentPrimaryPersonPhotoPath(profile));
-  addFindingCitations(lines, node.personId, options.findings ?? [], documentSourceXrefs, preservedRecord);
+  addFindingCitations(lines, findings, documentSourceXrefs, findingSourceXrefs, preservedRecord);
 
   const rawFams = new Set(rawDirectValues(preservedRecord, "FAMS"));
   const rawFamc = new Set(rawDirectValues(preservedRecord, "FAMC"));
@@ -474,7 +570,7 @@ function addIndividual(
   }
 
   if (options.includeAssociations ?? true) {
-    for (const edge of associationEdges.filter((edge) => edge.fromPersonId === node.personId)) {
+    for (const edge of associationEdges) {
       const targetXref = individualXrefs[edge.toPersonId];
       if (!targetXref) continue;
       addLine(lines, 1, "ASSO", targetXref);
@@ -631,9 +727,60 @@ function addFamily(
   addPreservedFamilyExtensions(lines, preservedRecord);
 }
 
+function indexPreservedRecords(records: GedcomPreservedRecord[]): PreservedRecordIndex {
+  const result: PreservedRecordIndex = {
+    individualByInternalId: new Map(),
+    individualByPointer: new Map(),
+    familyByPointer: new Map(),
+  };
+  records.forEach((record, index) => {
+    if (record.tag === "HEAD" && !result.head) result.head = record;
+    if (record.tag === "INDI") {
+      const indexed = { record, index };
+      if (record.internalId && !result.individualByInternalId.has(record.internalId)) {
+        result.individualByInternalId.set(record.internalId, indexed);
+      }
+      if (record.pointer && !result.individualByPointer.has(record.pointer)) {
+        result.individualByPointer.set(record.pointer, indexed);
+      }
+    }
+    if (record.tag === "FAM" && record.pointer && !result.familyByPointer.has(record.pointer)) {
+      result.familyByPointer.set(record.pointer, record);
+    }
+  });
+  return result;
+}
+
+function indexAssociationsByPerson(
+  edges: FamilyTreeProjectionEdge[],
+): Map<string, FamilyTreeProjectionEdge[]> {
+  const result = new Map<string, FamilyTreeProjectionEdge[]>();
+  for (const edge of edges) {
+    const existing = result.get(edge.fromPersonId);
+    if (existing) existing.push(edge);
+    else result.set(edge.fromPersonId, [edge]);
+  }
+  return result;
+}
+
+function indexFindingsByPerson(findings: Finding[]): Map<string, Finding[]> {
+  const result = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    // A malformed source row may repeat one person id. The previous `.filter`
+    // emitted that finding once, so keep the same output contract here.
+    for (const personId of new Set(finding.personIds ?? [])) {
+      const existing = result.get(personId);
+      if (existing) existing.push(finding);
+      else result.set(personId, [finding]);
+    }
+  }
+  return result;
+}
+
 function buildIndividualXrefs(
   nodes: FamilyTreeProjectionNode[],
   preservedRecords: GedcomPreservedRecord[],
+  individualByInternalId: Map<string, IndexedPreservedRecord>,
 ): Record<string, string> {
   const reserved = new Set(preservedRecords.map((record) => record.pointer).filter((value): value is string => Boolean(value)));
   const assigned = new Set<string>();
@@ -642,7 +789,7 @@ function buildIndividualXrefs(
   for (const node of nodes) {
     const profile = personProfile(node);
     const candidate = [
-      preservedRecords.find((record) => record.tag === "INDI" && record.internalId === node.personId)?.pointer,
+      individualByInternalId.get(node.personId)?.record.pointer,
       customFieldString(profile, GEDCOM_XREF_CUSTOM_FIELD),
       parseGedcomMetadata<GedcomPreservedRecord | null>(
         customFieldString(profile, GEDCOM_RAW_RECORD_CUSTOM_FIELD),
@@ -667,7 +814,19 @@ function buildFamilyXrefs(
   preservedRecords: GedcomPreservedRecord[],
   individualXrefs: Record<string, string>,
 ): Record<string, string> {
-  const rawFamilies = preservedRecords.filter((record) => record.tag === "FAM" && validGedcomXref(record.pointer));
+  const rawFamiliesByPartners = new Map<string, RawFamilyDescriptor[]>();
+  for (const record of preservedRecords) {
+    if (record.tag !== "FAM" || !validGedcomXref(record.pointer)) continue;
+    const partners = rawFamilyValues(record, ["HUSB", "WIFE", "PARTNER"]).sort();
+    const descriptor = {
+      record,
+      children: rawFamilyValues(record, ["CHIL"]).sort(),
+    };
+    const signature = stringArraySignature(partners);
+    const existing = rawFamiliesByPartners.get(signature);
+    if (existing) existing.push(descriptor);
+    else rawFamiliesByPartners.set(signature, [descriptor]);
+  }
   const reserved = new Set(preservedRecords.map((record) => record.pointer).filter((value): value is string => Boolean(value)));
   const used = new Set<string>();
   const result: Record<string, string> = {};
@@ -675,16 +834,18 @@ function buildFamilyXrefs(
   for (const family of families) {
     const partnerXrefs = family.partnerIds.map((id) => individualXrefs[id]).filter(Boolean).sort();
     const childXrefs = family.childIds.map((id) => individualXrefs[id]).filter(Boolean).sort();
-    const candidates = rawFamilies
-      .filter((record) => record.pointer && !used.has(record.pointer))
-      .map((record) => ({
-        record,
-        partners: rawFamilyValues(record, ["HUSB", "WIFE", "PARTNER"]).sort(),
-        children: rawFamilyValues(record, ["CHIL"]).sort(),
-      }))
-      .filter((candidate) => arrayEquals(candidate.partners, partnerXrefs))
-      .sort((left, right) => familyMatchScore(right.children, childXrefs) - familyMatchScore(left.children, childXrefs));
-    const matched = candidates[0];
+    let matched: RawFamilyDescriptor | undefined;
+    let matchedScore = Number.NEGATIVE_INFINITY;
+    for (const candidate of rawFamiliesByPartners.get(stringArraySignature(partnerXrefs)) ?? []) {
+      if (!candidate.record.pointer || used.has(candidate.record.pointer)) continue;
+      const score = familyMatchScore(candidate.children, childXrefs);
+      // Array.prototype.sort is stable. Replacing it with a single pass must
+      // therefore keep the first archive record when scores are equal.
+      if (!matched || score > matchedScore) {
+        matched = candidate;
+        matchedScore = score;
+      }
+    }
     if (matched?.record.pointer) {
       result[family.key] = matched.record.pointer;
       used.add(matched.record.pointer);
@@ -696,6 +857,10 @@ function buildFamilyXrefs(
     used.add(generated);
   }
   return result;
+}
+
+function stringArraySignature(values: string[]): string {
+  return JSON.stringify(values);
 }
 
 function buildDocumentSourceXrefs(
@@ -719,6 +884,79 @@ function buildDocumentSourceXrefs(
     while (reserved.has(generated) || assigned.has(generated)) generated = `@S_TRK${next++}@`;
     result[document.id] = generated;
     assigned.add(generated);
+  }
+  return result;
+}
+
+function buildFindingSourceXrefs(
+  findings: Finding[],
+  preservedRecords: GedcomPreservedRecord[],
+  documentSourceXrefs: Record<string, string>,
+): Record<string, string> {
+  const reserved = new Set(preservedRecords
+    .map((record) => record.pointer)
+    .filter((value): value is string => Boolean(value)));
+  const assigned = new Set(Object.values(documentSourceXrefs));
+  const logicalSourceXrefs = new Map<string, string>();
+  const result: Record<string, string> = {};
+  let next = 1;
+
+  for (const finding of findings) {
+    const documentXref = documentSourceXrefs[finding.documentId];
+    if (documentXref) {
+      result[finding.id] = documentXref;
+      continue;
+    }
+    const custom = finding.customFields ?? {};
+    const sourceMetadata = typeof custom.__gedcomSource === "string"
+      ? custom.__gedcomSource
+      : "";
+    const hasGedcomSourceRecord = Boolean(
+      custom.__gedcomCitation
+      || custom.__gedcomStandaloneSource
+      || sourceMetadata,
+    );
+    const isGedcomEventFinding = Boolean(
+      custom.__gedcomEventDescription
+      || custom.__gedcomEventTag
+      || custom.__gedcomEventType,
+    );
+    if (isGedcomEventFinding && !hasGedcomSourceRecord) continue;
+    // Event findings historically store their INDI/FAM owner pointer in the
+    // same metadata key. Never reuse that pointer for a top-level SOUR record.
+    const importedXref = hasGedcomSourceRecord && typeof custom.__gedcomSourceXref === "string"
+      ? custom.__gedcomSourceXref.trim()
+      : "";
+    const importSourceKey = typeof custom.__gedcomImportSourceKey === "string"
+      ? custom.__gedcomImportSourceKey.trim()
+      : "";
+    const sourceUrl = resolvedFindingSourceUrl(finding);
+    if (!importedXref && !sourceUrl && !sourceMetadata) continue;
+
+    // Citation URLs may differ for two records that point at the same GEDCOM
+    // source. Reuse the source record by import namespace/xref and keep the
+    // record-specific address on the citation itself.
+    const logicalKey = importedXref || sourceMetadata
+      ? [importSourceKey, importedXref, sourceMetadata].join("|")
+      : `manual-url|${sourceUrl}`;
+    const reused = logicalSourceXrefs.get(logicalKey);
+    if (reused) {
+      result[finding.id] = reused;
+      continue;
+    }
+
+    let xref = "";
+    if (validGedcomXref(importedXref) && !assigned.has(importedXref)) {
+      xref = importedXref;
+    } else {
+      xref = `@S_TRK_FINDING${next++}@`;
+      while (reserved.has(xref) || assigned.has(xref)) {
+        xref = `@S_TRK_FINDING${next++}@`;
+      }
+    }
+    logicalSourceXrefs.set(logicalKey, xref);
+    assigned.add(xref);
+    result[finding.id] = xref;
   }
   return result;
 }
@@ -754,29 +992,79 @@ function addDocumentSourceRecords(
   }
 }
 
+function addFindingSourceRecords(
+  lines: string[],
+  findings: Finding[],
+  findingSourceXrefs: Record<string, string>,
+  documentSourceXrefs: Record<string, string>,
+  preservedRecords: GedcomPreservedRecord[],
+): void {
+  const alreadyWritten = new Set([
+    ...preservedRecords
+      .filter((record) => record.tag === "SOUR")
+      .map((record) => record.pointer)
+      .filter((value): value is string => Boolean(value)),
+    ...Object.values(documentSourceXrefs),
+  ]);
+  for (const finding of findings) {
+    const xref = findingSourceXrefs[finding.id];
+    if (!xref || alreadyWritten.has(xref)) continue;
+    alreadyWritten.add(xref);
+    const custom = finding.customFields ?? {};
+    const source = parseGedcomMetadata<Record<string, unknown> | null>(
+      typeof custom.__gedcomSource === "string" ? custom.__gedcomSource : "",
+      null,
+    );
+    const title = stringValue(source?.title)
+      || finding.summary
+      || finding.findingType
+      || `Знахідка ${finding.id}`;
+    const author = stringValue(source?.author) || finding.archive;
+    const publication = stringValue(source?.publication);
+    const text = stringValue(source?.text);
+    const sourceType = stringValue(source?.sourceType) || stringValue(source?.mediaType);
+    const sourceUrl = stringValue(source?.url)
+      || (!source ? resolvedFindingSourceUrl(finding) : "");
+    const rin = stringValue(source?.rin);
+
+    addLine(lines, 0, "SOUR", "", xref);
+    addLine(lines, 1, "TITL", title);
+    if (author) addLine(lines, 1, "AUTH", author);
+    if (publication) addMultiline(lines, 1, "PUBL", publication);
+    if (text) addMultiline(lines, 1, "TEXT", text);
+    if (sourceType) addLine(lines, 1, "_TYPE", sourceType);
+    if (sourceUrl) addLine(lines, 1, "_URL", sourceUrl);
+    if (rin) addLine(lines, 1, "RIN", rin);
+    addLine(lines, 1, "_TRK_FINDING_ID", finding.id);
+  }
+}
+
 function addFindingCitations(
   lines: string[],
-  personId: string,
   findings: Finding[],
-  sourceXrefs: Record<string, string>,
+  documentSourceXrefs: Record<string, string>,
+  findingSourceXrefs: Record<string, string>,
   preservedRecord?: GedcomPreservedRecord,
 ): void {
   const rawCitationKeys = new Set(directSubtrees(preservedRecord)
     .filter((subtree) => subtree[0]?.tag === "SOUR")
     .map((subtree) => `${subtree[0]?.value ?? ""}|${subtree.find((line) => line.level === 2 && line.tag === "PAGE")?.value ?? ""}`));
-  for (const finding of findings.filter((item) => item.personIds?.includes(personId))) {
-    const sourceXref = sourceXrefs[finding.documentId];
+  for (const finding of findings) {
+    const sourceXref = documentSourceXrefs[finding.documentId] || findingSourceXrefs[finding.id];
     const custom = finding.customFields ?? {};
-    const importedCitation = parseGedcomMetadata<{ quality?: string } | null>(
+    const importedCitation = parseGedcomMetadata<{ quality?: string; url?: string } | null>(
       typeof custom.__gedcomCitation === "string" ? custom.__gedcomCitation : "",
       null,
     );
     if (preservedRecord && (custom.__gedcomCitation || custom.__gedcomEventDescription)) continue;
     if (sourceXref) {
-      const page = finding.page || finding.file;
+      const page = finding.page;
+      const citationUrl = resolvedFindingSourceUrl(finding)
+        || stringValue(importedCitation?.url);
       if (rawCitationKeys.has(`${sourceXref}|${page}`)) continue;
       addLine(lines, 1, "SOUR", sourceXref);
       if (page) addLine(lines, 2, "PAGE", page);
+      if (citationUrl) addLine(lines, 2, "_URL", citationUrl);
       const eventType = finding.findingType || finding.summary;
       if (eventType) addLine(lines, 2, "EVEN", eventType);
       if (finding.eventDate || finding.transcription || finding.description) {
@@ -796,6 +1084,8 @@ function addFindingCitations(
     if (finding.eventDate) addLine(lines, 2, "DATE", formatGedcomDate(finding.eventDate));
     if (finding.place) addLine(lines, 2, "PLAC", finding.place);
     addMultiline(lines, 2, "NOTE", description);
+    const sourceUrl = resolvedFindingSourceUrl(finding);
+    if (sourceUrl && !description.includes(sourceUrl)) addLine(lines, 2, "NOTE", sourceUrl);
     addLine(lines, 2, "_TRK_FINDING_ID", finding.id);
   }
 }
@@ -812,11 +1102,17 @@ function findingReliabilityToQuay(value: string): string {
 function preservedPersonRecord(
   personId: string,
   individualXrefs: Record<string, string>,
-  records: GedcomPreservedRecord[],
+  records: PreservedRecordIndex,
 ): GedcomPreservedRecord | undefined {
-  return records.find((record) => record.tag === "INDI" && (
-    record.internalId === personId || record.pointer === individualXrefs[personId]
-  ));
+  const byInternalId = records.individualByInternalId.get(personId);
+  const byPointer = records.individualByPointer.get(individualXrefs[personId]);
+  if (!byInternalId) return byPointer?.record;
+  if (!byPointer) return byInternalId.record;
+  // Preserve Array.prototype.find semantics when two different archive rows
+  // happen to match the internal id and the chosen pointer.
+  return byInternalId.index <= byPointer.index
+    ? byInternalId.record
+    : byPointer.record;
 }
 
 function rawFamilyValues(record: GedcomPreservedRecord, tags: string[]): string[] {
@@ -1110,7 +1406,13 @@ function addTrackerCustomFields(lines: string[], profile: Record<string, unknown
     GEDCOM_EDUCATION_CUSTOM_FIELD, GEDCOM_CITATIONS_CUSTOM_FIELD, GEDCOM_MEDIA_CUSTOM_FIELD,
   ]);
   for (const [key, value] of Object.entries(customFields(profile))) {
-    if (ignored.has(key) || value === "" || value === null || value === undefined) continue;
+    if (
+      ignored.has(key)
+      || key.startsWith("__gedcom")
+      || value === ""
+      || value === null
+      || value === undefined
+    ) continue;
     addLine(lines, 1, "EVEN");
     addLine(lines, 2, "TYPE", `Tracker field: ${key}`);
     addMultiline(lines, 2, "NOTE", typeof value === "string" ? value : JSON.stringify(value));
@@ -1211,6 +1513,7 @@ function buildGedcomFamilies(
   const families = new Map<string, GedcomFamily>();
   const partnerFamilyByPair = new Map<string, string>();
   const partnerFamilyByGroup = new Map<string, string>();
+  const nodesById = new Map(projection.nodes.map((node) => [node.personId, node]));
 
   for (const edge of projection.partnerEdges) {
     const pair = sortedPairKey(edge.fromPersonId, edge.toPersonId);
@@ -1218,7 +1521,7 @@ function buildGedcomFamilies(
     partnerFamilyByPair.set(pair, key);
     if (edge.familyGroupId) partnerFamilyByGroup.set(edge.familyGroupId, key);
     const family = getFamily(families, key);
-    family.partnerIds = sortPartnerIds([edge.fromPersonId, edge.toPersonId], projection);
+    family.partnerIds = sortPartnerIds([edge.fromPersonId, edge.toPersonId], nodesById);
     family.familyGroupId = edge.familyGroupId ?? null;
     family.relationshipType = String(edge.relationshipType);
     family.evidenceStatus = edge.evidenceStatus;
@@ -1251,7 +1554,7 @@ function buildGedcomFamilies(
         ? partnerFamilyByPair.get(pair)!
         : `parents:${edges[0].parentSetType ?? edges[0].relationshipType ?? "unknown"}:${parentIds.slice().sort().join("+")}`);
     const family = getFamily(families, key);
-    family.partnerIds = sortPartnerIds(unique([...family.partnerIds, ...parentIds]), projection);
+    family.partnerIds = sortPartnerIds(unique([...family.partnerIds, ...parentIds]), nodesById);
     family.familyGroupId = family.familyGroupId ?? edges[0].familyGroupId ?? null;
     if (family.evidenceStatus === "unknown") family.evidenceStatus = edges[0].evidenceStatus;
     if (!family.confidence) family.confidence = edges[0].confidence;
@@ -1300,6 +1603,8 @@ function buildFamilyPointersByPerson(
   familyXrefs: Record<string, string>,
 ): Map<string, { fams: string[]; famc: Array<{ xref: string; pedi: string | null }> }> {
   const result = new Map<string, { fams: string[]; famc: Array<{ xref: string; pedi: string | null }> }>();
+  const famsSeenByPerson = new Map<string, Set<string>>();
+  const famcSeenByPerson = new Map<string, Set<string>>();
   const ensure = (personId: string) => {
     const existing = result.get(personId);
     if (existing) return existing;
@@ -1312,11 +1617,19 @@ function buildFamilyPointersByPerson(
     const xref = familyXrefs[family.key];
     for (const partnerId of family.partnerIds) {
       const person = ensure(partnerId);
-      if (!person.fams.includes(xref)) person.fams.push(xref);
+      const seen = famsSeenByPerson.get(partnerId) ?? new Set<string>();
+      if (!famsSeenByPerson.has(partnerId)) famsSeenByPerson.set(partnerId, seen);
+      if (!seen.has(xref)) {
+        seen.add(xref);
+        person.fams.push(xref);
+      }
     }
     for (const childId of family.childIds) {
       const person = ensure(childId);
-      if (!person.famc.some((entry) => entry.xref === xref)) {
+      const seen = famcSeenByPerson.get(childId) ?? new Set<string>();
+      if (!famcSeenByPerson.has(childId)) famcSeenByPerson.set(childId, seen);
+      if (!seen.has(xref)) {
+        seen.add(xref);
         person.famc.push({ xref, pedi: family.childPedigree[childId] ?? null });
       }
     }
@@ -1540,8 +1853,10 @@ function parentFamilySetKey(edge: FamilyTreeProjectionEdge): string {
   ].join(":");
 }
 
-function sortPartnerIds(personIds: string[], projection: FamilyTreeProjection): string[] {
-  const nodesById = new Map(projection.nodes.map((node) => [node.personId, node]));
+function sortPartnerIds(
+  personIds: string[],
+  nodesById: Map<string, FamilyTreeProjectionNode>,
+): string[] {
   return personIds.slice().sort((first, second) => {
     const firstSex = genderToGedcomSex(nodesById.get(first)?.gender ?? ("" as Person["gender"]));
     const secondSex = genderToGedcomSex(nodesById.get(second)?.gender ?? ("" as Person["gender"]));

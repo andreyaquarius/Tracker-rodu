@@ -1,10 +1,13 @@
 import type {
   GedcomImportDraft,
+  GedcomImportCitationDraft,
   GedcomImportEventDraft,
   GedcomImportGender,
   GedcomImportNameDraft,
   GedcomImportParentChildDraft,
   GedcomImportPartnerDraft,
+  GedcomImportSourceDraft,
+  GedcomPreservedRecord,
 } from "../types/familyTree";
 import type {
   AppEntity,
@@ -38,6 +41,7 @@ import {
   stringifyGedcomMetadata,
 } from "./gedcomMetadata.ts";
 import { deriveGedcomImportSourceKey } from "./gedcomImportReconciliation.ts";
+import { extractFindingSourceUrl, stripFindingSourceUrls } from "./findingSourceUrl.ts";
 import { isGedcomPersonPhotoMedia, personPhotosFromGedcomMedia } from "./personPhotos.ts";
 
 export interface GedcomAppImportBuildOptions {
@@ -84,17 +88,10 @@ export function buildGedcomAppImport(
     ),
   );
   const peopleByXref = new Map(draft.people.map((person) => [person.xref, person]));
-  const documents = documentsFromGedcomSources(
-    draft,
-    createdAt,
-    options.defaultResearchId ?? "",
-    idFactory,
-    importSourceKey,
-  );
-  const documentIdBySourceXref = new Map(documents.map((document) => [
-    String(document.customFields.__gedcomSourceXref ?? ""),
-    document.id,
-  ]));
+  // GEDCOM SOUR records are evidence metadata, not uploaded working documents.
+  // Keep the field in the orchestration payload for backward compatibility,
+  // but never create DocumentRecord rows for them.
+  const documents: DocumentRecord[] = [];
   const relations = uniqueImportedRelations([
     ...draft.parentChildRelationships
       .map((relationship) => parentRelationFromGedcom(relationship, peopleByXref, personIdByXref, createdAt, idFactory))
@@ -110,7 +107,6 @@ export function buildGedcomAppImport(
     createdAt,
     options.defaultResearchId ?? "",
     idFactory,
-    documentIdBySourceXref,
   ).map((finding) => ({
     ...finding,
     customFields: {
@@ -188,6 +184,7 @@ function uniqueImportedFindings(findings: Finding[]): Finding[] {
       finding.description,
       finding.file,
       finding.page,
+      finding.sourceUrl,
       finding.transcription,
       String(custom.__gedcomSourceXref ?? ""),
       String(custom.__gedcomCitation ?? ""),
@@ -330,53 +327,6 @@ function choosePrimaryName(names: GedcomImportNameDraft[]): GedcomImportNameDraf
   );
 }
 
-function documentsFromGedcomSources(
-  draft: GedcomImportDraft,
-  timestamp: string,
-  defaultResearchId: string,
-  idFactory: () => string,
-  importSourceKey: string,
-): DocumentRecord[] {
-  const preservedSourceByXref = new Map((draft.preservedRecords ?? [])
-    .filter((record) => record.tag === "SOUR" && record.pointer)
-    .map((record) => [record.pointer ?? "", record]));
-  return (draft.sources ?? []).map((source) => {
-    const combinedText = [source.publication, source.text].filter(Boolean).join("\n\n");
-    const url = firstUrl([source.publication, source.text, source.title].join("\n"));
-    return {
-      id: idFactory(),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      researchId: defaultResearchId,
-      title: source.title || `GEDCOM source ${source.xref}`,
-      documentType: source.sourceType || source.mediaType || "GEDCOM source",
-      archive: source.author,
-      fund: source.rin,
-      description: combinedText,
-      file: url,
-      yearFrom: "",
-      yearTo: "",
-      place: "",
-      url,
-      pagesCount: "",
-      lastPage: "",
-      reviewStatus: "імпортовано",
-      notes: source.publication,
-      scans: [],
-      customFields: {
-        __gedcomSourceXref: source.xref,
-        __gedcomSource: stringifyGedcomMetadata(source),
-        __gedcomRawRecord: stringifyGedcomMetadata(preservedSourceByXref.get(source.xref) ?? null),
-        [GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD]: importSourceKey,
-      },
-    };
-  });
-}
-
-function firstUrl(value: string): string {
-  return value.match(/https?:\/\/[^\s<>]+/i)?.[0] ?? "";
-}
-
 function findingsFromGedcomDraft(
   draft: GedcomImportDraft,
   personIdByXref: Map<string, string>,
@@ -384,10 +334,31 @@ function findingsFromGedcomDraft(
   timestamp: string,
   defaultResearchId: string,
   idFactory: () => string,
-  documentIdBySourceXref: Map<string, string>,
 ): Finding[] {
   const appPersonById = new Map(people.map((person) => [person.id, person]));
   const result: Finding[] = [];
+  const citedSourceXrefs = new Set<string>();
+  const preservedSourceByXref = new Map((draft.preservedRecords ?? [])
+    .filter((record) => record.tag === "SOUR" && record.pointer)
+    .map((record) => [record.pointer ?? "", record]));
+  const addCitation = (
+    citation: GedcomImportCitationDraft,
+    event: GedcomImportEventDraft | undefined,
+    personIds: string[],
+    personNames: string[],
+  ) => {
+    if (citation.sourceXref) citedSourceXrefs.add(citation.sourceXref);
+    result.push(findingFromGedcomCitation({
+      citation,
+      event,
+      personIds,
+      personNames,
+      sources: draft.sources ?? [],
+      timestamp,
+      defaultResearchId,
+      idFactory,
+    }));
+  };
   for (const person of draft.people) {
     const personId = personIdByXref.get(person.xref);
     const appPerson = personId ? appPersonById.get(personId) : undefined;
@@ -404,30 +375,11 @@ function findingsFromGedcomDraft(
       });
       if (finding) result.push(finding);
       for (const citation of event.citations ?? []) {
-        result.push(findingFromGedcomCitation({
-          citation,
-          event,
-          personId,
-          personName: personDisplayName(appPerson),
-          sources: draft.sources ?? [],
-          timestamp,
-          defaultResearchId,
-          idFactory,
-          documentIdBySourceXref,
-        }));
+        addCitation(citation, event, [personId], [personDisplayName(appPerson)]);
       }
     }
     for (const citation of person.citations ?? []) {
-      result.push(findingFromGedcomCitation({
-        citation,
-        personId,
-        personName: personDisplayName(appPerson),
-        sources: draft.sources ?? [],
-        timestamp,
-        defaultResearchId,
-        idFactory,
-        documentIdBySourceXref,
-      }));
+      addCitation(citation, undefined, [personId], [personDisplayName(appPerson)]);
     }
   }
 
@@ -435,7 +387,6 @@ function findingsFromGedcomDraft(
     const partnerIds = family.partnerXrefs
       .map((xref) => personIdByXref.get(xref))
       .filter((id): id is string => Boolean(id));
-    if (!partnerIds.length) continue;
     const partnerNames = partnerIds
       .map((id) => appPersonById.get(id))
       .filter((person): person is Person => Boolean(person))
@@ -451,65 +402,108 @@ function findingsFromGedcomDraft(
         idFactory,
       });
       if (finding) result.push(finding);
+      for (const citation of event.citations ?? []) {
+        addCitation(citation, event, partnerIds, partnerNames);
+      }
     }
+    for (const citation of family.citations ?? []) {
+      addCitation(citation, undefined, partnerIds, partnerNames);
+    }
+  }
+
+  // Retain an uncited top-level SOUR as one standalone finding. Cited sources
+  // already live losslessly inside their citation findings, so creating a
+  // second card for those would only introduce another duplicate.
+  for (const source of draft.sources ?? []) {
+    if (citedSourceXrefs.has(source.xref)) continue;
+    result.push(findingFromGedcomSource({
+      source,
+      preservedRecord: preservedSourceByXref.get(source.xref),
+      timestamp,
+      defaultResearchId,
+      idFactory,
+    }));
   }
 
   return uniqueImportedFindings(result);
 }
 
 function findingFromGedcomCitation(input: {
-  citation: NonNullable<GedcomImportDraft["people"][number]["citations"]>[number];
+  citation: GedcomImportCitationDraft;
   event?: GedcomImportEventDraft;
-  personId: string;
-  personName: string;
+  personIds: string[];
+  personNames: string[];
   sources: NonNullable<GedcomImportDraft["sources"]>;
   timestamp: string;
   defaultResearchId: string;
   idFactory: () => string;
-  documentIdBySourceXref: Map<string, string>;
 }): Finding {
   const source = input.sources.find((item) => item.xref === input.citation.sourceXref);
-  const sourceTitle = source?.title || input.citation.sourceXref || "Джерело GEDCOM";
-  const description = input.citation.text || input.citation.notes || input.citation.page || source?.text || sourceTitle;
+  const sourceTitle = stripFindingSourceUrls(source?.title)
+    || stripFindingSourceUrls(source?.author)
+    || "Джерело GEDCOM";
+  const citationPage = stripFindingSourceUrls(input.citation.page);
+  const description = stripFindingSourceUrls(
+    input.citation.text
+      || input.citation.notes
+      || citationPage
+      || source?.text
+      || source?.publication
+      || sourceTitle,
+  );
   const archiveReference = parseGedcomArchiveReference(description);
   const eventDate = gedcomDateToAppDate(input.event?.eventDate || input.citation.dataDate || "");
-  const pageOrUrl = input.citation.page.trim();
+  const sourceUrl = extractFindingSourceUrl(
+    input.citation.url,
+    input.citation.page,
+    input.citation.text,
+    input.citation.notes,
+    source?.url,
+    source?.publication,
+    source?.text,
+    source?.title,
+    input.citation.sourceXref,
+  );
   const participantRole = humanGedcomCitationRole(input.citation.role);
-  const participants: FindingParticipant[] = [{
+  const participants: FindingParticipant[] = input.personIds.map((personId, index) => ({
     id: input.idFactory(),
-    role: participantRole || "Основна особа",
-    name: input.personName,
+    role: index === 0 ? participantRole || "Основна особа" : "Пов’язана особа",
+    name: input.personNames[index] || personId,
     notes: [
       `GEDCOM: ${input.citation.sourceXref}`,
-      input.citation.role && !participantRole ? `Зовнішній ідентифікатор ролі: ${input.citation.role}` : "",
+      index === 0 && input.citation.role && !participantRole
+        ? `Зовнішній ідентифікатор ролі: ${input.citation.role}`
+        : "",
     ].filter(Boolean).join("\n"),
-  }];
+  }));
+  const people = input.personNames.filter(Boolean).join("; ");
   return {
     id: input.idFactory(),
     createdAt: input.timestamp,
     updatedAt: input.timestamp,
     researchId: input.defaultResearchId,
-    documentId: input.documentIdBySourceXref.get(input.citation.sourceXref) ?? "",
+    documentId: "",
     findingType: input.event ? findingTypeFromGedcomEvent(input.event) : "джерело",
     eventDate,
-    people: input.personName,
-    personsText: input.personName,
-    personIds: [input.personId],
+    people,
+    personsText: people,
+    personIds: input.personIds,
     participants,
     place: input.event?.placeName ?? "",
-    archive: archiveReference?.archive || sourceTitle,
-    fund: archiveReference?.fund || source?.author || "",
+    archive: archiveReference?.archive || stripFindingSourceUrls(source?.author),
+    fund: archiveReference?.fund || "",
     description: archiveReference ? archiveReference.inventory : description,
-    file: archiveReference?.file || pageOrUrl,
-    page: findingPageWithActRecord(archiveReference, pageOrUrl),
-    summary: [sourceTitle, input.citation.eventType, input.citation.page].filter(Boolean).join(" · "),
-    transcription: archiveReference ? description : input.citation.text,
+    file: archiveReference?.file || "",
+    page: findingPageWithActRecord(archiveReference, citationPage),
+    sourceUrl,
+    summary: [sourceTitle, stripFindingSourceUrls(input.citation.eventType), citationPage].filter(Boolean).join(" · "),
+    transcription: archiveReference ? description : stripFindingSourceUrls(input.citation.text),
     conclusion: "",
     reliability: gedcomQualityLabel(input.citation.quality),
     needsReview: Number(input.citation.quality) > 3,
     notes: [
-      source?.publication ?? "",
-      input.citation.notes,
+      stripFindingSourceUrls(source?.publication),
+      stripFindingSourceUrls(input.citation.notes),
       participantRole ? `Роль: ${participantRole}` : "",
       archiveReference?.actRecord ? `Актовий запис: ${archiveReference.actRecord}` : "",
     ]
@@ -523,6 +517,64 @@ function findingFromGedcomCitation(input: {
       __gedcomSource: stringifyGedcomMetadata(source ?? null),
       ...(input.event ? gedcomEventCustomFields(input.event, eventEvidenceText(input.event)) : {}),
       ...gedcomArchiveCustomFields(archiveReference),
+    },
+  };
+}
+
+function findingFromGedcomSource(input: {
+  source: GedcomImportSourceDraft;
+  preservedRecord?: GedcomPreservedRecord;
+  timestamp: string;
+  defaultResearchId: string;
+  idFactory: () => string;
+}): Finding {
+  const sourceTitle = stripFindingSourceUrls(input.source.title)
+    || stripFindingSourceUrls(input.source.author)
+    || "Джерело GEDCOM";
+  const description = stripFindingSourceUrls(
+    input.source.text || input.source.publication || input.source.title,
+  );
+  const archiveReference = parseGedcomArchiveReference(description);
+  return {
+    id: input.idFactory(),
+    createdAt: input.timestamp,
+    updatedAt: input.timestamp,
+    researchId: input.defaultResearchId,
+    documentId: "",
+    findingType: "джерело",
+    eventDate: "",
+    people: "",
+    personsText: "",
+    personIds: [],
+    participants: [],
+    place: "",
+    archive: archiveReference?.archive || stripFindingSourceUrls(input.source.author),
+    fund: archiveReference?.fund || "",
+    description: archiveReference ? archiveReference.inventory : description,
+    file: archiveReference?.file || "",
+    page: findingPageWithActRecord(archiveReference),
+    sourceUrl: extractFindingSourceUrl(
+      input.source.url,
+      input.source.publication,
+      input.source.text,
+      input.source.title,
+    ),
+    summary: sourceTitle,
+    transcription: description,
+    conclusion: "",
+    reliability: "імпортовано",
+    needsReview: false,
+    notes: [
+      stripFindingSourceUrls(input.source.publication),
+      stripFindingSourceUrls(input.source.sourceType || input.source.mediaType),
+    ].filter(Boolean).join("\n"),
+    scans: [],
+    geo: null,
+    customFields: {
+      __gedcomSourceXref: input.source.xref,
+      __gedcomSource: stringifyGedcomMetadata(input.source),
+      __gedcomRawRecord: stringifyGedcomMetadata(input.preservedRecord ?? null),
+      __gedcomStandaloneSource: true,
     },
   };
 }
@@ -555,8 +607,10 @@ function findingFromGedcomEvent(input: {
   defaultResearchId: string;
   idFactory: () => string;
 }): Finding | null {
-  const description = eventEvidenceText(input.event);
-  if (!description) return null;
+  const rawDescription = eventEvidenceText(input.event);
+  if (!rawDescription) return null;
+  const description = stripFindingSourceUrls(rawDescription);
+  const sourceUrl = extractFindingSourceUrl(rawDescription);
   const effectiveEventType = effectiveGedcomEventType(input.event);
   const findingType = findingTypeFromGedcomEvent(input.event);
   const eventDate = gedcomDateToAppDate(input.event.eventDate || input.event.dateText);
@@ -587,6 +641,7 @@ function findingFromGedcomEvent(input: {
     description: archiveReference ? archiveReference.inventory : description,
     file: archiveReference?.file ?? "",
     page: findingPageWithActRecord(archiveReference),
+    sourceUrl,
     summary: [findingType, eventDate, place, people].filter(Boolean).join(" · "),
     transcription: description,
     conclusion: "",
@@ -594,7 +649,9 @@ function findingFromGedcomEvent(input: {
     needsReview: false,
     notes: [
       "Створено автоматично з опису події GEDCOM/MyHeritage.",
-      input.event.title?.trim() ? `Оригінальний тип MyHeritage/GEDCOM: ${input.event.title.trim()}` : "",
+      stripFindingSourceUrls(input.event.title).trim()
+        ? `Оригінальний тип MyHeritage/GEDCOM: ${stripFindingSourceUrls(input.event.title).trim()}`
+        : "",
       input.event.age?.trim() ? `Вік: ${input.event.age.trim()}` : "",
       input.event.cause?.trim() ? `Причина: ${input.event.cause.trim()}` : "",
       input.event.address?.trim() && input.event.address.trim() !== place ? `Адреса: ${input.event.address.trim()}` : "",
@@ -604,7 +661,7 @@ function findingFromGedcomEvent(input: {
     geo: input.event.geo ?? (place ? importedPlaceGeo(place) : null),
     customFields: {
       __gedcomSourceXref: input.sourceXref,
-      ...gedcomEventCustomFields(input.event, description),
+      ...gedcomEventCustomFields(input.event, rawDescription),
       ...gedcomArchiveCustomFields(archiveReference),
     },
   };

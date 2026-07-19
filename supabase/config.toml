@@ -73,3 +73,13 @@ verify_jwt = false
 # Called only by the scheduled GitHub workflow. The function compares the
 # bearer token with TASK_REMINDER_CRON_SECRET before using service-role access.
 verify_jwt = false
+
+[functions.process-gedcom-exports]
+# Accepts either an authenticated browser wake-up or the existing scheduled
+# worker secret. The function validates both paths before service-role work.
+verify_jwt = false
+
+[edge_runtime]
+# Keep the local Edge worker alive after a 202 response so waitUntil background
+# export, email and cleanup work can finish during localhost testing.
+policy = "per_worker"

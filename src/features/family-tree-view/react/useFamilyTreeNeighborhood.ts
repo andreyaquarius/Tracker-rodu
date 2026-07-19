@@ -58,6 +58,8 @@ export interface UseFamilyTreeNeighborhoodInput {
   enabled?: boolean;
   /** Separates temporary graph sessions even when their request shape matches. */
   sessionKey?: string;
+  /** Loads only the structural graph, without expandable branch metadata. */
+  structuralOnly?: boolean;
   ancestorDepth?: number;
   descendantDepth?: number;
   collateralDepth?: number;
@@ -117,6 +119,7 @@ export function useFamilyTreeNeighborhood({
   focusPersonId,
   enabled = true,
   sessionKey = "default",
+  structuralOnly = false,
   ancestorDepth = 7,
   descendantDepth = 0,
   collateralDepth = 0,
@@ -128,6 +131,7 @@ export function useFamilyTreeNeighborhood({
   const scopeKey = [
     treeId,
     focusPersonId,
+    structuralOnly ? "structural" : "full",
     ancestorDepth,
     descendantDepth,
     collateralDepth,
@@ -240,6 +244,7 @@ export function useFamilyTreeNeighborhood({
         {
           treeId,
           focusPersonId,
+          ...(structuralOnly ? { structuralOnly: true } : {}),
           ancestorDepth,
           descendantDepth,
           collateralDepth,
@@ -314,6 +319,7 @@ export function useFamilyTreeNeighborhood({
     resetBranchLayers,
     scopeKey,
     sessionKey,
+    structuralOnly,
     syncLoading,
     treeId,
   ]);

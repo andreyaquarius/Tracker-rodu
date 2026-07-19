@@ -258,6 +258,52 @@ test("isolates one family, its ancestors, direct children and every loaded path 
   assert.equal(graph.parentChildRelations.length, 20);
 });
 
+test("retains a separate path to the persisted lineage anchor without moving the corridor focus", () => {
+  const graph = corridorFixture();
+  const homePersonId = "nested-child";
+  const result = buildFamilyCorridorProjection({
+    graph,
+    selectedFamily: { familyGroupId: "selected" },
+    originalFocusPersonId: "focus",
+    lineageAnchorPersonId: homePersonId,
+  });
+
+  assert.notEqual("focus", homePersonId);
+  assert.equal(result.hasPathToOriginalFocus, true);
+  assert.equal(
+    result.perspectiveFocusPersonId,
+    "focus",
+    "retaining the home lineage must not replace the user's corridor focus",
+  );
+  assert.deepEqual(
+    result.pathPersonIds,
+    ["child-line", "father", "focus", "mother"],
+    "the public focus-path result remains scoped to originalFocusPersonId",
+  );
+  assert.deepEqual(
+    ["father", "mother", "child-other", homePersonId].filter(
+      personId => !result.graph.persons.some(person => person.id === personId),
+    ),
+    [],
+    "the second directed path from the selected parents to home must survive projection",
+  );
+  assert.equal(
+    result.graph.persons.some(person => person.id === "nested-partner"),
+    true,
+    "the concrete home parent set keeps its other parent as a connector",
+  );
+  assert.deepEqual(
+    ["other-nested", "partner-nested"].filter(
+      relationId => !result.graph.parentChildRelations.some(
+        relation => relation.id === relationId,
+      ),
+    ),
+    [],
+  );
+  assert.equal(result.graph.persons.some(person => person.id === "deep-child"), false);
+  assert.equal(result.graph.persons.some(person => person.id === "unrelated-child"), false);
+});
+
 test("only active connected nested families add descendants, independent of input order", () => {
   const graph = corridorFixture();
   const result = buildFamilyCorridorProjection({

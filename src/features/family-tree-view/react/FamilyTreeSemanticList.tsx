@@ -133,7 +133,7 @@ export function FamilyTreeSemanticList({
                 const lineageLabel = node.lineageRole === "direct-ancestor"
                   ? "Прямий предок"
                   : node.lineageRole === "focus"
-                    ? "Фокусна особа"
+                    ? "Коренева особа"
                     : undefined;
                 return (
                   <li key={node.occurrenceId}>

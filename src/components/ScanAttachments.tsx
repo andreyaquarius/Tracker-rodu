@@ -383,6 +383,9 @@ function uploadedReplacement(scan: ScanAttachment, uploaded: ScanAttachment): Sc
     id: scan.id,
     sourceKind: scan.sourceKind,
     sourceReference: scan.sourceReference || scan.storagePath,
+    sourceExternalId: scan.sourceExternalId,
+    sourceExpiresAt: scan.sourceExpiresAt,
+    sourceDurability: scan.sourceDurability,
     availability: "available",
   };
 }

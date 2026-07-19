@@ -32,7 +32,7 @@ const eventLabels: Record<PersonEventType, string> = {
   divorce: "Розлучення",
   residence: "Проживання",
   census: "Перепис населення",
-  revision_list: "Ревізький сказ",
+  revision_list: "Ревізька казка",
   confession_list: "Сповідний розпис",
   household_register: "Погосподарська книга",
   immigration: "Імміграція",
@@ -72,6 +72,27 @@ export function isValidCoordinate(latitude: unknown, longitude: unknown): boolea
     lat <= 90 &&
     lng >= -180 &&
     lng <= 180;
+}
+
+export function shouldSearchGeoPlaces(query: string, value: GeoPoint | null | undefined): boolean {
+  return !isValidCoordinate(value?.latitude, value?.longitude) && query.trim().length >= 3;
+}
+
+export function formatGeoCoordinates(
+  value: Pick<GeoPoint, "latitude" | "longitude"> | null | undefined,
+  precision = 6,
+): string {
+  if (!isValidCoordinate(value?.latitude, value?.longitude)) return "";
+  return `${Number(value?.latitude).toFixed(precision)}, ${Number(value?.longitude).toFixed(precision)}`;
+}
+
+export function formatGeoSelectionLabel(
+  placeName: string | null | undefined,
+  value: Pick<GeoPoint, "displayName" | "latitude" | "longitude"> | null | undefined,
+): string {
+  const label = placeName?.trim() || value?.displayName?.trim() || "Точна точка на карті";
+  const coordinates = formatGeoCoordinates(value);
+  return coordinates ? `${label} · ${coordinates}` : label;
 }
 
 export function geoMarkerColor(value: unknown, fallback: string = DEFAULT_GEO_MARKER_COLOR): string {
@@ -161,7 +182,9 @@ export function normalizePersonEvents(value: unknown, person: Pick<Person, "id" 
   const consumed = new Set<PersonEvent>();
   const standard = standardPersonEvents(person).flatMap((event) => {
     if (event.type === "residence" && (byType.get("residence")?.length ?? 0) > 0) return [];
-    const savedEvent = byType.get(event.type)?.[0];
+    const candidates = byType.get(event.type) ?? [];
+    const savedEvent = candidates.find((candidate) => candidate.id === event.id)
+      ?? candidates.find((candidate) => sameCanonicalEvent(candidate, event));
     if (savedEvent) consumed.add(savedEvent);
     return [savedEvent
       ? {
@@ -186,7 +209,9 @@ export function syncPersonEventsFromFields(person: Person): PersonEvent[] {
   const consumed = new Set<PersonEvent>();
   const standard = standardPersonEvents(person).flatMap((event) => {
     if (event.type === "residence" && (current.get("residence")?.length ?? 0) > 0) return [];
-    const previous = current.get(event.type)?.[0];
+    const candidates = current.get(event.type) ?? [];
+    const previous = candidates.find((candidate) => candidate.id === event.id)
+      ?? candidates.find((candidate) => sameCanonicalEvent(candidate, event));
     if (previous) consumed.add(previous);
     return [previous
       ? {
@@ -213,6 +238,12 @@ function groupPersonEventsByType(events: PersonEvent[]): Map<PersonEventType, Pe
     result.set(event.type, group);
   }
   return result;
+}
+
+function sameCanonicalEvent(first: PersonEvent, second: PersonEvent): boolean {
+  return first.type === second.type
+    && (first.date ?? "").trim() === (second.date ?? "").trim()
+    && (first.placeName ?? "").trim() === (second.placeName ?? "").trim();
 }
 
 export function stripInternalGeoFields(values: CustomFieldValues): CustomFieldValues {

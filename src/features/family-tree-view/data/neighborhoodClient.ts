@@ -24,6 +24,8 @@ export interface NeighborhoodFamilyBranchRequest {
 export interface NeighborhoodRequest {
   treeId: string;
   focusPersonId: PersonId;
+  /** Requests the relationship graph without expandable branch metadata. */
+  structuralOnly?: boolean;
   ancestorDepth?: number;
   descendantDepth?: number;
   collateralDepth?: number;
@@ -316,6 +318,7 @@ function cacheKey(
     graphVersion: graphVersion ?? null,
     permissionFingerprint,
     focusPersonId: request.focusPersonId,
+    structuralOnly: request.structuralOnly ?? false,
     ancestorDepth: request.ancestorDepth ?? null,
     descendantDepth: request.descendantDepth ?? null,
     collateralDepth: request.collateralDepth ?? null,

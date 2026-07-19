@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   FamilyTreeEdgeDto,
   FamilyTreeGraphDto,
@@ -8,7 +8,7 @@ import type {
   FamilyTreeIssueDto,
 } from "../types/familyTree";
 import { useFamilyTreeGraph } from "../hooks/useFamilyTreeGraph";
-import { getFamilyTreeGraph } from "../services/familyTreeGraphService";
+import { requestGedcomExport } from "../services/gedcomExportService.ts";
 import {
   calculateTreeLayoutWithCache,
   type VisualNode,
@@ -62,12 +62,11 @@ import type {
 } from "../types";
 import type { PageKey } from "../components/Sidebar";
 import { PersonFormModal } from "../components/PersonFormModal";
+import { savePersonAndClose } from "../features/persons-v2/contracts.ts";
 import { PersonCardModal } from "./PersonsPage";
 import { configs } from "./entityConfigs";
 import { EntityDetailsModal, EntityModal } from "./CrudPage";
 import type { DocumentScanViewerContext } from "../components/DocumentWorkspaceViewer";
-import { exportFamilyTreeGraphToGedcom } from "../utils/gedcom";
-import { readLatestGedcomArchive } from "../services/gedcomArchiveService.ts";
 import { graphForDisplayMode } from "../utils/familyTreeVisibility";
 import {
   createFamilyTree,
@@ -85,6 +84,11 @@ import type {
   GedcomImportReconciliationPayload,
   GedcomImportReconciliationResult,
 } from "../utils/gedcomImportReconciliation.ts";
+import type {
+  GedcomPhotoBackupPlan,
+  GedcomPhotoBackupProgress,
+  GedcomPhotoBackupResult,
+} from "../services/gedcomPhotoBackup.ts";
 
 const relatedEntityPages = [
   "researches",
@@ -115,8 +119,15 @@ const defaultToolbarState: FamilyTreeToolbarState = {
   includeDisputed: true,
 };
 
+const GEDCOM_EXPORT_PRIVACY_CONFIRMATION =
+  "GEDCOM-файл може містити персональні та приватні дані, зокрема відомості про живих осіб. " +
+  "Файл буде сформовано у фоновому режимі, а захищене посилання для завантаження надійде на email вашого облікового запису. " +
+  "Продовжити експорт?";
+
 export type FamilyTreePageProps = {
   projectId: string | undefined;
+  initialTreeId?: string;
+  initialFocusPersonId?: string;
   db?: AppDatabase;
   persons?: Person[];
   relations?: PersonRelation[];
@@ -137,6 +148,10 @@ export type FamilyTreePageProps = {
     input: GedcomImportReconciliationPayload,
     options?: GedcomImportExecutionOptions,
   ) => Promise<GedcomImportReconciliationResult | void>;
+  onBackupGedcomPhotos?: (
+    plan: GedcomPhotoBackupPlan,
+    onProgress: (progress: GedcomPhotoBackupProgress) => void,
+  ) => Promise<GedcomPhotoBackupResult>;
   onSaveEntity?: (collection: RelatedEntityPageKey, entity: AppEntity) => void | AppEntity | null | Promise<AppEntity | null | void>;
   onSaveRelation?: (relation: PersonRelation) => void;
   onDeleteRelation?: (id: string) => void;
@@ -152,6 +167,12 @@ export type FamilyTreePageProps = {
   canCreate?: boolean;
   researchRequired?: boolean;
   onOpenPerson?: (personId: string) => void;
+  onActiveContextChange?: (context: {
+    projectId: string;
+    treeId: string;
+    rootPersonId: string;
+  }) => void;
+  personProfileNavigationEnabled?: boolean;
   useProductionRenderer?: boolean;
 };
 
@@ -170,16 +191,21 @@ function ProductionFamilyTreePageWithWindows(props: FamilyTreePageProps) {
     ...props,
     allowNavigationFallback: false,
   });
+  const handleOpenPerson = props.personProfileNavigationEnabled && props.onOpenPerson
+    ? props.onOpenPerson
+    : openPersonCardWindow;
   return (
     <ProductionFamilyTreePage
       {...props}
-      onOpenPerson={openPersonCardWindow}
+      onOpenPerson={handleOpenPerson}
     />
   );
 }
 
 export function LegacyFamilyTreePage({
   projectId,
+  initialTreeId,
+  initialFocusPersonId,
   db,
   persons = [],
   relations = [],
@@ -206,9 +232,14 @@ export function LegacyFamilyTreePage({
   canCreate = true,
   researchRequired = false,
   onOpenPerson,
+  onActiveContextChange,
+  personProfileNavigationEnabled = false,
 }: FamilyTreePageProps) {
   const { openWindow: openWorkspaceWindow } = useWorkspaceWindows();
-  const [toolbarState, setToolbarState] = useState<FamilyTreeToolbarState>(defaultToolbarState);
+  const [toolbarState, setToolbarState] = useState<FamilyTreeToolbarState>(() => ({
+    ...defaultToolbarState,
+    treeId: initialTreeId?.trim() || "",
+  }));
   const [selectedOccurrenceId, setSelectedOccurrenceId] = useState("");
   const [highlightedOccurrenceIds, setHighlightedOccurrenceIds] = useState<string[]>([]);
   const [highlightedRelationshipId, setHighlightedRelationshipId] = useState("");
@@ -216,6 +247,7 @@ export function LegacyFamilyTreePage({
   const [issuesOpen, setIssuesOpen] = useState(false);
   const [treeSearchQuery, setTreeSearchQuery] = useState("");
   const [focusOccurrenceId, setFocusOccurrenceId] = useState("");
+  const appliedRouteFocusRef = useRef("");
   const [expandedBranchPersonIds, setExpandedBranchPersonIds] = useState<string[]>([]);
   const [treeAdminOpen, setTreeAdminOpen] = useState(false);
   const [treeAdminSummaries, setTreeAdminSummaries] = useState<FamilyTreeAdminSummary[]>([]);
@@ -316,6 +348,20 @@ export function LegacyFamilyTreePage({
     treeAdminSummaries.find((summary) => summary.tree.isDefault)?.tree.id ||
     treeAdminSummaries[0]?.tree.id ||
     "";
+  const persistedRootPersonId = treeAdminSummaries.find(
+    (summary) => summary.tree.id === activeTreeId,
+  )?.tree.rootPersonId
+    || data?.tree?.rootPersonId
+    || "";
+
+  useEffect(() => {
+    if (!projectId || !activeTreeId || !persistedRootPersonId) return;
+    onActiveContextChange?.({
+      projectId,
+      treeId: activeTreeId,
+      rootPersonId: persistedRootPersonId,
+    });
+  }, [activeTreeId, onActiveContextChange, persistedRootPersonId, projectId]);
 
   const refreshTreeAdmin = async () => {
     if (!projectId) {
@@ -334,6 +380,10 @@ export function LegacyFamilyTreePage({
   };
 
   function openPersonCardWindow(personId: string) {
+    if (personProfileNavigationEnabled && onOpenPerson) {
+      onOpenPerson(personId);
+      return;
+    }
     const person = persons.find((item) => item.id === personId);
     if (!db || !person || !onSaveRelation || !onDeleteRelation || !onOpenRelated || !onCreateRelated) {
       onOpenPerson?.(personId);
@@ -396,10 +446,7 @@ export function LegacyFamilyTreePage({
           canAddCustomField={canAddCustomField}
           customFieldLimitMessage={customFieldLimitMessage}
           onClose={close}
-          onSave={(savedPerson) => {
-            onSavePerson(savedPerson);
-            close();
-          }}
+          onSave={(savedPerson) => savePersonAndClose(onSavePerson, savedPerson, close)}
           modalMode="window"
           stackIndex={stackIndex}
           dockIndex={dockIndex}
@@ -549,7 +596,11 @@ export function LegacyFamilyTreePage({
   }
 
   useEffect(() => {
-    setToolbarState(defaultToolbarState);
+    setToolbarState({
+      ...defaultToolbarState,
+      treeId: initialTreeId?.trim() || "",
+    });
+    appliedRouteFocusRef.current = "";
     setSelectedOccurrenceId("");
     setHighlightedOccurrenceIds([]);
     setHighlightedRelationshipId("");
@@ -561,7 +612,7 @@ export function LegacyFamilyTreePage({
     setBuilderNotice("");
     mutations.resetError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [initialTreeId, projectId]);
 
   useEffect(() => {
     setExpandedBranchPersonIds([]);
@@ -600,6 +651,23 @@ export function LegacyFamilyTreePage({
       return rootOccurrence?.id ?? filteredGraph.occurrences[0]?.id ?? "";
     });
   }, [filteredGraph]);
+
+  useEffect(() => {
+    const personId = initialFocusPersonId?.trim();
+    if (!personId || !filteredGraph) return;
+    const routedTreeId = initialTreeId?.trim();
+    if (routedTreeId && filteredGraph.treeId !== routedTreeId) return;
+    const requestKey = `${filteredGraph.treeId}\u001f${personId}`;
+    if (appliedRouteFocusRef.current === requestKey) return;
+    const occurrence = filteredGraph.occurrences.find((item) => item.personId === personId);
+    if (!occurrence) return;
+    appliedRouteFocusRef.current = requestKey;
+    setSelectedOccurrenceId(occurrence.id);
+    setHighlightedOccurrenceIds([occurrence.id]);
+    setHighlightedRelationshipId("");
+    setSelectedIssueKey("");
+    setFocusOccurrenceId(occurrence.id);
+  }, [filteredGraph, initialFocusPersonId, initialTreeId]);
 
   const updateToolbar = (patch: Partial<FamilyTreeToolbarState>) => {
     if (patch.rootPersonId) {
@@ -762,41 +830,45 @@ export function LegacyFamilyTreePage({
 
   const exportGedcom = async () => {
     if (!projectId) return;
-    setBuilderNotice("Готую GEDCOM-файл для всього доступного дерева...");
+    const treeId = toolbarState.treeId || data?.treeId || filteredGraph?.treeId || "";
+    if (!treeId) {
+      setBuilderNotice("Не вибрано дерево для експорту GEDCOM.");
+      return;
+    }
+    if (!window.confirm(GEDCOM_EXPORT_PRIVACY_CONFIRMATION)) {
+      setBuilderNotice("Експорт GEDCOM скасовано.");
+      return;
+    }
+    setBuilderNotice("Надсилаю запит на фоновий експорт GEDCOM…");
     try {
-      const exportGraph = await getFamilyTreeGraph({
-        projectId,
-        treeId: toolbarState.treeId || data?.treeId || filteredGraph?.treeId || undefined,
-        rootPersonId: toolbarState.rootPersonId || data?.rootPersonId || filteredGraph?.rootPersonId || undefined,
-        mode: "family",
-        unlimitedDepth: true,
-        includeAssociations: true,
-        includeDisproven: true,
-        includePrivateLiving: true,
-        problemsMode: true,
-      });
-      const livingCount = exportGraph.nodes.filter((node) => node.isLiving).length;
-      if (livingCount > 0) {
-        const confirmed = window.confirm(
-          `GEDCOM-файл міститиме ${livingCount} живих осіб. У файлі буде позначка приватності RESN privacy, але перед завантаженням на сторонній ресурс перевірте його налаштування приватності. Експортувати файл?`,
+      const status = await requestGedcomExport(projectId, treeId);
+      if ((status.status === "failed" && !status.retryable) || status.status === "expired") {
+        throw new Error(
+          status.error ||
+            (status.status === "expired"
+              ? "Термін дії попереднього експорту завершився. Спробуйте ще раз."
+              : "Фоновий експорт GEDCOM завершився з помилкою."),
         );
-        if (!confirmed) {
-          setBuilderNotice("Експорт GEDCOM скасовано.");
-          return;
-        }
       }
-      const result = exportFamilyTreeGraphToGedcom(exportGraph, {
-        sourceName: "Трекер Роду",
-        createdAt: new Date(),
-        preservedRecords: exportGraph.treeId
-          ? (await readLatestGedcomArchive({ projectId, treeId: exportGraph.treeId }))?.records
-          : undefined,
-        documents,
-        findings,
-      });
-      downloadTextFile(result.text, "family-tree.ged", "text/plain;charset=utf-8");
-      const warningText = result.warnings.length ? ` Попереджень GEDCOM: ${result.warnings.length}.` : "";
-      setBuilderNotice(`GEDCOM експортовано: ${exportGraph.nodes.length} осіб.${warningText}`);
+      if (status.status === "completed") {
+        if (status.emailStatus === "sent") {
+          setBuilderNotice(
+            "GEDCOM-файл уже готовий. Захищене посилання для завантаження надіслано на вашу email-адресу.",
+          );
+        } else if (status.emailStatus === "failed") {
+          setBuilderNotice(
+            "GEDCOM-файл уже готовий, але не вдалося надіслати email із посиланням. Спробуйте повторити запит пізніше.",
+          );
+        } else {
+          setBuilderNotice(
+            "GEDCOM-файл уже готовий. Email із захищеним посиланням готується до надсилання.",
+          );
+        }
+      } else {
+        setBuilderNotice(
+          "Запит на експорт GEDCOM прийнято. Файл формується у фоновому режимі; коли він буде готовий, захищене посилання для завантаження надійде на вашу email-адресу.",
+        );
+      }
     } catch (exportError) {
       setBuilderNotice(
         exportError instanceof Error
@@ -1602,18 +1674,6 @@ function eventYear(event: VisualNode["person"]["events"][number] | undefined): s
 
 function normalizeSearchText(value: string): string {
   return value.toLocaleLowerCase("uk").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").trim();
-}
-
-function downloadTextFile(text: string, fileName: string, mimeType: string): void {
-  const blob = new Blob([text], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
 }
 
 function edgeAllowed(edge: FamilyTreeEdgeDto, state: FamilyTreeToolbarState): boolean {
