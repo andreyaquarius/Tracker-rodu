@@ -52,5 +52,10 @@ test("marks elapsed explicit deadlines and leaves ambiguous links unknown", () =
 
   assert.deepEqual(externalLinkExpiry("https://example.test/photo.jpg", now), { kind: "unknown" });
   assert.deepEqual(externalLinkExpiry("https://example.test/photo.jpg?e=2", now), { kind: "unknown" });
+  assert.deepEqual(externalLinkExpiry("https://example.test/photo.jpg?exp=1e308", now), { kind: "unknown" });
+  assert.deepEqual(
+    externalLinkExpiry("https://example.test/photo.jpg?X-Amz-Date=20260719T120000Z&X-Amz-Expires=1e308", now),
+    { kind: "unknown" },
+  );
   assert.deepEqual(externalLinkExpiry("not a URL", now), { kind: "unknown" });
 });

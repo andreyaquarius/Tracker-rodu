@@ -1,12 +1,12 @@
-import type { ScanAttachment } from "../types";
-import { createId } from "../utils/id";
-import { sanitizeWebUrl } from "../utils/safeUrl";
-import { nowIso } from "../utils/dateHelpers";
+import type { ScanAttachment } from "../types/index.ts";
+import { createId } from "../utils/id.ts";
+import { sanitizeWebUrl } from "../utils/safeUrl.ts";
+import { nowIso } from "../utils/dateHelpers.ts";
 import { externalLinkExpiry } from "../utils/externalLinkExpiry.ts";
 import {
   getCachedDocumentBlob,
   putCachedDocumentBlob,
-} from "./documentBlobCache";
+} from "./documentBlobCache.ts";
 import {
   deleteFileFromGoogleDrive,
   downloadFileFromGoogleDrive,
@@ -16,11 +16,12 @@ import {
   uploadFileToGoogleDrive,
   type GoogleDriveFileMetadata,
   type GoogleDriveUploadProgress,
-} from "./googleDriveStorage";
+} from "./googleDriveStorage.ts";
 
 export const MAX_ATTACHMENT_SIZE_MB = 25;
 export type AttachmentPolicy = "all" | "finding" | "archive-request" | "document" | "person-photo";
 const MAX_FILE_SIZE = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024;
+const MAX_EXTERNAL_DOCUMENT_SIZE = 100 * 1024 * 1024;
 const GOOGLE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 const imageExtensions = new Set(["jpg", "jpeg", "png", "webp", "gif", "bmp", "svg", "tif", "tiff"]);
 
@@ -332,7 +333,8 @@ export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
       return new Blob([externalPreviewHtml(target, scan.name)], { type: "text/html" });
     }
 
-    const cached = await getCachedDocumentBlob(scanBlobCacheKey(scan));
+    const cacheIdentity = scanBlobCacheIdentity(scan);
+    const cached = await getCachedDocumentBlob(scanBlobCacheKey(scan), cacheIdentity);
     if (cached) return cached;
 
     const blob = await fetchExternalDocumentBlob(target, kind);
@@ -343,7 +345,8 @@ export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
     throw new Error("У файлу відсутній ідентифікатор хмарного сховища.");
   }
 
-  const cached = await getCachedDocumentBlob(scanBlobCacheKey(scan));
+  const cacheIdentity = scanBlobCacheIdentity(scan);
+  const cached = await getCachedDocumentBlob(scanBlobCacheKey(scan), cacheIdentity);
   if (cached) return cached;
 
   const blob = await downloadFileFromGoogleDrive(scan.storagePath);
@@ -373,41 +376,86 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
       },
     });
   } catch (error) {
+    window.clearTimeout(timeoutId);
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error("Зовнішній сайт не відповів за 30 секунд. Спробуйте ще раз або додайте фото вручну.");
     }
     throw new Error(
       "Браузер не дозволив прочитати файл із цього сайту (CORS) або посилання вже недійсне. Відкрийте джерело в новій вкладці, завантажте зображення вручну й додайте його кнопкою «Додати файли».",
     );
+  }
+
+  try {
+    if (response.status === 401 || response.status === 403) {
+      const expiryMessage = externalLinkExpiryMessage(target);
+      if (expiryMessage) throw new Error(expiryMessage);
+      throw new Error("Файл потребує авторизації на зовнішньому сайті або доступ до нього заборонено.");
+    }
+    if (response.status === 404) {
+      const expiryMessage = externalLinkExpiryMessage(target);
+      if (expiryMessage) throw new Error(expiryMessage);
+    }
+    if (!response.ok) {
+      throw new Error(`Не вдалося завантажити зовнішній файл (${response.status}).`);
+    }
+
+    const contentType = response.headers.get("content-type")?.toLocaleLowerCase() ?? "";
+    const maxBytes = kind === "image" ? MAX_FILE_SIZE : MAX_EXTERNAL_DOCUMENT_SIZE;
+    const blob = await readBoundedResponseBlob(response, maxBytes);
+    const blobType = blob.type.toLocaleLowerCase();
+
+    if (kind === "pdf" && !contentType.includes("pdf") && !blobType.includes("pdf")) {
+      throw new Error("Джерело не повернуло PDF-файл для внутрішнього перегляду.");
+    }
+    if (kind === "image" && !contentType.startsWith("image/") && !blobType.startsWith("image/")) {
+      throw new Error("Джерело не повернуло зображення для внутрішнього перегляду.");
+    }
+
+    return blob;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Зовнішній сайт не передав файл за 30 секунд. Спробуйте ще раз або додайте фото вручну.");
+    }
+    throw error;
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
 
-  if (response.status === 401 || response.status === 403) {
-    const expiryMessage = externalLinkExpiryMessage(target);
-    if (expiryMessage) throw new Error(expiryMessage);
-    throw new Error("Файл потребує авторизації на зовнішньому сайті або доступ до нього заборонено.");
+export async function readBoundedResponseBlob(response: Response, maxBytes: number): Promise<Blob> {
+  const declaredSize = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredSize) && declaredSize > maxBytes) {
+    throw new Error(`Зовнішній файл перевищує дозволені ${Math.round(maxBytes / 1024 / 1024)} МБ.`);
   }
-  if (response.status === 404) {
-    const expiryMessage = externalLinkExpiryMessage(target);
-    if (expiryMessage) throw new Error(expiryMessage);
-  }
-  if (!response.ok) {
-    throw new Error(`Не вдалося завантажити зовнішній файл (${response.status}).`);
-  }
-
-  const contentType = response.headers.get("content-type")?.toLocaleLowerCase() ?? "";
-  const blob = await response.blob();
-  const blobType = blob.type.toLocaleLowerCase();
-
-  if (kind === "pdf" && !contentType.includes("pdf") && !blobType.includes("pdf")) {
-    throw new Error("Джерело не повернуло PDF-файл для внутрішнього перегляду.");
-  }
-  if (kind === "image" && !contentType.startsWith("image/") && !blobType.startsWith("image/")) {
-    throw new Error("Джерело не повернуло зображення для внутрішнього перегляду.");
+  if (!response.body) {
+    const blob = await response.blob();
+    if (blob.size > maxBytes) {
+      throw new Error(`Зовнішній файл перевищує дозволені ${Math.round(maxBytes / 1024 / 1024)} МБ.`);
+    }
+    return blob;
   }
 
-  return blob;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      received += value.byteLength;
+      if (received > maxBytes) {
+        await reader.cancel("size-limit").catch(() => undefined);
+        throw new Error(`Зовнішній файл перевищує дозволені ${Math.round(maxBytes / 1024 / 1024)} МБ.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new Blob(chunks, {
+    type: response.headers.get("content-type")?.split(";", 1)[0]?.trim() || "application/octet-stream",
+  });
 }
 
 function externalLinkExpiryMessage(target: string): string {
@@ -420,10 +468,21 @@ function externalLinkExpiryMessage(target: string): string {
 }
 
 async function cacheScanBlob(scan: ScanAttachment, blob: Blob): Promise<void> {
-  await putCachedDocumentBlob(scanBlobCacheKey(scan), blob, blob.type || scan.mimeType);
+  await putCachedDocumentBlob(
+    scanBlobCacheKey(scan),
+    blob,
+    blob.type || scan.mimeType,
+    scanBlobCacheIdentity(scan),
+  );
 }
 
-function scanBlobCacheKey(scan: ScanAttachment): string {
+export function scanBlobCacheKey(scan: ScanAttachment): string {
+  const identity = scanBlobCacheIdentity(scan);
+  if (scan.storage === "google-drive") return identity;
+  return `external:v2:${stableHash(identity, 2166136261)}:${stableHash(identity, 3335557771)}:${stableHash(identity, 2654435761)}:${stableHash(identity, 2246822519)}`;
+}
+
+function scanBlobCacheIdentity(scan: ScanAttachment): string {
   if (scan.storage === "google-drive") {
     const version = scan.driveRevisionId
       || scan.driveMd5Checksum
@@ -431,10 +490,9 @@ function scanBlobCacheKey(scan: ScanAttachment): string {
       || String(scan.size || scan.createdAt || "unknown");
     return `gdrive:${scan.storagePath}:${version}`;
   }
-
   const source = scan.webViewLink || scan.storagePath;
   const version = scan.driveModifiedTime || String(scan.size || scan.createdAt || "unknown");
-  return `external:${stableHash(source)}:${version}`;
+  return `external:${source}:${version}`;
 }
 
 export async function getScanPreviewSource(scan: ScanAttachment): Promise<ScanPreviewSource> {
@@ -642,8 +700,8 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function stableHash(value: string): string {
-  let hash = 2166136261;
+function stableHash(value: string, seed: number): string {
+  let hash = seed >>> 0;
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index);
     hash = Math.imul(hash, 16777619);

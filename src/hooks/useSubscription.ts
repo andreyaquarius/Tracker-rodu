@@ -12,8 +12,10 @@ import {
   isSubscriptionRefreshDue,
 } from "../utils/subscriptionPolling";
 
-export function useSubscription(projectId?: string, enabled = true) {
-  const [context, setContext] = useState<SubscriptionContext | null>(null);
+export function useSubscription(projectId?: string, enabled = true, scopeKey = "") {
+  const resolvedScopeKey = `${scopeKey}:${projectId ?? ""}:${enabled ? "1" : "0"}`;
+  const [loadedScopeKey, setLoadedScopeKey] = useState(resolvedScopeKey);
+  const [storedContext, setStoredContext] = useState<SubscriptionContext | null>(null);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState("");
   const requestGenerationRef = useRef(0);
@@ -24,7 +26,8 @@ export function useSubscription(projectId?: string, enabled = true) {
 
   const refreshSubscription = useCallback((): Promise<SubscriptionContext | null> => {
     if (!enabled) {
-      setContext(null);
+      setStoredContext(null);
+      setLoadedScopeKey(resolvedScopeKey);
       setLoading(false);
       return Promise.resolve(null);
     }
@@ -36,7 +39,8 @@ export function useSubscription(projectId?: string, enabled = true) {
       try {
         const next = await loadSubscriptionContext(projectId);
         if (requestGeneration !== requestGenerationRef.current) return null;
-        setContext(next);
+        setStoredContext(next);
+        setLoadedScopeKey(resolvedScopeKey);
         return next;
       } catch (loadError) {
         if (requestGeneration === requestGenerationRef.current) {
@@ -50,16 +54,18 @@ export function useSubscription(projectId?: string, enabled = true) {
         }
       }
     });
-  }, [enabled, projectId]);
+  }, [enabled, projectId, resolvedScopeKey]);
 
   useEffect(() => {
     const requestGeneration = requestGenerationRef.current + 1;
     requestGenerationRef.current = requestGeneration;
     refreshDeduperRef.current.clear();
     nextAutomaticRefreshAtRef.current = null;
+    setLoadedScopeKey(resolvedScopeKey);
+    setStoredContext(null);
+    setLoading(enabled);
 
     if (!enabled) {
-      setContext(null);
       setLoading(false);
       setError("");
     }
@@ -69,7 +75,7 @@ export function useSubscription(projectId?: string, enabled = true) {
       requestGenerationRef.current += 1;
       refreshDeduperRef.current.clear();
     };
-  }, [enabled, projectId]);
+  }, [enabled, projectId, resolvedScopeKey]);
 
   useEffect(() => {
     void refreshSubscription();
@@ -141,6 +147,8 @@ export function useSubscription(projectId?: string, enabled = true) {
     };
   }, [enabled, refreshSubscription]);
 
+  const context = loadedScopeKey === resolvedScopeKey ? storedContext : null;
+  const scopedLoading = loadedScopeKey === resolvedScopeKey ? loading : enabled;
   const getLimit = useCallback((key: PlanLimitKey) => context?.limits[key] ?? null, [context]);
   const getUsage = useCallback((key: PlanLimitKey) => context?.usage[key] ?? 0, [context]);
   const getRemaining = useCallback((key: PlanLimitKey) => {
@@ -183,7 +191,7 @@ export function useSubscription(projectId?: string, enabled = true) {
     isTrial: context?.subscription.status === "trialing" && trialDaysRemaining > 0,
     trialEndsAt: context?.subscription.trialEndsAt ?? null,
     trialDaysRemaining,
-    loading,
+    loading: scopedLoading,
     error,
     canCreateProject: withinLimit("projects"),
     canCreateResearch: canCreateProjectRecords && withinLimit("researches_total") && withinLimit("researches_per_project"),

@@ -19,6 +19,8 @@ test("photo backup UI requires explicit consent and explains the unknown lifetim
   assert.match(modal, /можуть перестати працювати будь-коли/);
   assert.match(modal, /Зрозуміло, завершити/);
   assert.match(modal, /beforeunload/);
+  assert.match(modal, /progress\.processed \/ progress\.total/);
+  assert.doesNotMatch(modal, /disabled=\{busy \|\| \(!driveReady/);
 });
 
 test("all GEDCOM entry points receive the shared batch backup callback", () => {

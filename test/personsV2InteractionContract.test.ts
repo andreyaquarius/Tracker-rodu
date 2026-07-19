@@ -56,6 +56,7 @@ test("persons V2 linked records can browse, create, and open real application re
 
 test("persons V2 uses the same access entitlement as the family-tree module", () => {
   assert.match(app, /canUsePersonsModuleV2\(\{[\s\S]*?canUseFamilyTreeFeature,[\s\S]*?\}\)/u);
+  assert.doesNotMatch(app, /personsModuleV2RolloutEnabled/u);
   assert.match(app, /personsModuleV2AccessLoading[\s\S]*?Перевіряємо доступ до нового модуля осіб/u);
 });
 

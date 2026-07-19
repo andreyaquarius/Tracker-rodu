@@ -2943,9 +2943,12 @@ tbody tr:hover { background: #fbfaf5; }
 }
 .modal.gedcom-photo-backup-modal {
   width: min(780px, 100%);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 .gedcom-photo-backup {
+  flex: 1 1 auto;
   min-height: 0;
   padding: 22px 24px 24px;
   display: grid;
@@ -3008,6 +3011,7 @@ tbody tr:hover { background: #fbfaf5; }
   font-weight: 700;
 }
 .gedcom-photo-backup__explanation,
+.gedcom-photo-backup__local-files,
 .gedcom-photo-backup__warning,
 .gedcom-photo-backup__result {
   display: grid;
@@ -3016,6 +3020,20 @@ tbody tr:hover { background: #fbfaf5; }
   background: #fbfaf6;
   border: 1px solid var(--line);
   border-radius: 12px;
+}
+.gedcom-photo-backup__local-files h3,
+.gedcom-photo-backup__local-files p {
+  margin: 0;
+}
+.gedcom-photo-backup__local-files {
+  color: #344b45;
+  line-height: 1.5;
+}
+.gedcom-photo-backup__local-files > .details-actions {
+  position: static;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
 }
 .gedcom-photo-backup__warning {
   background: #fff8e8;

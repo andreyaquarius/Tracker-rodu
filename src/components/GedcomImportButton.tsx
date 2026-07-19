@@ -259,23 +259,38 @@ export function GedcomImportButton({
       }
       setProgress({ step: "Імпорт завершено", percent: 100, detail: "Дані збережено." });
       const importSummary = formatGedcomImportReport(preview.report);
-      const photoPlan = buildGedcomPhotoBackupPlan(
-        preview.people,
-        personIdRemap,
-        committed.people,
-      );
-      if (
-        photoPlan.candidates.length
-        || photoPlan.missingLocalCount
-        || photoPlan.unsupportedHttpCount
-      ) {
-        setPhotoBackupCompletion({
+      try {
+        const photoPlan = buildGedcomPhotoBackupPlan(
+          preview.people,
+          personIdRemap,
+          committed.people,
+        );
+        if (
+          photoPlan.candidates.length
+          || photoPlan.missingLocalCount
+          || photoPlan.unsupportedHttpCount
+        ) {
+          setPhotoBackupCompletion({
+            fileName: preview.fileName,
+            importSummary,
+            plan: photoPlan,
+          });
+        } else {
+          window.alert(["Імпорт GEDCOM завершено.", importSummary].join("\n"));
+        }
+      } catch (photoPlanError) {
+        // The durable import is already complete. Optional photo preparation
+        // must never make a successful GEDCOM import look failed or trigger a
+        // misleading rollback attempt.
+        console.error("GEDCOM photo backup preparation failed", {
           fileName: preview.fileName,
-          importSummary,
-          plan: photoPlan,
+          error: photoPlanError,
         });
-      } else {
-        window.alert(["Імпорт GEDCOM завершено.", importSummary].join("\n"));
+        window.alert([
+          "Імпорт GEDCOM завершено.",
+          importSummary,
+          "Не вдалося підготувати пакетне копіювання фото. Дані імпорту збережені; фото можна додати пізніше з профілів осіб.",
+        ].join("\n"));
       }
       setPreview(null);
       setRootSearchQuery("");

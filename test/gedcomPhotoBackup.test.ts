@@ -5,6 +5,8 @@ import {
   backupGedcomPhotosToGoogleDrive,
   buildGedcomPhotoBackupPlan,
   applyPersonPhotoBackups,
+  attachLocalGedcomPhotoFiles,
+  redactExternalPhotoSource,
   type GedcomPhotoBackupCandidate,
 } from "../src/services/gedcomPhotoBackup.ts";
 
@@ -29,6 +31,25 @@ test("builds the post-import plan from imported photos and applies canonical per
   assert.equal(plan.totalPhotoCount, 3);
 });
 
+test("matches a selected GEDCOM photo directory in one batch", () => {
+  const imported = person("incoming", [
+    photo("local", "C:\\Family archive\\Photos\\ancestor.jpg", { availability: "missing-local" }),
+  ], "local");
+  const plan = buildGedcomPhotoBackupPlan([imported]);
+  const selected = new File(["portrait"], "ancestor.jpg", { type: "image/jpeg" });
+  Object.defineProperty(selected, "webkitRelativePath", {
+    configurable: true,
+    value: "Photos/ancestor.jpg",
+  });
+
+  const resolution = attachLocalGedcomPhotoFiles(plan, [selected]);
+
+  assert.equal(resolution.matchedCount, 1);
+  assert.equal(resolution.unmatchedCount, 0);
+  assert.equal(resolution.plan.missingLocalCount, 0);
+  assert.equal(resolution.plan.candidates[0]?.localFile, selected);
+});
+
 test("does not offer a photo already copied to Drive on a repeated import", () => {
   const source = "https://cdn.example/photo.jpg";
   const imported = person("new-id", [photo("incoming-photo", source)]);
@@ -44,6 +65,25 @@ test("does not offer a photo already copied to Drive on a repeated import", () =
 
   assert.equal(plan.candidates.length, 0);
   assert.equal(plan.alreadyStoredCount, 1);
+});
+
+test("signed URL credentials are ignored for identity and removed after Drive backup", () => {
+  const firstUrl = "https://cdn.example/photo.jpg?id=42&X-Amz-Date=20260719T000000Z&X-Amz-Signature=secret-one";
+  const refreshedUrl = "https://cdn.example/photo.jpg?X-Amz-Signature=secret-two&id=42&X-Amz-Date=20260720T000000Z";
+  const stored = photo("stored-photo", "drive-id", {
+    storage: "google-drive",
+    sourceReference: redactExternalPhotoSource(firstUrl),
+  });
+  const plan = buildGedcomPhotoBackupPlan(
+    [person("incoming", [photo("incoming-photo", refreshedUrl)])],
+    { incoming: "canonical" },
+    [person("canonical", [stored])],
+  );
+
+  assert.equal(plan.candidates.length, 0);
+  assert.equal(plan.alreadyStoredCount, 1);
+  assert.equal(stored.sourceReference?.includes("Signature"), false);
+  assert.match(stored.sourceReference ?? "", /id=42/u);
 });
 
 test("copies independent photos with partial failure and persists successful replacements", async () => {
@@ -72,6 +112,27 @@ test("copies independent photos with partial failure and persists successful rep
   assert.equal(result.failures.length, 1);
   assert.equal(result.failures[0]?.code, "cors");
   assert.deepEqual(persisted, ["p1"]);
+});
+
+test("an expired source cached successfully is not mislabeled when Drive upload fails", async () => {
+  const expiredSource = photo("expired", "https://cdn.example/expired.jpg?exp=1700000000");
+  const plan = buildGedcomPhotoBackupPlan(
+    [person("p1", [expiredSource])],
+    {},
+    [],
+    Date.parse("2026-07-19T00:00:00.000Z"),
+  );
+  const result = await backupGedcomPhotosToGoogleDrive(plan, {
+    target: { projectId: "project", projectName: "Project" },
+    persist: async () => ({ appliedSourceReferences: [] }),
+  }, {
+    loadPhoto: async () => new Blob(["cached"], { type: "image/jpeg" }),
+    storePhoto: async () => {
+      throw new Error("Google Drive quota exceeded");
+    },
+  });
+
+  assert.equal(result.failures[0]?.code, "upload");
 });
 
 test("keeps Drive objects person-scoped so attachment metadata remains unique", async () => {
