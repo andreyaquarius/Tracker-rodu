@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   authorizeGoogleDrive,
   isGoogleDriveAuthorized,
@@ -9,6 +9,7 @@ import type {
   GedcomPhotoBackupProgress,
   GedcomPhotoBackupResult,
 } from "../services/gedcomPhotoBackup.ts";
+import { attachLocalGedcomPhotoFiles } from "../services/gedcomPhotoBackup.ts";
 import { externalLinkExpiry, formatExternalLinkExpiry } from "../utils/externalLinkExpiry.ts";
 import { Modal } from "./Modal";
 
@@ -34,22 +35,21 @@ export function GedcomPhotoBackupModal({
   const [progress, setProgress] = useState<GedcomPhotoBackupProgress | null>(null);
   const [result, setResult] = useState<GedcomPhotoBackupResult | null>(null);
   const [error, setError] = useState("");
-  const [driveReady, setDriveReady] = useState(false);
+  const [localFiles, setLocalFiles] = useState<File[]>([]);
+  const directoryInputRef = useRef<HTMLInputElement | null>(null);
+  const localSelection = useMemo(
+    () => attachLocalGedcomPhotoFiles(plan, localFiles),
+    [localFiles, plan],
+  );
+  const effectivePlan = localSelection.plan;
   const busy = phase === "authorizing" || phase === "copying";
-  const expiryNotice = useMemo(() => expirySummary(plan), [plan]);
+  const expiryNotice = useMemo(() => expirySummary(effectivePlan), [effectivePlan]);
 
   useEffect(() => {
-    let active = true;
-    void prepareGoogleDriveAuthorization()
-      .then(() => {
-        if (active) setDriveReady(true);
-      })
-      .catch(() => {
-        if (active) setDriveReady(false);
-      });
-    return () => {
-      active = false;
-    };
+    // Warm up Google Identity Services, but never leave the consent button
+    // permanently disabled when the preload fails. The click path retries and
+    // can then show the real authorization error to the user.
+    void prepareGoogleDriveAuthorization().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -71,7 +71,10 @@ export function GedcomPhotoBackupModal({
     onClose();
   };
 
-  const startBackup = async (retryPlan = plan) => {
+  const startBackup = async (
+    retryPlan = effectivePlan,
+    previousResult: GedcomPhotoBackupResult | null = null,
+  ) => {
     if (!onBackup || !retryPlan.candidates.length) return;
     setError("");
     setResult(null);
@@ -81,7 +84,9 @@ export function GedcomPhotoBackupModal({
       await authorizeGoogleDrive();
       setPhase("copying");
       const nextResult = await onBackup(retryPlan, setProgress);
-      setResult(nextResult);
+      setResult(previousResult
+        ? mergeBackupResults(previousResult, nextResult, retryPlan)
+        : nextResult);
       setPhase("result");
     } catch (backupError) {
       setError(
@@ -94,7 +99,7 @@ export function GedcomPhotoBackupModal({
   };
 
   const retryPlan = result?.failures.length
-    ? { ...plan, candidates: uniqueFailedCandidates(result) }
+    ? { ...effectivePlan, candidates: uniqueFailedCandidates(result) }
     : null;
 
   return (
@@ -117,16 +122,16 @@ export function GedcomPhotoBackupModal({
           <section className="gedcom-photo-backup__warning" role="alert">
             <h3>Без копії зовнішні фото можуть зникнути</h3>
             {expiryNotice ? <p>{expiryNotice}</p> : null}
-            {plan.missingLocalCount ? (
+            {effectivePlan.missingLocalCount ? (
               <p>
-                Ще {plan.missingLocalCount.toLocaleString("uk-UA")} локальних фото з GEDCOM недоступні браузеру вже зараз.
+                Ще {effectivePlan.missingLocalCount.toLocaleString("uk-UA")} локальних фото з GEDCOM недоступні браузеру вже зараз.
                 Їх можна додати пізніше вручну з профілів осіб.
               </p>
             ) : null}
             <p>Метадані й початкові адреси залишаться у профілях, але саме зображення без Drive-копії не гарантується.</p>
             <p>Кеш браузера не має гарантованого строку зберігання й може бути очищений браузером або користувачем у будь-який момент.</p>
             <div className="details-actions">
-              {plan.candidates.length && onBackup ? (
+              {effectivePlan.candidates.length && onBackup ? (
                 <button type="button" className="button button-primary" onClick={() => setPhase("offer")}>
                   Повернутися і зберегти фото
                 </button>
@@ -142,7 +147,7 @@ export function GedcomPhotoBackupModal({
             <div className="gedcom-photo-backup__stats">
               <PhotoStat value={result.copied} label="збережено у Drive" />
               <PhotoStat value={result.failures.length} label="не вдалося" />
-              <PhotoStat value={plan.alreadyStoredCount} label="вже були у Drive" />
+              <PhotoStat value={effectivePlan.alreadyStoredCount} label="вже були у Drive" />
             </div>
             {result.failures.length ? (
               <div className="gedcom-photo-backup__failures">
@@ -157,7 +162,7 @@ export function GedcomPhotoBackupModal({
             ) : null}
             <div className="details-actions">
               {retryPlan?.candidates.length ? (
-                <button type="button" className="button button-secondary" onClick={() => void startBackup(retryPlan)}>
+                <button type="button" className="button button-secondary" onClick={() => void startBackup(retryPlan, result)}>
                   Повторити для невдалих ({retryPlan.candidates.length})
                 </button>
               ) : null}
@@ -167,10 +172,10 @@ export function GedcomPhotoBackupModal({
         ) : (
           <>
             <div className="gedcom-photo-backup__stats">
-              <PhotoStat value={plan.candidates.length} label="можна скопіювати" />
-              <PhotoStat value={plan.personCount} label="осіб із фото" />
-              <PhotoStat value={plan.missingLocalCount} label="потребують файла" />
-              <PhotoStat value={plan.alreadyStoredCount} label="вже у Drive" />
+              <PhotoStat value={effectivePlan.candidates.length} label="можна скопіювати" />
+              <PhotoStat value={effectivePlan.personCount} label="осіб із фото" />
+              <PhotoStat value={effectivePlan.missingLocalCount} label="потребують файла" />
+              <PhotoStat value={effectivePlan.alreadyStoredCount} label="вже у Drive" />
             </div>
 
             <section className="gedcom-photo-backup__explanation">
@@ -179,34 +184,97 @@ export function GedcomPhotoBackupModal({
                 Застосунок створить папку <b>Особи / Імпорт GEDCOM / Фото</b> у папці цього проєкту,
                 скопіює доступні зображення та автоматично оновить їх у профілях.
               </p>
+              {!isGoogleDriveAuthorized() ? (
+                <p>
+                  Google попросить дозволи створювати файли застосунку та переглядати Drive для наявної функції вибору документів.
+                  Під час цього пакетного кроку застосунок читає лише імпортовані фото й створює їх копії у папці проєкту.
+                </p>
+              ) : null}
               {expiryNotice ? <p>{expiryNotice}</p> : null}
-              {plan.expiredCount ? (
+              {effectivePlan.expiredCount ? (
                 <p className="form-error">
-                  Для {plan.expiredCount.toLocaleString("uk-UA")} фото зазначений строк уже минув.
+                  Для {effectivePlan.expiredCount.toLocaleString("uk-UA")} фото зазначений строк уже минув.
                   Спробуємо використати локальну кешовану копію, якщо вона ще є.
                 </p>
               ) : null}
-              {plan.unsupportedHttpCount ? (
+              {effectivePlan.unsupportedHttpCount ? (
                 <p className="form-error">
-                  {plan.unsupportedHttpCount.toLocaleString("uk-UA")} незахищених HTTP-посилань не копіюватимуться автоматично.
+                  {effectivePlan.unsupportedHttpCount.toLocaleString("uk-UA")} незахищених HTTP-посилань не копіюватимуться автоматично.
                 </p>
               ) : null}
-              {plan.missingLocalCount ? (
+              {effectivePlan.missingLocalCount ? (
                 <p>
-                  {plan.missingLocalCount.toLocaleString("uk-UA")} локальних шляхів із чужого комп’ютера неможливо прочитати з браузера;
-                  ці файли потрібно буде вибрати вручну.
+                  {effectivePlan.missingLocalCount.toLocaleString("uk-UA")} локальних шляхів із GEDCOM ще не зіставлено з файлами на цьому комп’ютері.
                 </p>
               ) : null}
             </section>
+
+            {plan.localCandidates.length ? (
+              <section className="gedcom-photo-backup__local-files">
+                <h3>Локальні фото з GEDCOM</h3>
+                <p>
+                  Виберіть папку з фотографіями або кілька файлів одразу. Застосунок зіставить їх за шляхом,
+                  назвою файла та ідентифікатором GEDCOM; неоднозначні збіги не завантажуватимуться.
+                </p>
+                <input
+                  ref={(node) => {
+                    directoryInputRef.current = node;
+                    node?.setAttribute("webkitdirectory", "");
+                  }}
+                  type="file"
+                  accept="image/*,.tif,.tiff,.bmp"
+                  multiple
+                  disabled={busy}
+                  hidden
+                  onChange={(event) => {
+                    setLocalFiles(Array.from(event.target.files ?? []));
+                    event.target.value = "";
+                  }}
+                />
+                <input
+                  id="gedcom-photo-local-files"
+                  type="file"
+                  accept="image/*,.tif,.tiff,.bmp"
+                  multiple
+                  disabled={busy}
+                  hidden
+                  onChange={(event) => {
+                    setLocalFiles(Array.from(event.target.files ?? []));
+                    event.target.value = "";
+                  }}
+                />
+                <div className="details-actions">
+                  <button type="button" className="button button-secondary" disabled={busy} onClick={() => directoryInputRef.current?.click()}>
+                    Вибрати папку
+                  </button>
+                  <label className="button button-secondary" htmlFor="gedcom-photo-local-files" aria-disabled={busy || undefined}>
+                    Вибрати кілька фото
+                  </label>
+                </div>
+                {localFiles.length ? (
+                  <p role="status">
+                    Зіставлено: {localSelection.matchedCount.toLocaleString("uk-UA")} із {plan.localCandidates.length.toLocaleString("uk-UA")}.
+                    {localSelection.unmatchedCount ? ` Не знайдено або неоднозначні: ${localSelection.unmatchedCount.toLocaleString("uk-UA")}.` : " Усі локальні фото знайдено."}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
 
             {busy ? (
               <div className="gedcom-import-progress" aria-live="polite">
                 <div className="gedcom-import-progress__header">
                   <strong>{phase === "authorizing" ? "Підключаємо Google Drive" : "Зберігаємо фотографії"}</strong>
-                  <span>{progressPercent(progress, plan)}%</span>
+                  <span>{progressPercent(progress)}%</span>
                 </div>
-                <div className="gedcom-import-progress__bar">
-                  <span style={{ width: `${Math.max(5, progressPercent(progress, plan))}%` }} />
+                <div
+                  className="gedcom-import-progress__bar"
+                  role="progressbar"
+                  aria-label="Прогрес збереження фотографій"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={progressPercent(progress)}
+                >
+                  <span style={{ width: `${progressPercent(progress)}%` }} />
                 </div>
                 <small>
                   {phase === "authorizing"
@@ -225,20 +293,20 @@ export function GedcomPhotoBackupModal({
             </details>
 
             <div className="details-actions">
-              {plan.candidates.length && onBackup ? (
+              {effectivePlan.candidates.length && onBackup ? (
                 <button
                   type="button"
                   className="button button-primary"
-                  disabled={busy || (!driveReady && !isGoogleDriveAuthorized())}
+                  disabled={busy}
                   onClick={() => void startBackup()}
                 >
                   {busy
                     ? "Зберігаємо…"
-                    : `${isGoogleDriveAuthorized() ? "Зберегти" : "Підключити Google Drive і зберегти"} ${plan.candidates.length.toLocaleString("uk-UA")} фото`}
+                    : `${isGoogleDriveAuthorized() ? "Зберегти" : "Підключити Google Drive і зберегти"} ${effectivePlan.candidates.length.toLocaleString("uk-UA")} фото`}
                 </button>
               ) : null}
               <button type="button" className="button button-secondary" disabled={busy} onClick={closeDialog}>
-                {plan.candidates.length ? "Не зараз" : "Завершити"}
+                {effectivePlan.candidates.length ? "Не зараз" : "Завершити"}
               </button>
             </div>
           </>
@@ -274,10 +342,9 @@ function expirySummary(plan: GedcomPhotoBackupPlan): string {
 
 function progressPercent(
   progress: GedcomPhotoBackupProgress | null,
-  plan: GedcomPhotoBackupPlan,
 ): number {
-  if (!progress || !plan.candidates.length) return 5;
-  return Math.max(5, Math.min(100, Math.round((progress.processed / plan.candidates.length) * 100)));
+  if (!progress || !progress.total) return 5;
+  return Math.max(5, Math.min(100, Math.round((progress.processed / progress.total) * 100)));
 }
 
 function uniqueFailedCandidates(result: GedcomPhotoBackupResult) {
@@ -290,4 +357,29 @@ function uniqueFailedCandidates(result: GedcomPhotoBackupResult) {
       seen.add(key);
       return true;
     });
+}
+
+function mergeBackupResults(
+  previous: GedcomPhotoBackupResult,
+  next: GedcomPhotoBackupResult,
+  retryPlan: GedcomPhotoBackupPlan,
+): GedcomPhotoBackupResult {
+  const retried = new Set(retryPlan.candidates.map(candidateKey));
+  const updatedPersons = new Map(
+    [...previous.updatedPersons, ...next.updatedPersons].map((person) => [person.id, person]),
+  );
+  return {
+    requested: previous.requested,
+    copied: previous.copied + next.copied,
+    uploaded: previous.uploaded + next.uploaded,
+    failures: [
+      ...previous.failures.filter((failure) => !retried.has(candidateKey(failure.candidate))),
+      ...next.failures,
+    ],
+    updatedPersons: [...updatedPersons.values()],
+  };
+}
+
+function candidateKey(candidate: GedcomPhotoBackupPlan["candidates"][number]): string {
+  return `${candidate.personId}:${candidate.deduplicationKey}`;
 }

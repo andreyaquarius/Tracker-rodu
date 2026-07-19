@@ -11,12 +11,15 @@ export interface GedcomPhotoBackupCandidate {
   requestedPrimary: boolean;
   /** Existing matched people may intentionally receive a newly imported source. */
   allowAppend: boolean;
+  /** Selected by the user for a local GEDCOM path; never persisted as raw bytes. */
+  localFile?: File;
   expiry: ExternalLinkExpiry;
   deduplicationKey: string;
 }
 
 export interface GedcomPhotoBackupPlan {
   candidates: GedcomPhotoBackupCandidate[];
+  localCandidates: GedcomPhotoBackupCandidate[];
   totalPhotoCount: number;
   personCount: number;
   alreadyStoredCount: number;
@@ -94,6 +97,7 @@ export function buildGedcomPhotoBackupPlan(
 ): GedcomPhotoBackupPlan {
   const canonicalById = new Map(canonicalPeople.map((person) => [person.id, person]));
   const candidates: GedcomPhotoBackupCandidate[] = [];
+  const localCandidates: GedcomPhotoBackupCandidate[] = [];
   const seen = new Set<string>();
   const peopleWithPhotos = new Set<string>();
   let alreadyStoredCount = 0;
@@ -121,21 +125,31 @@ export function buildGedcomPhotoBackupPlan(
       peopleWithPhotos.add(personId);
       const sourceReference = photo.sourceReference?.trim() || photo.storagePath.trim();
       const identity = normalizedPhotoSource(sourceReference);
+      const candidateIdentity = `${personId}:${identity}`;
+      if (seen.has(candidateIdentity)) continue;
+      seen.add(candidateIdentity);
       if (photo.storage === "google-drive" || durableSources.has(identity)) {
         alreadyStoredCount += 1;
         continue;
       }
       if (photo.availability === "missing-local" || !/^https?:\/\//i.test(sourceReference)) {
         missingLocalCount += 1;
+        localCandidates.push({
+          personId,
+          personName: personDisplayName(importedPerson),
+          photo,
+          sourceReference,
+          requestedPrimary: importedPerson.primaryPhotoId === photo.id,
+          allowAppend: !canonicalSources.has(identity),
+          expiry: { kind: "unknown" },
+          deduplicationKey: gedcomPhotoDeduplicationKey(personId, photo, sourceReference),
+        });
         continue;
       }
       if (!/^https:\/\//i.test(sourceReference)) {
         unsupportedHttpCount += 1;
         continue;
       }
-      const candidateIdentity = `${personId}:${identity}`;
-      if (seen.has(candidateIdentity)) continue;
-      seen.add(candidateIdentity);
       const expiry = externalLinkExpiry(sourceReference, nowMs);
       if (expiry.kind === "known") {
         knownExpiryCount += 1;
@@ -159,6 +173,7 @@ export function buildGedcomPhotoBackupPlan(
 
   return {
     candidates,
+    localCandidates,
     totalPhotoCount:
       candidates.length + alreadyStoredCount + missingLocalCount + unsupportedHttpCount,
     personCount: peopleWithPhotos.size,
@@ -185,6 +200,7 @@ export async function backupGedcomPhotosToGoogleDrive(
   dependencies: GedcomPhotoBackupDependencies = {},
 ): Promise<GedcomPhotoBackupResult> {
   const loadPhoto = dependencies.loadPhoto ?? (async (candidate) => {
+    if (candidate.localFile) return candidate.localFile;
     const { getScanBlob } = await import("./scanStorage.ts");
     return getScanBlob(candidate.photo);
   });
@@ -215,11 +231,23 @@ export async function backupGedcomPhotosToGoogleDrive(
       replacement: GedcomPhotoBackupReplacement;
     }> = [];
     for (const candidate of group) {
+      let blob: Blob;
+      try {
+        blob = await loadPhoto(candidate);
+      } catch (error) {
+        failures.push({
+          candidate,
+          code: photoFailureCode(error, candidate, "download"),
+          message: errorMessage(error),
+        });
+        processed += 1;
+        report(candidate);
+        continue;
+      }
       try {
         let upload = uploadByKey.get(candidate.deduplicationKey);
         if (!upload) {
-          upload = loadPhoto(candidate)
-            .then((blob) => storePhoto(candidate, blob, options.target));
+          upload = storePhoto(candidate, blob, options.target);
           uploadByKey.set(candidate.deduplicationKey, upload);
         }
         const stored = await upload;
@@ -236,7 +264,7 @@ export async function backupGedcomPhotosToGoogleDrive(
       } catch (error) {
         failures.push({
           candidate,
-          code: photoFailureCode(error, candidate),
+          code: photoFailureCode(error, candidate, "upload"),
           message: errorMessage(error),
         });
       } finally {
@@ -292,6 +320,55 @@ export async function backupGedcomPhotosToGoogleDrive(
   };
 }
 
+export function attachLocalGedcomPhotoFiles(
+  plan: GedcomPhotoBackupPlan,
+  selectedFiles: readonly File[],
+): {
+  plan: GedcomPhotoBackupPlan;
+  matchedCount: number;
+  unmatchedCount: number;
+} {
+  if (!plan.localCandidates.length || !selectedFiles.length) {
+    return {
+      plan,
+      matchedCount: 0,
+      unmatchedCount: plan.localCandidates.length,
+    };
+  }
+  const files = selectedFiles.map((file) => ({
+    file,
+    name: normalizeLocalPath(file.name),
+    relativePath: normalizeLocalPath(file.webkitRelativePath || file.name),
+  }));
+  const matched: GedcomPhotoBackupCandidate[] = [];
+  for (const candidate of plan.localCandidates) {
+    const sourcePath = normalizeLocalPath(candidate.sourceReference);
+    const sourceName = sourcePath.split("/").pop() ?? sourcePath;
+    const externalId = candidate.photo.sourceExternalId?.trim().toLocaleLowerCase("en-US") ?? "";
+    const exact = files.filter((item) => (
+      sourcePath === item.relativePath
+      || sourcePath.endsWith(`/${item.relativePath}`)
+      || item.relativePath.endsWith(`/${sourcePath}`)
+    ));
+    const byName = exact.length ? [] : files.filter((item) => item.name === sourceName);
+    const byExternalId = exact.length || byName.length || !externalId
+      ? []
+      : files.filter((item) => fileStem(item.name) === externalId || fileStem(item.name).includes(externalId));
+    const resolved = uniqueFile(exact) ?? uniqueFile(byName) ?? uniqueFile(byExternalId);
+    if (!resolved) continue;
+    matched.push({ ...candidate, localFile: resolved.file });
+  }
+  return {
+    plan: {
+      ...plan,
+      candidates: [...plan.candidates, ...matched],
+      missingLocalCount: Math.max(0, plan.localCandidates.length - matched.length),
+    },
+    matchedCount: matched.length,
+    unmatchedCount: Math.max(0, plan.localCandidates.length - matched.length),
+  };
+}
+
 async function defaultStorePhoto(
   candidate: GedcomPhotoBackupCandidate,
   blob: Blob,
@@ -337,7 +414,7 @@ export function applyPersonPhotoBackups(
       photos[existingIndex] = {
         ...replacement.stored,
         id: existing.id,
-        sourceReference: existing.sourceReference || sourceReference,
+        sourceReference: redactExternalPhotoSource(existing.sourceReference || sourceReference),
         sourceExternalId: existing.sourceExternalId || replacement.source.sourceExternalId,
       };
       if (replacement.requestedPrimary && !primaryPhotoId) primaryPhotoId = existing.id;
@@ -376,7 +453,7 @@ function uploadedPhotoReplacement(
     deleteOnRemove: false,
     availability: "available",
     sourceKind: "gedcom",
-    sourceReference: source.sourceReference || source.storagePath,
+    sourceReference: redactExternalPhotoSource(source.sourceReference || source.storagePath),
     sourceExternalId: source.sourceExternalId,
     sourceExpiresAt: source.sourceExpiresAt,
     sourceDurability: source.sourceDurability,
@@ -413,13 +490,17 @@ async function runWorkerPool<T>(
 function photoFailureCode(
   error: unknown,
   candidate: GedcomPhotoBackupCandidate,
+  stage: "download" | "upload",
 ): GedcomPhotoBackupFailureCode {
   const message = errorMessage(error).toLocaleLowerCase("uk-UA");
-  if (candidate.expiry.kind === "known" && candidate.expiry.expired) return "expired";
+  if (
+    stage === "download"
+    && candidate.expiry.kind === "known"
+    && candidate.expiry.expired
+  ) return "expired";
   if (message.includes("cors") || message.includes("браузер не дозволив")) return "cors";
-  if (message.includes("25") || message.includes("розмір") || message.includes("перевищ")) return "size";
-  if (message.includes("завантажити зовніш") || message.includes("посилання")) return "download";
-  return "upload";
+  if (message.includes("розмір") || message.includes("перевищує дозволені")) return "size";
+  return stage;
 }
 
 function errorMessage(error: unknown): string {
@@ -431,9 +512,50 @@ function photoSourceIdentity(photo: ScanAttachment): string {
 }
 
 export function normalizedPhotoSource(value: string): string {
+  const trimmed = redactExternalPhotoSource(value);
+  try {
+    const url = new URL(trimmed);
+    url.hash = "";
+    url.searchParams.sort();
+    return url.href;
+  } catch {
+    return trimmed;
+  }
+}
+
+const sensitivePhotoQueryKeys = new Set([
+  "access_token",
+  "auth",
+  "authorization",
+  "e",
+  "exp",
+  "expiration",
+  "expire",
+  "expires",
+  "expiry",
+  "googleaccessid",
+  "key-pair-id",
+  "policy",
+  "se",
+  "sig",
+  "signature",
+  "token",
+]);
+
+export function redactExternalPhotoSource(value: string): string {
   const trimmed = value.trim();
   try {
     const url = new URL(trimmed);
+    for (const key of [...url.searchParams.keys()]) {
+      const normalizedKey = key.toLocaleLowerCase("en-US");
+      if (
+        sensitivePhotoQueryKeys.has(normalizedKey)
+        || normalizedKey.startsWith("x-amz-")
+        || normalizedKey.startsWith("x-goog-")
+      ) {
+        url.searchParams.delete(key);
+      }
+    }
     url.hash = "";
     return url.href;
   } catch {
@@ -472,4 +594,22 @@ function personDisplayName(person: Person): string {
   return person.fullName.trim()
     || [person.surname, person.givenName, person.patronymic].filter(Boolean).join(" ")
     || "Особа без імені";
+}
+
+function normalizeLocalPath(value: string): string {
+  return value
+    .trim()
+    .replace(/^file:\/+/i, "")
+    .replace(/\\+/g, "/")
+    .replace(/^\/+/, "")
+    .toLocaleLowerCase("en-US");
+}
+
+function fileStem(value: string): string {
+  const lastDot = value.lastIndexOf(".");
+  return (lastDot > 0 ? value.slice(0, lastDot) : value).toLocaleLowerCase("en-US");
+}
+
+function uniqueFile<T extends { file: File }>(matches: T[]): T | null {
+  return matches.length === 1 ? matches[0]! : null;
 }

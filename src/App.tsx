@@ -106,10 +106,7 @@ import {
   type ProjectPersonPedigreeContext,
 } from "./services/projectPersonPedigreeOrder.ts";
 import { resolveFamilyTreeFeatureAccess } from "./utils/familyTreeFeatureAccess";
-import {
-  canUsePersonsModuleV2,
-  isPersonsModuleV2Enabled,
-} from "./utils/personsModuleV2";
+import { canUsePersonsModuleV2 } from "./utils/personsModuleV2";
 import type { PlanLimitKey, UpgradeReason } from "./types/subscription";
 import {
   clearProjectResearchCache,
@@ -595,6 +592,7 @@ export default function App() {
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [familyTreeFeatureAccess, setFamilyTreeFeatureAccess] = useState({
+    accountId: "",
     allowed: false,
     loading: true,
   });
@@ -699,6 +697,7 @@ export default function App() {
   const subscriptionAccess = useSubscription(
     workspace?.projectId,
     Boolean(account) && route.kind !== "public",
+    account?.id ?? "",
   );
   useEffect(() => {
     let active = true;
@@ -723,21 +722,22 @@ export default function App() {
   useEffect(() => {
     let active = true;
     if (!account || route.kind === "public") {
-      setFamilyTreeFeatureAccess({ allowed: false, loading: false });
+      setFamilyTreeFeatureAccess({ accountId: "", allowed: false, loading: false });
       return () => {
         active = false;
       };
     }
 
-    setFamilyTreeFeatureAccess({ allowed: false, loading: true });
+    const accountId = account.id;
+    setFamilyTreeFeatureAccess({ accountId, allowed: false, loading: true });
     void loadMyFamilyTreeFeatureAccess()
       .then((allowed) => {
-        if (active) setFamilyTreeFeatureAccess({ allowed, loading: false });
+        if (active) setFamilyTreeFeatureAccess({ accountId, allowed, loading: false });
       })
       .catch(() => {
         // Private beta access is deliberately fail-closed if the entitlement
         // service is unavailable or its database migration is not installed.
-        if (active) setFamilyTreeFeatureAccess({ allowed: false, loading: false });
+        if (active) setFamilyTreeFeatureAccess({ accountId, allowed: false, loading: false });
       });
 
     return () => {
@@ -748,24 +748,24 @@ export default function App() {
   // The application owner must never be locked out while the private-beta
   // entitlement migration is being rolled out. Server-side SQL grants app
   // administrators the same unconditional access.
+  const familyTreeAccessIsCurrent = Boolean(account)
+    && familyTreeFeatureAccess.accountId === account?.id;
+  const familyTreeFeatureAccessLoading = Boolean(account)
+    && (!familyTreeAccessIsCurrent || familyTreeFeatureAccess.loading);
   const canUseFamilyTreeFeature = resolveFamilyTreeFeatureAccess({
-    isAppAdmin: subscriptionAccess.isAdmin,
-    serverAllowed: familyTreeFeatureAccess.allowed,
-    serverLoading: familyTreeFeatureAccess.loading,
+    isAppAdmin: familyTreeAccessIsCurrent
+      && !subscriptionAccess.loading
+      && subscriptionAccess.isAdmin,
+    serverAllowed: familyTreeAccessIsCurrent && familyTreeFeatureAccess.allowed,
+    serverLoading: familyTreeFeatureAccessLoading,
   });
 
   const canOpenGeneHelp = subscriptionAccess.isAdmin || featureFlags.genehelp_public === true;
-  const personsModuleV2RolloutEnabled = isPersonsModuleV2Enabled({
-    envValue: import.meta.env.VITE_PERSONS_MODULE_V2,
-    remoteValue: featureFlags.persons_module_v2,
-  });
   const personsModuleV2Enabled = canUsePersonsModuleV2({
-    rolloutEnabled: personsModuleV2RolloutEnabled,
     canUseFamilyTreeFeature,
   });
-  const personsModuleV2AccessLoading = personsModuleV2RolloutEnabled
-    && familyTreeFeatureAccess.loading
-    && !subscriptionAccess.isAdmin;
+  const personsModuleV2AccessLoading = !personsModuleV2Enabled
+    && familyTreeFeatureAccessLoading;
   useEffect(() => {
     const projectId = workspace?.projectId;
     if (!personsModuleV2Enabled || !projectId) return;
@@ -4115,7 +4115,12 @@ export default function App() {
           replacements,
         );
         if (!persisted.person) return persisted;
-        syncEntityAttachmentMetadata("persons", persisted.person);
+        await syncProjectAttachmentMetadata(
+          targetProjectId,
+          "persons",
+          persisted.person.id,
+          projectAttachmentFields("persons", persisted.person, activeDb),
+        );
         if (activeWorkspaceIdRef.current !== targetProjectId) {
           const cached = loadProjectPeopleCache(targetProjectId);
           const persons = cached.persons.some((person) => person.id === persisted.person?.id)
@@ -4968,11 +4973,11 @@ export default function App() {
           return (
             <section className="panel empty-state">
               <strong>
-                {familyTreeFeatureAccess.loading
+                {familyTreeFeatureAccessLoading
                   ? "Перевіряємо доступ до родового дерева…"
                   : "Модуль «Родове дерево» поки доступний лише запрошеним тестувальникам."}
               </strong>
-              {!familyTreeFeatureAccess.loading ? (
+              {!familyTreeFeatureAccessLoading ? (
                 <p>Адміністратор може надати доступ зареєстрованому користувачу у розділі тарифів.</p>
               ) : null}
             </section>

@@ -117,6 +117,8 @@ export async function authorizeGoogleDrive(): Promise<void> {
 export async function reconnectGoogleDrive(): Promise<void> {
   activeToken = null;
   tokenRequestPromise = null;
+  folderPromises.clear();
+  deduplicatedUploadPromises.clear();
   await getGoogleDriveAccessToken(true, "select_account");
 }
 
@@ -331,6 +333,8 @@ export function clearGoogleDriveSession(): void {
   }
   activeToken = null;
   tokenRequestPromise = null;
+  folderPromises.clear();
+  deduplicatedUploadPromises.clear();
   safeStorageRemove(GOOGLE_DRIVE_CONNECTION_KEY);
 }
 
@@ -339,11 +343,11 @@ async function ensureProjectFolder(target: GoogleDriveProjectTarget): Promise<st
   const existingPromise = folderPromises.get(cacheKey);
   if (existingPromise) return existingPromise;
 
-  const folderPromise = findOrCreateProjectFolder(target)
-    .finally(() => {
-      folderPromises.delete(cacheKey);
-    });
+  const folderPromise = findOrCreateProjectFolder(target);
   folderPromises.set(cacheKey, folderPromise);
+  void folderPromise.catch(() => {
+    if (folderPromises.get(cacheKey) === folderPromise) folderPromises.delete(cacheKey);
+  });
   return folderPromise;
 }
 
@@ -373,11 +377,11 @@ async function ensureChildFolder(
   const existingPromise = folderPromises.get(cacheKey);
   if (existingPromise) return existingPromise;
 
-  const folderPromise = findOrCreateChildFolder(target, parentId, folderName)
-    .finally(() => {
-      folderPromises.delete(cacheKey);
-    });
+  const folderPromise = findOrCreateChildFolder(target, parentId, folderName);
   folderPromises.set(cacheKey, folderPromise);
+  void folderPromise.catch(() => {
+    if (folderPromises.get(cacheKey) === folderPromise) folderPromises.delete(cacheKey);
+  });
   return folderPromise;
 }
 
@@ -490,11 +494,11 @@ function escapeDriveQueryValue(value: string): string {
 
 async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
   let token = await getGoogleDriveAccessToken();
-  let response = await fetchWithToken(url, init, token);
+  let response = await retryGoogleDriveRequest(() => fetchWithToken(url, init, token));
   if (response.status === 401) {
     activeToken = null;
     token = await getGoogleDriveAccessToken(true);
-    response = await fetchWithToken(url, init, token);
+    response = await retryGoogleDriveRequest(() => fetchWithToken(url, init, token));
   }
   if (!response.ok) {
     const message = await googleApiError(response);
@@ -518,11 +522,15 @@ async function driveUploadFetch(
   }
 
   let token = await getGoogleDriveAccessToken();
-  let response = await xhrFetchWithToken(url, init, token, onProgress);
+  let response = await retryGoogleDriveRequest(
+    () => xhrFetchWithToken(url, init, token, onProgress),
+  );
   if (response.status === 401) {
     activeToken = null;
     token = await getGoogleDriveAccessToken(true);
-    response = await xhrFetchWithToken(url, init, token, onProgress);
+    response = await retryGoogleDriveRequest(
+      () => xhrFetchWithToken(url, init, token, onProgress),
+    );
   }
   if (!response.ok) {
     const message = await googleApiError(response);
@@ -534,6 +542,50 @@ async function driveUploadFetch(
     throw new Error(message);
   }
   return response;
+}
+
+async function retryGoogleDriveRequest(
+  request: () => Promise<Response>,
+  maxAttempts = 4,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await request();
+      if (!isRetryableGoogleDriveStatus(response.status) || attempt === maxAttempts - 1) {
+        return response;
+      }
+      const delayMs = googleDriveRetryDelay(response, attempt);
+      await response.body?.cancel("retry").catch(() => undefined);
+      await waitForRetry(delayMs);
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts - 1) throw error;
+      await waitForRetry(500 * (2 ** attempt));
+    }
+  }
+  throw lastError ?? new Error("Не вдалося виконати запит до Google Drive.");
+}
+
+function isRetryableGoogleDriveStatus(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function googleDriveRetryDelay(response: Response, attempt: number): number {
+  const retryAfter = response.headers.get("retry-after")?.trim() ?? "";
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(30_000, Math.max(250, seconds * 1000));
+  }
+  const retryAt = Date.parse(retryAfter);
+  if (Number.isFinite(retryAt)) {
+    return Math.min(30_000, Math.max(250, retryAt - Date.now()));
+  }
+  return Math.min(30_000, 500 * (2 ** attempt));
+}
+
+function waitForRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
 }
 
 function fetchWithToken(url: string, init: RequestInit, accessToken: string): Promise<Response> {

@@ -1,5 +1,6 @@
 type CachedDocumentBlob = {
   cacheKey: string;
+  sourceIdentity?: string;
   blob: Blob;
   mimeType: string;
   size: number;
@@ -15,24 +16,36 @@ const CLEANUP_TARGET_BYTES = Math.floor(MAX_CACHE_SIZE_BYTES * 0.75);
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-export async function getCachedDocumentBlob(cacheKey: string): Promise<Blob | null> {
+export async function getCachedDocumentBlob(
+  cacheKey: string,
+  expectedSourceIdentity = "",
+): Promise<Blob | null> {
   if (!cacheKey || !canUseIndexedDb()) return null;
   const database = await openCacheDatabase();
   const record = await idbRequest<CachedDocumentBlob | undefined>(
     database.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(cacheKey),
   );
   if (!record) return null;
+  if (expectedSourceIdentity && record.sourceIdentity !== expectedSourceIdentity) {
+    return null;
+  }
 
   void touchCachedDocument(cacheKey).catch(() => undefined);
   return record.blob;
 }
 
-export async function putCachedDocumentBlob(cacheKey: string, blob: Blob, mimeType = ""): Promise<void> {
+export async function putCachedDocumentBlob(
+  cacheKey: string,
+  blob: Blob,
+  mimeType = "",
+  sourceIdentity = cacheKey,
+): Promise<void> {
   if (!cacheKey || !blob.size || !canUseIndexedDb()) return;
   const database = await openCacheDatabase();
   const now = Date.now();
   const record: CachedDocumentBlob = {
     cacheKey,
+    sourceIdentity,
     blob,
     mimeType: mimeType || blob.type || "application/octet-stream",
     size: blob.size,

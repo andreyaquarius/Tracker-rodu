@@ -16,6 +16,7 @@ const directExpiryKeys = new Set([
   "expiration",
   "se",
 ]);
+const MAX_DATE_MILLISECONDS = 8_640_000_000_000_000;
 
 /** Reads only a deadline explicitly encoded by the source URL. */
 export function externalLinkExpiry(
@@ -71,7 +72,14 @@ export function formatExternalLinkExpiry(
 }
 
 function knownExpiry(expiryMs: number, nowMs: number): ExternalLinkExpiry {
-  const difference = expiryMs - nowMs;
+  if (
+    !Number.isFinite(expiryMs)
+    || Math.abs(expiryMs) > MAX_DATE_MILLISECONDS
+  ) {
+    return { kind: "unknown" };
+  }
+  const normalizedNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const difference = expiryMs - normalizedNowMs;
   return {
     kind: "known",
     expiresAt: new Date(expiryMs).toISOString(),

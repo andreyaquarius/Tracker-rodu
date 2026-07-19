@@ -33,6 +33,10 @@ jobs:
             echo "::error::Repository secret SUPABASE_ACCESS_TOKEN is missing."
             exit 1
           fi
+          if [[ "$SUPABASE_ACCESS_TOKEN" != sbp_* ]]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN must be a Supabase personal access token (sbp_...), not an sb_secret_ API key or service-role key. Create it at https://supabase.com/dashboard/account/tokens."
+            exit 1
+          fi
           if [ -z "$SUPABASE_PROJECT_REF" ]; then
             echo "::error::Repository secret SUPABASE_PROJECT_REF is missing."
             exit 1
@@ -50,6 +54,39 @@ jobs:
         uses: supabase/setup-cli@v1
         with:
           version: latest
+
+      - name: Verify Supabase account and project access
+        run: |
+          if ! status="$(curl --silent --show-error --retry 2 \
+              --output "$RUNNER_TEMP/supabase-project.json" \
+              --write-out "%{http_code}" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF")"; then
+            echo "::error::Could not connect to the Supabase Management API while verifying deployment credentials."
+            exit 1
+          fi
+
+          case "$status" in
+            200)
+              echo "Supabase credentials and project access are valid."
+              ;;
+            401)
+              echo "::error::Supabase rejected SUPABASE_ACCESS_TOKEN (HTTP 401). Replace it with an active personal access token from https://supabase.com/dashboard/account/tokens."
+              exit 1
+              ;;
+            403)
+              echo "::error::The Supabase account behind SUPABASE_ACCESS_TOKEN has no access to project $SUPABASE_PROJECT_REF (HTTP 403)."
+              exit 1
+              ;;
+            404)
+              echo "::error::SUPABASE_PROJECT_REF does not identify a project accessible to this token (HTTP 404)."
+              exit 1
+              ;;
+            *)
+              echo "::error::Could not verify Supabase project access (HTTP $status)."
+              exit 1
+              ;;
+          esac
 
       - name: Deploy Edge Functions
         run: |
