@@ -1,4 +1,4 @@
-import type { PersonRelation } from "../types";
+import type { PersonRelation } from "../types/index.ts";
 import type {
   AssociationRelationship,
   AssociationRelationshipType,
@@ -12,7 +12,7 @@ import type {
   ParentSetType,
   PartnerRelationship,
   PartnerRelationshipType,
-} from "../types/familyTree";
+} from "../types/familyTree.ts";
 
 type ParentChildDefinition = {
   parentSetType: ParentSetType;

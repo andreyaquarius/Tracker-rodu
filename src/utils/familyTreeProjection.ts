@@ -1,4 +1,4 @@
-import type { Person, PersonEvent, PersonRelation } from "../types";
+import type { Person, PersonEvent, PersonRelation } from "../types/index.ts";
 import type {
   EvidenceStatus,
   FamilyTreeGraphEdgeIntent,
@@ -8,7 +8,7 @@ import type {
   FamilyTreePersonTimelineEvent,
   FamilyTreePersonTimelineEventType,
   ParentChildRelationship,
-} from "../types/familyTree";
+} from "../types/familyTree.ts";
 import { legacyRelationToGraphIntent, validateFamilyGraph } from "./familyTreeGraph.ts";
 
 export interface FamilyTreeProjectionNode {

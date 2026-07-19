@@ -1,4 +1,4 @@
-import type { DocumentRecord, Finding, Person } from "../types";
+import type { DocumentRecord, Finding, Person } from "../types/index.ts";
 import type {
   FamilyTreeGraphDto,
   FamilyTreeGraphIssue,
@@ -12,7 +12,7 @@ import type {
   GedcomPreservedRecord,
   GedcomRecord,
   GedcomSummary,
-} from "../types/familyTree";
+} from "../types/familyTree.ts";
 import type {
   FamilyTreeProjection,
   FamilyTreeProjectionEdge,

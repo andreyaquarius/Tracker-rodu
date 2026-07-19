@@ -1,9 +1,9 @@
-import type { EntityId } from "../types";
+import type { EntityId } from "../types/index.ts";
 import type {
   FamilyTreeGraphIssue,
   GedcomPreservedLine,
   GedcomPreservedRecord,
-} from "../types/familyTree";
+} from "../types/familyTree.ts";
 
 export const GEDCOM_ARCHIVE_SCHEMA_VERSION = 1;
 export const GEDCOM_ARCHIVE_ROW_BATCH_SIZE = 400;
