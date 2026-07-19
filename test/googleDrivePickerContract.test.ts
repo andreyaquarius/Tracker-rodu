@@ -52,6 +52,8 @@ test("Picker public configuration is declared, validated, built and permitted by
     2,
   );
   assert.match(viteConfig, /frame-src[^\n]*https:\/\/docs\.google\.com/);
+  assert.match(viteConfig, /img-src[^\n]*blob:/);
+  assert.match(viteConfig, /frame-src[^\n]*blob:/);
 });
 
 test("Drive attachments retain resource keys for link-shared files", () => {

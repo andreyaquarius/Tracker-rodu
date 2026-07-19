@@ -66,6 +66,7 @@ export function PersonPreviewDrawerV2({
     typeof window !== "undefined"
       && window.matchMedia("(max-width: 780px)").matches
   ));
+  const [photoFailed, setPhotoFailed] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -78,6 +79,10 @@ export function PersonPreviewDrawerV2({
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  useEffect(() => {
+    setPhotoFailed(false);
+  }, [person?.id, photoUrl]);
 
   useEffect(() => {
     if (!person || !compactOverlay || typeof document === "undefined") return;
@@ -187,8 +192,8 @@ export function PersonPreviewDrawerV2({
           ×
         </button>
         <div className="persons-v2-preview__photo">
-          {photoUrl ? (
-            <img src={photoUrl} alt={`Фото: ${name}`} />
+          {photoUrl && !photoFailed ? (
+            <img src={photoUrl} alt={`Фото: ${name}`} onError={() => setPhotoFailed(true)} />
           ) : (
             <span aria-hidden="true">{previewInitialsV2(person)}</span>
           )}

@@ -13,6 +13,7 @@ import {
   inspectAttachmentReference,
   isGoogleWorkspaceDriveFile,
   MAX_ATTACHMENT_SIZE_MB,
+  normalizeScanPreviewBlob,
   openScan,
   saveScan,
 } from "../services/scanStorage";
@@ -276,7 +277,7 @@ export function ScanAttachmentsEditor({
     setUploading(true);
     setError("");
     try {
-      const blob = await getScanBlob(scan);
+      const blob = normalizeScanPreviewBlob(scan, await getScanBlob(scan));
       const file = new File([blob], scan.name || "gedcom-photo", {
         type: blob.type || scan.mimeType || "application/octet-stream",
       });

@@ -551,12 +551,30 @@ export async function getScanPreviewSource(scan: ScanAttachment): Promise<ScanPr
     };
   }
 
-  const blob = await getScanBlob(scan);
+  const blob = normalizeScanPreviewBlob(scan, await getScanBlob(scan));
   return {
     kind: previewKindFromMetadata(scan.name, blob.type || scan.mimeType),
     url: URL.createObjectURL(blob),
     revokeOnClose: true,
   };
+}
+
+/**
+ * Google Drive can return ordinary images with the generic octet-stream MIME
+ * type. Keep the bytes intact, but restore the preview MIME from the filename
+ * so browsers can decode the resulting blob URL reliably.
+ */
+export function normalizeScanPreviewBlob(scan: Pick<ScanAttachment, "name">, blob: Blob): Blob {
+  const currentType = blob.type.toLocaleLowerCase();
+  const extension = scan.name.split(".").pop()?.toLocaleLowerCase() ?? "";
+  const expectedType = mimeTypeFromExtension(extension);
+  if (
+    expectedType
+    && (!currentType || currentType === "application/octet-stream" || currentType === "binary/octet-stream")
+  ) {
+    return new Blob([blob], { type: expectedType });
+  }
+  return blob;
 }
 
 export async function openScan(scan: ScanAttachment): Promise<void> {

@@ -410,9 +410,26 @@ async function defaultStorePhoto(
     type: blob.type || candidate.photo.mimeType || "image/*",
   });
   return saveScanToProject(target, file, "person-photo", {
-    driveFolderPath: ["Особи", "Імпорт GEDCOM", "Фото"],
+    driveFolderPath: gedcomPersonPhotoDriveFolderPath(candidate),
     deduplicationKey: candidate.deduplicationKey,
   });
+}
+
+/**
+ * Keeps every person's GEDCOM photos in a distinct, readable Drive folder.
+ * The stable suffix prevents two people with the same name from sharing one
+ * folder without exposing the full internal UUID in the user's Drive.
+ */
+export function gedcomPersonPhotoDriveFolderPath(
+  person: Pick<GedcomPhotoBackupCandidate, "personId" | "personName">,
+): string[] {
+  const readableName = person.personName.trim().replace(/\s+/g, " ").slice(0, 108)
+    || "Особа без імені";
+  const stableSuffix = [
+    stableHash(person.personId, 2166136261),
+    stableHash(person.personId, 3335557771),
+  ].join("-");
+  return ["Особи", `${readableName} — ${stableSuffix}`, "Фото"];
 }
 
 export function applyPersonPhotoBackups(

@@ -207,6 +207,8 @@ test("person photo UI and persistence reuse Drive attachment metadata without ba
   const photoUtility = source("../src/utils/personPhotos.ts");
   const attachments = source("../src/components/ScanAttachments.tsx");
   const personPage = source("../src/pages/PersonsPage.tsx");
+  const personProfileV2 = source("../src/features/persons-v2/PersonProfileV2.tsx");
+  const personPreviewV2 = source("../src/features/persons-v2/PersonPreviewDrawerV2.tsx");
   const scanStorage = source("../src/services/scanStorage.ts");
 
   assert.match(modal, /policy="person-photo"/);
@@ -226,6 +228,8 @@ test("person photo UI and persistence reuse Drive attachment metadata without ba
   assert.match(scanStorage, /додайте його кнопкою «Додати файли»/);
   assert.match(personPage, /primaryPersonPhoto/);
   assert.match(personPage, /<ScanAttachmentsView/);
+  assert.match(personProfileV2, /onError=\{\(\) => setPhotoFailed\(true\)\}/);
+  assert.match(personPreviewV2, /onError=\{\(\) => setPhotoFailed\(true\)\}/);
   assert.match(source("../src/features/family-tree-view/react/PersonCard.tsx"), /loading="lazy"/);
   assert.match(source("../src/features/family-tree-view/react/PersonCard.tsx"), /resolvePhotoSource/);
   assert.doesNotMatch(photoUtility, /base64|readAsDataURL|localStorage/i);

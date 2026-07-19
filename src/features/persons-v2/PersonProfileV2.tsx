@@ -160,10 +160,16 @@ export function PersonProfileV2({
 }: PersonProfileV2Props) {
   const componentId = useId().replace(/:/g, "");
   const [internalTab, setInternalTab] = useState<PersonProfileTabV2>(defaultTab);
+  const [photoFailed, setPhotoFailed] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pendingKeyboardFocus = useRef<PersonProfileTabV2 | null>(null);
   const activeTab = controlledTab ?? internalTab;
   const name = personDisplayName(person);
+
+  useEffect(() => {
+    setPhotoFailed(false);
+  }, [person.id, photoUrl]);
+
   const completeness = useMemo(() => calculatePersonProfileCompleteness(person), [person]);
   const places = useMemo(() => personMainPlaces(person), [person]);
   const timeline = useMemo(() => buildPersonTimeline(person), [person]);
@@ -260,8 +266,8 @@ export function PersonProfileV2({
         ) : null}
         <div className="persons-v2-profile__identity">
           <div className="persons-v2-profile__photo">
-            {photoUrl ? (
-              <img src={photoUrl} alt={`Фото: ${name}`} />
+            {photoUrl && !photoFailed ? (
+              <img src={photoUrl} alt={`Фото: ${name}`} onError={() => setPhotoFailed(true)} />
             ) : (
               <span aria-hidden="true">{personInitials(person)}</span>
             )}

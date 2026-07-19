@@ -2,9 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ScanAttachment } from "../src/types/index.ts";
 import {
+  normalizeScanPreviewBlob,
   readBoundedResponseBlob,
   scanBlobCacheKey,
 } from "../src/services/scanStorage.ts";
+
+test("preview blobs recover image MIME types returned by Drive as octet-stream", () => {
+  const original = new Blob([new Uint8Array([0xff, 0xd8, 0xff])], {
+    type: "application/octet-stream",
+  });
+  const normalized = normalizeScanPreviewBlob({ name: "portrait.JPG" }, original);
+
+  assert.equal(normalized.type, "image/jpeg");
+  assert.equal(normalized.size, original.size);
+});
+
+test("preview blobs preserve an already specific MIME type", () => {
+  const original = new Blob([new Uint8Array([1, 2, 3])], { type: "image/webp" });
+
+  assert.equal(normalizeScanPreviewBlob({ name: "portrait.jpg" }, original), original);
+});
 
 test("external scan cache keys separate a known 32-bit FNV collision", () => {
   const first = externalScan("https://cdn.example/1u4ko08/piloav.jpg");

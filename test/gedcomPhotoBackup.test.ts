@@ -7,9 +7,26 @@ import {
   copyableGedcomPhotoBackupPlan,
   applyPersonPhotoBackups,
   attachLocalGedcomPhotoFiles,
+  gedcomPersonPhotoDriveFolderPath,
   redactExternalPhotoSource,
   type GedcomPhotoBackupCandidate,
 } from "../src/services/gedcomPhotoBackup.ts";
+
+test("stores GEDCOM photos in a distinct Drive folder for every person", () => {
+  const first = gedcomPersonPhotoDriveFolderPath({
+    personId: "person-one",
+    personName: "Каленський Андрій",
+  });
+  const second = gedcomPersonPhotoDriveFolderPath({
+    personId: "person-two",
+    personName: "Каленський Андрій",
+  });
+
+  assert.equal(first[0], "Особи");
+  assert.equal(first[2], "Фото");
+  assert.match(first[1] ?? "", /^Каленський Андрій — [a-z0-9]+-[a-z0-9]+$/u);
+  assert.notEqual(first[1], second[1]);
+});
 
 test("builds the post-import plan from imported photos and applies canonical person remaps", () => {
   const imported = person("incoming", [

@@ -9,7 +9,13 @@ import {
 import { createPortal } from "react-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { DocumentFragmentSelection, ScanAttachment } from "../types";
-import { downloadScan, getScanBlob, openScan, saveScan } from "../services/scanStorage";
+import {
+  downloadScan,
+  getScanBlob,
+  normalizeScanPreviewBlob,
+  openScan,
+  saveScan,
+} from "../services/scanStorage";
 import { authorizeGoogleDrive, reconnectGoogleDrive } from "../services/googleDriveStorage";
 
 export type DocumentScanViewerContext = {
@@ -116,7 +122,7 @@ export function DocumentWorkspaceViewer({
 
     const promise = getScanBlob(scan)
       .then((blob) => {
-        const previewBlob = normalizePreviewBlob(scan, blob);
+        const previewBlob = normalizeScanPreviewBlob(scan, blob);
         const nextKind = previewKind(scan, previewBlob);
         if (!nextKind) {
           throw new Error("Попередній перегляд доступний для зображень, PDF і web-джерел.");
@@ -1078,44 +1084,6 @@ function previewKind(scan: ScanAttachment, blob: Blob): PreviewKind | null {
     return "image";
   }
   return null;
-}
-
-function normalizePreviewBlob(scan: ScanAttachment, blob: Blob): Blob {
-  const currentType = blob.type.toLocaleLowerCase();
-  const extension = scan.name.split(".").pop()?.toLocaleLowerCase() ?? "";
-  const expectedType = previewMimeTypeFromExtension(extension);
-  if (
-    expectedType &&
-    (!currentType || currentType === "application/octet-stream" || currentType === "binary/octet-stream")
-  ) {
-    return new Blob([blob], { type: expectedType });
-  }
-  return blob;
-}
-
-function previewMimeTypeFromExtension(extension: string): string {
-  switch (extension) {
-    case "pdf":
-      return "application/pdf";
-    case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "png":
-      return "image/png";
-    case "webp":
-      return "image/webp";
-    case "gif":
-      return "image/gif";
-    case "bmp":
-      return "image/bmp";
-    case "svg":
-      return "image/svg+xml";
-    case "html":
-    case "htm":
-      return "text/html";
-    default:
-      return "";
-  }
 }
 
 function hostedFilePreviewUrl(scan: ScanAttachment): string {
