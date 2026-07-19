@@ -69,7 +69,7 @@ test("project deletion worker processes durable jobs with adaptive bounded batch
 });
 
 test("project deletion worker removes only project-prefixed Supabase Storage objects", () => {
-  assert.match(worker, /"project-backups",\s*"project-attachments"/);
+  assert.match(worker, /"project-backups",\s*"project-attachments",\s*"gedcom-exports"/);
   assert.match(worker, /\.list\(directory,\s*\{/);
   assert.match(worker, /offset,\s*sortBy/);
   assert.match(worker, /\.remove\(files\.slice/);

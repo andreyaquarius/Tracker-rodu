@@ -79,18 +79,30 @@ test("production renderer requires an explicit production flag but is always ena
   assert.doesNotMatch(app, /featureFlags\.family_tree_renderer_v2 !== false/);
 });
 
-test("production person cards stay in the tree workspace with all linked records", () => {
+test("family tree routes person opens to V2 profiles while preserving legacy windows", () => {
   const page = readFileSync(
     new URL("../../src/pages/FamilyTreePage.tsx", import.meta.url),
     "utf8",
   );
+  const app = readFileSync(new URL("../../src/App.tsx", import.meta.url), "utf8");
   const windows = readFileSync(
     new URL("../../src/hooks/useFamilyTreeRecordWindows.tsx", import.meta.url),
     "utf8",
   );
   assert.match(page, /ProductionFamilyTreePageWithWindows/);
   assert.match(page, /allowNavigationFallback: false/);
-  assert.match(page, /onOpenPerson=\{openPersonCardWindow\}/);
+  assert.match(
+    page,
+    /props\.personProfileNavigationEnabled && props\.onOpenPerson[\s\S]*?\? props\.onOpenPerson[\s\S]*?: openPersonCardWindow/,
+  );
+  assert.match(
+    page,
+    /if \(personProfileNavigationEnabled && onOpenPerson\) \{[\s\S]*?onOpenPerson\(personId\);[\s\S]*?return;/,
+  );
+  assert.match(
+    app,
+    /onOpenPerson=\{\(personId\) => openRelatedRecord\("persons", personId\)\}[\s\S]*?personProfileNavigationEnabled=\{personsModuleV2Enabled\}/,
+  );
   assert.match(windows, /<PersonCardModal/);
   assert.match(windows, /onOpenRelated=\{openRelatedRecordWindow\}/);
   assert.match(windows, /onCreateRelated=\{openRelatedCreateWindow\}/);

@@ -2,6 +2,7 @@ import type { ScanAttachment } from "../types";
 import { createId } from "../utils/id";
 import { sanitizeWebUrl } from "../utils/safeUrl";
 import { nowIso } from "../utils/dateHelpers";
+import { externalLinkExpiry } from "../utils/externalLinkExpiry.ts";
 import {
   getCachedDocumentBlob,
   putCachedDocumentBlob,
@@ -34,6 +35,7 @@ export type ScanUploadProgress = GoogleDriveUploadProgress & {
 
 export type SaveScanOptions = {
   driveFolderPath?: string[];
+  deduplicationKey?: string;
   onUploadProgress?: (progress: ScanUploadProgress) => void;
 };
 
@@ -76,6 +78,21 @@ export async function saveScan(
   policy: AttachmentPolicy = "all",
   options: SaveScanOptions = {},
 ): Promise<ScanAttachment> {
+  if (!activeProject) {
+    throw new Error("Спочатку виберіть проєкт.");
+  }
+  if (!activeProjectCanUpload) {
+    throw new Error("У цьому проєкті можна редагувати й видаляти наявні файли, але додавання нових файлів заблоковане поточним тарифом.");
+  }
+  return saveScanToProject(activeProject, file, policy, options);
+}
+
+export async function saveScanToProject(
+  target: { projectId: string; projectName: string },
+  file: File,
+  policy: AttachmentPolicy = "all",
+  options: SaveScanOptions = {},
+): Promise<ScanAttachment> {
   const supported =
     policy === "person-photo"
       ? isSupportedPersonPhoto(file)
@@ -90,17 +107,10 @@ export async function saveScan(
   if (policy !== "document" && file.size > MAX_FILE_SIZE) {
     throw new Error(`Файл «${file.name}» перевищує дозволені ${MAX_ATTACHMENT_SIZE_MB} МБ.`);
   }
-  if (!activeProject) {
-    throw new Error("Спочатку виберіть проєкт.");
-  }
-
-  if (!activeProjectCanUpload) {
-    throw new Error("У цьому проєкті можна редагувати й видаляти наявні файли, але додавання нових файлів заблоковане поточним тарифом.");
-  }
-
   const id = createId();
-  const uploaded = await uploadFileToGoogleDrive(activeProject, file, id, {
+  const uploaded = await uploadFileToGoogleDrive(target, file, id, {
     folderPath: options.driveFolderPath,
+    deduplicationKey: options.deduplicationKey,
     onProgress: options.onUploadProgress
       ? (progress) => options.onUploadProgress?.({ ...progress, fileName: file.name })
       : undefined,
@@ -347,10 +357,13 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
   }
 
   let response: Response;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
   try {
     response = await fetch(target, {
       credentials: "omit",
       mode: "cors",
+      signal: controller.signal,
       headers: {
         Accept: kind === "pdf"
           ? "application/pdf,*/*"
@@ -359,10 +372,15 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
             : "*/*",
       },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Зовнішній сайт не відповів за 30 секунд. Спробуйте ще раз або додайте фото вручну.");
+    }
     throw new Error(
       "Браузер не дозволив прочитати файл із цього сайту (CORS) або посилання вже недійсне. Відкрийте джерело в новій вкладці, завантажте зображення вручну й додайте його кнопкою «Додати файли».",
     );
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 
   if (response.status === 401 || response.status === 403) {
@@ -393,21 +411,9 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
 }
 
 function externalLinkExpiryMessage(target: string): string {
-  let url: URL;
-  try {
-    url = new URL(target);
-  } catch {
-    return "";
-  }
-  const rawExpiry = ["e", "exp", "expires", "expiry", "expiration"]
-    .map((key) => url.searchParams.get(key))
-    .find((value): value is string => Boolean(value));
-  if (!rawExpiry) return "";
-  const numeric = Number(rawExpiry);
-  const expiryMs = Number.isFinite(numeric)
-    ? numeric * (numeric < 10_000_000_000 ? 1000 : 1)
-    : Date.parse(rawExpiry);
-  if (Number.isFinite(expiryMs) && expiryMs <= Date.now()) {
+  const expiry = externalLinkExpiry(target);
+  if (expiry.kind === "unknown") return "";
+  if (expiry.expired) {
     return "Строк дії зовнішнього посилання на фото закінчився. Відкрийте джерело, завантажте фото вручну та додайте його у Google Drive кнопкою «Додати файли».";
   }
   return "Зовнішній сайт відхилив тимчасове посилання на фото. Воно могло стати недійсним раніше зазначеного строку; завантажте фото вручну й додайте його у Google Drive.";

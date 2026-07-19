@@ -20,6 +20,7 @@ import type {
 import { EntityDetailsModal, EntityModal } from "../pages/CrudPage";
 import { configs } from "../pages/entityConfigs";
 import { PersonCardModal } from "../pages/PersonsPage";
+import { savePersonAndClose } from "../features/persons-v2/contracts.ts";
 
 const relatedEntityPages = [
   "researches",
@@ -196,10 +197,7 @@ export function useFamilyTreeRecordWindows({
           canAddCustomField={canAddCustomField}
           customFieldLimitMessage={customFieldLimitMessage}
           onClose={close}
-          onSave={(savedPerson) => {
-            onSavePerson(savedPerson);
-            close();
-          }}
+          onSave={(savedPerson) => savePersonAndClose(onSavePerson, savedPerson, close)}
           modalMode="window"
           stackIndex={stackIndex}
           dockIndex={dockIndex}

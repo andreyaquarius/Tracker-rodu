@@ -26,6 +26,13 @@ import {
   stopGedcomImportHeartbeat,
 } from "../services/gedcomImportOperation.ts";
 import { Modal } from "./Modal";
+import { GedcomPhotoBackupModal } from "./GedcomPhotoBackupModal.tsx";
+import {
+  buildGedcomPhotoBackupPlan,
+  type GedcomPhotoBackupPlan,
+  type GedcomPhotoBackupProgress,
+  type GedcomPhotoBackupResult,
+} from "../services/gedcomPhotoBackup.ts";
 
 export interface GedcomImportArchivePayload {
   gedcomVersion: string;
@@ -53,6 +60,10 @@ interface GedcomImportButtonProps {
     archive: GedcomImportArchivePayload;
     importOperationId?: string;
   }) => Promise<{ treeId: string; archiveBatchId?: string } | void>;
+  onBackupGedcomPhotos?: (
+    plan: GedcomPhotoBackupPlan,
+    onProgress: (progress: GedcomPhotoBackupProgress) => void,
+  ) => Promise<GedcomPhotoBackupResult>;
 }
 
 type GedcomImportPreview = {
@@ -75,6 +86,12 @@ type GedcomImportProgress = {
   detail: string;
 } | null;
 
+type GedcomPhotoBackupCompletion = {
+  fileName: string;
+  importSummary: string;
+  plan: GedcomPhotoBackupPlan;
+};
+
 export function GedcomImportButton({
   inputId,
   hideTrigger = false,
@@ -84,12 +101,15 @@ export function GedcomImportButton({
   onImportGedcom,
   onSaveRelation,
   onCreateFamilyTree,
+  onBackupGedcomPhotos,
 }: GedcomImportButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<GedcomImportPreview | null>(null);
   const [progress, setProgress] = useState<GedcomImportProgress>(null);
   const [rootSearchQuery, setRootSearchQuery] = useState("");
+  const [photoBackupCompletion, setPhotoBackupCompletion] =
+    useState<GedcomPhotoBackupCompletion | null>(null);
   const rootPersonSearchId = useId();
   const rootCandidates = useMemo(
     () => preview ? sortRootCandidates(preview.people, preview.relations) : [],
@@ -117,6 +137,7 @@ export function GedcomImportButton({
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    setPhotoBackupCompletion(null);
 
     if (researchRequired && !defaultResearchId) {
       window.alert("Перед імпортом GEDCOM оберіть дослідження у фільтрі або створіть одне дослідження в проєкті.");
@@ -180,10 +201,11 @@ export function GedcomImportButton({
     setProgress({
       step: "Зберігаємо осіб і звʼязки",
       percent: 45,
-      detail: `Осіб: ${preview.people.length}, джерел: ${preview.documents.length}, звʼязків: ${preview.relations.length}, знахідок: ${preview.findings.length}.`,
+      detail: `Осіб: ${preview.people.length}, джерел: ${preview.report.sources}, звʼязків: ${preview.relations.length}, знахідок: ${preview.findings.length}.`,
     });
     let activeStage: GedcomImportStage = "people-relations";
     let importOperationId = "";
+    let personIdRemap: Record<string, string> = {};
     try {
       let committed: GedcomImportReconciliationPayload = {
         people: preview.people,
@@ -202,6 +224,7 @@ export function GedcomImportButton({
         if (reconciled) {
           committed = reconciled;
           importOperationId = reconciled.importOperationId ?? "";
+          personIdRemap = reconciled.personIdRemap;
         }
       } else {
         await onImportPersons(preview.personRecords);
@@ -235,10 +258,25 @@ export function GedcomImportButton({
         await completeGedcomImportOperation(importOperationId);
       }
       setProgress({ step: "Імпорт завершено", percent: 100, detail: "Дані збережено." });
-      window.alert([
-        "Імпорт GEDCOM завершено.",
-        formatGedcomImportReport(preview.report),
-      ].join("\n"));
+      const importSummary = formatGedcomImportReport(preview.report);
+      const photoPlan = buildGedcomPhotoBackupPlan(
+        preview.people,
+        personIdRemap,
+        committed.people,
+      );
+      if (
+        photoPlan.candidates.length
+        || photoPlan.missingLocalCount
+        || photoPlan.unsupportedHttpCount
+      ) {
+        setPhotoBackupCompletion({
+          fileName: preview.fileName,
+          importSummary,
+          plan: photoPlan,
+        });
+      } else {
+        window.alert(["Імпорт GEDCOM завершено.", importSummary].join("\n"));
+      }
       setPreview(null);
       setRootSearchQuery("");
     } catch (error) {
@@ -425,6 +463,15 @@ export function GedcomImportButton({
             </div>
           </div>
         </Modal>
+      ) : null}
+      {photoBackupCompletion ? (
+        <GedcomPhotoBackupModal
+          fileName={photoBackupCompletion.fileName}
+          importSummary={photoBackupCompletion.importSummary}
+          plan={photoBackupCompletion.plan}
+          onBackup={onBackupGedcomPhotos}
+          onClose={() => setPhotoBackupCompletion(null)}
+        />
       ) : null}
     </>
   );

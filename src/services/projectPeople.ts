@@ -32,6 +32,12 @@ import {
   personPhotoMetadataForStorage,
   personPhotoStateFromMetadata,
 } from "../utils/personPhotos.ts";
+import { ProjectRecordConflictError } from "./projectConflicts.ts";
+import {
+  applyPersonPhotoBackups,
+  type GedcomPhotoBackupPersistenceResult,
+  type GedcomPhotoBackupReplacement,
+} from "./gedcomPhotoBackup.ts";
 
 type PersonRow = {
   id: string;
@@ -380,14 +386,60 @@ export async function saveProjectPerson(
   projectId: string,
   person: Person,
   researchIds: Set<string>,
+  expectedUpdatedAt?: string,
 ): Promise<Person> {
-  const { data, error } = await getSupabaseClient()
-    .from("persons")
-    .upsert(personToRow(projectId, person, researchIds), { onConflict: "id" })
-    .select(PERSON_SELECT)
-    .single();
+  const client = getSupabaseClient();
+  const row = personToRow(projectId, person, researchIds);
+  const result = expectedUpdatedAt
+    ? await client
+        .from("persons")
+        .update(row)
+        .eq("project_id", projectId)
+        .eq("id", person.id)
+        .eq("updated_at", expectedUpdatedAt)
+        .select(PERSON_SELECT)
+        .maybeSingle()
+    : await client
+        .from("persons")
+        .insert(row)
+        .select(PERSON_SELECT)
+        .single();
+  const { data, error } = result;
   if (error) throw error;
+  if (!data) throw new ProjectRecordConflictError();
   return personFromRow(data as PersonRow);
+}
+
+/**
+ * Patches only the photo gallery against the latest server row. This keeps a
+ * long Drive copy operation from overwriting profile fields edited meanwhile.
+ */
+export async function saveProjectPersonPhotoBackups(
+  projectId: string,
+  personId: string,
+  replacements: readonly GedcomPhotoBackupReplacement[],
+): Promise<GedcomPhotoBackupPersistenceResult> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = await getProjectPerson(projectId, personId);
+    if (!current) {
+      throw new Error("Особу для прив’язування фотографій не знайдено.");
+    }
+    const applied = applyPersonPhotoBackups(current, replacements);
+    if (applied.person === current) return applied;
+    try {
+      const saved = await saveProjectPerson(
+        projectId,
+        applied.person,
+        new Set(current.researchId ? [current.researchId] : []),
+        current.updatedAt,
+      );
+      return { ...applied, person: saved };
+    } catch (error) {
+      if (error instanceof ProjectRecordConflictError && attempt < 2) continue;
+      throw error;
+    }
+  }
+  throw new Error("Не вдалося оновити фотографії через паралельне редагування особи.");
 }
 
 export async function deleteProjectPerson(projectId: string, personId: string): Promise<void> {

@@ -27,6 +27,7 @@ import {
 import {
   normalizeTaskReminderFields,
 } from "../utils/taskReminders.ts";
+import { extractFindingSourceUrl } from "../utils/findingSourceUrl.ts";
 
 type TaskRow = {
   id: string;
@@ -73,6 +74,7 @@ type FindingRow = {
   description: string;
   file_reference: string;
   page: string;
+  source_url: string;
   summary: string;
   transcription: string;
   conclusion: string;
@@ -96,7 +98,7 @@ type FindingParticipantRow = {
 const TASK_SELECT =
   "id, project_id, research_id, person_name, title, description, place, year_from, year_to, document_type, document_id, status, priority, deadline, reminder_at, reminder_in_app, reminder_email, reminder_sent_at, notes, custom_fields, created_at, updated_at";
 const FINDING_SELECT =
-  "id, project_id, research_id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields, created_at, updated_at";
+  "id, project_id, research_id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, source_url, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields, created_at, updated_at";
 const FINDING_META_KEY = "__trackerRoduFindingMeta";
 const IMPORT_REFERENCE_BATCH_ITEMS = 100;
 const IMPORT_REFERENCE_BATCH_BYTES = 20_000;
@@ -198,6 +200,17 @@ function findingFromRow(
     description: row.description,
     file: row.file_reference,
     page: row.page,
+    sourceUrl: extractFindingSourceUrl(
+      row.source_url,
+      row.file_reference,
+      row.page,
+      row.summary,
+      row.description,
+      row.transcription,
+      row.notes,
+      row.archive,
+      row.fund,
+    ),
     summary: row.summary,
     transcription: row.transcription,
     conclusion: row.conclusion,
@@ -235,6 +248,17 @@ function findingToRow(
     description: finding.description,
     file_reference: finding.file,
     page: finding.page,
+    source_url: extractFindingSourceUrl(
+      finding.sourceUrl,
+      finding.file,
+      finding.page,
+      finding.summary,
+      finding.description,
+      finding.transcription,
+      finding.notes,
+      finding.archive,
+      finding.fund,
+    ),
     summary: finding.summary,
     transcription: finding.transcription,
     conclusion: finding.conclusion,
@@ -803,7 +827,22 @@ export function loadProjectWorkRecordsCache(projectId: string): {
             ...normalizeTaskReminderFields(task),
           }))
         : [],
-      findings: Array.isArray(parsed.findings) ? (parsed.findings as Finding[]) : [],
+      findings: Array.isArray(parsed.findings)
+        ? (parsed.findings as Finding[]).map((finding) => ({
+            ...finding,
+            sourceUrl: extractFindingSourceUrl(
+              finding.sourceUrl,
+              finding.file,
+              finding.page,
+              finding.summary,
+              finding.description,
+              finding.transcription,
+              finding.notes,
+              finding.archive,
+              finding.fund,
+            ),
+          }))
+        : [],
     };
   } catch {
     return { tasks: [], findings: [] };

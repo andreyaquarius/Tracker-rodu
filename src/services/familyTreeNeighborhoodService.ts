@@ -6,12 +6,14 @@ import type {
   FamilyTreeNeighborhoodClient,
   NeighborhoodRequest,
   NeighborhoodResponse,
-} from "../features/family-tree-view/data/neighborhoodClient";
+} from "../features/family-tree-view/data/neighborhoodClient.ts";
 import {
   createCachedNeighborhoodClient,
-} from "../features/family-tree-view/data/neighborhoodClient";
+} from "../features/family-tree-view/data/neighborhoodClient.ts";
 import { getSupabaseClient } from "./supabaseAuth.ts";
 import { databaseStatementTimeoutMessage } from "../utils/databaseErrors.ts";
+import { familyTreeNeighborhoodRpcCandidates } from "../utils/familyTreeNeighborhoodRpc.ts";
+import { selectFamilyTreeEntryPointForPerson } from "../utils/familyTreePersonNavigation.ts";
 
 export interface FamilyTreeEntryPoint {
   id: string;
@@ -31,6 +33,10 @@ type FamilyTreeEntryPointRow = {
   graph_version: number | string;
 };
 
+type FamilyTreePersonMembershipRow = {
+  tree_id: string;
+};
+
 const ENTRY_POINT_SELECT = "id, project_id, title, root_person_id, is_default, graph_version";
 
 export async function readFamilyTreeEntryPoints(
@@ -45,6 +51,32 @@ export async function readFamilyTreeEntryPoints(
     .order("id", { ascending: true });
   if (error) throw error;
   return ((data ?? []) as FamilyTreeEntryPointRow[]).map(entryPointFromRow);
+}
+
+export async function readFamilyTreeEntryPointForPerson(
+  projectId: string,
+  personId: string,
+  preferredTreeId?: string,
+): Promise<FamilyTreeEntryPoint | null> {
+  const normalizedPersonId = personId.trim();
+  if (!projectId || !normalizedPersonId) return null;
+  const [entryPoints, membershipResult] = await Promise.all([
+    readFamilyTreeEntryPoints(projectId),
+    getSupabaseClient()
+      .from("family_tree_persons")
+      .select("tree_id")
+      .eq("project_id", projectId)
+      .eq("person_id", normalizedPersonId)
+      .neq("member_role", "hidden"),
+  ]);
+  if (membershipResult.error) throw membershipResult.error;
+  const memberTreeIds = ((membershipResult.data ?? []) as FamilyTreePersonMembershipRow[])
+    .map((membership) => membership.tree_id);
+  return selectFamilyTreeEntryPointForPerson(
+    entryPoints,
+    memberTreeIds,
+    preferredTreeId,
+  );
 }
 
 export function createTrackerNeighborhoodClient(): FamilyTreeNeighborhoodClient {
@@ -68,23 +100,12 @@ function createAbortableSupabaseRpcClient(): FamilyTreeNeighborhoodClient {
       if (!accessToken) throw new Error("Сеанс завершився. Увійдіть знову, щоб відкрити дерево.");
       if (signal?.aborted) throw abortError();
 
-      let response = await fetch(
-        `${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/get_family_tree_neighborhood_v2`,
-        {
-          method: "POST",
-          headers: {
-            apikey: publishableKey,
-            authorization: `Bearer ${accessToken}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ p_request: request }),
-          signal,
-        },
-      );
-      let payload = await response.json().catch(() => undefined) as unknown;
-      if (!response.ok && isMissingRpcFunction(payload)) {
+      const rpcCandidates = familyTreeNeighborhoodRpcCandidates(request);
+      let response: Response | undefined;
+      let payload: unknown;
+      for (const [index, functionName] of rpcCandidates.entries()) {
         response = await fetch(
-          `${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/get_family_tree_neighborhood_v1`,
+          `${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/${functionName}`,
           {
             method: "POST",
             headers: {
@@ -97,7 +118,10 @@ function createAbortableSupabaseRpcClient(): FamilyTreeNeighborhoodClient {
           },
         );
         payload = await response.json().catch(() => undefined) as unknown;
+        const hasFallback = index < rpcCandidates.length - 1;
+        if (response.ok || !hasFallback || !isMissingRpcFunction(payload)) break;
       }
+      if (!response) throw new Error("Не вдалося розпочати завантаження родового дерева.");
       if (!response.ok) {
         const message = databaseStatementTimeoutMessage(payload) ??
           readPostgrestError(payload) ??

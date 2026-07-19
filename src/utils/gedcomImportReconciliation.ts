@@ -14,6 +14,7 @@ import {
   GEDCOM_XREF_CUSTOM_FIELD,
   parseGedcomMetadata,
 } from "./gedcomMetadata.ts";
+import { extractFindingSourceUrl, stripFindingSourceUrls } from "./findingSourceUrl.ts";
 
 export interface GedcomImportReconciliationPayload {
   people: Person[];
@@ -118,12 +119,16 @@ export function reconcileGedcomImportForRetry(
     personIdRemap,
     documentIdRemap,
   ));
-  const findingBuckets = bucketBy(existing.findings, findingIdentityKey);
+  const findingBuckets = bucketByMany(existing.findings, (finding) =>
+    findingIdentityKeys(finding, !findingSourceKey(finding))
+  );
+  const claimedFindings = new Set<string>();
   const findingIdRemap = new Map<string, string>();
   const findings = remappedFindings.map((finding) => {
-    const match = shiftBucket(findingBuckets, findingIdentityKey(finding));
+    const match = shiftFirstBucket(findingBuckets, findingIdentityKeys(finding), claimedFindings);
     const id = match?.id ?? finding.id;
     findingIdRemap.set(finding.id, id);
+    if (match) claimedFindings.add(match.id);
     return match ?? finding;
   });
 
@@ -186,7 +191,7 @@ function documentIdentityKeys(document: DocumentRecord, includeLegacy = true): s
   const xref = stringValue(custom.__gedcomSourceXref);
   const raw = stringValue(custom.__gedcomRawRecord);
   const source = parseGedcomMetadata<Record<string, unknown>>(custom.__gedcomSource, {});
-  const rin = stringValue(source.rin) || document.fund.trim();
+  const rin = stringValue(source.rin) || stringValue(document.fund);
   return compact([
     sourceKey && xref ? `source-xref:${sourceKey}|${xref}` : "",
     sourceKey && rin ? `source-rin:${sourceKey}|${rin}` : "",
@@ -205,21 +210,117 @@ function relationIdentityKey(relation: PersonRelation): string {
   ]);
 }
 
-function findingIdentityKey(finding: Finding): string {
+function findingIdentityKeys(finding: Finding, includeLegacy = true): string[] {
   const custom = finding.customFields ?? {};
-  return JSON.stringify([
-    [...finding.personIds].sort(),
-    finding.documentId,
-    stringValue(custom.__gedcomSourceXref),
-    stringValue(custom.__gedcomCitation),
-    stringValue(custom.__gedcomEventType),
-    stringValue(custom.__gedcomEventDescription),
-    finding.findingType,
-    finding.eventDate,
-    finding.place,
+  const sourceKey = findingSourceKey(finding);
+  const citation = stringValue(custom.__gedcomCitation);
+  const source = stringValue(custom.__gedcomSource);
+  const sourceXref = stringValue(custom.__gedcomSourceXref);
+  const event = gedcomEventIdentity(custom);
+  const sourceUrl = extractFindingSourceUrl(
+    finding.sourceUrl,
+    citation,
+    source,
+    finding.file,
     finding.page,
+    finding.summary,
     finding.description,
+    finding.transcription,
+    finding.notes,
+    finding.archive,
+    finding.fund,
+  );
+  const people = [...finding.personIds].sort();
+  let body: string;
+
+  if (citation) {
+    body = JSON.stringify([
+      "gedcom-citation",
+      people,
+      sourceXref,
+      gedcomCitationIdentity(citation),
+      event,
+    ]);
+  } else if (custom.__gedcomStandaloneSource || (source && !people.length && !event)) {
+    body = JSON.stringify([
+      "gedcom-source",
+      sourceXref,
+      gedcomSourceIdentity(source),
+    ]);
+  } else if (event) {
+    body = JSON.stringify([
+      "gedcom-event",
+      people,
+      sourceXref,
+      event,
+      finding.eventDate,
+      finding.place,
+    ]);
+  } else {
+    body = JSON.stringify([
+      "tracker-finding",
+      people,
+      finding.documentId,
+      finding.findingType,
+      finding.eventDate,
+      finding.place,
+      finding.page,
+      finding.description,
+      sourceUrl,
+    ]);
+  }
+
+  return compact([
+    sourceKey ? `source:${sourceKey}|${body}` : "",
+    includeLegacy ? `legacy:${body}` : "",
   ]);
+}
+
+function findingSourceKey(finding: Finding): string {
+  return entitySourceKey(finding.customFields ?? {});
+}
+
+function gedcomCitationIdentity(serialized: string): unknown[] {
+  const citation = parseGedcomMetadata<Record<string, unknown>>(serialized, {});
+  return [
+    stringValue(citation.sourceXref),
+    stripFindingSourceUrls(stringValue(citation.page)),
+    stringValue(citation.eventType),
+    stringValue(citation.role),
+    stringValue(citation.quality),
+    stringValue(citation.dataDate),
+    stripFindingSourceUrls(stringValue(citation.text)),
+    stripFindingSourceUrls(stringValue(citation.notes)),
+    extractFindingSourceUrl(serialized),
+  ];
+}
+
+function gedcomSourceIdentity(serialized: string): unknown[] {
+  const source = parseGedcomMetadata<Record<string, unknown>>(serialized, {});
+  return [
+    stringValue(source.xref),
+    stripFindingSourceUrls(stringValue(source.title)),
+    stripFindingSourceUrls(stringValue(source.author)),
+    stripFindingSourceUrls(stringValue(source.publication)),
+    stripFindingSourceUrls(stringValue(source.text)),
+    stringValue(source.sourceType),
+    stringValue(source.mediaType),
+    stringValue(source.rin),
+    extractFindingSourceUrl(serialized),
+  ];
+}
+
+function gedcomEventIdentity(custom: Record<string, unknown>): unknown[] | null {
+  const rawDescription = stringValue(custom.__gedcomEventDescription);
+  const identity = [
+    stringValue(custom.__gedcomEventTag),
+    stringValue(custom.__gedcomEventType),
+    stringValue(custom.__gedcomEventRawType),
+    stringValue(custom.__gedcomEventValue),
+    stripFindingSourceUrls(rawDescription),
+    extractFindingSourceUrl(rawDescription),
+  ];
+  return identity.some(Boolean) ? identity : null;
 }
 
 function uniqueIdentityIndex<T>(
@@ -253,6 +354,30 @@ function bucketBy<T>(items: readonly T[], keyFor: (item: T) => string): Map<stri
   return buckets;
 }
 
+function bucketByMany<T>(items: readonly T[], keysFor: (item: T) => string[]): Map<string, T[]> {
+  const buckets = new Map<string, T[]>();
+  for (const item of items) {
+    for (const key of keysFor(item)) {
+      buckets.set(key, [...(buckets.get(key) ?? []), item]);
+    }
+  }
+  return buckets;
+}
+
+function shiftFirstBucket<T extends { id: string }>(
+  buckets: Map<string, T[]>,
+  keys: readonly string[],
+  claimed: ReadonlySet<string>,
+): T | undefined {
+  for (const key of keys) {
+    const bucket = buckets.get(key);
+    while (bucket?.length && claimed.has(bucket[0].id)) bucket.shift();
+    const candidate = bucket?.shift();
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
+
 function shiftBucket<T>(buckets: Map<string, T[]>, key: string): T | undefined {
   return buckets.get(key)?.shift();
 }
@@ -261,8 +386,8 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function entitySourceKey(customFields: Record<string, unknown>): string {
-  return stringValue(customFields[GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD]);
+function entitySourceKey(customFields: Record<string, unknown> | undefined): string {
+  return stringValue(customFields?.[GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD]);
 }
 
 function normalizeKeyPart(value: string): string {

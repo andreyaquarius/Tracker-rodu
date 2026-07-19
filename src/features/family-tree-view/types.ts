@@ -203,9 +203,11 @@ export interface FamilyTreeLayoutOptions {
   showUnknownParentPlaceholders?: boolean;
   /** child person id -> selected parent-set/union id */
   activeParentSetByChild?: Readonly<Record<PersonId, UnionId>>;
-  /** Direct root-to-focus lineage used to keep its partnership visually primary. */
+  /** Geometry-priority path used to keep its partnership visually primary. */
   primaryLineagePersonIds?: readonly PersonId[];
-  /** Person relative to whom highlighted cards are direct ancestors. */
+  /** Narrow structural path that may traverse otherwise closed partners. */
+  lineageBridgePersonIds?: readonly PersonId[];
+  /** Stable person relative to whom highlighted cards are direct ancestors. */
   lineageTargetPersonId?: PersonId;
   /** 0 = one fill; 1/2/3 = branches split at parents/grandparents/great-grandparents. */
   lineageGroupDepth?: FamilyTreeLineageGroupDepth;

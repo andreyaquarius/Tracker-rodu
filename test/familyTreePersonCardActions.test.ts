@@ -41,7 +41,7 @@ test("person-card actions use semantic SVG shapes instead of ambiguous glyphs", 
 });
 
 test("card actions preserve names, state, callbacks, and compact-mode hiding", () => {
-  assert.match(card, /aria-pressed=\{node\.lineageRole === "focus"\}/);
+  assert.match(card, /aria-pressed=\{focused\}/);
   assert.match(card, /aria-expanded=\{!branchesCollapsed\}/);
   assert.match(card, /onFocus\?\.\(personId\)/);
   assert.match(card, /onShowAllDescendants\(personId, node\.occurrenceId\)/);

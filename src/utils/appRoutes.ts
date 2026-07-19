@@ -4,7 +4,7 @@ import type {
   CustomSectionDefinition,
   SectionParentKey,
 } from "../types";
-import { customSectionKey } from "./sectionHierarchy";
+import { customSectionKey } from "./sectionHierarchy.ts";
 
 const pageSegments: Partial<Record<PageKey, string>> = {
   dashboard: "dashboard",
@@ -34,6 +34,8 @@ export type AppRoute =
       kind: "project";
       projectRef: string;
       page: PageKey;
+      personId?: string;
+      personMode?: "profile" | "edit" | "new";
       unresolvedSectionPath?: boolean;
     }
   | { kind: "unknown" };
@@ -175,6 +177,34 @@ export function parseAppRoute(
   }
 
   const standardPage = segmentPages.get(sectionPath[0]);
+  if (standardPage === "persons") {
+    if (sectionPath.length === 2 && sectionPath[1] === "new") {
+      return {
+        kind: "project",
+        projectRef,
+        page: "persons",
+        personMode: "new",
+      };
+    }
+    if (sectionPath.length === 2 && sectionPath[1]) {
+      return {
+        kind: "project",
+        projectRef,
+        page: "persons",
+        personId: sectionPath[1],
+        personMode: "profile",
+      };
+    }
+    if (sectionPath.length === 3 && sectionPath[1] && sectionPath[2] === "edit") {
+      return {
+        kind: "project",
+        projectRef,
+        page: "persons",
+        personId: sectionPath[1],
+        personMode: "edit",
+      };
+    }
+  }
   if (standardPage && sectionPath.length === 1) {
     return { kind: "project", projectRef, page: standardPage };
   }
@@ -209,4 +239,44 @@ export function pagePath(
 
 export function projectDashboardPath(projectSlug: string): string {
   return pagePath(projectSlug, "dashboard");
+}
+
+export interface FamilyTreeRouteFocus {
+  treeId?: string;
+  focusPersonId?: string;
+}
+
+export function familyTreePath(
+  projectSlug: string,
+  focus: FamilyTreeRouteFocus = {},
+): string {
+  const base = pagePath(projectSlug, "familyTree");
+  const params = new URLSearchParams();
+  const treeId = focus.treeId?.trim();
+  const focusPersonId = focus.focusPersonId?.trim();
+  if (treeId) params.set("treeId", treeId);
+  if (focusPersonId) params.set("focusPersonId", focusPersonId);
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
+}
+
+export function parseFamilyTreeRouteFocus(search: string): FamilyTreeRouteFocus {
+  const params = new URLSearchParams(search);
+  const treeId = params.get("treeId")?.trim() || undefined;
+  const focusPersonId = params.get("focusPersonId")?.trim() || undefined;
+  return { treeId, focusPersonId };
+}
+
+export function personPath(
+  projectSlug: string,
+  personId?: string,
+  mode: "profile" | "edit" | "new" = "profile",
+): string {
+  const base = pagePath(projectSlug, "persons");
+  if (mode === "new") return `${base}/new`;
+  if (!personId) return base;
+  const encodedPersonId = encodeURIComponent(personId);
+  return mode === "edit"
+    ? `${base}/${encodedPersonId}/edit`
+    : `${base}/${encodedPersonId}`;
 }

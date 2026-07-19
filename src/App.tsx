@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type {
   ActivityLogEntry,
@@ -51,8 +51,11 @@ import {
 } from "./components/DocumentWorkspaceViewer";
 import { isHierarchyPage } from "./utils/sectionHierarchy";
 import {
+  familyTreePath,
   pagePath,
   parseAppRoute,
+  parseFamilyTreeRouteFocus,
+  personPath,
   projectDashboardPath,
 } from "./utils/appRoutes";
 import {
@@ -96,7 +99,17 @@ import {
   assertFamilyTreeFeatureAccess,
   loadMyFamilyTreeFeatureAccess,
 } from "./services/familyTreeFeatureAccess";
+import { readFamilyTreeEntryPointForPerson } from "./services/familyTreeNeighborhoodService";
+import {
+  invalidateProjectPersonPedigreeOrder,
+  loadProjectPersonPedigreeOrder,
+  type ProjectPersonPedigreeContext,
+} from "./services/projectPersonPedigreeOrder.ts";
 import { resolveFamilyTreeFeatureAccess } from "./utils/familyTreeFeatureAccess";
+import {
+  canUsePersonsModuleV2,
+  isPersonsModuleV2Enabled,
+} from "./utils/personsModuleV2";
 import type { PlanLimitKey, UpgradeReason } from "./types/subscription";
 import {
   clearProjectResearchCache,
@@ -119,6 +132,7 @@ import {
   loadProjectPeopleCache,
   saveProjectPeopleCache,
   saveProjectPerson,
+  saveProjectPersonPhotoBackups,
   saveProjectPersonRelation,
 } from "./services/projectPeople";
 import {
@@ -199,6 +213,12 @@ import {
 import { assertProjectRecordUnchanged } from "./services/projectConflicts";
 import { deleteScanFile, setProjectAttachmentTarget } from "./services/scanStorage";
 import { clearGoogleDriveSession } from "./services/googleDriveStorage";
+import {
+  backupGedcomPhotosToGoogleDrive,
+  type GedcomPhotoBackupPlan,
+  type GedcomPhotoBackupProgress,
+  type GedcomPhotoBackupResult,
+} from "./services/gedcomPhotoBackup.ts";
 import { clearAllProjectCaches } from "./utils/projectCache";
 import { databaseStatementTimeoutMessage } from "./utils/databaseErrors";
 import {
@@ -239,6 +259,9 @@ import {
   projectDeletionPhaseLabel,
   projectDeletionServerActivityLabel,
 } from "./utils/projectDeletionUi.ts";
+
+const PersonsModuleV2 = lazy(() => import("./features/persons-v2/PersonsModuleV2")
+  .then((module) => ({ default: module.PersonsModuleV2 })));
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
@@ -578,6 +601,15 @@ export default function App() {
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
+  const [familyTreePedigreeContext, setFamilyTreePedigreeContext] = useState<(
+    ProjectPersonPedigreeContext & { projectId: string }
+  ) | null>(null);
+  const showPersonInTreeRequestRef = useRef(0);
+  const showPersonInTreeContextRef = useRef({ projectId: "", location: "" });
+  showPersonInTreeContextRef.current = {
+    projectId: workspace?.projectId ?? "",
+    location: `${location.pathname}${location.search}${location.hash}`,
+  };
   const [projectResearches, setProjectResearches] = useState<Research[]>([]);
   const [researchesReadyForProject, setResearchesReadyForProject] = useState<string | null>(null);
   const [projectPersons, setProjectPersons] = useState<Person[]>([]);
@@ -605,6 +637,10 @@ export default function App() {
   const route = useMemo(
     () => parseAppRoute(location.pathname, projectCustomSections),
     [location.pathname, projectCustomSections],
+  );
+  const familyTreeRouteFocus = useMemo(
+    () => parseFamilyTreeRouteFocus(location.search),
+    [location.search],
   );
   const page: PageKey =
     route.kind === "project" || route.kind === "settings"
@@ -643,6 +679,23 @@ export default function App() {
     projectId: string;
     value: string;
   } | null>(null);
+  const handleFamilyTreeActiveContextChange = useCallback((
+    context: ProjectPersonPedigreeContext & { projectId: string },
+  ) => {
+    const projectId = workspace?.projectId;
+    if (!projectId || context.projectId !== projectId) return;
+    setFamilyTreePedigreeContext((current) => (
+      current?.projectId === projectId
+      && current.treeId === context.treeId
+      && current.rootPersonId === context.rootPersonId
+        ? current
+        : {
+            projectId,
+            treeId: context.treeId,
+            rootPersonId: context.rootPersonId,
+          }
+    ));
+  }, [workspace?.projectId]);
   const subscriptionAccess = useSubscription(
     workspace?.projectId,
     Boolean(account) && route.kind !== "public",
@@ -702,6 +755,24 @@ export default function App() {
   });
 
   const canOpenGeneHelp = subscriptionAccess.isAdmin || featureFlags.genehelp_public === true;
+  const personsModuleV2RolloutEnabled = isPersonsModuleV2Enabled({
+    envValue: import.meta.env.VITE_PERSONS_MODULE_V2,
+    remoteValue: featureFlags.persons_module_v2,
+  });
+  const personsModuleV2Enabled = canUsePersonsModuleV2({
+    rolloutEnabled: personsModuleV2RolloutEnabled,
+    canUseFamilyTreeFeature,
+  });
+  const personsModuleV2AccessLoading = personsModuleV2RolloutEnabled
+    && familyTreeFeatureAccess.loading
+    && !subscriptionAccess.isAdmin;
+  useEffect(() => {
+    const projectId = workspace?.projectId;
+    if (!personsModuleV2Enabled || !projectId) return;
+    void loadProjectPersonPedigreeOrder(projectId, undefined, {
+      cacheScope: account?.id ?? "",
+    }).catch(() => undefined);
+  }, [account?.id, personsModuleV2Enabled, workspace?.projectId]);
   const canCreateProjectRecords = !workspace || subscriptionAccess.canCreateProjectRecords;
   const canCreateStandardSection = useCallback((sectionKey?: string) => {
     if (!canCreateProjectRecords) return false;
@@ -891,18 +962,22 @@ export default function App() {
     ) {
       return;
     }
-    const canonicalPath = pagePath(
-      requestedWorkspace.projectSlug,
-      route.page,
-      projectCustomSections,
-    );
+    const canonicalPath = route.page === "persons" && route.personMode
+      ? personPath(requestedWorkspace.projectSlug, route.personId, route.personMode)
+      : pagePath(
+          requestedWorkspace.projectSlug,
+          route.page,
+          projectCustomSections,
+        );
     if (location.pathname !== canonicalPath) {
-      routerNavigate(canonicalPath, { replace: true });
+      routerNavigate(`${canonicalPath}${location.search}${location.hash}`, { replace: true });
     }
   }, [
     account,
     isAccountSigningIn,
+    location.hash,
     location.pathname,
+    location.search,
     passwordRecovery,
     route,
     routerNavigate,
@@ -3572,7 +3647,7 @@ export default function App() {
       options?.onProgress?.({
         step: "Оновлюємо дані проєкту",
         percent: 74,
-        detail: "Особи, звʼязки, джерела та знахідки підготовлені.",
+        detail: "Особи, звʼязки та знахідки з джерелами підготовлені.",
       });
       return reconciled;
     }
@@ -3700,7 +3775,7 @@ export default function App() {
       if (documentsToImport.length) {
         await runPersistenceStage(
           "documents",
-          "Не вдалося зберегти джерела і документи.",
+          "Не вдалося зберегти сумісні записи документів попереднього імпорту.",
           { documents: reconciled.documents.length },
           () => importProjectDocuments(
             projectId,
@@ -3715,9 +3790,11 @@ export default function App() {
         );
       }
       options?.onProgress?.({
-        step: "Джерела збережені",
+        step: "Джерела підготовлені",
         percent: 58,
-        detail: `Джерел і документів: ${reconciled.documents.length.toLocaleString("uk-UA")}.`,
+        detail: reconciled.documents.length
+          ? `Сумісних записів документів попереднього імпорту: ${reconciled.documents.length.toLocaleString("uk-UA")}.`
+          : "Джерела GEDCOM буде збережено у відповідних знахідках.",
       });
       if (findingsToImport.length) {
         await runPersistenceStage(
@@ -3817,7 +3894,11 @@ export default function App() {
     setModuleSearch(query);
     setOpenEntityId(entityId ?? "");
     if (workspace) {
-      routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
+      routerNavigate(
+        nextPage === "persons" && entityId && personsModuleV2Enabled
+          ? personPath(workspace.projectSlug, entityId)
+          : pagePath(workspace.projectSlug, nextPage, projectCustomSections),
+      );
     }
   };
   const openRelatedRecord = (nextPage: PageKey, entityId: string) => {
@@ -3825,8 +3906,68 @@ export default function App() {
     setOpenEntityId(entityId);
     setCreateRequest(null);
     if (workspace) {
-      routerNavigate(pagePath(workspace.projectSlug, nextPage, projectCustomSections));
+      routerNavigate(
+        nextPage === "persons" && personsModuleV2Enabled
+          ? personPath(workspace.projectSlug, entityId)
+          : pagePath(workspace.projectSlug, nextPage, projectCustomSections),
+      );
     }
+  };
+  const showPersonInFamilyTree = async (person: Person) => {
+    if (!canUseFamilyTreeFeature) {
+      notify("Модуль «Родове дерево» доступний лише запрошеним тестувальникам.", true);
+      return;
+    }
+    if (!workspace) return;
+    const requestId = showPersonInTreeRequestRef.current + 1;
+    showPersonInTreeRequestRef.current = requestId;
+    const requestedProjectId = workspace.projectId;
+    const requestedLocation = showPersonInTreeContextRef.current.location;
+    try {
+      const preferredTreeId = familyTreePedigreeContext?.projectId === workspace.projectId
+        ? familyTreePedigreeContext.treeId
+        : undefined;
+      const entryPoint = await readFamilyTreeEntryPointForPerson(
+        workspace.projectId,
+        person.id,
+        preferredTreeId,
+      );
+      const currentContext = showPersonInTreeContextRef.current;
+      if (
+        showPersonInTreeRequestRef.current !== requestId
+        || currentContext.projectId !== requestedProjectId
+        || currentContext.location !== requestedLocation
+      ) {
+        return;
+      }
+      if (!entryPoint) {
+        notify("Цю особу ще не додано до жодного родового дерева.", true);
+        return;
+      }
+      routerNavigate(familyTreePath(workspace.projectSlug, {
+        treeId: entryPoint.id,
+        focusPersonId: person.id,
+      }));
+    } catch (error) {
+      const currentContext = showPersonInTreeContextRef.current;
+      if (
+        showPersonInTreeRequestRef.current !== requestId
+        || currentContext.projectId !== requestedProjectId
+        || currentContext.location !== requestedLocation
+      ) {
+        return;
+      }
+      notify(describeError(error, "Не вдалося знайти цю особу в родовому дереві."), true);
+    }
+  };
+  const showPersonOnMap = (person: Person) => {
+    if (!workspace) return;
+    setModuleSearch("");
+    setOpenEntityId("");
+    setCreateRequest(null);
+    routerNavigate(
+      `${pagePath(workspace.projectSlug, "map", projectCustomSections)}?personId=${encodeURIComponent(person.id)}`,
+    );
   };
   const createRelatedRecord = (nextPage: PageKey, initialValues: Record<string, unknown>) => {
     if (!ensureCanCreateProjectRecord("Новий пов’язаний запис")) return;
@@ -3915,17 +4056,12 @@ export default function App() {
     setProjectPersons(optimistic);
     saveProjectPeopleCache(projectId, optimistic, projectPersonRelations);
 
-    return assertProjectRecordUnchanged(
-      "persons",
+    return saveProjectPerson(
       projectId,
-      person.id,
+      person,
+      new Set(projectResearches.map((research) => research.id)),
       baseUpdatedAt(person) ?? previousEntity?.updatedAt,
     )
-      .then(() => saveProjectPerson(
-        projectId,
-        person,
-        new Set(projectResearches.map((research) => research.id)),
-      ))
       .then((saved) => {
         refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("persons", previousEntity, saved);
@@ -3950,6 +4086,54 @@ export default function App() {
         notify(describeError(error, "Не вдалося зберегти особу."), true);
         return null;
       });
+  };
+  const backupImportedGedcomPhotos = async (
+    plan: GedcomPhotoBackupPlan,
+    onProgress: (progress: GedcomPhotoBackupProgress) => void,
+  ): Promise<GedcomPhotoBackupResult> => {
+    if (!workspace) {
+      throw new Error("Для пакетного збереження фото потрібен активний хмарний проєкт.");
+    }
+    if (workspace.role === "viewer") {
+      throw new Error("У цьому проєкті у вас є лише право перегляду.");
+    }
+    if (!canCreateProjectRecords) {
+      throw new Error("Додавання нових файлів заблоковане поточним тарифом.");
+    }
+    const targetProjectId = workspace.projectId;
+    const targetProjectName = workspace.projectName;
+    return backupGedcomPhotosToGoogleDrive(plan, {
+      target: {
+        projectId: targetProjectId,
+        projectName: targetProjectName,
+      },
+      onProgress,
+      persist: async ({ personId, replacements }) => {
+        const persisted = await saveProjectPersonPhotoBackups(
+          targetProjectId,
+          personId,
+          replacements,
+        );
+        if (!persisted.person) return persisted;
+        syncEntityAttachmentMetadata("persons", persisted.person);
+        if (activeWorkspaceIdRef.current !== targetProjectId) {
+          const cached = loadProjectPeopleCache(targetProjectId);
+          const persons = cached.persons.some((person) => person.id === persisted.person?.id)
+            ? cached.persons.map((person) => person.id === persisted.person?.id ? persisted.person! : person)
+            : [persisted.person, ...cached.persons];
+          saveProjectPeopleCache(targetProjectId, persons, cached.relations);
+          return persisted;
+        }
+        setProjectPersons((current) => {
+          const next = current.some((person) => person.id === persisted.person?.id)
+            ? current.map((person) => person.id === persisted.person?.id ? persisted.person! : person)
+            : [persisted.person!, ...current];
+          saveProjectPeopleCache(targetProjectId, next, projectPersonRelations);
+          return next;
+        });
+        return persisted;
+      },
+    });
   };
   const deletePerson = (id: string) => {
     if (!workspace) {
@@ -4098,6 +4282,7 @@ export default function App() {
 
     return saveProjectPersonRelation(projectId, relation)
       .then((saved) => {
+        invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
         const latestPeople = loadProjectPeopleCache(projectId);
         const peopleForNames = latestPeople.persons.length ? latestPeople.persons : projectPersons;
         const firstPerson = peopleForNames.find((person) => person.id === saved.personId);
@@ -4152,6 +4337,7 @@ export default function App() {
     setProjectPersonRelations(optimistic);
     saveProjectPeopleCache(projectId, projectPersons, optimistic);
     void deleteProjectPersonRelation(projectId, id).then(() => {
+      invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
       recordProjectActivity(
         "persons",
         id,
@@ -4774,6 +4960,7 @@ export default function App() {
           <MapPage
             db={activeDb}
             onOpenRelated={openRelatedRecord}
+            initialPersonId={new URLSearchParams(location.search).get("personId")?.trim() ?? ""}
           />
         );
       case "familyTree":
@@ -4795,6 +4982,8 @@ export default function App() {
           <FamilyTreeErrorBoundary>
             <FamilyTreePage
               projectId={workspace?.projectId}
+              initialTreeId={familyTreeRouteFocus.treeId}
+              initialFocusPersonId={familyTreeRouteFocus.focusPersonId}
               db={activeDb}
               persons={activeDb.persons}
               relations={activeDb.personRelations}
@@ -4812,6 +5001,7 @@ export default function App() {
               onSavePerson={savePerson}
               onImportRecords={importTableRecords}
               onImportGedcom={importGedcomRecords}
+              onBackupGedcomPhotos={workspace ? backupImportedGedcomPhotos : undefined}
               onSaveEntity={(collection, entity) => saveFor(collection)(entity)}
               onSaveRelation={saveRelation}
               onDeleteRelation={deleteRelation}
@@ -4825,6 +5015,8 @@ export default function App() {
               canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
               researchRequired={researchRequiredByPlan}
               onOpenPerson={(personId) => openRelatedRecord("persons", personId)}
+              onActiveContextChange={handleFamilyTreeActiveContextChange}
+              personProfileNavigationEnabled={personsModuleV2Enabled}
               useProductionRenderer={shouldUseProductionFamilyTreeRenderer(
                 featureFlags,
                 import.meta.env.DEV,
@@ -4897,6 +5089,75 @@ export default function App() {
         );
       }
       case "persons":
+        if (personsModuleV2AccessLoading) {
+          return (
+            <section className="panel empty-state">
+              <strong>Перевіряємо доступ до нового модуля осіб…</strong>
+            </section>
+          );
+        }
+        if (personsModuleV2Enabled) {
+          return (
+            <Suspense fallback={<div className="panel empty-state">Завантажуємо модуль осіб…</div>}>
+              <PersonsModuleV2
+                db={activeDb}
+                projectId={workspace?.projectId}
+                persons={activeDb.persons}
+                relations={activeDb.personRelations}
+                researches={activeDb.researches}
+                findings={activeDb.findings}
+                tasks={activeDb.tasks}
+                hypotheses={activeDb.hypotheses}
+                archiveRequests={activeDb.archiveRequests}
+                initialSearch={moduleSearch}
+                target={{
+                  mode: route.kind === "project" && route.personMode
+                    ? route.personMode
+                    : "list",
+                  personId: route.kind === "project" ? route.personId : undefined,
+                }}
+                onNavigate={(target, options) => {
+                  if (!workspace) return;
+                  routerNavigate(
+                    target.mode === "list"
+                      ? pagePath(workspace.projectSlug, "persons", projectCustomSections)
+                      : personPath(workspace.projectSlug, target.personId, target.mode),
+                    { replace: options?.replace },
+                  );
+                }}
+                onShowInTree={canUseFamilyTreeFeature ? showPersonInFamilyTree : undefined}
+                onOpenMap={showPersonOnMap}
+                onSavePerson={savePerson}
+                onImportRecords={importTableRecords}
+                onImportGedcom={importGedcomRecords}
+                onBackupGedcomPhotos={workspace ? backupImportedGedcomPhotos : undefined}
+                onSaveRelation={saveRelation}
+                onOpenRelated={openRelatedRecord}
+                onNavigateRelated={navigate}
+                onCreateRelated={createRelatedRecord}
+                customFieldDefinitions={activeDb.settings.customFields.filter(
+                  (field) => field.module === "persons",
+                )}
+                onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
+                onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
+                canAddCustomField={canCreateCustomField}
+                customFieldLimitMessage={customFieldLimitMessage}
+                readOnly={readOnly}
+                canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
+                projectName={workspace?.projectName}
+                researchRequired={researchRequiredByPlan}
+                canUseGedcom={canUseFamilyTreeFeature}
+                pedigreeCacheScope={account?.id ?? ""}
+                pedigreeContext={
+                  familyTreePedigreeContext
+                  && familyTreePedigreeContext.projectId === workspace?.projectId
+                    ? familyTreePedigreeContext
+                    : undefined
+                }
+              />
+            </Suspense>
+          );
+        }
         return (
           <PersonsPage
             db={activeDb}
@@ -4916,10 +5177,15 @@ export default function App() {
             canAddCustomField={canCreateCustomField}
             customFieldLimitMessage={customFieldLimitMessage}
             initialSearch={moduleSearch}
-            initialOpenPersonId={openEntityId}
+            initialOpenPersonId={
+              route.kind === "project" && route.page === "persons" && route.personId
+                ? route.personId
+                : openEntityId
+            }
             onSavePerson={savePerson}
             onImportRecords={importTableRecords}
             onImportGedcom={importGedcomRecords}
+            onBackupGedcomPhotos={workspace ? backupImportedGedcomPhotos : undefined}
             onDeletePerson={deletePerson}
             onSaveRelation={saveRelation}
             onDeleteRelation={deleteRelation}

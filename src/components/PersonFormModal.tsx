@@ -580,6 +580,7 @@ export function PersonFormModal({
                 <GeoPlaceField
                   key={type}
                   label={personEventLabel(type)}
+                  eventType={type}
                   value={personEvent?.geo ?? null}
                   placeName={personEvent?.placeName ?? ""}
                   onChange={(geo) => updateEventGeo(type, geo)}

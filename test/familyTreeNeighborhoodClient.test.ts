@@ -545,6 +545,7 @@ test("cache keys separate tree, focus, every depth budget, graph version, and pe
   await expectMissThenHit(request({ descendantDepth: 4 }));
   await expectMissThenHit(request({ collateralDepth: 2 }));
   await expectMissThenHit(request({ maxNodes: 401 }));
+  await expectMissThenHit(request({ structuralOnly: true }));
   await expectMissThenHit(request({ knownGraphVersion: "v2" }));
   await expectMissThenHit(
     request({

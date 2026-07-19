@@ -2,10 +2,10 @@ import type { PersonEvent, PersonEventType } from "../types";
 import { createId } from "../utils/id";
 import { PERSON_EVENT_TYPES, personEventLabel } from "../utils/geo";
 
-const CORE_FIELD_EVENTS = new Set<PersonEventType>(["birth", "marriage", "death"]);
+const CORE_FIELD_EVENTS = new Set<PersonEventType>(["birth", "marriage", "death", "residence"]);
 
 function isSyntheticFieldEvent(event: PersonEvent): boolean {
-  return CORE_FIELD_EVENTS.has(event.type) || (event.type === "residence" && event.id === "residence");
+  return CORE_FIELD_EVENTS.has(event.type) && event.id === event.type;
 }
 
 export function PersonEventsEditor({
@@ -77,9 +77,7 @@ export function PersonEventsEditor({
                     });
                   }}
                 >
-                  {PERSON_EVENT_TYPES
-                    .filter((type) => !CORE_FIELD_EVENTS.has(type))
-                    .map((type) => (
+                  {PERSON_EVENT_TYPES.map((type) => (
                       <option key={type} value={type}>{personEventLabel(type)}</option>
                     ))}
                 </select>

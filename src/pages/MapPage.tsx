@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import Fuse, { type IFuseOptions } from "fuse.js";
-import type { AppDatabase, Finding, GeoPoint, Person, PersonEvent } from "../types";
+import type { AppDatabase, Finding, GeoPoint, Person, PersonEvent, PersonEventType } from "../types";
 import type { PageKey } from "../components/Sidebar";
-import { geoMarkerColor, personEventLabel } from "../utils/geo";
+import { geoMarkerColor } from "../utils/geo";
 import { primaryParticipantName } from "../utils/findingParticipants";
 import { formatDateForDisplay } from "../utils/dateHelpers";
+import { personTimelineEventDisplayTitle } from "../features/persons-v2/presentation.ts";
+import { personEventIconSvgMarkup, personEventVisual } from "../utils/personEventVisuals.ts";
 
 type MapMarkerKind = "person-event" | "finding";
-const PERSON_MARKER_COLOR = "#c49a32";
 const FINDING_MARKER_COLOR = "#0f4a42";
 
 interface TrackerMapMarker {
   id: string;
   kind: MapMarkerKind;
+  eventType: PersonEventType | null;
   title: string;
   subtitle: string;
   place: string;
@@ -52,19 +54,26 @@ function hasCoordinates(value: GeoPoint | null | undefined): value is GeoPoint &
 }
 
 function markerColor(marker: TrackerMapMarker): string {
+  const fallbackColor = marker.kind === "finding" || !marker.eventType
+    ? FINDING_MARKER_COLOR
+    : personEventVisual(marker.eventType).color;
   return geoMarkerColor(
     marker.geo.markerColor,
-    marker.kind === "finding" ? FINDING_MARKER_COLOR : PERSON_MARKER_COLOR,
+    fallbackColor,
   );
 }
 
-function markerIcon(color: string, count = 1): L.DivIcon {
-  const safeColor = geoMarkerColor(color);
+function markerIcon(marker: TrackerMapMarker, count = 1): L.DivIcon {
+  const safeColor = markerColor(marker);
+  const isEventMarker = marker.kind === "person-event" && Boolean(marker.eventType);
+  const markerMarkup = isEventMarker && marker.eventType
+    ? `<span class="tracker-map-marker tracker-map-event-marker" style="--marker-color:${safeColor}">${personEventIconSvgMarkup(marker.eventType)}</span>`
+    : `<span class="tracker-map-marker" style="--marker-color:${safeColor}"></span>`;
   return L.divIcon({
     className: "tracker-map-marker-shell",
-    html: `<span class="tracker-map-marker" style="--marker-color:${safeColor}"></span>${count > 1 ? `<span class="tracker-map-marker-count">${count}</span>` : ""}`,
-    iconSize: count > 1 ? [34, 30] : [22, 22],
-    iconAnchor: [11, 22],
+    html: `${markerMarkup}${count > 1 ? `<span class="tracker-map-marker-count">${count}</span>` : ""}`,
+    iconSize: isEventMarker ? (count > 1 ? [40, 34] : [30, 32]) : (count > 1 ? [34, 30] : [22, 22]),
+    iconAnchor: isEventMarker ? [15, 30] : [11, 22],
   });
 }
 
@@ -141,6 +150,7 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
       markers.push({
         id: `person:${person.id}:${event.id}`,
         kind: "person-event",
+        eventType: event.type,
         title,
         subtitle,
         place,
@@ -173,6 +183,7 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
     markers.push({
       id: `finding:${finding.id}`,
       kind: "finding",
+      eventType: null,
       title,
       subtitle,
       place,
@@ -193,6 +204,7 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
         finding.description,
         finding.file,
         finding.page,
+        finding.sourceUrl,
         finding.summary,
         finding.transcription,
         finding.conclusion,
@@ -228,21 +240,23 @@ function createMapSearch(markers: TrackerMapMarker[]) {
 }
 
 function personEventTitle(event: PersonEvent): string {
-  return [personEventLabel(event.type), formatDateForDisplay(event.date)]
+  return [personTimelineEventDisplayTitle(event), formatDateForDisplay(event.date)]
     .filter(Boolean).join(" · ");
 }
 
 export function MapPage({
   db,
   onOpenRelated,
+  initialPersonId = "",
 }: {
   db: AppDatabase;
   onOpenRelated?: (page: PageKey, entityId: string) => void;
+  initialPersonId?: string;
 }) {
   const [kind, setKind] = useState<"all" | MapMarkerKind>("all");
   const [researchId, setResearchId] = useState("");
   const [settlement, setSettlement] = useState("");
-  const [personId, setPersonId] = useState("");
+  const [personId, setPersonId] = useState(initialPersonId);
   const [query, setQuery] = useState("");
   const [selectedGroupKey, setSelectedGroupKey] = useState("");
   const markers = useMemo(() => buildMarkers(db), [db.persons, db.findings, db.researches]);
@@ -263,6 +277,10 @@ export function MapPage({
     ? filteredGroups.find((group) => group.key === selectedGroupKey) ?? null
     : null;
   const visibleListMarkers = selectedGroup?.markers ?? filtered;
+
+  useEffect(() => {
+    setPersonId(initialPersonId);
+  }, [initialPersonId]);
 
   useEffect(() => {
     if (settlement && !placeOptions.includes(settlement)) setSettlement("");
@@ -497,7 +515,7 @@ function TrackerMap({
       bounds.push(latlng);
       const primary = group.markers[0];
       const leafletMarker = L.marker(latlng, {
-        icon: markerIcon(markerColor(primary), group.markers.length),
+        icon: markerIcon(primary, group.markers.length),
       }).addTo(layer);
       leafletMarker.on("click", () => {
         onSelectGroup(group.key);

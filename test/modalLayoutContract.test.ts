@@ -14,6 +14,17 @@ test("modal layout follows the expanded or collapsed Tracker workspace", () => {
   assert.match(styles, /\.modal \{[^}]*overflow-x:\s*hidden/s);
 });
 
+test("draggable modal stays inside the viewport when its content becomes taller", () => {
+  const modal = source("../src/components/Modal.tsx");
+  const styles = source("../src/styles.css");
+
+  assert.match(modal, /new ResizeObserver\(clampToViewport\)/);
+  assert.match(modal, /resizeObserver\?\.observe\(modal\)/);
+  assert.match(modal, /resizeObserver\?\.disconnect\(\)/);
+  assert.match(styles, /\.modal \{[^}]*max-height:\s*calc\(100dvh - 60px\)[^}]*overflow-y:\s*auto/s);
+  assert.match(styles, /\.modal-header \{[^}]*position:\s*sticky[^}]*top:\s*0/s);
+});
+
 test("GEDCOM and relative dialogs own padded, non-overflowing content areas", () => {
   const gedcom = source("../src/components/GedcomImportButton.tsx");
   const familyTree = source("../src/pages/ProductionFamilyTreePage.tsx");

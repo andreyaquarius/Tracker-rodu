@@ -112,16 +112,12 @@ test("reuses committed IDs and remaps root, archive map and dependent records on
   ), true);
 });
 
-test("keeps matched Tracker records canonical instead of partially overwriting them", () => {
+test("keeps matched Tracker people and findings canonical instead of partially overwriting them", () => {
   const committed = payload("old");
   const retry = payload("new");
   const existingPerson = {
     ...committed.people[0]!,
     notes: "Edited safely in Tracker",
-  };
-  const existingDocument = {
-    ...committed.documents[0]!,
-    notes: "Tracker document note",
   };
   const existingFinding = {
     ...committed.findings[0]!,
@@ -130,13 +126,13 @@ test("keeps matched Tracker records canonical instead of partially overwriting t
 
   const result = reconcileGedcomImportForRetry(retry, {
     people: [existingPerson, ...committed.people.slice(1)],
-    documents: [existingDocument, ...committed.documents.slice(1)],
+    documents: committed.documents,
     relations: committed.relations,
     findings: [existingFinding, ...committed.findings.slice(1)],
   });
 
   assert.equal(result.people[0], existingPerson);
-  assert.equal(result.documents[0], existingDocument);
+  assert.deepEqual(result.documents, committed.documents);
   assert.equal(result.findings[0], existingFinding);
   assert.equal(result.relations[0], committed.relations[0]);
 });

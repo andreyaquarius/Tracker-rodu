@@ -254,7 +254,8 @@ test("maps an archival cipher from a GEDCOM source citation without losing its t
 
   assert.equal(result.findings.length, 1);
   const finding = result.findings[0];
-  assert.equal(finding.documentId, result.documents[0].id);
+  assert.equal(result.documents.length, 0);
+  assert.equal(finding.documentId, "");
   assert.equal(finding.archive, "ЦДІАК");
   assert.equal(finding.fund, "127");
   assert.equal(finding.description, "1012");
@@ -462,4 +463,121 @@ test("keeps MyHeritage numeric citation ROLE as metadata instead of a human part
   assert.equal(finding.participants[0].role, "Основна особа");
   assert.match(finding.participants[0].notes, /Зовнішній ідентифікатор ролі: 40001:2036248047:/);
   assert.doesNotMatch(finding.notes, /Роль: 40001/);
+});
+
+test("imports GEDCOM source URLs once into the dedicated finding field", () => {
+  let id = 0;
+  const sourceUrl = "https://example.test/records/42?person=ivan";
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @S1@ SOUR",
+    `1 TITL Parish register · ${sourceUrl}`,
+    `1 PUBL Online collection: ${sourceUrl}`,
+    `1 TEXT Catalog entry ${sourceUrl}`,
+    `1 _URL ${sourceUrl}`,
+    "0 @I1@ INDI",
+    "1 NAME Ivan /Test/",
+    "1 BIRT",
+    "2 DATE 1900",
+    "2 SOUR @S1@",
+    `3 PAGE p. 12 · ${sourceUrl}`,
+    "3 DATA",
+    `4 TEXT Birth entry ${sourceUrl}`,
+    `3 NOTE Verified at ${sourceUrl}`,
+    "0 TRLR",
+  ].join("\n"));
+
+  const result = buildGedcomAppImport(draft, {
+    idFactory: () => `id-${++id}`,
+    nowFactory: () => "2026-07-19T00:00:00.000Z",
+  });
+
+  assert.equal(result.documents.length, 0);
+  assert.equal(result.findings.length, 1);
+  const finding = result.findings[0];
+  assert.equal(finding.sourceUrl, sourceUrl);
+  assert.equal(finding.documentId, "");
+  assert.equal(finding.page, "p. 12");
+  assert.equal(finding.transcription, "Birth entry");
+  for (const visibleValue of [
+    finding.archive,
+    finding.fund,
+    finding.description,
+    finding.file,
+    finding.page,
+    finding.summary,
+    finding.transcription,
+    finding.notes,
+  ]) {
+    assert.doesNotMatch(visibleValue, /https?:\/\//u);
+  }
+  assert.match(String(finding.customFields.__gedcomCitation), /https:\/\/example\.test\/records\/42/);
+});
+
+test("keeps an uncited top-level GEDCOM source as a standalone finding", () => {
+  let id = 0;
+  const sourceUrl = "https://archive.example.test/catalog/uncited";
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @S9@ SOUR",
+    "1 TITL Uncited catalog source",
+    "1 AUTH State archive",
+    `1 _URL ${sourceUrl}`,
+    "0 @I1@ INDI",
+    "1 NAME Ivan /Test/",
+    "0 TRLR",
+  ].join("\n"));
+
+  const result = buildGedcomAppImport(draft, {
+    idFactory: () => `id-${++id}`,
+    nowFactory: () => "2026-07-19T00:00:00.000Z",
+  });
+
+  assert.equal(result.documents.length, 0);
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].sourceUrl, sourceUrl);
+  assert.equal(result.findings[0].summary, "Uncited catalog source");
+  assert.deepEqual(result.findings[0].personIds, []);
+  assert.equal(result.findings[0].customFields.__gedcomStandaloneSource, true);
+});
+
+test("creates findings for family-level and family-event GEDCOM citations", () => {
+  let id = 0;
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @S1@ SOUR",
+    "1 TITL Marriage register",
+    "1 _URL https://example.test/marriages",
+    "0 @S2@ SOUR",
+    "1 TITL Family dossier",
+    "1 _URL https://example.test/families",
+    "0 @I1@ INDI",
+    "1 NAME Petro /Test/",
+    "0 @I2@ INDI",
+    "1 NAME Hanna /Test/",
+    "0 @F1@ FAM",
+    "1 HUSB @I1@",
+    "1 WIFE @I2@",
+    "1 MARR",
+    "2 DATE 1920",
+    "2 SOUR @S1@",
+    "3 PAGE p. 4",
+    "1 SOUR @S2@",
+    "2 PAGE folder 8",
+    "0 TRLR",
+  ].join("\n"));
+
+  const result = buildGedcomAppImport(draft, {
+    idFactory: () => `id-${++id}`,
+    nowFactory: () => "2026-07-19T00:00:00.000Z",
+  });
+
+  assert.equal(result.documents.length, 0);
+  assert.equal(result.findings.length, 2);
+  assert.deepEqual(
+    result.findings.map((finding) => finding.sourceUrl).sort(),
+    ["https://example.test/families", "https://example.test/marriages"],
+  );
+  assert.equal(result.findings.every((finding) => finding.personIds.length === 2), true);
+  assert.ok(result.findings.some((finding) => finding.eventDate === "1920"));
 });

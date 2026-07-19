@@ -85,14 +85,28 @@ export function Modal({
     );
     setPosition(initialPosition);
 
+    const clampToViewport = () => {
+      if (fullscreenRef.current || !isDraggableModalViewport()) return;
+      const nextRect = modal.getBoundingClientRect();
+      setPosition((current) => {
+        const next = clampModalPosition(
+          current ?? initialPosition,
+          nextRect.width,
+          nextRect.height,
+        );
+        return current && current.left === next.left && current.top === next.top
+          ? current
+          : next;
+      });
+    };
+
     const handleResize = () => {
       if (fullscreenRef.current) return;
       if (!isDraggableModalViewport()) {
         setPosition(null);
         return;
       }
-      const nextRect = modal.getBoundingClientRect();
-      setPosition((current) => clampModalPosition(current ?? initialPosition, nextRect.width, nextRect.height));
+      clampToViewport();
     };
 
     const handleSidebarLayoutChange = () => {
@@ -105,9 +119,18 @@ export function Modal({
       ));
     };
 
+    // Window content can grow after navigation inside the modal (for example,
+    // the tree tools switch from the compact menu to the taller settings
+    // view). Re-clamp on every size change so its bottom remains reachable.
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(clampToViewport);
+    resizeObserver?.observe(modal);
+
     window.addEventListener("resize", handleResize);
     window.addEventListener(SIDEBAR_LAYOUT_CHANGE_EVENT, handleSidebarLayoutChange);
     return () => {
+      resizeObserver?.disconnect();
       window.removeEventListener("resize", handleResize);
       window.removeEventListener(SIDEBAR_LAYOUT_CHANGE_EVENT, handleSidebarLayoutChange);
     };

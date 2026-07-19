@@ -17,6 +17,7 @@ export interface PersonCardProps {
   duplicateCount: number;
   compact: boolean;
   selected: boolean;
+  focused: boolean;
   branchesCollapsible?: boolean;
   branchesCollapsed?: boolean;
   onOpen?: ((personId: string, occurrenceId: string) => void) | undefined;
@@ -50,6 +51,7 @@ export function PersonCard({
   duplicateCount,
   compact,
   selected,
+  focused,
   branchesCollapsible = false,
   branchesCollapsed = false,
   onOpen,
@@ -141,7 +143,7 @@ export function PersonCard({
   const lineageDescription = node.lineageRole === "direct-ancestor"
     ? ", прямий предок"
     : node.lineageRole === "focus"
-      ? ", фокусна особа"
+      ? ", коренева особа"
       : "";
 
   return (
@@ -179,7 +181,7 @@ export function PersonCard({
             className="ft-card-action"
             data-action="focus"
             data-tooltip={`Показати дерево від ${name}`}
-            aria-pressed={node.lineageRole === "focus"}
+            aria-pressed={focused}
             aria-label={`Зробити ${name} фокусною особою`}
             onClick={() => onFocus?.(personId)}
           >

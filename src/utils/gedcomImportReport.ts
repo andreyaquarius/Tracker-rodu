@@ -52,6 +52,12 @@ export function buildGedcomImportReport(
         0,
       ),
       0,
+    ) + draft.families.reduce(
+      (total, family) => total + (family.citations?.length ?? 0) + family.events.reduce(
+        (eventTotal, event) => eventTotal + (event.citations?.length ?? 0),
+        0,
+      ),
+      0,
     ),
     media: draft.people.reduce(
       (total, person) => total + (person.media?.length ?? 0) + person.events.reduce(

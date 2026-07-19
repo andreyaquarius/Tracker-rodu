@@ -23,6 +23,8 @@ export interface FamilyCorridorProjectionInput {
   graph: FamilyGraphData;
   selectedFamily: FamilyCorridorScope;
   originalFocusPersonId: PersonId;
+  /** Persisted tree root whose visible direct lineage must survive projection. */
+  lineageAnchorPersonId?: PersonId;
   /** Only these descendant families may add children outside the focus path. */
   activeNestedFamilies?: readonly FamilyCorridorScope[];
 }
@@ -112,7 +114,12 @@ export function projectFamilyCorridorGraph(
 export function buildFamilyCorridorProjection(
   input: FamilyCorridorProjectionInput,
 ): FamilyCorridorProjectionResult {
-  const { graph, selectedFamily, originalFocusPersonId } = input;
+  const {
+    graph,
+    selectedFamily,
+    originalFocusPersonId,
+    lineageAnchorPersonId,
+  } = input;
   const index = buildProjectionIndex(graph);
   const selected = resolveFamilyScope(selectedFamily, graph, index);
   const includedPersonIds = new Set<PersonId>();
@@ -209,26 +216,34 @@ export function buildFamilyCorridorProjection(
     index.relationsByParentId,
     relation => relation.childId,
   );
-  const ancestorsOfFocus = reachablePeople(
-    [originalFocusPersonId],
-    index.relationsByChildId,
-    relation => relation.parentId,
-  );
-  const pathPeople = new Set<PersonId>();
-  for (const personId of descendantsOfSelected) {
-    if (ancestorsOfFocus.has(personId)) pathPeople.add(personId);
-  }
+  const pathPeopleTo = (targetPersonId: PersonId): Set<PersonId> => {
+    const ancestorsOfTarget = reachablePeople(
+      [targetPersonId],
+      index.relationsByChildId,
+      relation => relation.parentId,
+    );
+    return new Set(
+      [...descendantsOfSelected].filter(personId =>
+        ancestorsOfTarget.has(personId),
+      ),
+    );
+  };
+  const pathPeople = pathPeopleTo(originalFocusPersonId);
+  const lineagePathPeople = lineageAnchorPersonId
+    ? pathPeopleTo(lineageAnchorPersonId)
+    : new Set<PersonId>();
+  const retainedPathPeople = new Set([...pathPeople, ...lineagePathPeople]);
   const hasPathToOriginalFocus =
     index.personIds.has(originalFocusPersonId) &&
     pathPeople.has(originalFocusPersonId) &&
     selected.parentIds.some(parentId => pathPeople.has(parentId));
 
-  if (hasPathToOriginalFocus) {
-    for (const personId of pathPeople) includePerson(personId);
+  if (retainedPathPeople.size) {
+    for (const personId of retainedPathPeople) includePerson(personId);
     for (const relation of graph.parentChildRelations) {
       if (
-        pathPeople.has(relation.parentId) &&
-        pathPeople.has(relation.childId)
+        retainedPathPeople.has(relation.parentId) &&
+        retainedPathPeople.has(relation.childId)
       ) {
         includeRelationBundle(relation);
       }

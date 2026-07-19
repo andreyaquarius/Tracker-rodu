@@ -12,7 +12,8 @@ export function isDatabaseStatementTimeout(error: unknown): boolean {
   const text = databaseErrorText(error).toLocaleLowerCase();
   return text.includes("57014") ||
     text.includes("statement timeout") ||
-    text.includes("timeout manager");
+    text.includes("timeout manager") ||
+    text.includes("сервер не встиг завершити запит");
 }
 
 export function databaseStatementTimeoutMessage(error: unknown): string | null {

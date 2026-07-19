@@ -39,6 +39,11 @@ import type {
   GedcomImportReconciliationPayload,
   GedcomImportReconciliationResult,
 } from "../utils/gedcomImportReconciliation.ts";
+import type {
+  GedcomPhotoBackupPlan,
+  GedcomPhotoBackupProgress,
+  GedcomPhotoBackupResult,
+} from "../services/gedcomPhotoBackup.ts";
 import {
   PERSON_RELATION_TYPES,
   normalizePersonRelation,
@@ -53,6 +58,16 @@ import {
   listPersonLinkedRecords,
   type PersonLinkedRecords,
 } from "../services/projectPersonLinkedRecords.ts";
+import {
+  savePersonAndClose,
+  type PersonSaveHandler,
+} from "../features/persons-v2/contracts.ts";
+import {
+  archiveRequestDraftForPerson,
+  findingDraftForPerson,
+  hypothesisDraftForPerson,
+  taskDraftForPerson,
+} from "../utils/personRelatedRecordDrafts.ts";
 
 type PersonTab =
   | "overview"
@@ -87,6 +102,7 @@ export function PersonsPage({
   onSavePerson,
   onImportRecords,
   onImportGedcom,
+  onBackupGedcomPhotos,
   onDeletePerson,
   onSaveRelation,
   onDeleteRelation,
@@ -115,12 +131,16 @@ export function PersonsPage({
   customFieldLimitMessage?: string;
   initialSearch?: string;
   initialOpenPersonId?: string;
-  onSavePerson: (person: Person) => void;
+  onSavePerson: PersonSaveHandler;
   onImportRecords: (collection: "persons", records: AppEntity[]) => Promise<void>;
   onImportGedcom?: (
     input: GedcomImportReconciliationPayload,
     options?: GedcomImportExecutionOptions,
   ) => Promise<GedcomImportReconciliationResult | void>;
+  onBackupGedcomPhotos?: (
+    plan: GedcomPhotoBackupPlan,
+    onProgress: (progress: GedcomPhotoBackupProgress) => void,
+  ) => Promise<GedcomPhotoBackupResult>;
   onDeletePerson: (id: string) => void;
   onSaveRelation: (relation: PersonRelation) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onDeleteRelation: (id: string) => void;
@@ -212,10 +232,7 @@ export function PersonsPage({
           canAddCustomField={canAddCustomField}
           customFieldLimitMessage={customFieldLimitMessage}
           onClose={close}
-          onSave={(savedPerson) => {
-            onSavePerson(savedPerson);
-            close();
-          }}
+          onSave={(savedPerson) => savePersonAndClose(onSavePerson, savedPerson, close)}
           modalMode="window"
           stackIndex={stackIndex}
           dockIndex={dockIndex}
@@ -241,10 +258,7 @@ export function PersonsPage({
           canAddCustomField={canAddCustomField}
           customFieldLimitMessage={customFieldLimitMessage}
           onClose={close}
-          onSave={(savedPerson) => {
-            onSavePerson(savedPerson);
-            close();
-          }}
+          onSave={(savedPerson) => savePersonAndClose(onSavePerson, savedPerson, close)}
           modalMode="window"
           stackIndex={stackIndex}
           dockIndex={dockIndex}
@@ -382,6 +396,7 @@ export function PersonsPage({
               researchRequired={researchRequired}
               onImportPersons={(records) => onImportRecords("persons", records)}
               onImportGedcom={onImportGedcom}
+              onBackupGedcomPhotos={onBackupGedcomPhotos}
               onSaveRelation={onSaveRelation}
               onCreateFamilyTree={projectId ? async ({ fileName, people, relations, rootPersonId, importOperationId }) => {
                 const result = await createFamilyTreeFromLegacyImport({
@@ -715,7 +730,7 @@ export function PersonCardModal({
               records={linkedFindings}
               type="finding"
               onOpen={onOpenRelated}
-              onAdd={() => onCreateRelated("findings", findingDraftFor(person))}
+              onAdd={() => onCreateRelated("findings", findingDraftForPerson(person))}
               readOnly={!canCreate}
             />
           ) : null}
@@ -724,7 +739,7 @@ export function PersonCardModal({
               records={linkedTasks}
               type="task"
               onOpen={onOpenRelated}
-              onAdd={() => onCreateRelated("tasks", taskDraftFor(person))}
+              onAdd={() => onCreateRelated("tasks", taskDraftForPerson(person))}
               readOnly={!canCreate}
             />
           ) : null}
@@ -733,7 +748,7 @@ export function PersonCardModal({
               records={linkedHypotheses}
               type="hypothesis"
               onOpen={onOpenRelated}
-              onAdd={() => onCreateRelated("hypotheses", hypothesisDraftFor(person))}
+              onAdd={() => onCreateRelated("hypotheses", hypothesisDraftForPerson(person))}
               readOnly={!canCreate}
             />
           ) : null}
@@ -742,7 +757,7 @@ export function PersonCardModal({
               records={linkedArchiveRequests}
               type="archiveRequest"
               onOpen={onOpenRelated}
-              onAdd={() => onCreateRelated("archiveRequests", archiveRequestDraftFor(person))}
+              onAdd={() => onCreateRelated("archiveRequests", archiveRequestDraftForPerson(person))}
               readOnly={!canCreate}
             />
           ) : null}
@@ -1506,45 +1521,4 @@ function linkedCountByPerson(records: Array<{ personIds?: string[] }>): Map<stri
 
 function normalize(value: string): string {
   return value.trim().toLocaleLowerCase("uk");
-}
-
-function findingDraftFor(person: Person): Record<string, unknown> {
-  const name = personDisplayName(person);
-  return {
-    researchId: person.researchId,
-    personIds: [person.id],
-    personsText: name,
-    participants: [{
-      id: createId(),
-      role: "Згадана особа",
-      name,
-      notes: "Додано з картки особи",
-    }],
-    place: person.birthPlace || person.residencePlaces.split(/[,;\n]/)[0]?.trim() || "",
-  };
-}
-
-function taskDraftFor(person: Person): Record<string, unknown> {
-  return {
-    researchId: person.researchId,
-    personIds: [person.id],
-    personName: personDisplayName(person),
-    place: person.birthPlace || person.residencePlaces.split(/[,;\n]/)[0]?.trim() || "",
-  };
-}
-
-function hypothesisDraftFor(person: Person): Record<string, unknown> {
-  return {
-    researchId: person.researchId,
-    personIds: [person.id],
-    relatedPeople: personDisplayName(person),
-  };
-}
-
-function archiveRequestDraftFor(person: Person): Record<string, unknown> {
-  return {
-    researchId: person.researchId,
-    personIds: [person.id],
-    subject: `Запит щодо ${personDisplayName(person)}`,
-  };
 }

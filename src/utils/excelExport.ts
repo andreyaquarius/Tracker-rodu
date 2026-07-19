@@ -125,6 +125,7 @@ export const standardLabels: Record<CollectionKey, Record<string, string>> = {
     description: "Опис",
     file: "Справа",
     page: "Аркуш або сторінка",
+    sourceUrl: "Посилання на джерело",
     scans: "Файл знахідки",
     summary: "Короткий зміст",
     transcription: "Точна транскрипція",

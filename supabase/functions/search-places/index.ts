@@ -111,11 +111,11 @@ function mapNominatimReverseResult(item: NominatimResult, latitude: number, long
     label,
     details: placeDetails(item.address) || item.display_name || "",
     geo: {
-      displayName: label,
+      displayName: item.display_name || label,
       latitude,
       longitude,
       source: "map_click",
-      precision: "approximate",
+      precision: item.type === "house" || item.class === "building" ? "exact" : "approximate",
       provider: "OpenStreetMap Nominatim",
       externalId: String(item.place_id ?? item.osm_id ?? ""),
     },
@@ -158,7 +158,7 @@ Deno.serve(async (request) => {
         lon: String(reverseLongitude),
         format: "jsonv2",
         addressdetails: "1",
-        zoom: "14",
+        zoom: "18",
         "accept-language": "uk",
       });
 

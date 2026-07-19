@@ -4,7 +4,7 @@ import {
   requestDeletionContinuation,
 } from "./continuation.ts";
 
-const STORAGE_BUCKETS = ["project-backups", "project-attachments"] as const;
+const STORAGE_BUCKETS = ["project-backups", "project-attachments", "gedcom-exports"] as const;
 const STORAGE_PAGE_SIZE = 1_000;
 const STORAGE_REMOVE_BATCH_SIZE = 100;
 const INITIAL_DATABASE_BATCH_SIZE = 250;

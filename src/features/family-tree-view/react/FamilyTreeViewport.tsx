@@ -259,7 +259,7 @@ export function FamilyTreeViewport({
               : `Змонтовано ${visibleNodes.length} із ${layoutState.layout?.nodes.length ?? 0} карток`}
         </span>
         {hasDirectLineage ? (
-          <span className="ft-lineage-legend" aria-label="Кольором позначено фокусну особу та прямих предків">
+          <span className="ft-lineage-legend" aria-label="Кольором позначено кореневу особу та її прямих предків">
             <span className="ft-lineage-swatch" aria-hidden="true" />
             Пряма гілка
           </span>
@@ -361,6 +361,7 @@ export function FamilyTreeViewport({
                     duplicateCount={node.personId ? occurrenceCounts.get(node.personId) ?? 1 : 0}
                     compact={compact}
                     selected={Boolean(node.personId && node.personId === selectedPersonId)}
+                    focused={node.occurrenceId === layoutState.layout?.focusOccurrenceId}
                     branchesCollapsible={Boolean(
                       node.personId && branchTogglePersonIds?.has(node.personId),
                     )}

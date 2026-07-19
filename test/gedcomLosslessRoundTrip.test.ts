@@ -99,8 +99,7 @@ test("imports rich MyHeritage facts into Tracker records", () => {
   const person = built.people.find((item) => item.customFields.__gedcomXref === "@I100@")!;
 
   assert.equal(draft.sources?.[0]?.title, "Метрична книга");
-  assert.equal(built.documents.length, 1);
-  assert.equal(built.documents[0].title, "Метрична книга");
+  assert.equal(built.documents.length, 0);
   assert.equal(draft.people[0].citations?.[0]?.text, "Повна транскрипція");
   assert.equal(draft.people[0].media?.[0]?.photoRin, "9001");
   assert.match(person.residencePlaces, /Київ/);
@@ -113,7 +112,9 @@ test("imports rich MyHeritage facts into Tracker records", () => {
   assert.equal(person.photos?.[0].storagePath, "https://example.test/photo.jpg");
   assert.equal(person.primaryPhotoId, person.photos?.[0].id);
   assert.ok(built.findings.some((finding) =>
-    finding.transcription === "Повна транскрипція" && finding.documentId === built.documents[0].id));
+    finding.transcription === "Повна транскрипція"
+      && finding.documentId === ""
+      && finding.sourceUrl === "https://example.test/source"));
   assert.equal(built.personIdByXref["@I100@"], person.id);
 });
 
@@ -153,6 +154,86 @@ test("round-trips raw sources, citations, media, extensions and original xrefs",
   assert.equal(secondDraft.people.find((person) => person.xref === "@I300@")?.vitalStatus, "unknown");
 });
 
+test("round-trips a finding source URL without creating a Tracker document", () => {
+  const input = [
+    "0 HEAD",
+    "0 @S1@ SOUR",
+    "1 TITL Parish register",
+    "1 _URL https://example.test/archive/register-12",
+    "0 @I1@ INDI",
+    "1 NAME Ivan /Test/",
+    "1 SOUR @S1@",
+    "2 PAGE p. 12",
+    "2 DATA",
+    "3 TEXT Birth record",
+    "0 TRLR",
+  ].join("\n");
+  const firstDraft = buildGedcomImportDraft(input);
+  let id = 0;
+  const firstImport = buildGedcomAppImport(firstDraft, {
+    idFactory: () => `id-${++id}`,
+    nowFactory: () => "2026-07-19T00:00:00.000Z",
+  });
+  const projection = buildFamilyTreeProjection({
+    projectId: "project",
+    treeId: "tree",
+    persons: firstImport.people,
+    legacyRelations: firstImport.relations,
+    includeIsolatedPersons: true,
+  });
+
+  const exported = exportFamilyTreeProjectionToGedcom(projection, {
+    findings: firstImport.findings,
+  });
+  const secondDraft = buildGedcomImportDraft(exported.text);
+  id = 0;
+  const secondImport = buildGedcomAppImport(secondDraft, {
+    idFactory: () => `second-${++id}`,
+    nowFactory: () => "2026-07-19T00:00:00.000Z",
+  });
+
+  assert.match(exported.text, /1 _URL https:\/\/example\.test\/archive\/register-12\r\n/u);
+  assert.equal(secondDraft.sources?.[0]?.url, "https://example.test/archive/register-12");
+  assert.equal(secondImport.documents.length, 0);
+  const sourceFindings = secondImport.findings.filter((finding) => finding.sourceUrl);
+  assert.equal(sourceFindings.length, 1);
+  assert.equal(sourceFindings[0].sourceUrl, "https://example.test/archive/register-12");
+  assert.equal(sourceFindings[0].page, "p. 12");
+});
+
+test("an event finding never reuses its INDI owner pointer as a SOUR pointer", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Ivan /Test/",
+    "1 EVEN Military service",
+    "2 TYPE Military Service",
+    "2 NOTE Record: https://example.test/military/1",
+    "0 TRLR",
+  ].join("\n"));
+  let id = 0;
+  const imported = buildGedcomAppImport(draft, {
+    idFactory: () => `event-${++id}`,
+    nowFactory: () => "2026-07-19T00:00:00.000Z",
+  });
+  const projection = buildFamilyTreeProjection({
+    projectId: "project",
+    treeId: "tree",
+    persons: imported.people,
+    legacyRelations: imported.relations,
+    includeIsolatedPersons: true,
+  });
+
+  const exported = exportFamilyTreeProjectionToGedcom(projection, {
+    findings: imported.findings,
+  }).text;
+
+  assert.equal(exported.match(/^0 @I1@ INDI$/gmu)?.length, 1);
+  assert.doesNotMatch(exported, /^0 @I1@ SOUR$/mu);
+  assert.doesNotMatch(exported, /^0 @S_TRK_FINDING\d+@ SOUR$/mu);
+  assert.match(exported, /2 NOTE Record: https:\/\/example\.test\/military\/1/mu);
+});
+
 test("recovers an adopted FAMC link when a MyHeritage family omits reciprocal CHIL", () => {
   const draft = buildGedcomImportDraft([
     "0 HEAD",
@@ -187,9 +268,25 @@ test("exports Tracker documents and findings as GEDCOM sources and citations", (
   });
   const person = built.people.find((item) => item.customFields.__gedcomXref === "@I100@")!;
   const document = {
-    ...built.documents[0],
     id: "tracker-document",
+    createdAt: "2026-07-12T00:00:00.000Z",
+    updatedAt: "2026-07-12T00:00:00.000Z",
+    researchId: "",
     title: "Нове джерело Трекера",
+    documentType: "метрична книга",
+    archive: "",
+    fund: "",
+    description: "",
+    file: "",
+    yearFrom: "",
+    yearTo: "",
+    place: "",
+    url: "",
+    pagesCount: "",
+    lastPage: "",
+    reviewStatus: "",
+    notes: "",
+    scans: [],
     customFields: {},
   };
   const finding = {

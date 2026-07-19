@@ -568,6 +568,7 @@ export interface GedcomPreservedRecord {
 export interface GedcomImportCitationDraft {
   sourceXref: string;
   page: string;
+  url: string;
   eventType: string;
   role: string;
   quality: string;
@@ -592,6 +593,7 @@ export interface GedcomImportSourceDraft {
   author: string;
   publication: string;
   text: string;
+  url: string;
   sourceType: string;
   mediaType: string;
   rin: string;
