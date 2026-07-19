@@ -209,12 +209,13 @@ export function GedcomPhotoBackupModal({
               ) : null}
             </section>
 
-            {plan.localCandidates.length ? (
+            {plan.candidates.length || plan.localCandidates.length ? (
               <section className="gedcom-photo-backup__local-files">
-                <h3>Локальні фото з GEDCOM</h3>
+                <h3>Оригінальні фото з комп’ютера</h3>
                 <p>
-                  Виберіть папку з фотографіями або кілька файлів одразу. Застосунок зіставить їх за шляхом,
-                  назвою файла та ідентифікатором GEDCOM; неоднозначні збіги не завантажуватимуться.
+                  Якщо зовнішні посилання вже недоступні або блокують копіювання, виберіть папку з фотографіями
+                  чи кілька файлів одразу. Застосунок зіставить їх за шляхом, назвою файла та ідентифікатором GEDCOM;
+                  неоднозначні збіги не завантажуватимуться.
                 </p>
                 <input
                   ref={(node) => {
@@ -253,7 +254,7 @@ export function GedcomPhotoBackupModal({
                 </div>
                 {localFiles.length ? (
                   <p role="status">
-                    Зіставлено: {localSelection.matchedCount.toLocaleString("uk-UA")} із {plan.localCandidates.length.toLocaleString("uk-UA")}.
+                    Зіставлено: {localSelection.matchedCount.toLocaleString("uk-UA")} із {(plan.candidates.length + plan.localCandidates.length).toLocaleString("uk-UA")}.
                     {localSelection.unmatchedCount ? ` Не знайдено або неоднозначні: ${localSelection.unmatchedCount.toLocaleString("uk-UA")}.` : " Усі локальні фото знайдено."}
                   </p>
                 ) : null}

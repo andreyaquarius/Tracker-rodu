@@ -39,6 +39,11 @@ verify_jwt = false
 [functions.search-places]
 verify_jwt = true
 
+# Authenticated, narrowly allowlisted proxy for GEDCOM photo URLs from the
+# supported MyHeritage CDN. The function also validates auth in code.
+[functions.fetch-gedcom-photo]
+verify_jwt = true
+
 # Receives only an anonymous per-document client/session identifier and a
 # bounded active-second count. The function also validates the caller's JWT in
 # code before relaying the aggregate to Google Analytics.

@@ -17,6 +17,10 @@ import {
   type GoogleDriveFileMetadata,
   type GoogleDriveUploadProgress,
 } from "./googleDriveStorage.ts";
+import {
+  fetchGedcomPhotoViaProxy,
+  isGedcomPhotoProxyUrl,
+} from "./gedcomPhotoProxy.ts";
 
 export const MAX_ATTACHMENT_SIZE_MB = 25;
 export type AttachmentPolicy = "all" | "finding" | "archive-request" | "document" | "person-photo";
@@ -357,6 +361,10 @@ export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
 async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind): Promise<Blob> {
   if (new URL(target).protocol !== "https:") {
     throw new Error("Для внутрішнього перегляду зовнішніх PDF і зображень підтримуються лише HTTPS-посилання.");
+  }
+
+  if (kind === "image" && isGedcomPhotoProxyUrl(target)) {
+    return fetchGedcomPhotoViaProxy(target);
   }
 
   let response: Response;

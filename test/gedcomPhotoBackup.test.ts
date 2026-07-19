@@ -50,6 +50,21 @@ test("matches a selected GEDCOM photo directory in one batch", () => {
   assert.equal(resolution.plan.candidates[0]?.localFile, selected);
 });
 
+test("uses selected originals when a remote GEDCOM photo cannot be fetched", () => {
+  const imported = person("incoming", [
+    photo("remote", "https://sites-cf.mhcache.com/archive/ancestor.jpg"),
+  ], "remote");
+  const plan = buildGedcomPhotoBackupPlan([imported]);
+  const selected = new File(["portrait"], "remote.jpg", { type: "image/jpeg" });
+
+  const resolution = attachLocalGedcomPhotoFiles(plan, [selected]);
+
+  assert.equal(resolution.matchedCount, 1);
+  assert.equal(resolution.unmatchedCount, 0);
+  assert.equal(resolution.plan.candidates.length, 1);
+  assert.equal(resolution.plan.candidates[0]?.localFile, selected);
+});
+
 test("does not offer a photo already copied to Drive on a repeated import", () => {
   const source = "https://cdn.example/photo.jpg";
   const imported = person("new-id", [photo("incoming-photo", source)]);
@@ -141,6 +156,11 @@ test("keeps Drive objects person-scoped so attachment metadata remains unique", 
     person("p1", [photo("a", source)]),
     person("p2", [photo("b", source)]),
   ]);
+  assert.equal(plan.candidates.length, 2);
+  assert.notEqual(
+    plan.candidates[0]?.deduplicationKey,
+    plan.candidates[1]?.deduplicationKey,
+  );
   let storedCount = 0;
   const result = await backupGedcomPhotosToGoogleDrive(plan, {
     target: { projectId: "project", projectName: "Project" },

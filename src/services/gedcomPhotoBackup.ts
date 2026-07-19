@@ -328,11 +328,15 @@ export function attachLocalGedcomPhotoFiles(
   matchedCount: number;
   unmatchedCount: number;
 } {
-  if (!plan.localCandidates.length || !selectedFiles.length) {
+  const matchableCandidates = uniquePhotoCandidates([
+    ...plan.candidates,
+    ...plan.localCandidates,
+  ]);
+  if (!matchableCandidates.length || !selectedFiles.length) {
     return {
       plan,
       matchedCount: 0,
-      unmatchedCount: plan.localCandidates.length,
+      unmatchedCount: matchableCandidates.length,
     };
   }
   const files = selectedFiles.map((file) => ({
@@ -340,32 +344,41 @@ export function attachLocalGedcomPhotoFiles(
     name: normalizeLocalPath(file.name),
     relativePath: normalizeLocalPath(file.webkitRelativePath || file.name),
   }));
-  const matched: GedcomPhotoBackupCandidate[] = [];
-  for (const candidate of plan.localCandidates) {
+  const matchedByKey = new Map<string, GedcomPhotoBackupCandidate>();
+  for (const candidate of matchableCandidates) {
     const sourcePath = normalizeLocalPath(candidate.sourceReference);
     const sourceName = sourcePath.split("/").pop() ?? sourcePath;
+    const photoName = normalizeLocalPath(candidate.photo.name).split("/").pop() ?? "";
     const externalId = candidate.photo.sourceExternalId?.trim().toLocaleLowerCase("en-US") ?? "";
     const exact = files.filter((item) => (
       sourcePath === item.relativePath
       || sourcePath.endsWith(`/${item.relativePath}`)
       || item.relativePath.endsWith(`/${sourcePath}`)
     ));
-    const byName = exact.length ? [] : files.filter((item) => item.name === sourceName);
+    const byName = exact.length ? [] : files.filter((item) => (
+      item.name === sourceName || Boolean(photoName && item.name === photoName)
+    ));
     const byExternalId = exact.length || byName.length || !externalId
       ? []
       : files.filter((item) => fileStem(item.name) === externalId || fileStem(item.name).includes(externalId));
     const resolved = uniqueFile(exact) ?? uniqueFile(byName) ?? uniqueFile(byExternalId);
     if (!resolved) continue;
-    matched.push({ ...candidate, localFile: resolved.file });
+    matchedByKey.set(photoCandidateKey(candidate), { ...candidate, localFile: resolved.file });
   }
+  const remoteCandidates = plan.candidates.map((candidate) => (
+    matchedByKey.get(photoCandidateKey(candidate)) ?? candidate
+  ));
+  const matchedLocalCandidates = plan.localCandidates
+    .map((candidate) => matchedByKey.get(photoCandidateKey(candidate)))
+    .filter((candidate): candidate is GedcomPhotoBackupCandidate => Boolean(candidate));
   return {
     plan: {
       ...plan,
-      candidates: [...plan.candidates, ...matched],
-      missingLocalCount: Math.max(0, plan.localCandidates.length - matched.length),
+      candidates: uniquePhotoCandidates([...remoteCandidates, ...matchedLocalCandidates]),
+      missingLocalCount: Math.max(0, plan.localCandidates.length - matchedLocalCandidates.length),
     },
-    matchedCount: matched.length,
-    unmatchedCount: Math.max(0, plan.localCandidates.length - matched.length),
+    matchedCount: matchedByKey.size,
+    unmatchedCount: Math.max(0, matchableCandidates.length - matchedByKey.size),
   };
 }
 
@@ -612,4 +625,20 @@ function fileStem(value: string): string {
 
 function uniqueFile<T extends { file: File }>(matches: T[]): T | null {
   return matches.length === 1 ? matches[0]! : null;
+}
+
+function photoCandidateKey(candidate: GedcomPhotoBackupCandidate): string {
+  return `${candidate.personId}:${candidate.deduplicationKey}`;
+}
+
+function uniquePhotoCandidates(
+  candidates: readonly GedcomPhotoBackupCandidate[],
+): GedcomPhotoBackupCandidate[] {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = photoCandidateKey(candidate);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

@@ -390,8 +390,10 @@ export function PersonsPage({
               onImport={(records) => onImportRecords("persons", records)}
             />
           ) : null}
-          {canCreateRecords && canUseGedcom ? (
+          {canUseGedcom ? (
             <GedcomImportButton
+              key={`persons-gedcom-import:${projectId ?? "local"}`}
+              disabled={!canCreateRecords}
               defaultResearchId={researchFilter || (researches.length === 1 ? researches[0].id : "")}
               researchRequired={researchRequired}
               onImportPersons={(records) => onImportRecords("persons", records)}

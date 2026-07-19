@@ -7,6 +7,7 @@ import {
 } from "react";
 import { Modal } from "../components/Modal";
 import { GedcomImportButton, type GedcomImportArchivePayload } from "../components/GedcomImportButton";
+import { GedcomPhotoBackupModal } from "../components/GedcomPhotoBackupModal.tsx";
 import { CircularAncestorChartWindow } from "../components/familyTree/CircularAncestorChartWindow";
 import { FamilyTreeToolsWindow } from "../components/familyTree/FamilyTreeToolsWindow";
 import {
@@ -107,11 +108,17 @@ import type {
   GedcomImportReconciliationPayload,
   GedcomImportReconciliationResult,
 } from "../utils/gedcomImportReconciliation.ts";
-import type {
-  GedcomPhotoBackupPlan,
-  GedcomPhotoBackupProgress,
-  GedcomPhotoBackupResult,
+import {
+  buildGedcomPhotoBackupPlan,
+  type GedcomPhotoBackupPlan,
+  type GedcomPhotoBackupProgress,
+  type GedcomPhotoBackupResult,
 } from "../services/gedcomPhotoBackup.ts";
+
+type GedcomPhotoRecoverySnapshot = {
+  plan: GedcomPhotoBackupPlan;
+  importSummary: string;
+};
 
 const FAMILY_TREE_GEDCOM_INPUT_ID = "family-tree-tools-gedcom-input";
 const HOME_LINEAGE_ANCESTOR_DEPTH = 16;
@@ -193,12 +200,26 @@ export function ProductionFamilyTreePage({
   const [treeToolsNotice, setTreeToolsNotice] = useState("");
   const [exportingGedcom, setExportingGedcom] = useState(false);
   const [gedcomResearchId, setGedcomResearchId] = useState("");
+  const [gedcomPhotoRecovery, setGedcomPhotoRecovery] =
+    useState<GedcomPhotoRecoverySnapshot | null>(null);
   const [treeAppearance, setTreeAppearance] =
     useState<FamilyTreeAppearancePreferences>({
       ...DEFAULT_FAMILY_TREE_APPEARANCE,
     });
   const preferredTreeIdRef = useRef("");
   const mutations = useFamilyTreeMutations();
+  const persistedGedcomPhotoPlan = useMemo(
+    () => buildGedcomPhotoBackupPlan(persons, {}, persons),
+    [persons],
+  );
+  const pendingGedcomPhotoCount =
+    persistedGedcomPhotoPlan.candidates.length +
+    persistedGedcomPhotoPlan.missingLocalCount +
+    persistedGedcomPhotoPlan.unsupportedHttpCount;
+
+  useEffect(() => {
+    setGedcomPhotoRecovery(null);
+  }, [projectId]);
 
   useEffect(() => {
     setGedcomResearchId((current) => {
@@ -345,6 +366,27 @@ export function ProductionFamilyTreePage({
     setTreeToolsOpen(true);
   }
 
+  function openGedcomPhotoRecovery() {
+    const plan = buildGedcomPhotoBackupPlan(persons, {}, persons);
+    const pendingCount =
+      plan.candidates.length + plan.missingLocalCount + plan.unsupportedHttpCount;
+    if (!pendingCount || !onBackupGedcomPhotos || readOnly) return;
+    setGedcomPhotoRecovery({
+      plan,
+      importSummary: [
+        `Осіб із фото GEDCOM: ${plan.personCount.toLocaleString("uk-UA")}.`,
+        `Можна скопіювати автоматично: ${plan.candidates.length.toLocaleString("uk-UA")}.`,
+        plan.missingLocalCount
+          ? `Потребують вибору локального файла: ${plan.missingLocalCount.toLocaleString("uk-UA")}.`
+          : "",
+        plan.unsupportedHttpCount
+          ? `Незахищені HTTP-посилання: ${plan.unsupportedHttpCount.toLocaleString("uk-UA")}.`
+          : "",
+      ].filter(Boolean).join("\n"),
+    });
+    setTreeToolsOpen(false);
+  }
+
   function selectGedcomFile() {
     setTreeToolsOpen(false);
     document.getElementById(FAMILY_TREE_GEDCOM_INPUT_ID)?.click();
@@ -465,19 +507,49 @@ export function ProductionFamilyTreePage({
     );
   }
 
-  if (loading) return <FamilyTreeLoadingState />;
+  // Keep the importer mounted while the tree entry points reload after a
+  // successful import. Its post-import Google Drive offer is local component
+  // state; unmounting here used to discard that dialog before it was shown.
+  const gedcomImportControl = !readOnly && onImportRecords && onSaveRelation ? (
+    <GedcomImportButton
+      key={`family-tree-gedcom-import:${projectId}`}
+      inputId={FAMILY_TREE_GEDCOM_INPUT_ID}
+      hideTrigger
+      disabled={!canImportGedcom}
+      defaultResearchId={gedcomResearchId}
+      researchRequired={researchRequired}
+      onImportPersons={(records) => onImportRecords("persons", records)}
+      onImportGedcom={onImportGedcom}
+      onBackupGedcomPhotos={onBackupGedcomPhotos}
+      onSaveRelation={onSaveRelation}
+      onCreateFamilyTree={(input) => createTreeFromGedcom(input)}
+    />
+  ) : null;
+
+  if (loading) {
+    return (
+      <>
+        {gedcomImportControl}
+        <FamilyTreeLoadingState />
+      </>
+    );
+  }
   if (error) {
     return (
-      <FamilyTreeErrorState
-        message={error}
-        onRetry={() => setReloadRevision((value) => value + 1)}
-      />
+      <>
+        {gedcomImportControl}
+        <FamilyTreeErrorState
+          message={error}
+          onRetry={() => setReloadRevision((value) => value + 1)}
+        />
+      </>
     );
   }
 
   const needsRoot = !selectedEntry?.rootPersonId;
   return (
     <>
+      {gedcomImportControl}
       {needsRoot ? (
         <div className="family-tree-v2-empty-tools">
           <button
@@ -521,20 +593,6 @@ export function ProductionFamilyTreePage({
         />
       ) : null}
 
-      {canImportGedcom && onImportRecords && onSaveRelation ? (
-        <GedcomImportButton
-          inputId={FAMILY_TREE_GEDCOM_INPUT_ID}
-          hideTrigger
-          defaultResearchId={gedcomResearchId}
-          researchRequired={researchRequired}
-          onImportPersons={(records) => onImportRecords("persons", records)}
-          onImportGedcom={onImportGedcom}
-          onBackupGedcomPhotos={onBackupGedcomPhotos}
-          onSaveRelation={onSaveRelation}
-          onCreateFamilyTree={(input) => createTreeFromGedcom(input)}
-        />
-      ) : null}
-
       {treeToolsOpen ? (
         <FamilyTreeToolsWindow
           trees={entryPoints}
@@ -543,6 +601,8 @@ export function ProductionFamilyTreePage({
           selectedResearchId={gedcomResearchId}
           researchRequired={researchRequired}
           canImportGedcom={canImportGedcom && (!researchRequired || Boolean(gedcomResearchId))}
+          canBackupGedcomPhotos={Boolean(!readOnly && onBackupGedcomPhotos)}
+          gedcomPhotoBackupCount={pendingGedcomPhotoCount}
           canExportGedcom={Boolean(selectedEntry?.id && selectedEntry.rootPersonId)}
           exportingGedcom={exportingGedcom}
           appearance={treeAppearance}
@@ -550,10 +610,21 @@ export function ProductionFamilyTreePage({
           onSelectTree={setSelectedTreeId}
           onSelectResearch={setGedcomResearchId}
           onImportGedcom={selectGedcomFile}
+          onOpenGedcomPhotoBackup={openGedcomPhotoRecovery}
           onExportGedcom={() => void exportGedcom()}
           onOpenCircularChart={openCircularAncestorChart}
           onAppearanceChange={updateTreeAppearance}
           onClose={() => setTreeToolsOpen(false)}
+        />
+      ) : null}
+
+      {gedcomPhotoRecovery ? (
+        <GedcomPhotoBackupModal
+          fileName="Фото з імпортованих GEDCOM"
+          importSummary={gedcomPhotoRecovery.importSummary}
+          plan={gedcomPhotoRecovery.plan}
+          onBackup={onBackupGedcomPhotos}
+          onClose={() => setGedcomPhotoRecovery(null)}
         />
       ) : null}
 

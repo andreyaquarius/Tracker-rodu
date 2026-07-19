@@ -34,6 +34,55 @@ test("all GEDCOM entry points receive the shared batch backup callback", () => {
   assert.match(familyTree, /onBackupGedcomPhotos=\{onBackupGedcomPhotos\}/);
 });
 
+test("production tree keeps the GEDCOM photo offer mounted while tree data reloads", () => {
+  const familyTree = source("../src/pages/ProductionFamilyTreePage.tsx");
+  const controlAt = familyTree.indexOf("const gedcomImportControl =");
+  const loadingAt = familyTree.indexOf("if (loading)", controlAt);
+  const normalRenderAt = familyTree.indexOf("const needsRoot", loadingAt);
+
+  assert.ok(controlAt >= 0 && loadingAt > controlAt && normalRenderAt > loadingAt);
+  assert.match(
+    familyTree.slice(loadingAt, normalRenderAt),
+    /if \(loading\)[\s\S]*?\{gedcomImportControl\}[\s\S]*?<FamilyTreeLoadingState \/>/,
+  );
+  assert.match(
+    familyTree.slice(normalRenderAt),
+    /return \([\s\S]*?\{gedcomImportControl\}/,
+  );
+  assert.match(familyTree, /key=\{`family-tree-gedcom-import:\$\{projectId\}`\}/);
+});
+
+test("GEDCOM entry points stay mounted when the create quota changes", () => {
+  const button = source("../src/components/GedcomImportButton.tsx");
+  const personsV2 = source("../src/features/persons-v2/PersonsModuleV2.tsx");
+  const personsLegacy = source("../src/pages/PersonsPage.tsx");
+  const familyTree = source("../src/pages/ProductionFamilyTreePage.tsx");
+
+  assert.match(button, /disabled\?: boolean/);
+  assert.match(button, /disabled=\{busy \|\| disabled\}/);
+  assert.match(personsV2, /\{!readOnly && canUseGedcom \? \([\s\S]*?<GedcomImportButton[\s\S]*?disabled=\{!canCreate\}/);
+  assert.doesNotMatch(personsV2, /!readOnly && canCreate && canUseGedcom/);
+  assert.match(personsLegacy, /\{canUseGedcom \? \([\s\S]*?<GedcomImportButton[\s\S]*?disabled=\{!canCreateRecords\}/);
+  assert.doesNotMatch(personsLegacy, /canCreateRecords && canUseGedcom/);
+  assert.match(familyTree, /const gedcomImportControl = !readOnly && onImportRecords && onSaveRelation \? \(/);
+  assert.match(familyTree, /disabled=\{!canImportGedcom\}/);
+});
+
+test("a completed tree import can reopen batch photo backup from persisted people", () => {
+  const familyTree = source("../src/pages/ProductionFamilyTreePage.tsx");
+  const tools = source("../src/components/familyTree/FamilyTreeToolsWindow.tsx");
+
+  assert.match(
+    familyTree,
+    /buildGedcomPhotoBackupPlan\(persons, \{\}, persons\)/,
+  );
+  assert.match(familyTree, /function openGedcomPhotoRecovery\(\)/);
+  assert.match(familyTree, /onOpenGedcomPhotoBackup=\{openGedcomPhotoRecovery\}/);
+  assert.match(familyTree, /<GedcomPhotoBackupModal[\s\S]*?plan=\{gedcomPhotoRecovery\.plan\}/);
+  assert.match(tools, /Зберегти фото з GEDCOM/);
+  assert.match(tools, /gedcomPhotoBackupCount/);
+});
+
 test("Drive uploads use a deterministic deduplication property", () => {
   const drive = source("../src/services/googleDriveStorage.ts");
   const backup = source("../src/services/gedcomPhotoBackup.ts");

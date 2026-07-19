@@ -414,8 +414,10 @@ export function PersonsModuleV2({
           onImport={(records) => onImportRecords("persons", records)}
         />
       ) : null}
-      {!readOnly && canCreate && canUseGedcom ? (
+      {!readOnly && canUseGedcom ? (
         <GedcomImportButton
+          key={`persons-v2-gedcom-import:${projectId ?? "local"}`}
+          disabled={!canCreate}
           defaultResearchId={researches.length === 1 ? researches[0].id : ""}
           researchRequired={researchRequired}
           onImportPersons={(records) => onImportRecords("persons", records)}
