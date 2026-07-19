@@ -7,6 +7,10 @@ const EDGE_ENTRYPOINT = resolve(
   process.cwd(),
   "supabase/functions/process-gedcom-exports/index.ts",
 );
+const DEPLOY_WORKFLOW = readFileSync(
+  resolve(process.cwd(), ".github/workflows/deploy-supabase-functions.yml"),
+  "utf8",
+);
 
 test("GEDCOM export Edge graph uses explicit file imports", () => {
   const visited = new Set<string>();
@@ -37,6 +41,11 @@ test("GEDCOM export Edge graph uses explicit file imports", () => {
   }
 
   assert.ok(visited.size > 1, "Expected to inspect the transitive Edge import graph");
+});
+
+test("Edge deployment watches the shared application module roots", () => {
+  assert.match(DEPLOY_WORKFLOW, /- "src\/types\/\*\*"/);
+  assert.match(DEPLOY_WORKFLOW, /- "src\/utils\/\*\*"/);
 });
 
 function localModuleSpecifiers(source: string): string[] {

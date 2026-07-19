@@ -6,6 +6,10 @@ on:
     paths:
       - "supabase/functions/**"
       - "supabase/config.toml"
+      # process-gedcom-exports reuses Edge-safe GEDCOM modules from the app
+      # source tree. Changes there must redeploy the function as well.
+      - "src/types/**"
+      - "src/utils/**"
       - ".github/workflows/deploy-supabase-functions.yml"
   workflow_dispatch:
 
