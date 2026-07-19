@@ -80,7 +80,18 @@ async function callOperationRpc(
   args: Record<string, unknown>,
 ): Promise<GedcomImportOperationStatus> {
   const { data, error } = await getSupabaseClient().rpc(functionName, args);
-  if (error) throw error;
+  if (error) {
+    const message = typeof error.message === "string" ? error.message : "";
+    if (message.includes("GEDCOM_IMPORT_ALREADY_EXISTS")) {
+      throw new Error(
+        "У цьому проєкті вже є імпортований GEDCOM. Відкрийте «Керування GEDCOM», видаліть попередній набір осіб і лише тоді імпортуйте інший файл.",
+      );
+    }
+    if (message.includes("GEDCOM_IMPORT_ALREADY_ACTIVE")) {
+      throw new Error("У цьому проєкті вже виконується інший GEDCOM-імпорт. Дочекайтеся його завершення.");
+    }
+    throw error;
+  }
   return parseGedcomImportOperationStatus(data);
 }
 

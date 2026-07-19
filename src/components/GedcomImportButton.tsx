@@ -58,6 +58,7 @@ interface GedcomImportButtonProps {
     people: Person[];
     relations: PersonRelation[];
     rootPersonId?: string;
+    importSourceKey: string;
     archive: GedcomImportArchivePayload;
     importOperationId?: string;
   }) => Promise<{ treeId: string; archiveBatchId?: string } | void>;
@@ -65,6 +66,7 @@ interface GedcomImportButtonProps {
     plan: GedcomPhotoBackupPlan,
     onProgress: (progress: GedcomPhotoBackupProgress) => void,
   ) => Promise<GedcomPhotoBackupResult>;
+  onImportCompleted?: (input: { importSourceKey: string; fileName: string }) => Promise<void> | void;
 }
 
 type GedcomImportPreview = {
@@ -104,6 +106,7 @@ export function GedcomImportButton({
   onSaveRelation,
   onCreateFamilyTree,
   onBackupGedcomPhotos,
+  onImportCompleted,
 }: GedcomImportButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -155,7 +158,10 @@ export function GedcomImportButton({
       const draft = buildGedcomImportDraft(decodeGedcomBytes(bytes));
       setProgress({ step: "Готуємо записи", percent: 35, detail: "Розбираємо осіб, сімʼї та звʼязки з GEDCOM." });
       activeStage = "prepare-records";
-      const built = buildGedcomAppImport(draft, { defaultResearchId });
+      const built = buildGedcomAppImport(draft, {
+        defaultResearchId,
+        sourceFileName: file.name,
+      });
       if (!built.people.length) {
         throw new Error("У файлі GEDCOM не знайдено жодної особи для імпорту.");
       }
@@ -247,6 +253,7 @@ export function GedcomImportButton({
           people: committed.people,
           relations: committed.relations,
           rootPersonId: committed.rootPersonId,
+          importSourceKey: committed.importSourceKey,
           archive: {
             ...preview.archive,
             personIdByXref: committed.personIdByXref,
@@ -259,6 +266,15 @@ export function GedcomImportButton({
       }
       if (importOperationId) {
         await completeGedcomImportOperation(importOperationId);
+      }
+      try {
+        await onImportCompleted?.({
+          importSourceKey: committed.importSourceKey,
+          fileName: preview.fileName,
+        });
+      } catch {
+        // Dataset refresh is a non-critical UI follow-up. The completed import
+        // must stay successful even if the marker cannot be reloaded yet.
       }
       setProgress({ step: "Імпорт завершено", percent: 100, detail: "Дані збережено." });
       const importSummary = formatGedcomImportReport(preview.report);

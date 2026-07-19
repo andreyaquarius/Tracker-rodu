@@ -18,7 +18,10 @@ import {
   discardOptionalProjectCache,
   saveOptionalProjectCache,
 } from "../utils/projectCache.ts";
-import { selectRowsInParallel } from "../utils/pagedRows.ts";
+import {
+  selectRowsInParallel,
+  type PagedRangeRequest,
+} from "../utils/pagedRows.ts";
 import {
   chunkPersonImportRows,
   chunkRelationImportRows,
@@ -38,6 +41,7 @@ import {
   type GedcomPhotoBackupPersistenceResult,
   type GedcomPhotoBackupReplacement,
 } from "./gedcomPhotoBackup.ts";
+import type { GedcomImportDatasetMarker } from "../utils/gedcomImportGroups.ts";
 
 type PersonRow = {
   id: string;
@@ -82,6 +86,8 @@ type RelationRow = {
   status: string;
   evidence_text: string;
   notes: string;
+  import_source_key?: string;
+  gedcom_metadata?: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -97,6 +103,8 @@ type PersonScanGroups = {
 const PERSON_SELECT =
   "id, project_id, research_id, status, gender, surname, given_name, patronymic, full_name, name_variants, surname_variants, birth_date, birth_year_from, birth_year_to, birth_place, marriage_date, marriage_place, death_date, death_year_from, death_year_to, death_place, residence_places, social_status, religion, occupation, is_living, privacy_status, notes, custom_fields, created_at, updated_at";
 const RELATION_SELECT =
+  "id, project_id, person_id, related_person_id, relation_type, status, evidence_text, notes, import_source_key, gedcom_metadata, created_at, updated_at";
+const LEGACY_RELATION_SELECT =
   "id, project_id, person_id, related_person_id, relation_type, status, evidence_text, notes, created_at, updated_at";
 const SCANS_KEY = PERSON_SCANS_METADATA_KEY;
 const MAIDEN_SURNAME_KEY = "__trackerRoduMaidenSurname";
@@ -153,6 +161,23 @@ function splitCustomFields(value: unknown): {
     maidenSurname,
     primaryPhotoId: photoState.primaryPhotoId,
   };
+}
+
+export function isMissingPersonRelationProvenanceColumnsError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  const code = typeof record.code === "string" ? record.code.toUpperCase() : "";
+  const description = [record.message, record.details, record.hint]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  const mentionsProvenanceColumn = description.includes("import_source_key")
+    || description.includes("gedcom_metadata");
+  if (!mentionsProvenanceColumn) return false;
+  return code === "42703"
+    || code === "PGRST204"
+    || description.includes("does not exist")
+    || description.includes("schema cache");
 }
 
 function personFromRow(row: PersonRow): Person {
@@ -256,6 +281,11 @@ function normalizePersonPrivacyStatus(value: unknown): Person["privacyStatus"] {
 }
 
 function relationFromRow(row: RelationRow): PersonRelation {
+  const metadata = asRecord(row.gedcom_metadata);
+  const familyXref = typeof metadata.familyXref === "string" ? metadata.familyXref : "";
+  const importSourceKey = typeof metadata.importSourceKey === "string"
+    ? metadata.importSourceKey
+    : row.import_source_key ?? "";
   return normalizePersonRelation({
     id: row.id,
     personId: row.person_id,
@@ -264,6 +294,22 @@ function relationFromRow(row: RelationRow): PersonRelation {
     status: row.status as PersonRelation["status"],
     evidenceText: row.evidence_text,
     notes: row.notes,
+    gedcomMetadata: familyXref || importSourceKey
+      ? {
+          familyXref,
+          importSourceKey,
+          importFileName: typeof metadata.importFileName === "string" ? metadata.importFileName : undefined,
+          startDate: typeof metadata.startDate === "string" ? metadata.startDate : undefined,
+          startPlace: typeof metadata.startPlace === "string" ? metadata.startPlace : undefined,
+          endDate: typeof metadata.endDate === "string" ? metadata.endDate : undefined,
+          endPlace: typeof metadata.endPlace === "string" ? metadata.endPlace : undefined,
+          eventType: typeof metadata.eventType === "string" ? metadata.eventType : undefined,
+          pedigree: typeof metadata.pedigree === "string" || metadata.pedigree === null
+            ? metadata.pedigree
+            : undefined,
+          rawNotes: typeof metadata.rawNotes === "string" ? metadata.rawNotes : undefined,
+        }
+      : undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -280,9 +326,47 @@ function relationToRow(projectId: string, relation: PersonRelation) {
     status: normalized.status,
     evidence_text: normalized.evidenceText,
     notes: normalized.notes,
+    import_source_key: normalized.gedcomMetadata?.importSourceKey?.trim() ?? "",
+    gedcom_metadata: normalized.gedcomMetadata ?? {},
     created_at: normalized.createdAt,
     updated_at: normalized.updatedAt,
   };
+}
+
+function relationToLegacyRow(row: ReturnType<typeof relationToRow>) {
+  return {
+    id: row.id,
+    project_id: row.project_id,
+    person_id: row.person_id,
+    related_person_id: row.related_person_id,
+    relation_type: row.relation_type,
+    status: row.status,
+    evidence_text: row.evidence_text,
+    notes: row.notes,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+async function listProjectRelationRows(projectId: string): Promise<RelationRow[]> {
+  const client = getSupabaseClient();
+  const selectRows = (columns: string) => selectRowsInParallel<RelationRow>(
+    () => client
+      .from("person_relations")
+      .select(columns)
+      .eq("project_id", projectId)
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true }) as unknown as PagedRangeRequest<RelationRow>,
+    SELECT_BATCH_SIZE,
+    SELECT_CONCURRENCY_PER_TABLE,
+  );
+
+  try {
+    return await selectRows(RELATION_SELECT);
+  } catch (error) {
+    if (!isMissingPersonRelationProvenanceColumnsError(error)) throw error;
+    return selectRows(LEGACY_RELATION_SELECT);
+  }
 }
 
 export async function listProjectPeople(projectId: string): Promise<{
@@ -301,16 +385,7 @@ export async function listProjectPeople(projectId: string): Promise<{
       SELECT_BATCH_SIZE,
       SELECT_CONCURRENCY_PER_TABLE,
     ),
-    selectRowsInParallel<RelationRow>(
-      () => client
-        .from("person_relations")
-        .select(RELATION_SELECT)
-        .eq("project_id", projectId)
-        .order("updated_at", { ascending: false })
-        .order("id", { ascending: true }),
-      SELECT_BATCH_SIZE,
-      SELECT_CONCURRENCY_PER_TABLE,
-    ),
+    listProjectRelationRows(projectId),
   ]);
   return {
     persons: personRows.map(personFromRow),
@@ -336,14 +411,26 @@ export async function getProjectPersonRelation(
   projectId: string,
   relationId: string,
 ): Promise<PersonRelation | null> {
-  const { data, error } = await getSupabaseClient()
-    .from("person_relations")
-    .select(RELATION_SELECT)
-    .eq("project_id", projectId)
-    .eq("id", relationId)
-    .maybeSingle();
-  if (error) throw error;
-  return data ? relationFromRow(data as RelationRow) : null;
+  const client = getSupabaseClient();
+  const loadRelation = async (columns: string): Promise<RelationRow | null> => {
+    const { data, error } = await client
+      .from("person_relations")
+      .select(columns)
+      .eq("project_id", projectId)
+      .eq("id", relationId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? data as unknown as RelationRow : null;
+  };
+
+  try {
+    const row = await loadRelation(RELATION_SELECT);
+    return row ? relationFromRow(row) : null;
+  } catch (error) {
+    if (!isMissingPersonRelationProvenanceColumnsError(error)) throw error;
+    const row = await loadRelation(LEGACY_RELATION_SELECT);
+    return row ? relationFromRow(row) : null;
+  }
 }
 
 export async function importProjectPeople(
@@ -368,11 +455,21 @@ export async function importProjectPeople(
     onProgress: withImportPhase("persons", options.onProgress),
   });
   const relationRows = relations.map((relation) => relationToRow(projectId, relation));
+  let useLegacyRelationSchema = false;
   await runImportBatches(chunkRelationImportRows(relationRows), async (batch) => {
     await runAdaptiveImportBatch(batch, async (items) => {
-      const { error } = await client
+      let { error } = await client
         .from("person_relations")
-        .upsert(items, { onConflict: "id" });
+        .upsert(
+          useLegacyRelationSchema ? items.map(relationToLegacyRow) : items,
+          { onConflict: "id" },
+        );
+      if (error && !useLegacyRelationSchema && isMissingPersonRelationProvenanceColumnsError(error)) {
+        useLegacyRelationSchema = true;
+        ({ error } = await client
+          .from("person_relations")
+          .upsert(items.map(relationToLegacyRow), { onConflict: "id" }));
+      }
       if (error) throw error;
     });
   }, {
@@ -443,25 +540,122 @@ export async function saveProjectPersonPhotoBackups(
 }
 
 export async function deleteProjectPerson(projectId: string, personId: string): Promise<void> {
-  const { error } = await getSupabaseClient()
-    .from("persons")
-    .delete()
-    .eq("project_id", projectId)
-    .eq("id", personId);
+  await deleteProjectPersons(projectId, [personId]);
+}
+
+export interface ProjectPersonDeletionResult {
+  deletedPersons: number;
+  deletedRelations: number;
+  deletedFindings: number;
+}
+
+export async function deleteProjectPersons(
+  projectId: string,
+  personIds: readonly string[],
+): Promise<ProjectPersonDeletionResult> {
+  const uniqueIds = [...new Set(personIds.map((id) => id.trim()).filter(Boolean))];
+  if (!uniqueIds.length) return { deletedPersons: 0, deletedRelations: 0, deletedFindings: 0 };
+  const { data, error } = await getSupabaseClient().rpc("delete_project_persons", {
+    target_project_id: projectId,
+    target_person_ids: uniqueIds,
+  });
+  if (error) throw projectPersonDeletionError(error);
+  const result = parseProjectPersonDeletionResult(data);
+  if (result.deletedPersons !== uniqueIds.length) {
+    throw new Error("Не всі вибрані особи були видалені. Оновіть сторінку та повторіть спробу.");
+  }
+  return result;
+}
+
+export async function deleteProjectGedcomPersons(
+  projectId: string,
+  sourceKey: string,
+): Promise<ProjectPersonDeletionResult> {
+  const normalizedSourceKey = sourceKey.trim();
+  if (!normalizedSourceKey) throw new Error("Не вказано GEDCOM-імпорт для видалення.");
+  const { data, error } = await getSupabaseClient().rpc("delete_project_gedcom_persons", {
+    target_project_id: projectId,
+    target_source_key: normalizedSourceKey,
+  });
+  if (error) throw projectPersonDeletionError(error);
+  return parseProjectPersonDeletionResult(data);
+}
+
+export async function listProjectGedcomImportDatasets(
+  projectId: string,
+): Promise<GedcomImportDatasetMarker[]> {
+  const { data, error } = await getSupabaseClient().rpc("list_project_gedcom_import_datasets", {
+    target_project_id: projectId,
+  });
   if (error) throw error;
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const record = value as Record<string, unknown>;
+    const sourceKey = typeof record.sourceKey === "string" ? record.sourceKey.trim() : "";
+    if (!sourceKey) return [];
+    return [{
+      sourceKey,
+      importedAt: typeof record.importedAt === "string" ? record.importedAt : "",
+    }];
+  });
+}
+
+function projectPersonDeletionError(error: unknown): Error {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "object" && error && "message" in error
+      ? String((error as { message?: unknown }).message ?? "")
+      : String(error ?? "");
+  if (message.includes("PERSON_IS_TREE_ROOT")) {
+    return new Error(
+      "Ця особа є кореневою в одному з родових дерев. Спочатку виберіть для цього дерева іншу кореневу особу або видаліть саме дерево.",
+    );
+  }
+  if (message.includes("PROJECT_GEDCOM_OPERATION_ACTIVE")) {
+    return new Error("Зачекайте завершення поточного GEDCOM-імпорту або відкату та повторіть дію.");
+  }
+  if (message.includes("PERSON_DELETE_TARGET_MISMATCH")) {
+    return new Error("Список осіб змінився. Оновіть сторінку, перевірте вибір і повторіть видалення.");
+  }
+  return error instanceof Error ? error : new Error(message || "Не вдалося видалити особу.");
+}
+
+function parseProjectPersonDeletionResult(value: unknown): ProjectPersonDeletionResult {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const deletedPersons = Number(record.deletedPersons ?? 0);
+  const deletedRelations = Number(record.deletedRelations ?? 0);
+  const deletedFindings = Number(record.deletedFindings ?? 0);
+  return {
+    deletedPersons: Number.isFinite(deletedPersons) && deletedPersons >= 0 ? deletedPersons : 0,
+    deletedRelations: Number.isFinite(deletedRelations) && deletedRelations >= 0 ? deletedRelations : 0,
+    deletedFindings: Number.isFinite(deletedFindings) && deletedFindings >= 0 ? deletedFindings : 0,
+  };
 }
 
 export async function saveProjectPersonRelation(
   projectId: string,
   relation: PersonRelation,
 ): Promise<PersonRelation> {
-  const { data, error } = await getSupabaseClient()
+  const client = getSupabaseClient();
+  const row = relationToRow(projectId, relation);
+  const { data, error } = await client
     .from("person_relations")
-    .upsert(relationToRow(projectId, relation), { onConflict: "id" })
+    .upsert(row, { onConflict: "id" })
     .select(RELATION_SELECT)
     .single();
-  if (error) throw error;
-  return relationFromRow(data as RelationRow);
+  if (!error) return relationFromRow(data as RelationRow);
+  if (!isMissingPersonRelationProvenanceColumnsError(error)) throw error;
+
+  const { data: legacyData, error: legacyError } = await client
+    .from("person_relations")
+    .upsert(relationToLegacyRow(row), { onConflict: "id" })
+    .select(LEGACY_RELATION_SELECT)
+    .single();
+  if (legacyError) throw legacyError;
+  return relationFromRow(legacyData as RelationRow);
 }
 
 export async function deleteProjectPersonRelation(

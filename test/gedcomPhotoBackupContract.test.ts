@@ -63,7 +63,10 @@ test("GEDCOM entry points stay mounted when the create quota changes", () => {
 
   assert.match(button, /disabled\?: boolean/);
   assert.match(button, /disabled=\{busy \|\| disabled\}/);
-  assert.match(personsV2, /\{!readOnly && canUseGedcom \? \([\s\S]*?<GedcomImportButton[\s\S]*?disabled=\{!canCreate\}/);
+  assert.match(
+    personsV2,
+    /\{!readOnly && canUseGedcom \? \([\s\S]*?<GedcomImportButton[\s\S]*?disabled=\{!canCreate \|\| gedcomImportGroups\.length > 0\}/,
+  );
   assert.doesNotMatch(personsV2, /!readOnly && canCreate && canUseGedcom/);
   assert.match(personsLegacy, /\{canUseGedcom \? \([\s\S]*?<GedcomImportButton[\s\S]*?disabled=\{!canCreateRecords\}/);
   assert.doesNotMatch(personsLegacy, /canCreateRecords && canUseGedcom/);

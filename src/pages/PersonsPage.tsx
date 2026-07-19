@@ -400,13 +400,14 @@ export function PersonsPage({
               onImportGedcom={onImportGedcom}
               onBackupGedcomPhotos={onBackupGedcomPhotos}
               onSaveRelation={onSaveRelation}
-              onCreateFamilyTree={projectId ? async ({ fileName, people, relations, rootPersonId, importOperationId }) => {
+              onCreateFamilyTree={projectId ? async ({ fileName, people, relations, rootPersonId, importSourceKey, importOperationId }) => {
                 const result = await createFamilyTreeFromLegacyImport({
                   projectId,
                   title: `GEDCOM: ${fileName}`,
                   persons: people,
                   relations,
                   rootPersonId,
+                  importSourceKey,
                   rollbackOperationId: importOperationId,
                 });
                 if (result && importOperationId) {

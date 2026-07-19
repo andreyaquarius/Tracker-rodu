@@ -30,6 +30,7 @@ import {
   GEDCOM_ARCHIVE_REFERENCE_CUSTOM_FIELD,
   GEDCOM_CITATIONS_CUSTOM_FIELD,
   GEDCOM_EDUCATION_CUSTOM_FIELD,
+  GEDCOM_IMPORT_FILE_NAME_CUSTOM_FIELD,
   GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD,
   GEDCOM_MEDIA_CUSTOM_FIELD,
   GEDCOM_NATIONALITY_CUSTOM_FIELD,
@@ -47,6 +48,7 @@ import { isGedcomPersonPhotoMedia, personPhotosFromGedcomMedia } from "./personP
 export interface GedcomAppImportBuildOptions {
   defaultResearchId?: string;
   importSourceKey?: string;
+  sourceFileName?: string;
   idFactory?: () => string;
   nowFactory?: () => string;
 }
@@ -85,6 +87,7 @@ export function buildGedcomAppImport(
       idFactory,
       preservedPersonByXref.get(person.xref),
       importSourceKey,
+      options.sourceFileName?.trim() ?? "",
     ),
   );
   const peopleByXref = new Map(draft.people.map((person) => [person.xref, person]));
@@ -94,10 +97,26 @@ export function buildGedcomAppImport(
   const documents: DocumentRecord[] = [];
   const relations = uniqueImportedRelations([
     ...draft.parentChildRelationships
-      .map((relationship) => parentRelationFromGedcom(relationship, peopleByXref, personIdByXref, createdAt, idFactory))
+      .map((relationship) => parentRelationFromGedcom(
+        relationship,
+        peopleByXref,
+        personIdByXref,
+        createdAt,
+        idFactory,
+        importSourceKey,
+        options.sourceFileName?.trim() ?? "",
+      ))
       .filter((relation): relation is PersonRelation => Boolean(relation)),
     ...draft.partnerRelationships
-      .map((relationship) => partnerRelationFromGedcom(relationship, peopleByXref, personIdByXref, createdAt, idFactory))
+      .map((relationship) => partnerRelationFromGedcom(
+        relationship,
+        peopleByXref,
+        personIdByXref,
+        createdAt,
+        idFactory,
+        importSourceKey,
+        options.sourceFileName?.trim() ?? "",
+      ))
       .filter((relation): relation is PersonRelation => Boolean(relation)),
   ]);
   const findings = findingsFromGedcomDraft(
@@ -112,6 +131,7 @@ export function buildGedcomAppImport(
     customFields: {
       ...finding.customFields,
       [GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD]: importSourceKey,
+      [GEDCOM_IMPORT_FILE_NAME_CUSTOM_FIELD]: options.sourceFileName?.trim() ?? "",
     },
   }));
   const externalMediaCount = draft.people.flatMap((person) => person.media ?? [])
@@ -222,6 +242,7 @@ function personFromGedcomDraft(
   idFactory: () => string,
   preservedRecord?: NonNullable<GedcomImportDraft["preservedRecords"]>[number],
   importSourceKey = "",
+  importFileName = "",
 ): Person {
   const name = choosePrimaryName(person.names);
   const marriedName = person.names.find((item) => item.nameType === "married");
@@ -297,6 +318,7 @@ function personFromGedcomDraft(
       [GEDCOM_MEDIA_CUSTOM_FIELD]: stringifyGedcomMetadata(person.media ?? []),
       [GEDCOM_RAW_RECORD_CUSTOM_FIELD]: stringifyGedcomMetadata(preservedRecord ?? null),
       [GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD]: importSourceKey,
+      [GEDCOM_IMPORT_FILE_NAME_CUSTOM_FIELD]: importFileName,
     },
   };
 }
@@ -890,6 +912,8 @@ function parentRelationFromGedcom(
   personIdByXref: Map<string, string>,
   timestamp: string,
   idFactory: () => string,
+  importSourceKey: string,
+  importFileName: string,
 ): PersonRelation | null {
   const childId = personIdByXref.get(relationship.childXref);
   const parentId = personIdByXref.get(relationship.parentXref);
@@ -907,6 +931,8 @@ function parentRelationFromGedcom(
     notes: `Імпортовано з GEDCOM. Сім’я: ${relationship.familyXref}.`,
     gedcomMetadata: {
       familyXref: relationship.familyXref,
+      importSourceKey,
+      importFileName,
       pedigree: relationship.pedigree,
       rawNotes: relationship.notes,
     },
@@ -919,6 +945,8 @@ function partnerRelationFromGedcom(
   personIdByXref: Map<string, string>,
   timestamp: string,
   idFactory: () => string,
+  importSourceKey: string,
+  importFileName: string,
 ): PersonRelation | null {
   const firstId = personIdByXref.get(relationship.personAXref);
   const secondId = personIdByXref.get(relationship.personBXref);
@@ -940,6 +968,8 @@ function partnerRelationFromGedcom(
       : `Сім’я: ${relationship.familyXref}.`,
     gedcomMetadata: {
       familyXref: relationship.familyXref,
+      importSourceKey,
+      importFileName,
       startDate: relationship.eventDate,
       startPlace: relationship.placeName,
       endDate: relationship.endDate,

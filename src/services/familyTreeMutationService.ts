@@ -161,6 +161,8 @@ export interface CreateFamilyTreeFromLegacyImportInput {
   persons: Person[];
   relations: PersonRelation[];
   rootPersonId?: EntityId;
+  /** Stable ownership key for removing exactly one GEDCOM dataset. */
+  importSourceKey?: string;
   makeDefault?: boolean;
   /** Durable rollback operation used by GEDCOM imports. */
   rollbackOperationId?: EntityId;
@@ -303,6 +305,7 @@ export async function createFamilyTreeFromLegacyImport(
     rootPersonId,
     makeDefault: input.makeDefault ?? true,
     rollbackOperationId: input.rollbackOperationId,
+    importSourceKey: input.importSourceKey,
   });
 
   try {
@@ -1119,6 +1122,7 @@ async function createImportedFamilyTree(input: {
   rootPersonId: EntityId;
   makeDefault: boolean;
   rollbackOperationId?: EntityId;
+  importSourceKey?: string;
 }): Promise<EntityId> {
   const client = getSupabaseClient();
   const existing = await client
@@ -1143,7 +1147,10 @@ async function createImportedFamilyTree(input: {
         title,
         root_person_id: input.rootPersonId,
         privacy_status: "private",
-        settings: { source: "gedcom_import" },
+        settings: {
+          source: "gedcom_import",
+          ...(input.importSourceKey ? { import_source_key: input.importSourceKey } : {}),
+        },
       })
       .eq("project_id", input.projectId)
       .eq("id", reusableEmptyTree.id)
@@ -1167,6 +1174,7 @@ async function createImportedFamilyTree(input: {
       privacy_status: "private",
       settings: {
         source: "gedcom_import",
+        ...(input.importSourceKey ? { import_source_key: input.importSourceKey } : {}),
         ...(input.rollbackOperationId
           ? { rollback_operation_id: input.rollbackOperationId }
           : {}),

@@ -404,6 +404,7 @@ export function ProductionFamilyTreePage({
     people: Person[];
     relations: PersonRelation[];
     rootPersonId?: string;
+    importSourceKey: string;
     archive: GedcomImportArchivePayload;
     importOperationId?: string;
   }) {
@@ -414,6 +415,7 @@ export function ProductionFamilyTreePage({
       persons: input.people,
       relations: input.relations,
       rootPersonId: input.rootPersonId,
+      importSourceKey: input.importSourceKey,
       rollbackOperationId: input.importOperationId,
     });
     if (!result) return;

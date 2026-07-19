@@ -28,7 +28,7 @@ export type PersonsCatalogViewV2 = "list" | "grid";
 export type PersonsCatalogSortV2 = "family" | "name-asc" | "name-desc" | "recent" | "birth-asc";
 export type PersonsCatalogFamilyOrderStatusV2 = "loading" | "ready" | "unavailable";
 export type PersonsCatalogLivingFilterV2 = "all" | "living" | "deceased";
-export type PersonsCatalogBulkActionV2 = "tag" | "export" | "merge";
+export type PersonsCatalogBulkActionV2 = "tag" | "export" | "merge" | "delete";
 
 export interface PersonsCatalogFiltersV2 {
   query: string;
@@ -52,6 +52,7 @@ export interface PersonsCatalogV2Props {
   enabledBulkActions?: readonly PersonsCatalogBulkActionV2[];
   photoUrlForPerson?: (person: Person) => string | undefined;
   onOpenPerson: (person: Person) => void;
+  onDeletePerson?: (person: Person) => void;
   onCreatePerson?: () => void;
   onSelectionChange?: (persons: readonly Person[]) => void;
   onBulkAction?: (
@@ -90,6 +91,7 @@ export function PersonsCatalogV2({
   enabledBulkActions = [],
   photoUrlForPerson,
   onOpenPerson,
+  onDeletePerson,
   onCreatePerson,
   onSelectionChange,
   onBulkAction,
@@ -332,6 +334,16 @@ export function PersonsCatalogV2({
               Об’єднати
             </button>
           ) : null}
+          {enabledBulkActions.includes("delete") ? (
+            <button
+              type="button"
+              className="button button-danger"
+              disabled={!onBulkAction || !selectedPersons.length}
+              onClick={() => runBulkAction("delete")}
+            >
+              Видалити вибраних
+            </button>
+          ) : null}
         </div>
         <label>
           <span className="visually-hidden">Сортування</span>
@@ -380,6 +392,7 @@ export function PersonsCatalogV2({
             photoUrlForPerson={photoUrlForPerson}
             onToggleSelected={toggleSelected}
             onOpenPerson={onOpenPerson}
+            onDeletePerson={onDeletePerson}
             onOpenFromKeyboard={openFromKeyboard}
           />
         ) : (
@@ -392,6 +405,7 @@ export function PersonsCatalogV2({
             photoUrlForPerson={photoUrlForPerson}
             onToggleSelected={toggleSelected}
             onOpenPerson={onOpenPerson}
+            onDeletePerson={onDeletePerson}
             onOpenFromKeyboard={openFromKeyboard}
           />
         )
@@ -435,6 +449,7 @@ interface PersonsCollectionViewPropsV2 {
   photoUrlForPerson?: (person: Person) => string | undefined;
   onToggleSelected: (personId: string) => void;
   onOpenPerson: (person: Person) => void;
+  onDeletePerson?: (person: Person) => void;
   onOpenFromKeyboard: (event: KeyboardEvent<HTMLElement>, person: Person) => void;
 }
 
@@ -447,6 +462,7 @@ function PersonsListV2({
   photoUrlForPerson,
   onToggleSelected,
   onOpenPerson,
+  onDeletePerson,
   onOpenFromKeyboard,
 }: PersonsCollectionViewPropsV2) {
   return (
@@ -462,6 +478,7 @@ function PersonsListV2({
             <th>Місця</th>
             <th>Документи</th>
             <th>Остання подія</th>
+            {onDeletePerson ? <th aria-label="Дії" /> : null}
           </tr>
         </thead>
         <tbody>
@@ -493,6 +510,23 @@ function PersonsListV2({
               <td>{personPlacesV2(person) || "—"}</td>
               <td>{summaries.get(person.id)?.documentCount ?? 0}</td>
               <td>{lastEventLabelV2(person, summaries.get(person.id))}</td>
+              {onDeletePerson ? (
+                <td className="persons-v2-list__actions">
+                  <button
+                    type="button"
+                    className="button button-danger persons-v2-delete-person"
+                    aria-label={`Видалити ${personDisplayNameV2(person)}`}
+                    title="Видалити особу"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDeletePerson(person);
+                    }}
+                    onKeyDown={stopKeyboardPropagationV2}
+                  >
+                    Видалити
+                  </button>
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>
@@ -510,6 +544,7 @@ function PersonsGridV2({
   photoUrlForPerson,
   onToggleSelected,
   onOpenPerson,
+  onDeletePerson,
   onOpenFromKeyboard,
 }: PersonsCollectionViewPropsV2) {
   return (
@@ -523,14 +558,31 @@ function PersonsGridV2({
           onClick={() => onOpenPerson(person)}
           onKeyDown={(event) => onOpenFromKeyboard(event, person)}
         >
-          <input
-            type="checkbox"
-            checked={selectedIds.has(person.id)}
-            aria-label={`Вибрати ${personDisplayNameV2(person)}`}
-            onClick={stopPropagationV2}
-            onKeyDown={stopKeyboardPropagationV2}
-            onChange={() => onToggleSelected(person.id)}
-          />
+          <div className="persons-v2-grid-card__controls">
+            <input
+              type="checkbox"
+              checked={selectedIds.has(person.id)}
+              aria-label={`Вибрати ${personDisplayNameV2(person)}`}
+              onClick={stopPropagationV2}
+              onKeyDown={stopKeyboardPropagationV2}
+              onChange={() => onToggleSelected(person.id)}
+            />
+            {onDeletePerson ? (
+              <button
+                type="button"
+                className="button button-danger persons-v2-grid-card__delete"
+                aria-label={`Видалити ${personDisplayNameV2(person)}`}
+                title="Видалити особу"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeletePerson(person);
+                }}
+                onKeyDown={stopKeyboardPropagationV2}
+              >
+                Видалити
+              </button>
+            ) : null}
+          </div>
           <PersonIdentityV2 person={person} photoUrl={photoUrlForPerson?.(person)} large />
           <span className="status-pill">{person.status}</span>
           <dl>
@@ -602,10 +654,10 @@ function isEmptyFiltersV2(filters: PersonsCatalogFiltersV2): boolean {
   return !filters.query && filters.gender === "all" && filters.living === "all" && filters.status === "all";
 }
 
-function stopPropagationV2(event: MouseEvent<HTMLInputElement>) {
+function stopPropagationV2(event: MouseEvent<HTMLElement>) {
   event.stopPropagation();
 }
 
-function stopKeyboardPropagationV2(event: KeyboardEvent<HTMLInputElement>) {
+function stopKeyboardPropagationV2(event: KeyboardEvent<HTMLElement>) {
   event.stopPropagation();
 }

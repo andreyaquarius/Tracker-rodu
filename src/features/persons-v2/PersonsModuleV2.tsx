@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   AppDatabase,
   AppEntity,
@@ -56,11 +56,18 @@ import { PersonsCatalogV2 } from "./PersonsCatalogV2";
 import { PersonPreviewDrawerV2 } from "./PersonPreviewDrawerV2";
 import { PersonProfileV2 } from "./PersonProfileV2";
 import { PersonEditorV2 } from "./PersonEditorV2";
-import { buildPersonTimeline } from "./model";
+import { buildPersonTimeline, personDisplayName as personDisplayNameForDeleteV2 } from "./model";
 import {
   relatedRecordDraftForPerson,
   type PersonCreatableRelatedPage,
 } from "../../utils/personRelatedRecordDrafts.ts";
+import {
+  buildGedcomImportGroups,
+  type GedcomImportDatasetMarker,
+  type GedcomImportGroup,
+} from "../../utils/gedcomImportGroups.ts";
+import { GedcomImportManagerV2 } from "./GedcomImportManagerV2.tsx";
+import { listProjectGedcomImportDatasets } from "../../services/projectPeople.ts";
 
 export interface PersonsModuleV2Props {
   db: AppDatabase;
@@ -78,6 +85,8 @@ export interface PersonsModuleV2Props {
   onShowInTree?: (person: Person) => void;
   onOpenMap?: (person: Person) => void;
   onSavePerson: PersonSaveHandler;
+  onDeletePersons?: (personIds: readonly string[]) => Promise<void>;
+  onDeleteGedcomImport?: (group: GedcomImportGroup) => Promise<void>;
   onImportRecords: (collection: "persons", records: AppEntity[]) => Promise<void>;
   onImportGedcom?: (
     input: GedcomImportReconciliationPayload,
@@ -142,6 +151,8 @@ export function PersonsModuleV2({
   onShowInTree,
   onOpenMap,
   onSavePerson,
+  onDeletePersons,
+  onDeleteGedcomImport,
   onImportRecords,
   onImportGedcom,
   onBackupGedcomPhotos,
@@ -164,6 +175,8 @@ export function PersonsModuleV2({
   pedigreeCacheScope = "",
 }: PersonsModuleV2Props) {
   const [previewPersonId, setPreviewPersonId] = useState("");
+  const [deletingPersons, setDeletingPersons] = useState(false);
+  const [gedcomDatasetMarkers, setGedcomDatasetMarkers] = useState<GedcomImportDatasetMarker[]>([]);
   const detailPersonId = target.personId || previewPersonId;
   const detailPerson = persons.find((person) => person.id === detailPersonId) ?? null;
   const routePerson = persons.find((person) => person.id === target.personId) ?? null;
@@ -175,6 +188,10 @@ export function PersonsModuleV2({
   const [remoteSummaries, setRemoteSummaries] = useState<Map<string, ProjectPersonSummary> | null>(null);
   const summaries = remoteSummaries ?? localSummaries;
   const selectedPhotoUrl = usePersonPhotoUrl(detailPerson);
+  const gedcomImportGroups = useMemo(
+    () => buildGedcomImportGroups(persons, relations, findings, gedcomDatasetMarkers),
+    [findings, gedcomDatasetMarkers, persons, relations],
+  );
   const pedigreeTreeId = pedigreeContext?.treeId ?? "";
   const pedigreeRootPersonId = pedigreeContext?.rootPersonId ?? "";
   const pedigreeRequestKey = [
@@ -209,6 +226,35 @@ export function PersonsModuleV2({
     : currentPedigreeLoad?.status === "unavailable" || currentPedigreeLoad?.status === "ready"
       ? "unavailable"
       : "loading";
+
+  const loadGedcomDatasetMarkers = useCallback(async (): Promise<GedcomImportDatasetMarker[]> => {
+    if (!projectId || !canUseGedcom) {
+      return [];
+    }
+    try {
+      return await listProjectGedcomImportDatasets(projectId);
+    } catch {
+      // Entity provenance remains a compatible fallback while the migration
+      // is rolling out to hosted projects.
+      return [];
+    }
+  }, [canUseGedcom, projectId]);
+
+  useEffect(() => {
+    let active = true;
+    void loadGedcomDatasetMarkers().then((markers) => {
+      if (active) setGedcomDatasetMarkers(markers);
+    });
+    return () => {
+      active = false;
+    };
+  }, [loadGedcomDatasetMarkers]);
+
+  useEffect(() => {
+    if (previewPersonId && !persons.some((person) => person.id === previewPersonId)) {
+      setPreviewPersonId("");
+    }
+  }, [persons, previewPersonId]);
 
   useEffect(() => {
     if (!projectId) {
@@ -377,6 +423,9 @@ export function PersonsModuleV2({
           directAncestor={effectiveDirectAncestorIds.has(routePerson.id)}
           onBack={() => onNavigate({ mode: "list" })}
           onEdit={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
+          onDelete={!readOnly && onDeletePersons && !deletingPersons
+            ? (person) => void deleteOnePerson(person)
+            : undefined}
           onShowInTree={onShowInTree}
           onOpenMap={onOpenMap}
           onAddEvent={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
@@ -417,20 +466,24 @@ export function PersonsModuleV2({
       {!readOnly && canUseGedcom ? (
         <GedcomImportButton
           key={`persons-v2-gedcom-import:${projectId ?? "local"}`}
-          disabled={!canCreate}
+          disabled={!canCreate || gedcomImportGroups.length > 0}
           defaultResearchId={researches.length === 1 ? researches[0].id : ""}
           researchRequired={researchRequired}
           onImportPersons={(records) => onImportRecords("persons", records)}
           onImportGedcom={onImportGedcom}
+          onImportCompleted={async () => {
+            setGedcomDatasetMarkers(await loadGedcomDatasetMarkers());
+          }}
           onBackupGedcomPhotos={onBackupGedcomPhotos}
           onSaveRelation={onSaveRelation}
-          onCreateFamilyTree={projectId ? async ({ fileName, people, relations: importedRelations, rootPersonId, importOperationId }) => {
+          onCreateFamilyTree={projectId ? async ({ fileName, people, relations: importedRelations, rootPersonId, importSourceKey, importOperationId }) => {
             const result = await createFamilyTreeFromLegacyImport({
               projectId,
               title: `GEDCOM: ${fileName}`,
               persons: people,
               relations: importedRelations,
               rootPersonId,
+              importSourceKey,
               rollbackOperationId: importOperationId,
             });
             if (result && importOperationId) {
@@ -440,8 +493,127 @@ export function PersonsModuleV2({
           } : undefined}
         />
       ) : null}
+      {canUseGedcom && onDeleteGedcomImport ? (
+        <GedcomImportManagerV2
+          groups={gedcomImportGroups}
+          canDelete={!readOnly && !deletingPersons}
+          onDelete={async (group) => {
+            await onDeleteGedcomImport(group);
+            setGedcomDatasetMarkers((current) => (
+              current.filter((marker) => marker.sourceKey !== group.sourceKey)
+            ));
+          }}
+        />
+      ) : null}
     </>
   );
+
+  async function deleteOnePerson(person: Person) {
+    if (!onDeletePersons || deletingPersons) return;
+    if (pedigreeRootPersonId === person.id) {
+      window.alert(
+        "Ця особа є кореневою для поточного родового дерева. Спочатку відкрийте налаштування дерева та виберіть іншу кореневу особу.",
+      );
+      return;
+    }
+    const summary = summaries.get(person.id);
+    const impact = {
+      relations: summary?.relationCount ?? relations.filter((relation) => (
+        relation.personId === person.id || relation.relatedPersonId === person.id
+      )).length,
+      findings: summary?.findingCount ?? findings.filter((finding) => finding.personIds.includes(person.id)).length,
+      tasks: summary?.taskCount ?? tasks.filter((task) => task.personIds.includes(person.id)).length,
+      hypotheses: summary?.hypothesisCount ?? hypotheses.filter((hypothesis) => hypothesis.personIds.includes(person.id)).length,
+      archiveRequests: summary?.archiveRequestCount ?? archiveRequests.filter((request) => request.personIds.includes(person.id)).length,
+      documents: summary?.documentCount ?? 0,
+    };
+    const linkedRecords = impact.findings
+      + impact.tasks
+      + impact.hypotheses
+      + impact.archiveRequests
+      + impact.documents;
+    const linkedDetails = [
+      impact.relations ? `родинних звʼязків: ${impact.relations}` : "",
+      impact.findings ? `знахідок: ${impact.findings}` : "",
+      impact.tasks ? `завдань: ${impact.tasks}` : "",
+      impact.hypotheses ? `гіпотез: ${impact.hypotheses}` : "",
+      impact.archiveRequests ? `архівних запитів: ${impact.archiveRequests}` : "",
+      impact.documents ? `повʼязаних документів: ${impact.documents}` : "",
+    ].filter(Boolean).join("; ");
+    const confirmed = window.confirm(
+      [
+        `Видалити особу «${personDisplayNameForDeleteV2(person)}»?`,
+        linkedDetails
+          ? `До неї привʼязано: ${linkedDetails}.`
+          : "У видимих розділах повʼязаних записів не знайдено.",
+        impact.relations
+          ? "Родинні звʼязки цієї особи буде видалено."
+          : "",
+        linkedRecords
+          ? "Знахідки, завдання, гіпотези, архівні запити й документи не видаляються — застосунок відвʼяже їх від цієї особи."
+          : "",
+        "Також буде очищено технічні посилання та вкладення профілю; самі файли на Google Drive не видаляються.",
+        "Перед видаленням перегляньте й за потреби вручну відвʼяжіть важливі записи. Якщо продовжити, решту привʼязок застосунок відвʼяже автоматично. Цю дію не можна скасувати.",
+      ].filter(Boolean).join("\n\n"),
+    );
+    if (!confirmed) return;
+    setDeletingPersons(true);
+    try {
+      await onDeletePersons([person.id]);
+      if (previewPersonId === person.id) setPreviewPersonId("");
+      if (target.personId === person.id) {
+        onNavigate({ mode: "list" }, { replace: true });
+      }
+    } catch {
+      // The application-level handler already shows the actionable error.
+    } finally {
+      setDeletingPersons(false);
+    }
+  }
+
+  const deleteSelectedPersons = async (selected: readonly Person[]) => {
+    if (!onDeletePersons || deletingPersons || !selected.length) return;
+    if (pedigreeRootPersonId && selected.some((person) => person.id === pedigreeRootPersonId)) {
+      window.alert(
+        "Серед вибраних є коренева особа поточного родового дерева. Спочатку виберіть іншу кореневу особу в налаштуваннях дерева.",
+      );
+      return;
+    }
+    const selectedIds = new Set(selected.map((person) => person.id));
+    const impact = {
+      relations: relations.filter((relation) => (
+        selectedIds.has(relation.personId) || selectedIds.has(relation.relatedPersonId)
+      )).length,
+      findings: findings.filter((finding) => finding.personIds.some((id) => selectedIds.has(id))).length,
+      tasks: tasks.filter((task) => task.personIds.some((id) => selectedIds.has(id))).length,
+      hypotheses: hypotheses.filter((hypothesis) => hypothesis.personIds.some((id) => selectedIds.has(id))).length,
+      archiveRequests: archiveRequests.filter((request) => request.personIds.some((id) => selectedIds.has(id))).length,
+    };
+    const impactDetails = [
+      impact.relations ? `родинних звʼязків: ${impact.relations}` : "",
+      impact.findings ? `знахідок: ${impact.findings}` : "",
+      impact.tasks ? `завдань: ${impact.tasks}` : "",
+      impact.hypotheses ? `гіпотез: ${impact.hypotheses}` : "",
+      impact.archiveRequests ? `архівних запитів: ${impact.archiveRequests}` : "",
+    ].filter(Boolean).join("; ");
+    const confirmed = window.confirm(
+      [
+        `Видалити вибраних осіб (${selected.length})?`,
+        impactDetails ? `З ними повʼязано: ${impactDetails}.` : "У видимих розділах повʼязаних записів не знайдено.",
+        "Родинні звʼязки буде видалено. Інші записи проєкту залишаться, але будуть відвʼязані від вибраних осіб.",
+        "Перед видаленням перегляньте важливі привʼязки. Цю дію не можна скасувати.",
+      ].join("\n\n"),
+    );
+    if (!confirmed) return;
+    setDeletingPersons(true);
+    try {
+      await onDeletePersons(selected.map((person) => person.id));
+    } catch {
+      // The application-level handler already shows the actionable error.
+    } finally {
+      setDeletingPersons(false);
+    }
+  };
 
   return (
     <div className="persons-v2-catalog-shell">
@@ -461,16 +633,24 @@ export function PersonsModuleV2({
             onCreatePerson={!readOnly && canCreate
               ? () => onNavigate({ mode: "new" })
               : undefined}
-            enabledBulkActions={["export"]}
+            enabledBulkActions={readOnly || !onDeletePersons ? ["export"] : ["export", "delete"]}
+            onDeletePerson={!readOnly && onDeletePersons && !deletingPersons
+              ? (person) => void deleteOnePerson(person)
+              : undefined}
             onBulkAction={(action, selected) => {
-              if (action !== "export") return;
-              exportPersonsToExcel(
-                db,
-                projectName,
-                [...selected],
-                "filtered",
-                customFieldDefinitions,
-              );
+              if (action === "delete") {
+                void deleteSelectedPersons(selected);
+                return;
+              }
+              if (action === "export") {
+                exportPersonsToExcel(
+                  db,
+                  projectName,
+                  [...selected],
+                  "filtered",
+                  customFieldDefinitions,
+                );
+              }
             }}
           />
         </div>
@@ -489,6 +669,9 @@ export function PersonsModuleV2({
           onOpenProfile={(person) => onNavigate({ mode: "profile", personId: person.id })}
           onShowInTree={onShowInTree}
           onEdit={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
+          onDelete={!readOnly && onDeletePersons && !deletingPersons
+            ? (person) => void deleteOnePerson(person)
+            : undefined}
           onAddEvent={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
         />
       </div>

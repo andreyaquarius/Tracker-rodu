@@ -120,7 +120,8 @@ import {
 } from "./services/projectResearches";
 import {
   clearProjectPeopleCache,
-  deleteProjectPerson,
+  deleteProjectGedcomPersons,
+  deleteProjectPersons,
   deleteProjectPersonRelation,
   getProjectPerson,
   getProjectPersonRelation,
@@ -132,6 +133,7 @@ import {
   saveProjectPersonPhotoBackups,
   saveProjectPersonRelation,
 } from "./services/projectPeople";
+import type { GedcomImportGroup } from "./utils/gedcomImportGroups.ts";
 import {
   clearProjectDocumentsCache,
   deleteProjectDocument,
@@ -602,6 +604,7 @@ export default function App() {
   const [familyTreePedigreeContext, setFamilyTreePedigreeContext] = useState<(
     ProjectPersonPedigreeContext & { projectId: string }
   ) | null>(null);
+  const [personPedigreeRevision, setPersonPedigreeRevision] = useState(0);
   const showPersonInTreeRequestRef = useRef(0);
   const showPersonInTreeContextRef = useRef({ projectId: "", location: "" });
   showPersonInTreeContextRef.current = {
@@ -4140,123 +4143,173 @@ export default function App() {
       },
     });
   };
-  const deletePerson = (id: string) => {
-    if (!workspace) {
-      app.setDatabase((current) => ({
-        ...current,
-        persons: current.persons.filter((person) => person.id !== id),
-        personRelations: current.personRelations.filter(
-          (relation) => relation.personId !== id && relation.relatedPersonId !== id,
-        ),
-        tasks: current.tasks.map((task) => ({
-          ...task,
-          personIds: task.personIds.filter((personId) => personId !== id),
-        })),
-        findings: current.findings.map((finding) => ({
-          ...finding,
-          personIds: finding.personIds.filter((personId) => personId !== id),
-        })),
-        hypotheses: current.hypotheses.map((hypothesis) => ({
-          ...hypothesis,
-          personIds: hypothesis.personIds.filter((personId) => personId !== id),
-        })),
-        archiveRequests: current.archiveRequests.map((request) => ({
-          ...request,
-          personIds: request.personIds.filter((personId) => personId !== id),
-        })),
-      }));
-      return;
-    }
-    if (workspace.role === "viewer") {
-      notify("У цьому проєкті у вас є лише право перегляду.", true);
-      return;
-    }
-
-    const projectId = workspace.projectId;
-    const previousPersons = projectPersons;
-    const previousRelations = projectPersonRelations;
-    const previousTasks = projectTasks;
-    const previousFindings = projectFindings;
-    const previousHypotheses = projectHypotheses;
-    const previousRequests = projectArchiveRequests;
-    const nextPersons = previousPersons.filter((person) => person.id !== id);
-    const nextRelations = previousRelations.filter(
-      (relation) => relation.personId !== id && relation.relatedPersonId !== id,
+  const removePersonIdsFromLoadedProject = (
+    projectId: string,
+    personIds: readonly string[],
+    options: {
+      relationIds?: readonly string[];
+      findingIds?: readonly string[];
+    } = {},
+  ) => {
+    const removedIds = new Set(personIds);
+    const removedRelationIds = new Set(options.relationIds ?? []);
+    const removedFindingIds = new Set(options.findingIds ?? []);
+    const nextPersons = projectPersons.filter((person) => !removedIds.has(person.id));
+    const nextRelations = projectPersonRelations.filter(
+      (relation) => (
+        !removedRelationIds.has(relation.id)
+        && !removedIds.has(relation.personId)
+        && !removedIds.has(relation.relatedPersonId)
+      ),
     );
-    const nextTasks = previousTasks.map((task) => ({
+    const nextTasks = projectTasks.map((task) => ({
       ...task,
-      personIds: task.personIds.filter((personId) => personId !== id),
+      personIds: task.personIds.filter((personId) => !removedIds.has(personId)),
     }));
-    const nextFindings = previousFindings.map((finding) => ({
-      ...finding,
-      personIds: finding.personIds.filter((personId) => personId !== id),
-    }));
-    const nextHypotheses = previousHypotheses.map((hypothesis) => ({
+    const nextFindings = projectFindings
+      .filter((finding) => !removedFindingIds.has(finding.id))
+      .map((finding) => ({
+        ...finding,
+        personIds: finding.personIds.filter((personId) => !removedIds.has(personId)),
+      }));
+    const nextHypotheses = projectHypotheses.map((hypothesis) => ({
       ...hypothesis,
-      personIds: hypothesis.personIds.filter((personId) => personId !== id),
+      personIds: hypothesis.personIds.filter((personId) => !removedIds.has(personId)),
     }));
-    const nextRequests = previousRequests.map((request) => ({
+    const nextRequests = projectArchiveRequests.map((request) => ({
       ...request,
-      personIds: request.personIds.filter((personId) => personId !== id),
+      personIds: request.personIds.filter((personId) => !removedIds.has(personId)),
     }));
+
+    saveProjectPeopleCache(projectId, nextPersons, nextRelations);
+    saveProjectWorkRecordsCache(projectId, nextTasks, nextFindings);
+    saveProjectAnalysisRecordsCache(projectId, nextHypotheses, nextRequests);
+    if (activeWorkspaceIdRef.current !== projectId) return;
     setProjectPersons(nextPersons);
     setProjectPersonRelations(nextRelations);
     setProjectTasks(nextTasks);
     setProjectFindings(nextFindings);
     setProjectHypotheses(nextHypotheses);
     setProjectArchiveRequests(nextRequests);
-    saveProjectPeopleCache(projectId, nextPersons, nextRelations);
-    saveProjectWorkRecordsCache(projectId, nextTasks, nextFindings);
-    saveProjectAnalysisRecordsCache(
-      projectId,
-      nextHypotheses,
-      nextRequests,
-    );
+  };
 
-    void Promise.all([
-      deleteProjectPerson(projectId, id),
-      deleteProjectHypothesisTargetLinks(projectId, "person", id),
-    ])
-      .then(async () => {
-        recordEntityDeletion("persons", id);
-        deleteEntityAttachmentMetadata("persons", id);
-        const changedFindings = nextFindings.filter(
-          (finding, index) =>
-            finding.personIds.length !== previousFindings[index]?.personIds.length,
-        );
-        const updates = await Promise.allSettled(
-          changedFindings.map((finding) =>
-            saveProjectFinding(
-              projectId,
-              finding,
-              new Set(projectResearches.map((research) => research.id)),
-              new Set(projectDocuments.map((document) => document.id)),
-              new Set(nextPersons.map((person) => person.id)),
-            ),
-          ),
-        );
-        if (updates.some((result) => result.status === "rejected")) {
-          notify("Особу видалено, але частину пов’язаних знахідок не вдалося оновити.", true);
-        }
-      })
-      .catch((error: unknown) => {
-        saveProjectPeopleCache(projectId, previousPersons, previousRelations);
-        saveProjectWorkRecordsCache(projectId, previousTasks, previousFindings);
-        saveProjectAnalysisRecordsCache(
-          projectId,
-          previousHypotheses,
-          previousRequests,
-        );
-        if (activeWorkspaceIdRef.current === projectId) {
-          setProjectPersons(previousPersons);
-          setProjectPersonRelations(previousRelations);
-          setProjectTasks(previousTasks);
-          setProjectFindings(previousFindings);
-          setProjectHypotheses(previousHypotheses);
-          setProjectArchiveRequests(previousRequests);
-        }
-      notify(describeError(error, "Не вдалося видалити особу."), true);
+  const deletePersons = async (personIds: readonly string[]): Promise<void> => {
+    const uniqueIds = [...new Set(personIds.map((id) => id.trim()).filter(Boolean))];
+    if (!uniqueIds.length) return;
+    if (!workspace) {
+      const removedIds = new Set(uniqueIds);
+      app.setDatabase((current) => ({
+        ...current,
+        persons: current.persons.filter((person) => !removedIds.has(person.id)),
+        personRelations: current.personRelations.filter(
+          (relation) => !removedIds.has(relation.personId) && !removedIds.has(relation.relatedPersonId),
+        ),
+        tasks: current.tasks.map((task) => ({
+          ...task,
+          personIds: task.personIds.filter((personId) => !removedIds.has(personId)),
+        })),
+        findings: current.findings.map((finding) => ({
+          ...finding,
+          personIds: finding.personIds.filter((personId) => !removedIds.has(personId)),
+        })),
+        hypotheses: current.hypotheses.map((hypothesis) => ({
+          ...hypothesis,
+          personIds: hypothesis.personIds.filter((personId) => !removedIds.has(personId)),
+        })),
+        archiveRequests: current.archiveRequests.map((request) => ({
+          ...request,
+          personIds: request.personIds.filter((personId) => !removedIds.has(personId)),
+        })),
+      }));
+      return;
+    }
+    if (workspace.role === "viewer") {
+      const message = "У цьому проєкті у вас є лише право перегляду.";
+      notify(message, true);
+      throw new Error(message);
+    }
+
+    const projectId = workspace.projectId;
+    try {
+      const result = await deleteProjectPersons(projectId, uniqueIds);
+      removePersonIdsFromLoadedProject(projectId, uniqueIds);
+      invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
+      setPersonPedigreeRevision((current) => current + 1);
+      notify(
+        result.deletedPersons === 1
+          ? "Особу видалено. Пов’язані записи відв’язано."
+          : `Видалено осіб: ${result.deletedPersons}. Пов’язані записи відв’язано.`,
+      );
+    } catch (error) {
+      const message = describeError(error, "Не вдалося видалити особу або її зв’язки.");
+      notify(message, true);
+      throw new Error(message);
+    }
+  };
+
+  const deleteGedcomImport = async (group: GedcomImportGroup): Promise<void> => {
+    if (!workspace) {
+      const removedPersonIds = new Set(group.personIds);
+      const removedRelationIds = new Set(group.relationIds);
+      const removedFindingIds = new Set(group.findingIds);
+      app.setDatabase((current) => ({
+        ...current,
+        persons: current.persons.filter((person) => !removedPersonIds.has(person.id)),
+        personRelations: current.personRelations.filter((relation) => (
+          !removedRelationIds.has(relation.id)
+          && !removedPersonIds.has(relation.personId)
+          && !removedPersonIds.has(relation.relatedPersonId)
+        )),
+        findings: current.findings
+          .filter((finding) => !removedFindingIds.has(finding.id))
+          .map((finding) => ({
+            ...finding,
+            personIds: finding.personIds.filter((personId) => !removedPersonIds.has(personId)),
+          })),
+        tasks: current.tasks.map((task) => ({
+          ...task,
+          personIds: task.personIds.filter((personId) => !removedPersonIds.has(personId)),
+        })),
+        hypotheses: current.hypotheses.map((hypothesis) => ({
+          ...hypothesis,
+          personIds: hypothesis.personIds.filter((personId) => !removedPersonIds.has(personId)),
+        })),
+        archiveRequests: current.archiveRequests.map((request) => ({
+          ...request,
+          personIds: request.personIds.filter((personId) => !removedPersonIds.has(personId)),
+        })),
+      }));
+      return;
+    }
+    if (workspace.role === "viewer") {
+      const message = "У цьому проєкті у вас є лише право перегляду.";
+      notify(message, true);
+      throw new Error(message);
+    }
+    const projectId = workspace.projectId;
+    try {
+      const result = await deleteProjectGedcomPersons(projectId, group.sourceKey);
+      removePersonIdsFromLoadedProject(projectId, group.personIds, {
+        relationIds: group.relationIds,
+        findingIds: group.findingIds,
       });
+      invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
+      setFamilyTreePedigreeContext((current) => (
+        current?.projectId === projectId ? null : current
+      ));
+      setPersonPedigreeRevision((current) => current + 1);
+      notify(
+        `GEDCOM-набір видалено: ${result.deletedPersons} осіб, ${result.deletedRelations} зв’язків і ${result.deletedFindings} знахідок.`,
+      );
+    } catch (error) {
+      const message = describeError(error, "Не вдалося видалити GEDCOM-набір.");
+      notify(message, true);
+      throw new Error(message);
+    }
+  };
+
+  const deletePerson = (id: string) => {
+    void deletePersons([id]).catch(() => undefined);
   };
   const saveRelation = (relation: PersonRelation): Promise<PersonRelation | null> => {
     if (!workspace) {
@@ -5133,6 +5186,8 @@ export default function App() {
                 onShowInTree={canUseFamilyTreeFeature ? showPersonInFamilyTree : undefined}
                 onOpenMap={showPersonOnMap}
                 onSavePerson={savePerson}
+                onDeletePersons={deletePersons}
+                onDeleteGedcomImport={deleteGedcomImport}
                 onImportRecords={importTableRecords}
                 onImportGedcom={importGedcomRecords}
                 onBackupGedcomPhotos={workspace ? backupImportedGedcomPhotos : undefined}
@@ -5152,7 +5207,7 @@ export default function App() {
                 projectName={workspace?.projectName}
                 researchRequired={researchRequiredByPlan}
                 canUseGedcom={canUseFamilyTreeFeature}
-                pedigreeCacheScope={account?.id ?? ""}
+                pedigreeCacheScope={`${account?.id ?? ""}:${personPedigreeRevision}`}
                 pedigreeContext={
                   familyTreePedigreeContext
                   && familyTreePedigreeContext.projectId === workspace?.projectId

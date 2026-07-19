@@ -8,6 +8,7 @@ export const GEDCOM_CITATIONS_CUSTOM_FIELD = "__gedcomCitations";
 export const GEDCOM_MEDIA_CUSTOM_FIELD = "__gedcomMedia";
 export const GEDCOM_RAW_RECORD_CUSTOM_FIELD = "__gedcomRawRecord";
 export const GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD = "__gedcomImportSourceKey";
+export const GEDCOM_IMPORT_FILE_NAME_CUSTOM_FIELD = "__gedcomImportFileName";
 export const GEDCOM_ARCHIVE_REFERENCE_CUSTOM_FIELD = "__gedcomArchiveReference";
 export const GEDCOM_ARCHIVE_ACT_RECORD_CUSTOM_FIELD = "__gedcomArchiveActRecord";
 

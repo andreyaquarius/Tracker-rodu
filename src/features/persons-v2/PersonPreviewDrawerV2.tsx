@@ -36,6 +36,7 @@ export interface PersonPreviewDrawerV2Props {
   onOpenProfile?: (person: Person) => void;
   onShowInTree?: (person: Person) => void;
   onEdit?: (person: Person) => void;
+  onDelete?: (person: Person) => void;
   onAddEvent?: (person: Person) => void;
   onLinkDocument?: (person: Person) => void;
   onMoreActions?: (person: Person) => void;
@@ -56,6 +57,7 @@ export function PersonPreviewDrawerV2({
   onOpenProfile,
   onShowInTree,
   onEdit,
+  onDelete,
   onAddEvent,
   onLinkDocument,
   onMoreActions,
@@ -282,6 +284,11 @@ export function PersonPreviewDrawerV2({
         {onEdit ? (
           <button type="button" className="button button-secondary" onClick={() => onEdit(person)}>
             Редагувати
+          </button>
+        ) : null}
+        {onDelete ? (
+          <button type="button" className="button button-danger" onClick={() => onDelete(person)}>
+            Видалити особу
           </button>
         ) : null}
         {onAddEvent ? (

@@ -7788,9 +7788,22 @@ tbody tr:hover { background: #fbfaf5; }
   line-height: 1.45;
 }
 
-.persons-v2-list th:last-child,
-.persons-v2-list td:last-child {
+.persons-v2-list th:nth-child(8),
+.persons-v2-list td:nth-child(8) {
   min-width: 150px;
+}
+
+.persons-v2-list__actions {
+  width: 92px;
+  min-width: 92px;
+  text-align: right;
+}
+
+.persons-v2-delete-person {
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .persons-v2-list tbody tr {
@@ -7925,11 +7938,18 @@ tbody tr:hover { background: #fbfaf5; }
   box-shadow: 0 12px 28px rgba(25, 53, 46, .1);
 }
 
-.persons-v2-grid-card > input {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 2;
+.persons-v2-grid-card__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+}
+
+.persons-v2-grid-card__delete {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 10px;
 }
 
 .persons-v2-grid-card dl {
@@ -9015,13 +9035,15 @@ button.persons-v2-timeline__event:focus-visible {
   }
 
   .persons-v2-catalog-layout.has-preview .persons-v2-list table {
-    min-width: 680px;
+    min-width: 570px;
   }
 
   .persons-v2-catalog-layout.has-preview .persons-v2-list th:nth-child(5),
   .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(5),
   .persons-v2-catalog-layout.has-preview .persons-v2-list th:nth-child(6),
-  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(6) {
+  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(6),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list th:nth-child(7),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(7) {
     display: none;
   }
 }
@@ -9033,13 +9055,94 @@ button.persons-v2-timeline__event:focus-visible {
   }
 
   .persons-v2-catalog-layout.has-preview .persons-v2-list table {
-    min-width: 540px;
+    width: 100%;
+    min-width: 250px;
   }
 
   .persons-v2-catalog-layout.has-preview .persons-v2-list th:nth-child(4),
-  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(4) {
+  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(4),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list th:nth-child(5),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(5),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list th:nth-child(6),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(6),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list th:nth-child(7),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(7),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list th:nth-child(8),
+  .persons-v2-catalog-layout.has-preview .persons-v2-list td:nth-child(8) {
     display: none;
   }
+
+  .persons-v2-catalog-layout.has-preview .persons-v2-identity {
+    min-width: 0;
+  }
+
+  .persons-v2-catalog-layout.has-preview .persons-v2-list__actions {
+    width: 42px;
+    min-width: 42px;
+  }
+
+  .persons-v2-catalog-layout.has-preview .persons-v2-delete-person {
+    width: 30px;
+    min-width: 30px;
+    padding: 5px;
+    overflow: hidden;
+    color: transparent;
+    font-size: 0;
+  }
+
+  .persons-v2-catalog-layout.has-preview .persons-v2-delete-person::before {
+    content: "×";
+    color: #fff;
+    font-size: 18px;
+    line-height: 1;
+  }
+}
+
+.persons-v2-gedcom-manager-modal {
+  width: min(720px, 100%);
+}
+
+.persons-v2-gedcom-manager {
+  display: grid;
+  gap: 14px;
+  padding: 22px 24px 24px;
+}
+
+.persons-v2-gedcom-manager > p {
+  margin: 0;
+  color: #40574f;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.persons-v2-gedcom-manager__list {
+  display: grid;
+  gap: 10px;
+}
+
+.persons-v2-gedcom-manager__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+}
+
+.persons-v2-gedcom-manager__item > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.persons-v2-gedcom-manager__item strong,
+.persons-v2-gedcom-manager__item span {
+  overflow-wrap: anywhere;
+}
+
+.persons-v2-gedcom-manager__item span {
+  color: #53665f;
+  font-size: 11px;
+  font-weight: 650;
 }
 
 @container person-profile-section (max-width: 620px) {

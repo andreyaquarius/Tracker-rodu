@@ -477,6 +477,8 @@ export interface PersonRelation extends BaseEntity {
   /** Import-only structured metadata; canonical graph creation persists it. */
   gedcomMetadata?: {
     familyXref: string;
+    importSourceKey?: string;
+    importFileName?: string;
     startDate?: string;
     startPlace?: string;
     endDate?: string;

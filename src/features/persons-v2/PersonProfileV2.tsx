@@ -80,6 +80,7 @@ export interface PersonProfileV2Props {
   onTabChange?: (tab: PersonProfileTabV2) => void;
   onBack?: () => void;
   onEdit?: (person: Person) => void;
+  onDelete?: (person: Person) => void;
   onShowInTree?: (person: Person) => void;
   onOpenMap?: (person: Person) => void;
   onAddEvent?: (person: Person) => void;
@@ -143,6 +144,7 @@ export function PersonProfileV2({
   onTabChange,
   onBack,
   onEdit,
+  onDelete,
   onShowInTree,
   onOpenMap,
   onAddEvent,
@@ -279,6 +281,11 @@ export function PersonProfileV2({
           {onEdit ? (
             <button type="button" className="button button-primary" onClick={() => onEdit(person)}>
               Редагувати
+            </button>
+          ) : null}
+          {onDelete ? (
+            <button type="button" className="button button-danger" onClick={() => onDelete(person)}>
+              Видалити особу
             </button>
           ) : null}
           {onShowInTree ? (
