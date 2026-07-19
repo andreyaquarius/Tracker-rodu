@@ -3,7 +3,7 @@ import type {
   FamilyTreeGraphDto,
   FamilyTreeNodeDto,
   FamilyTreeOccurrenceDto,
-} from "../types/familyTree";
+} from "../types/familyTree.ts";
 
 type PathStep = "up" | "down" | "partner" | "other";
 

@@ -1,4 +1,4 @@
-import type { DocumentRecord, EntityId, Finding, GeoPoint } from "./index";
+import type { DocumentRecord, EntityId, Finding, GeoPoint } from "./index.ts";
 
 export type FamilyTreePrivacyStatus = "private" | "project" | "public" | "confidential";
 export type EvidenceStatus = "proven" | "likely" | "disputed" | "disproven" | "unknown";

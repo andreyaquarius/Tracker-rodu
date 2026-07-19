@@ -1,4 +1,4 @@
-import type { Finding } from "../types";
+import type { Finding } from "../types/index.ts";
 import { sanitizeWebUrl } from "./safeUrl.ts";
 
 const HTTP_URL_PATTERN = /https?:\/\/[^\s<>"']+/giu;
