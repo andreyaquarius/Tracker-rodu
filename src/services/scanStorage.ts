@@ -15,6 +15,7 @@ import {
   listGoogleDriveFolderFiles,
   uploadFileToGoogleDrive,
   type GoogleDriveFileMetadata,
+  type GoogleDrivePickerFile,
   type GoogleDriveUploadProgress,
 } from "./googleDriveStorage.ts";
 import {
@@ -173,14 +174,17 @@ export async function inspectGoogleDriveAttachment(
   fileReference: string,
   policy: AttachmentPolicy = "all",
 ): Promise<DriveAttachmentPreview> {
-  const fileId = googleDriveFileId(fileReference);
-  if (!fileId) {
+  const reference = googleDriveReference(fileReference);
+  if (!reference) {
     throw new Error("Вставте коректне посилання Google Drive або ідентифікатор файлу.");
   }
 
-  const file = await getGoogleDriveFileMetadata(fileId);
+  const file = await getGoogleDriveFileMetadata(reference.id, reference.resourceKey);
   if (file.mimeType === GOOGLE_FOLDER_MIME_TYPE) {
-    const files = supportedDriveFiles(await listGoogleDriveFolderFiles(file.id), policy);
+    const files = supportedDriveFiles(
+      await listGoogleDriveFolderFiles(file.id, file.resourceKey || reference.resourceKey),
+      policy,
+    );
     if (!files.length) {
       throw new Error("У цій папці не знайдено підтримуваних файлів.");
     }
@@ -215,14 +219,17 @@ export async function attachGoogleDriveReference(
   policy: AttachmentPolicy = "all",
   range: DriveAttachRange = {},
 ): Promise<ScanAttachment[]> {
-  const fileId = googleDriveFileId(fileReference);
-  if (!fileId) {
+  const reference = googleDriveReference(fileReference);
+  if (!reference) {
     throw new Error("Вставте коректне посилання Google Drive або ідентифікатор файлу.");
   }
 
-  const file = await getGoogleDriveFileMetadata(fileId);
+  const file = await getGoogleDriveFileMetadata(reference.id, reference.resourceKey);
   if (file.mimeType === GOOGLE_FOLDER_MIME_TYPE) {
-    const files = supportedDriveFiles(await listGoogleDriveFolderFiles(file.id), policy);
+    const files = supportedDriveFiles(
+      await listGoogleDriveFolderFiles(file.id, file.resourceKey || reference.resourceKey),
+      policy,
+    );
     const selected = rangeDriveFiles(files, range);
     if (!selected.length) {
       throw new Error("У вибраному діапазоні немає підтримуваних файлів.");
@@ -234,9 +241,34 @@ export async function attachGoogleDriveReference(
   return [driveFileToAttachment(file)];
 }
 
+export async function attachPickedGoogleDriveFiles(
+  selectedFiles: GoogleDrivePickerFile[],
+  policy: AttachmentPolicy = "all",
+): Promise<ScanAttachment[]> {
+  const attached: ScanAttachment[] = [];
+  for (const selectedFile of selectedFiles) {
+    const metadata = await getGoogleDriveFileMetadata(
+      selectedFile.id,
+      selectedFile.resourceKey,
+    );
+    const file: GoogleDriveFileMetadata = {
+      ...metadata,
+      name: metadata.name || selectedFile.name,
+      mimeType: metadata.mimeType || selectedFile.mimeType,
+      size: metadata.size || selectedFile.size,
+      webViewLink: metadata.webViewLink || selectedFile.webViewLink,
+      resourceKey: metadata.resourceKey || selectedFile.resourceKey,
+    };
+    ensureAttachableDriveFile(file, policy);
+    attached.push(driveFileToAttachment(file));
+  }
+  return attached;
+}
+
 function ensureAttachableDriveFile(file: GoogleDriveFileMetadata, policy: AttachmentPolicy): void {
-  if (file.mimeType.startsWith("application/vnd.google-apps.")) {
-    throw new Error("Файли Google Документів, Таблиць або Презентацій потрібно спершу завантажити як PDF чи зображення.");
+  if (isGoogleWorkspaceDriveFile(file.mimeType)) {
+    if (policy === "document") return;
+    throw new Error("Файли Google Документів, Таблиць або Презентацій можна прикріплювати в модулі «Документи».");
   }
   if (!isSupportedAttachmentMetadata(file.name, file.mimeType, policy)) {
     throw new Error(`Формат файлу «${file.name}» не підтримується.`);
@@ -259,6 +291,7 @@ function driveFileToAttachment(file: GoogleDriveFileMetadata): ScanAttachment {
     driveMd5Checksum: file.md5Checksum,
     driveModifiedTime: file.modifiedTime,
     driveRevisionId: file.headRevisionId,
+    driveResourceKey: file.resourceKey,
     deleteOnRemove: false,
   };
 }
@@ -308,7 +341,7 @@ function supportedDriveFiles(
   policy: AttachmentPolicy,
 ): GoogleDriveFileMetadata[] {
   return files.filter((file) => {
-    if (file.mimeType.startsWith("application/vnd.google-apps.")) return false;
+    if (isGoogleWorkspaceDriveFile(file.mimeType)) return policy === "document";
     if (!isSupportedAttachmentMetadata(file.name, file.mimeType, policy)) return false;
     if (policy !== "document" && file.size > MAX_FILE_SIZE) return false;
     return true;
@@ -329,6 +362,9 @@ function rangeDriveFiles(
 
 export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
   assertScanAvailable(scan);
+  if (isGoogleWorkspaceDriveFile(scan.mimeType)) {
+    throw new Error("Google Документ відкривається та редагується безпосередньо у Google Drive.");
+  }
   if (scan.storage === "external-url") {
     const target = sanitizeWebUrl(scan.webViewLink || scan.storagePath);
     if (!target) throw new Error("Зовнішнє посилання має некоректний або небезпечний формат.");
@@ -353,7 +389,7 @@ export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
   const cached = await getCachedDocumentBlob(scanBlobCacheKey(scan), cacheIdentity);
   if (cached) return cached;
 
-  const blob = await downloadFileFromGoogleDrive(scan.storagePath);
+  const blob = await downloadFileFromGoogleDrive(scan.storagePath, scan.driveResourceKey);
   await cacheScanBlob(scan, blob).catch(() => undefined);
   return blob;
 }
@@ -537,12 +573,13 @@ export async function openScan(scan: ScanAttachment): Promise<void> {
   // scan.webViewLink can originate from an imported backup, so it must be
   // scheme-checked before window.open() to avoid "javascript:" execution or an
   // open redirect. Fall back to the canonical Drive view URL we build ourselves.
-  const target = sanitizeWebUrl(scan.webViewLink) ?? googleDriveViewUrl(scan.storagePath);
+  const target = sanitizeWebUrl(scan.webViewLink)
+    ?? googleDriveViewUrl(scan.storagePath, scan.driveResourceKey);
   openExternalWindow(target);
 }
 
 export async function downloadScan(scan: ScanAttachment): Promise<void> {
-  if (scan.storage === "external-url") {
+  if (scan.storage === "external-url" || isGoogleWorkspaceDriveFile(scan.mimeType)) {
     await openScan(scan);
     return;
   }
@@ -557,10 +594,12 @@ export async function downloadScan(scan: ScanAttachment): Promise<void> {
 
 export async function deleteScanFile(
   scan: ScanAttachment,
-  options: { force?: boolean } = {},
+  _options: { force?: boolean } = {},
 ): Promise<void> {
   if (!scan.storagePath) return;
-  if (scan.deleteOnRemove === false && !options.force) return;
+  // A file explicitly selected through Google Picker belongs to the user.
+  // Removing its link from Tracker Rodu must never delete the Drive original.
+  if (scan.deleteOnRemove === false) return;
   const storage = String(scan.storage ?? "");
 
   // Legacy attachments may still point to the former storage provider.
@@ -717,25 +756,29 @@ function stableHash(value: string, seed: number): string {
   return (hash >>> 0).toString(36);
 }
 
-function googleDriveFileId(value: string): string {
+function googleDriveReference(value: string): { id: string; resourceKey?: string } | null {
   const input = value.trim();
-  if (!input) return "";
+  if (!input) return null;
   const directId = input.match(/^[a-zA-Z0-9_-]{20,}$/)?.[0];
-  if (directId) return directId;
+  if (directId) return { id: directId };
   try {
     const url = new URL(input);
+    const resourceKey = url.searchParams.get("resourcekey")
+      || url.searchParams.get("resourceKey")
+      || undefined;
     const queryId = url.searchParams.get("id");
-    if (queryId) return queryId;
+    if (queryId) return { id: queryId, resourceKey };
     const fileMatch = url.pathname.match(/\/file\/d\/([^/]+)/);
-    if (fileMatch?.[1]) return fileMatch[1];
+    if (fileMatch?.[1]) return { id: fileMatch[1], resourceKey };
     const folderMatch = url.pathname.match(/\/folders\/([^/]+)/);
-    if (folderMatch?.[1]) return folderMatch[1];
+    if (folderMatch?.[1]) return { id: folderMatch[1], resourceKey };
     const documentMatch = url.pathname.match(/\/(?:document|spreadsheets|presentation)\/d\/([^/]+)/);
-    if (documentMatch?.[1]) return documentMatch[1];
+    if (documentMatch?.[1]) return { id: documentMatch[1], resourceKey };
   } catch {
     // Not a URL; fall through to a permissive extraction attempt.
   }
-  return input.match(/[a-zA-Z0-9_-]{20,}/)?.[0] ?? "";
+  const extractedId = input.match(/[a-zA-Z0-9_-]{20,}/)?.[0];
+  return extractedId ? { id: extractedId } : null;
 }
 
 function isSupportedAttachmentMetadata(
@@ -751,6 +794,14 @@ function isSupportedAttachmentMetadata(
     : policy === "archive-request"
       ? isSupportedArchiveRequestAttachment(fileLike)
       : isSupportedAttachment(fileLike);
+}
+
+export function isGoogleWorkspaceDriveFile(mimeType: string | undefined): boolean {
+  return Boolean(
+    mimeType
+    && mimeType !== GOOGLE_FOLDER_MIME_TYPE
+    && mimeType.startsWith("application/vnd.google-apps."),
+  );
 }
 
 function ensureExternalUrlMatchesPolicy(

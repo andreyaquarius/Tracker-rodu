@@ -51,17 +51,25 @@
 - 🔴 **Branch protection** на `main`: заборонити прямий push, вимагати PR + проходження статус-перевірок (lint, test, audit, secret-scan).
 - 🔴 **Secret scanning + Push protection: Enabled** (Settings → Code security).
 - 🟠 **Dependabot** (alerts + security updates) — автоматичні PR на CVE залежностей (F-02/F-13).
-- 🔴 **Repository secrets** для деплою: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_GOOGLE_CLIENT_ID` — лише публічні/publishable значення. Жодного `service_role`/`ENCRYPTION_KEY` у репо-секретах фронтенду.
+- 🔴 **Repository secrets** для деплою: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_PICKER_API_KEY`, `VITE_GOOGLE_DRIVE_APP_ID` — лише публічні/publishable значення. Жодного `service_role`/`ENCRYPTION_KEY` у репо-секретах фронтенду.
 - 🟠 Закріпити версії GitHub Actions за commit-SHA (зараз `@v6`/`@v5`/`@v4`) — захист ланцюга постачання CI.
 - 🟢 Pages: переконатися, що **Enforce HTTPS** увімкнено для кастомного домену.
 
 ---
 
-## 3. Google Cloud (OAuth / Drive / API key)
+## 3. Google Cloud (OAuth / Drive / Picker API)
 
-- 🔴 **OAuth client** (`VITE_GOOGLE_CLIENT_ID`): Authorized JavaScript origins і redirect URIs — лише `https://trekerrodu.com.ua` (+ staging за потреби).
-- 🟠 Drive scope лишити мінімальним — `drive.file` (вже так).
-- 🔴 **F-12:** ключ `VITE_GOOGLE_API_KEY` у локальному `.env` **не використовується** і відсутній у збірці. Видалити рядок із локального `.env`; якщо ключ реальний — **відкликати** або обмежити (HTTP-referrer + API restrictions) у Google Cloud.
+- 🔴 Увімкнути **Google Drive API** і **Google Picker API** у тому самому Google Cloud project, де створений OAuth client.
+- 🔴 **OAuth client** (`VITE_GOOGLE_CLIENT_ID`) має бути типу **Web application**. У `Authorized JavaScript origins` додати точні origins `https://trekerrodu.com.ua` (і окремо `https://www.trekerrodu.com.ua`, лише якщо цей хост реально використовується). Для GIS token popup redirect URI не потрібен.
+- 🔴 У **Google Auth Platform → Data Access** лишити тільки мінімальний scope `https://www.googleapis.com/auth/drive.file`. Не додавати `drive.readonly`, `drive` або інші scopes доступу до всього диска.
+- 🔴 Створити окремий **browser API key** для Picker (`VITE_GOOGLE_PICKER_API_KEY`). У **Application restrictions** вибрати `Websites` і дозволити лише точні production HTTP referrers (та окремі явно потрібні staging/local referrers); у **API restrictions** дозволити тільки **Google Picker API**.
+- 🔴 `VITE_GOOGLE_DRIVE_APP_ID` має дорівнювати **Project number** цього самого Google Cloud project (не Project ID і не OAuth client ID).
+- 🔴 У **Audience** вибрати `External`: для тестування додати конкретні адреси в `Test users`, а перед загальним доступом перевести застосунок у `In production`.
+- 🔴 У **Branding** вказати назву, support email, homepage `https://trekerrodu.com.ua`, privacy policy `https://trekerrodu.com.ua/privacy`, terms `https://trekerrodu.com.ua/terms`; додати й підтвердити authorized domain `trekerrodu.com.ua` через Search Console.
+- 🔴 У frontend і GitHub передавати рівно три публічні Google-значення: `VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_PICKER_API_KEY`, `VITE_GOOGLE_DRIVE_APP_ID`. **OAuth client secret не потрібен** браузерному Picker/OAuth flow, не використовується у збірці й не повинен зберігатися у frontend secrets.
+- 🟠 Після видалення широкого scope тестові користувачі мають відкликати старий grant у Google Account Connections і підключити Drive повторно.
+- 🟠 Для Google Workspace адміністратор домену може окремо обмежувати OAuth-застосунки; у такому разі він має дозволити конкретний OAuth client ID і scope `drive.file` у **API controls**.
+- 🔴 **F-12:** застарілий загальний ключ `VITE_GOOGLE_API_KEY` у локальному `.env` не використовувати. Видалити його; якщо ключ реальний — відкликати. Для Picker застосовувати лише окремий обмежений `VITE_GOOGLE_PICKER_API_KEY` з HTTP-referrer та API restrictions, описаними вище.
 
 ---
 

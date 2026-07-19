@@ -18,6 +18,8 @@ export interface ScanAttachment {
   driveMd5Checksum?: string;
   driveModifiedTime?: string;
   driveRevisionId?: string;
+  /** Resource key required by Google Drive for some link-shared files. */
+  driveResourceKey?: string;
   deleteOnRemove?: boolean;
   /** Imported GEDCOM can reference a local file that the browser cannot read. */
   availability?: "available" | "missing-local";
