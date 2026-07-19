@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   GEDCOM_EXPORT_SIGNED_URL_SECONDS,
   failGedcomExport,
+  formatGedcomExportError,
   parseClaimedGedcomExport,
   processClaimedGedcomExport,
   standardGedcomStorageUpload,
@@ -83,7 +84,7 @@ for (let jobIndex = 0; jobIndex < MAX_JOBS_PER_RUN; jobIndex += 1) {
     console.error(JSON.stringify({
       event: "gedcom_export_failed",
       jobId: job.jobId,
-      error: jobError instanceof Error ? jobError.message : String(jobError),
+      error: formatGedcomExportError(jobError),
     }));
     await failGedcomExport(client, job.jobId, job.attempts, jobError);
   }
@@ -96,7 +97,7 @@ for (let jobIndex = 0; jobIndex < MAX_JOBS_PER_RUN; jobIndex += 1) {
       console.error(JSON.stringify({
         event: "gedcom_export_email_wake_failed",
         jobId: job.jobId,
-        error: emailWakeError instanceof Error ? emailWakeError.message : String(emailWakeError),
+        error: formatGedcomExportError(emailWakeError),
       }));
     }
   }

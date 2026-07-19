@@ -17,6 +17,20 @@ export const GEDCOM_EXPORT_BUCKET = "gedcom-exports";
 export const GEDCOM_EXPORT_FILE_NAME = "family-tree.ged";
 export const GEDCOM_EXPORT_SIGNED_URL_SECONDS = 7 * 24 * 60 * 60;
 export const GEDCOM_EXPORT_PAGE_SIZE = 1_000;
+export const GEDCOM_EXPORT_ERROR_MAX_LENGTH = 2_000;
+
+const GEDCOM_EXPORT_ERROR_FIELD_MAX_LENGTH = 800;
+const GEDCOM_EXPORT_ERROR_FIELDS = [
+  "code",
+  "message",
+  "details",
+  "hint",
+  "status",
+  "statusCode",
+  "status_code",
+  "name",
+  "error",
+] as const;
 
 export type GedcomExportJob = {
   jobId: string;
@@ -156,8 +170,28 @@ const EVENT_SELECT = "id, project_id, person_id, event_type, title, event_date, 
 const PARTNER_SELECT = "id, family_group_id, person_a_id, person_b_id, relationship_type, start_date, start_place, end_date, end_place, evidence_status, confidence, source_document_id, source_finding_id, notes, metadata";
 const PARENT_CHILD_SELECT = "id, parent_id, child_id, parent_set_id, family_group_id, relationship_type, parent_role_label, start_date, end_date, evidence_status, confidence, is_bloodline, source_document_id, source_finding_id, notes, metadata";
 const ASSOCIATION_SELECT = "id, person_a_id, person_b_id, association_type, evidence_status, confidence, source_document_id, source_finding_id, notes, metadata";
-const FINDING_SELECT = "id, research_id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, source_url, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields, created_at, updated_at";
+const FINDING_SELECT_LEGACY = "id, research_id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields, created_at, updated_at";
+const FINDING_SELECT = `${FINDING_SELECT_LEGACY}, source_url`;
 const DOCUMENT_SELECT = "id, research_id, title, document_type, archive, fund, file_reference, year_from, year_to, place, url, pages_count, last_page, review_status, description, notes, custom_fields, created_at, updated_at";
+
+export function isMissingFindingsSourceUrlError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || Array.isArray(error)) return false;
+  const record = error as Record<string, unknown>;
+  const code = String(record.code ?? "").trim().toUpperCase();
+  const description = [record.message, record.details, record.hint]
+    .filter((value) => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+
+  if (code === "42703") {
+    const namesSourceUrl = /(?:findings\s*\.\s*source_url|column\s+["']?source_url["']?)/u.test(description);
+    return namesSourceUrl && /does not exist/u.test(description);
+  }
+  return code === "PGRST204"
+    && /schema cache/u.test(description)
+    && /source_url/u.test(description)
+    && /findings/u.test(description);
+}
 
 export async function standardGedcomStorageUpload(
   client: SupabaseServiceClient,
@@ -318,7 +352,7 @@ export async function failGedcomExport(
   attempt: number,
   error: unknown,
 ): Promise<void> {
-  const message = exportErrorMessage(error).slice(0, 2_000);
+  const message = formatGedcomExportError(error);
   const result = await client.rpc("fail_gedcom_export", {
     target_job_id: jobId,
     target_attempt: attempt,
@@ -419,10 +453,7 @@ async function readProjectFindingsAndDocuments(
   projectId: string,
 ): Promise<{ findings: Finding[]; documents: DocumentRecord[] }> {
   const [findingRows, participantRows, documentRows] = await Promise.all([
-    readPaged<FindingRow>(() => client.from("findings")
-      .select(FINDING_SELECT)
-      .eq("project_id", projectId)
-      .order("id", { ascending: true })),
+    readProjectFindingRows(client, projectId),
     readPaged<FindingParticipantRow>(() => client.from("finding_participants")
       .select("id, finding_id, person_id, name, role, notes")
       .eq("project_id", projectId)
@@ -437,6 +468,26 @@ async function readProjectFindingsAndDocuments(
     findings: findingRows.map((row) => mapFinding(row, participantsByFinding.get(row.id) ?? [])),
     documents: documentRows.map(mapDocument),
   };
+}
+
+async function readProjectFindingRows(
+  client: SupabaseServiceClient,
+  projectId: string,
+): Promise<FindingRow[]> {
+  try {
+    return await readPaged<FindingRow>(() => client.from("findings")
+      .select(FINDING_SELECT)
+      .eq("project_id", projectId)
+      .order("id", { ascending: true }));
+  } catch (error) {
+    if (!isMissingFindingsSourceUrlError(error)) throw error;
+  }
+
+  const legacyRows = await readPaged<Omit<FindingRow, "source_url">>(() => client.from("findings")
+    .select(FINDING_SELECT_LEGACY)
+    .eq("project_id", projectId)
+    .order("id", { ascending: true }));
+  return legacyRows.map((row) => ({ ...row, source_url: "" }));
 }
 
 async function readPreservedRecords(
@@ -585,11 +636,87 @@ function valueText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function exportErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  if (error && typeof error === "object" && "message" in error) {
-    const message = String((error as { message?: unknown }).message ?? "").trim();
-    if (message) return message;
+/**
+ * Converts failures from Error, PostgREST, Storage and fetch into a bounded,
+ * JSON-shaped diagnostic. Only explicitly useful scalar fields are copied so
+ * request headers, bodies and credentials cannot be logged accidentally.
+ */
+export function formatGedcomExportError(error: unknown): string {
+  const payload: Record<string, string> = {};
+
+  if (error && (typeof error === "object" || typeof error === "function")) {
+    for (const field of GEDCOM_EXPORT_ERROR_FIELDS) {
+      const value = readErrorField(error, field);
+      const text = errorFieldText(value);
+      if (text) addBoundedErrorField(payload, field, text);
+    }
+  } else {
+    const text = errorFieldText(error);
+    if (text) addBoundedErrorField(payload, "message", text);
   }
-  return "GEDCOM_EXPORT_FAILED";
+
+  if (Object.keys(payload).length === 0) {
+    payload.message = "GEDCOM_EXPORT_FAILED";
+  }
+  return JSON.stringify(payload);
+}
+
+function readErrorField(error: object | Function, field: string): unknown {
+  try {
+    return (error as Record<string, unknown>)[field];
+  } catch {
+    return undefined;
+  }
+}
+
+function errorFieldText(value: unknown): string {
+  if (
+    typeof value !== "string"
+    && typeof value !== "number"
+    && typeof value !== "boolean"
+    && typeof value !== "bigint"
+  ) {
+    return "";
+  }
+  try {
+    return redactGedcomExportSecrets(String(value).trim());
+  } catch {
+    return "";
+  }
+}
+
+function redactGedcomExportSecrets(value: string): string {
+  return value
+    .replace(/\b(?:sbp_|sb_secret_|sb_publishable_)[A-Za-z0-9._~-]{8,}\b/g, "[REDACTED_KEY]")
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, "[REDACTED_JWT]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{8,}={0,2}/gi, "Bearer [REDACTED]")
+    .replace(
+      /((?:api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|token|secret)\s*[:=]\s*)(?:Bearer\s+)?[^\s,;]+/gi,
+      "$1[REDACTED]",
+    );
+}
+
+function addBoundedErrorField(
+  payload: Record<string, string>,
+  field: string,
+  unboundedValue: string,
+): void {
+  let value = clipErrorField(unboundedValue, GEDCOM_EXPORT_ERROR_FIELD_MAX_LENGTH);
+  while (value) {
+    const candidate = { ...payload, [field]: value };
+    const encoded = JSON.stringify(candidate);
+    if (encoded.length <= GEDCOM_EXPORT_ERROR_MAX_LENGTH) {
+      payload[field] = value;
+      return;
+    }
+    const nextLength = value.length - (encoded.length - GEDCOM_EXPORT_ERROR_MAX_LENGTH) - 1;
+    if (nextLength <= 0) return;
+    value = clipErrorField(value, nextLength);
+  }
+}
+
+function clipErrorField(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  if (maxLength <= 1) return "…".slice(0, Math.max(0, maxLength));
+  return `${value.slice(0, maxLength - 1)}…`;
 }

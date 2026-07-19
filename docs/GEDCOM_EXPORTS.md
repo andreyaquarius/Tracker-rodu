@@ -10,7 +10,7 @@
 
 ## Розгортання
 
-1. Застосувати міграцію `supabase/migrations/202607190001_async_gedcom_exports.sql`.
+1. Застосувати міграції `supabase/migrations/202607190001_async_gedcom_exports.sql` і `supabase/migrations/202607190002_gedcom_sources_as_findings.sql` у вказаному порядку. Workflow розгортання Edge Functions не виконує SQL-міграції.
 2. Розгорнути Edge Function `process-gedcom-exports` (наявний workflow розгортання функцій підхоплює її автоматично).
 3. У Supabase Edge Function secrets перевірити:
    - `RESEND_API_KEY`;
