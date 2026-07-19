@@ -95,7 +95,7 @@ function stringValue(value: unknown): string {
 function proxyCodeMessage(code: string, status: number): string {
   switch (code) {
     case "PHOTO_SOURCE_EXPIRED":
-      return "Зовнішнє посилання на фотографію більше недоступне. Виберіть оригінал у пакетному вікні або додайте фото вручну кнопкою «Додати файли».";
+      return "Посилання MyHeritage на фотографію вже недоступне. Створіть у MyHeritage новий експорт GEDCOM із фото та одразу імпортуйте щойно завантажений файл; повторний імпорт цього самого GEDCOM не оновить посилання.";
     case "PHOTO_SOURCE_TIMEOUT":
       return "Зовнішнє джерело фотографії не відповіло вчасно. Спробуйте ще раз.";
     case "PHOTO_TOO_LARGE":

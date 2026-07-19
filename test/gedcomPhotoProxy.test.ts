@@ -50,7 +50,7 @@ test("client reads the structured Supabase function error response", async () =>
 
   assert.equal(
     await gedcomPhotoProxyErrorMessage(error),
-    "Зовнішнє посилання на фотографію більше недоступне. Виберіть оригінал у пакетному вікні або додайте фото вручну кнопкою «Додати файли».",
+    "Посилання MyHeritage на фотографію вже недоступне. Створіть у MyHeritage новий експорт GEDCOM із фото та одразу імпортуйте щойно завантажений файл; повторний імпорт цього самого GEDCOM не оновить посилання.",
   );
 });
 

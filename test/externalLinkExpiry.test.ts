@@ -59,3 +59,26 @@ test("marks elapsed explicit deadlines and leaves ambiguous links unknown", () =
   );
   assert.deepEqual(externalLinkExpiry("not a URL", now), { kind: "unknown" });
 });
+
+test("reads the signed MyHeritage photo deadline from its base64url path", () => {
+  const token = "az10ZXN0JnM9c2lnJmU9MTc4NDEwOTYwMA";
+  const expired = externalLinkExpiry(
+    `https://sites-cf.mhcache.com/e/1/${token}/photo.jpg`,
+    now,
+  );
+
+  assert.equal(expired.kind, "known");
+  if (expired.kind === "known") {
+    assert.equal(expired.expiresAt, "2026-07-15T10:00:00.000Z");
+    assert.equal(expired.expired, true);
+  }
+
+  for (const rejected of [
+    `http://sites-cf.mhcache.com/e/1/${token}/photo.jpg`,
+    `https://sites-cf.mhcache.com.evil.example/e/1/${token}/photo.jpg`,
+    `https://user@sites-cf.mhcache.com/e/1/${token}/photo.jpg`,
+    `https://sites-cf.mhcache.com:444/e/1/${token}/photo.jpg`,
+  ]) {
+    assert.deepEqual(externalLinkExpiry(rejected, now), { kind: "unknown" }, rejected);
+  }
+});
