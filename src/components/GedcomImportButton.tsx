@@ -44,6 +44,7 @@ export interface GedcomImportArchivePayload {
 interface GedcomImportButtonProps {
   inputId?: string;
   hideTrigger?: boolean;
+  disabled?: boolean;
   defaultResearchId?: string;
   researchRequired?: boolean;
   onImportPersons: (records: AppEntity[]) => Promise<void>;
@@ -95,6 +96,7 @@ type GedcomPhotoBackupCompletion = {
 export function GedcomImportButton({
   inputId,
   hideTrigger = false,
+  disabled = false,
   defaultResearchId = "",
   researchRequired = false,
   onImportPersons,
@@ -130,12 +132,13 @@ export function GedcomImportButton({
   );
 
   const selectFile = () => {
-    if (!busy) inputRef.current?.click();
+    if (!busy && !disabled) inputRef.current?.click();
   };
 
   const importFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
+    if (disabled) return;
     if (!file) return;
     setPhotoBackupCompletion(null);
 
@@ -196,7 +199,7 @@ export function GedcomImportButton({
   };
 
   const confirmImport = async () => {
-    if (!preview) return;
+    if (!preview || disabled) return;
     setBusy(true);
     setProgress({
       step: "Зберігаємо осіб і звʼязки",
@@ -339,6 +342,7 @@ export function GedcomImportButton({
         ref={inputRef}
         type="file"
         accept=".ged,.gedcom,text/plain"
+        disabled={disabled}
         hidden
         onChange={(event) => void importFile(event)}
       />
@@ -346,7 +350,7 @@ export function GedcomImportButton({
         <button
           type="button"
           className="button button-secondary"
-          disabled={busy}
+          disabled={busy || disabled}
           onClick={selectFile}
         >
           {busy ? "Імпортуємо GEDCOM..." : "Імпорт GEDCOM"}
@@ -472,7 +476,7 @@ export function GedcomImportButton({
               }}>
                 Скасувати
               </button>
-              <button type="button" className="button button-primary" disabled={busy || !preview.rootPersonId} onClick={() => void confirmImport()}>
+              <button type="button" className="button button-primary" disabled={busy || disabled || !preview.rootPersonId} onClick={() => void confirmImport()}>
                 {busy ? "Імпортуємо..." : onCreateFamilyTree ? "Імпортувати і створити дерево" : "Імпортувати"}
               </button>
             </div>

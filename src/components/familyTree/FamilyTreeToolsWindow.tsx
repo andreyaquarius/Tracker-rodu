@@ -23,6 +23,8 @@ interface FamilyTreeToolsWindowProps {
   selectedResearchId: string;
   researchRequired: boolean;
   canImportGedcom: boolean;
+  canBackupGedcomPhotos: boolean;
+  gedcomPhotoBackupCount: number;
   canExportGedcom: boolean;
   exportingGedcom: boolean;
   appearance: FamilyTreeAppearancePreferences;
@@ -30,6 +32,7 @@ interface FamilyTreeToolsWindowProps {
   onSelectTree: (treeId: string) => void;
   onSelectResearch: (researchId: string) => void;
   onImportGedcom: () => void;
+  onOpenGedcomPhotoBackup: () => void;
   onExportGedcom: () => void;
   onOpenCircularChart: () => void;
   onAppearanceChange: (value: FamilyTreeAppearancePreferences) => void;
@@ -93,6 +96,8 @@ export function FamilyTreeToolsWindow({
   selectedResearchId,
   researchRequired,
   canImportGedcom,
+  canBackupGedcomPhotos,
+  gedcomPhotoBackupCount,
   canExportGedcom,
   exportingGedcom,
   appearance,
@@ -100,6 +105,7 @@ export function FamilyTreeToolsWindow({
   onSelectTree,
   onSelectResearch,
   onImportGedcom,
+  onOpenGedcomPhotoBackup,
   onExportGedcom,
   onOpenCircularChart,
   onAppearanceChange,
@@ -214,6 +220,23 @@ export function FamilyTreeToolsWindow({
               <span>
                 <strong>Імпорт GEDCOM</strong>
                 <small>Завантажити осіб і зв’язки з файлу .ged</small>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="family-tree-tools-action"
+              disabled={!canBackupGedcomPhotos || gedcomPhotoBackupCount === 0}
+              onClick={onOpenGedcomPhotoBackup}
+            >
+              <span className="family-tree-tools-icon" aria-hidden="true">☁</span>
+              <span>
+                <strong>Зберегти фото з GEDCOM</strong>
+                <small>
+                  {gedcomPhotoBackupCount
+                    ? `Незбережених фото: ${gedcomPhotoBackupCount.toLocaleString("uk-UA")}`
+                    : "Усі доступні фото вже збережено"}
+                </small>
               </span>
             </button>
 
