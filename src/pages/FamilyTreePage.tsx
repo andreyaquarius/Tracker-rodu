@@ -165,7 +165,11 @@ export type FamilyTreePageProps = {
   canCreateRelated?: (page: RelatedEntityPageKey) => boolean;
   readOnly?: boolean;
   canCreate?: boolean;
+  canCreateTree?: boolean;
+  treeLimitMessage?: string;
   researchRequired?: boolean;
+  gedcomResearchRequired?: boolean;
+  onSubscriptionChanged?: () => void;
   onOpenPerson?: (personId: string) => void;
   onActiveContextChange?: (context: {
     projectId: string;
@@ -230,7 +234,10 @@ export function LegacyFamilyTreePage({
   canCreateRelated,
   readOnly = false,
   canCreate = true,
+  canCreateTree = true,
+  treeLimitMessage,
   researchRequired = false,
+  onSubscriptionChanged,
   onOpenPerson,
   onActiveContextChange,
   personProfileNavigationEnabled = false,
@@ -728,7 +735,7 @@ export function LegacyFamilyTreePage({
   };
 
   const createAdminTree = async () => {
-    if (!projectId || !newTreeTitle.trim()) return;
+    if (!projectId || !newTreeTitle.trim() || !canCreateTree) return;
     setTreeAdminLoading(true);
     setTreeAdminError("");
     try {
@@ -738,6 +745,7 @@ export function LegacyFamilyTreePage({
       setBuilderNotice("Нове дерево створено. Тепер можна додати фокусну особу або прив’язати людей.");
       await refreshTreeAdmin();
       await refetch();
+      onSubscriptionChanged?.();
     } catch (adminError) {
       setTreeAdminError(adminError instanceof Error ? adminError.message : "Не вдалося створити дерево.");
     } finally {
@@ -775,6 +783,7 @@ export function LegacyFamilyTreePage({
       setBuilderNotice("Дерева об’єднано. Якщо між гілками з’явився зв’язок, тепер вони будуть будуватися як одне дерево.");
       await refreshTreeAdmin();
       await refetch();
+      onSubscriptionChanged?.();
     } catch (adminError) {
       setTreeAdminError(adminError instanceof Error ? adminError.message : "Не вдалося об’єднати дерева.");
     } finally {
@@ -800,6 +809,7 @@ export function LegacyFamilyTreePage({
       setBuilderNotice("Дерево видалено. Особи з бази не видалялися.");
       await refreshTreeAdmin();
       await refetch();
+      onSubscriptionChanged?.();
     } catch (adminError) {
       setTreeAdminError(adminError instanceof Error ? adminError.message : "Не вдалося видалити дерево.");
     } finally {
@@ -879,7 +889,7 @@ export function LegacyFamilyTreePage({
   };
 
   const openBuilderAction = (action: FamilyTreeBuilderAction, personId: string) => {
-    if (!personId) return;
+    if (!personId || readOnly || !canCreate) return;
     setBuilderNotice("");
     mutations.resetError();
     setAttachTarget(null);
@@ -895,6 +905,7 @@ export function LegacyFamilyTreePage({
   };
 
   const openRootBuilder = () => {
+    if (readOnly || !canCreate || (!filteredGraph?.tree && !canCreateTree)) return;
     setBuilderNotice("");
     mutations.resetError();
     setAttachTarget(null);
@@ -925,6 +936,7 @@ export function LegacyFamilyTreePage({
       }));
       setBuilderTarget(null);
       setBuilderNotice("Першу особу створено. Родове дерево готове до наповнення.");
+      onSubscriptionChanged?.();
       return;
     }
 
@@ -975,6 +987,7 @@ export function LegacyFamilyTreePage({
     setBuilderTarget(null);
     setBuilderNotice("Особу додано до родового дерева. Граф оновлено.");
     await refetch();
+    onSubscriptionChanged?.();
   };
 
   const submitAttachAction = async (payload: FamilyTreeAttachSubmit) => {
@@ -1035,7 +1048,7 @@ export function LegacyFamilyTreePage({
     await refetch();
   };
   const createTreeFromExistingPeople = async () => {
-    if (!projectId || !persons.length) return;
+    if (!projectId || !persons.length || !canCreateTree) return;
     const rootPersonId = selectedTreeBuildRootPersonId || persons[0]?.id || "";
     if (!rootPersonId) return;
     const originalPersonById = new Map(persons.map((person) => [person.id, person]));
@@ -1068,6 +1081,7 @@ export function LegacyFamilyTreePage({
     setSelectedOccurrenceId("");
     setBuilderNotice(`Родове дерево сформовано з наявних осіб: ${result.persons} осіб, ${result.parentChildRelationships + result.partnerRelationships} зв’язків.`);
     await refetch();
+    onSubscriptionChanged?.();
   };
   const showRootCreationState = Boolean(
     projectId &&
@@ -1102,6 +1116,8 @@ export function LegacyFamilyTreePage({
           isLoading={treeAdminLoading}
           error={treeAdminError}
           readOnly={readOnly}
+          canCreateTree={canCreateTree}
+          treeLimitMessage={treeLimitMessage}
           onNewTreeTitleChange={setNewTreeTitle}
           onCreateTree={() => void createAdminTree()}
           onSelectTree={selectAdminTree}
@@ -1134,11 +1150,14 @@ export function LegacyFamilyTreePage({
           <span className="eyebrow">Родове дерево</span>
           <h2>У цьому проєкті ще немає родового дерева.</h2>
           <p>Почніть із першої особи.</p>
+          {!filteredGraph?.tree && !canCreateTree && treeLimitMessage ? (
+            <div className="alert alert-notice">{treeLimitMessage}</div>
+          ) : null}
           <div className="family-tree-root-empty-actions">
-            <button type="button" className="button button-primary" onClick={openRootBuilder}>
+            <button type="button" className="button button-primary" disabled={readOnly || !canCreate || (!filteredGraph?.tree && !canCreateTree)} onClick={openRootBuilder}>
               Створити себе
             </button>
-            <button type="button" className="button" onClick={openRootBuilder}>
+            <button type="button" className="button" disabled={readOnly || !canCreate || (!filteredGraph?.tree && !canCreateTree)} onClick={openRootBuilder}>
               Створити фокусну особу
             </button>
             {!readOnly && persons.length ? (
@@ -1159,7 +1178,7 @@ export function LegacyFamilyTreePage({
                       ))}
                   </select>
                 </label>
-                <button type="button" className="button button-secondary" onClick={() => void createTreeFromExistingPeople()}>
+                <button type="button" className="button button-secondary" disabled={!canCreateTree} onClick={() => void createTreeFromExistingPeople()}>
                   Сформувати дерево з наявних осіб
                 </button>
               </>
@@ -1193,7 +1212,7 @@ export function LegacyFamilyTreePage({
                 setHighlightedRelationshipId("");
                 setSelectedIssueKey("");
               }}
-              onAction={openBuilderActionFromOccurrence}
+              onAction={!readOnly && canCreate ? openBuilderActionFromOccurrence : undefined}
               onExpandGeneration={expandHiddenRelatives}
             />
           </div>
@@ -1202,9 +1221,9 @@ export function LegacyFamilyTreePage({
               graph={filteredGraph}
               selected={selectedLayoutNode}
               onSelectOccurrence={setSelectedOccurrenceId}
-              onAction={openBuilderAction}
-              onAttach={openAttachAction}
-              onDetach={(input) => void detachRelationship(input)}
+              onAction={!readOnly && canCreate ? openBuilderAction : undefined}
+              onAttach={!readOnly ? openAttachAction : undefined}
+              onDetach={!readOnly ? (input) => void detachRelationship(input) : undefined}
               onOpenPerson={openPersonCardWindow}
             />
             <FamilyTreeLegend />
@@ -1280,6 +1299,8 @@ function FamilyTreeAdminPanel({
   isLoading,
   error,
   readOnly,
+  canCreateTree,
+  treeLimitMessage,
   onNewTreeTitleChange,
   onCreateTree,
   onSelectTree,
@@ -1294,6 +1315,8 @@ function FamilyTreeAdminPanel({
   isLoading: boolean;
   error: string;
   readOnly: boolean;
+  canCreateTree: boolean;
+  treeLimitMessage?: string;
   onNewTreeTitleChange: (value: string) => void;
   onCreateTree: () => void;
   onSelectTree: (treeId: string, rootPersonId: string | null) => void;
@@ -1348,10 +1371,14 @@ function FamilyTreeAdminPanel({
               }}
             />
           </label>
-          <button type="button" className="button button-primary" disabled={!newTreeTitle.trim() || isLoading} onClick={onCreateTree}>
+          <button type="button" className="button button-primary" disabled={!canCreateTree || !newTreeTitle.trim() || isLoading} onClick={onCreateTree}>
             Створити дерево
           </button>
         </div>
+      ) : null}
+
+      {!canCreateTree && treeLimitMessage ? (
+        <div className="alert alert-notice">{treeLimitMessage}</div>
       ) : null}
 
       {error ? <div className="form-error">{error}</div> : null}

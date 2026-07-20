@@ -9,6 +9,9 @@ export type SubscriptionStatus =
 
 export type PlanLimitKey =
   | "projects"
+  | "family_trees_total"
+  | "persons_total"
+  | "editors_total"
   | "researches_total"
   | "researches_per_project"
   | "records_per_standard_section"
@@ -20,6 +23,9 @@ export type PlanLimitKey =
   | "hypothesis_ai_reviews_per_month";
 
 export type SubscriptionFeature =
+  | "family_trees"
+  | "persons"
+  | "editors"
   | "custom_sections"
   | "custom_fields"
   | "table_import"
@@ -78,6 +84,12 @@ export interface SubscriptionContext {
   plan: SubscriptionPlan;
   limits: Record<PlanLimitKey, PlanLimit>;
   usage: SubscriptionUsage;
+  projectCapacity: {
+    ownerId: string;
+    effectivePlanCode: PlanCode;
+    limits: Record<PlanLimitKey, PlanLimit>;
+    usage: SubscriptionUsage;
+  } | null;
   sectionQuotas: Record<string, SectionQuota>;
   isAdmin: boolean;
   projectAccessMode: SubscriptionAccessMode | null;

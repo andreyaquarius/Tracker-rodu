@@ -91,6 +91,7 @@ import {
 } from "./services/authenticatedEngagement";
 import { useSubscription } from "./hooks/useSubscription";
 import {
+  beginTableImport,
   loadAppFeatureFlags,
   subscriptionErrorCode,
   subscriptionErrorMessage,
@@ -295,7 +296,7 @@ const PUBLIC_PAGE_SEO: Record<PublicPageKey, {
   pricing: {
     title: "Тарифи Трекера Роду — Старт, Дослідник і Професійний",
     description:
-      "Тарифи Трекера Роду: Старт, Дослідник і Професійний, 30 днів пробного повного доступу без платіжної картки.",
+      "Тарифи Трекера Роду за кількістю осіб, дерев, редакторів і ШІ-кредитів; 30 днів можливостей Professional без платіжної картки.",
     canonical: `${SITE_ORIGIN}/pricing`,
   },
 };
@@ -391,7 +392,6 @@ const researchScopedCollections: ReadonlySet<CollectionKey> = new Set([
   "findings",
   "hypotheses",
   "archiveRequests",
-  "persons",
 ]);
 
 const standardSectionQuotaKeys: Record<string, string> = {
@@ -738,8 +738,8 @@ export default function App() {
         if (active) setFamilyTreeFeatureAccess({ accountId, allowed, loading: false });
       })
       .catch(() => {
-        // Private beta access is deliberately fail-closed if the entitlement
-        // service is unavailable or its database migration is not installed.
+        // Core tree access stays fail-closed when the authenticated server
+        // verification is unavailable; this is no longer a private allow-list.
         if (active) setFamilyTreeFeatureAccess({ accountId, allowed: false, loading: false });
       });
 
@@ -748,9 +748,8 @@ export default function App() {
     };
   }, [account?.id, route.kind]);
 
-  // The application owner must never be locked out while the private-beta
-  // entitlement migration is being rolled out. Server-side SQL grants app
-  // administrators the same unconditional access.
+  // Keep the administrator fallback while the core entitlement migration is
+  // rolling out. Server-side SQL grants every authenticated account access.
   const familyTreeAccessIsCurrent = Boolean(account)
     && familyTreeFeatureAccess.accountId === account?.id;
   const familyTreeFeatureAccessLoading = Boolean(account)
@@ -776,57 +775,88 @@ export default function App() {
       cacheScope: account?.id ?? "",
     }).catch(() => undefined);
   }, [account?.id, personsModuleV2Enabled, workspace?.projectId]);
+  const projectCapacity = subscriptionAccess.context?.projectCapacity ?? null;
+  const projectCapacityPlan = projectCapacity?.effectivePlanCode
+    ?? subscriptionAccess.effectivePlan
+    ?? "free";
+  const projectCapacityOwnedByAnotherAccount = Boolean(
+    workspace
+      && account?.id
+      && projectCapacity?.ownerId
+      && projectCapacity.ownerId !== account.id,
+  );
+  const projectCapacityOwnerGuidance = projectCapacityOwnedByAnotherAccount
+    ? " Змінити тариф або звільнити місце може лише власник цього проєкту."
+    : "";
+  const projectCapacityUpgradePlan: UpgradeReason["recommendedPlan"] = projectCapacityPlan === "free"
+    ? "researcher"
+    : "professional";
+  const accountUpgradePlan: UpgradeReason["recommendedPlan"] = subscriptionAccess.effectivePlan === "free"
+    ? "researcher"
+    : "professional";
   const canCreateProjectRecords = !workspace || subscriptionAccess.canCreateProjectRecords;
   const canCreateStandardSection = useCallback((sectionKey?: string) => {
     if (!canCreateProjectRecords) return false;
     if (!sectionKey) return true;
+    if (sectionKey === standardSectionQuotaKeys.persons) {
+      return subscriptionAccess.canCreatePerson;
+    }
     return subscriptionAccess.context?.sectionQuotas[sectionKey]?.canCreate ?? true;
-  }, [canCreateProjectRecords, subscriptionAccess.context]);
+  }, [canCreateProjectRecords, subscriptionAccess.canCreatePerson, subscriptionAccess.context]);
   const canCreateCustomSection = !workspace || subscriptionAccess.canCreateCustomSection;
   const canCreateCustomField = !workspace || subscriptionAccess.canCreateCustomField;
   const limitNotice = useCallback((label: string, key: PlanLimitKey) => {
     if (subscriptionAccess.loading) return "Перевіряємо ліміти тарифу…";
-    const limit = subscriptionAccess.getLimit(key);
-    const used = subscriptionAccess.getUsage(key);
+    const limit = subscriptionAccess.getCapacityLimit(key);
+    const used = subscriptionAccess.getCapacityUsage(key);
     if (limit && !limit.isUnlimited && limit.value !== null) {
       if (limit.value === 0) {
-        return `Створення ${label} недоступне на поточному тарифі. Перегляньте платні тарифи, щоб додати цю можливість.`;
+        return `Створення ${label} недоступне на поточному тарифі. Перегляньте платні тарифи, щоб додати цю можливість.${projectCapacityOwnerGuidance}`;
       }
-      return `Досягнуто ліміт ${label}: використано ${used} із ${limit.value}. Ви можете редагувати або видаляти наявні елементи, але не можете додавати нові.`;
+      return `Досягнуто ліміт ${label}: використано ${used} із ${limit.value}. Ви можете редагувати або видаляти наявні елементи, але не можете додавати нові.${projectCapacityOwnerGuidance}`;
     }
-    return `Створення ${label} недоступне на поточному тарифі.`;
-  }, [subscriptionAccess.getLimit, subscriptionAccess.getUsage, subscriptionAccess.loading]);
+    return `Створення ${label} недоступне на поточному тарифі.${projectCapacityOwnerGuidance}`;
+  }, [
+    projectCapacityOwnerGuidance,
+    subscriptionAccess.getCapacityLimit,
+    subscriptionAccess.getCapacityUsage,
+    subscriptionAccess.loading,
+  ]);
   const customSectionLimitMessage = canCreateCustomSection
     ? undefined
     : limitNotice("власних розділів", "custom_sections_per_project");
   const customFieldLimitMessage = canCreateCustomField
     ? undefined
     : limitNotice("власних полів", "custom_fields_per_project");
+  const familyTreeLimitMessage = subscriptionAccess.canCreateFamilyTree
+    ? undefined
+    : limitNotice("родових дерев", "family_trees_total");
   const showCustomFieldBlocked = useCallback(() => {
     setUpgradeReason({
       featureName: "Власні поля",
       reason: customFieldLimitMessage || "Створення нового власного поля недоступне або ліміт уже використано.",
-      recommendedPlan: "researcher",
-      used: subscriptionAccess.getUsage("custom_fields_per_project"),
-      limit: subscriptionAccess.getLimit("custom_fields_per_project")?.value ?? undefined,
+      recommendedPlan: projectCapacityUpgradePlan,
+      used: subscriptionAccess.getCapacityUsage("custom_fields_per_project"),
+      limit: subscriptionAccess.getCapacityLimit("custom_fields_per_project")?.value ?? undefined,
     });
   }, [
     customFieldLimitMessage,
-    subscriptionAccess.getLimit,
-    subscriptionAccess.getUsage,
+    projectCapacityUpgradePlan,
+    subscriptionAccess.getCapacityLimit,
+    subscriptionAccess.getCapacityUsage,
   ]);
   const firstReachedLimitNotice = useCallback((label: string, keys: PlanLimitKey[]) => {
     if (subscriptionAccess.loading) return "Перевіряємо ліміти тарифу…";
     const reachedKey = keys.find((key) => {
-      const limit = subscriptionAccess.getLimit(key);
-      const used = subscriptionAccess.getUsage(key);
+      const limit = subscriptionAccess.getCapacityLimit(key);
+      const used = subscriptionAccess.getCapacityUsage(key);
       return Boolean(limit && !limit.isUnlimited && limit.value !== null && used >= limit.value);
     });
     return limitNotice(label, reachedKey ?? keys[0]);
   }, [
     limitNotice,
-    subscriptionAccess.getLimit,
-    subscriptionAccess.getUsage,
+    subscriptionAccess.getCapacityLimit,
+    subscriptionAccess.getCapacityUsage,
     subscriptionAccess.loading,
   ]);
   const canCreateResearchRecord = !workspace || subscriptionAccess.canCreateResearch;
@@ -836,7 +866,7 @@ export default function App() {
         "researches_per_project",
         "researches_total",
       ]);
-  const researchRequiredByPlan = subscriptionAccess.effectivePlan !== "professional";
+  const researchRequiredByPlan = projectCapacityPlan !== "professional";
   const requestedDataGroups = useMemo(() => dataGroupsForPage(page), [page]);
   const shouldLoadResearches = requestedDataGroups.has("researches");
   const shouldLoadPeople = requestedDataGroups.has("people");
@@ -905,11 +935,39 @@ export default function App() {
     if (canCreateProjectRecords) return true;
     setUpgradeReason({
       featureName,
-      reason: "У цьому проєкті можна редагувати й видаляти наявні дані, але створення нових записів заблоковане поточним тарифом.",
-      recommendedPlan: "researcher",
+      reason: `У цьому проєкті можна редагувати й видаляти наявні дані, але створення нових записів заблоковане поточним тарифом.${projectCapacityOwnerGuidance}`,
+      recommendedPlan: projectCapacityUpgradePlan,
     });
     return false;
-  }, [canCreateProjectRecords]);
+  }, [
+    canCreateProjectRecords,
+    projectCapacityOwnerGuidance,
+    projectCapacityUpgradePlan,
+  ]);
+  const ensureCanCreatePerson = useCallback((featureName = "Нова особа") => {
+    if (!canCreateProjectRecords) return ensureCanCreateProjectRecord(featureName);
+    if (subscriptionAccess.canCreatePerson) return true;
+    const used = subscriptionAccess.getCapacityUsage("persons_total");
+    const limit = subscriptionAccess.getCapacityLimit("persons_total");
+    setUpgradeReason({
+      featureName,
+      reason: limit && !limit.isUnlimited && limit.value !== null
+        ? `Досягнуто загальний ліміт осіб: використано ${used} із ${limit.value}. Наявні картки можна переглядати, редагувати, об’єднувати, експортувати або видаляти.${projectCapacityOwnerGuidance}`
+        : `Додавання нових осіб недоступне на поточному тарифі.${projectCapacityOwnerGuidance}`,
+      recommendedPlan: projectCapacityUpgradePlan,
+      used,
+      limit: limit?.value ?? undefined,
+    });
+    return false;
+  }, [
+    canCreateProjectRecords,
+    ensureCanCreateProjectRecord,
+    projectCapacityOwnerGuidance,
+    projectCapacityUpgradePlan,
+    subscriptionAccess.canCreatePerson,
+    subscriptionAccess.getCapacityLimit,
+    subscriptionAccess.getCapacityUsage,
+  ]);
   const refreshSubscriptionAfterCreate = useCallback((previousEntity: unknown) => {
     if (!previousEntity) void subscriptionAccess.refreshSubscription();
   }, [subscriptionAccess.refreshSubscription]);
@@ -2335,7 +2393,7 @@ export default function App() {
       setUpgradeReason({
         featureName: "Створення проєкту",
         reason: "Ви використали доступну кількість проєктів для поточного тарифу.",
-        recommendedPlan: "researcher",
+        recommendedPlan: accountUpgradePlan,
         used: subscriptionAccess.getUsage("projects"),
         limit: subscriptionAccess.getLimit("projects")?.value ?? undefined,
       });
@@ -2647,9 +2705,9 @@ export default function App() {
       setUpgradeReason({
         featureName: "Нове дослідження",
         reason: researchLimitMessage || "Досягнуто ліміт досліджень для поточного тарифу.",
-        recommendedPlan: "researcher",
-        used: subscriptionAccess.getUsage("researches_per_project"),
-        limit: subscriptionAccess.getLimit("researches_per_project")?.value ?? undefined,
+        recommendedPlan: projectCapacityUpgradePlan,
+        used: subscriptionAccess.getCapacityUsage("researches_per_project"),
+        limit: subscriptionAccess.getCapacityLimit("researches_per_project")?.value ?? undefined,
       });
       return;
     }
@@ -3521,8 +3579,14 @@ export default function App() {
     if (!canCreateProjectRecords) {
       throw new Error("У цьому проєкті можна редагувати й видаляти наявні дані, але імпорт нових записів заблокований поточним тарифом.");
     }
+    if (!subscriptionAccess.canImportTable) {
+      throw new Error(subscriptionErrorMessage(new Error("PLAN_LIMIT_REACHED:table_imports_per_month")));
+    }
     const sectionQuotaKey = standardSectionQuotaKeys[collection];
     if (sectionQuotaKey && !canCreateStandardSection(sectionQuotaKey)) {
+      if (collection === "persons") {
+        throw new Error(subscriptionErrorMessage(new Error("PLAN_LIMIT_REACHED:persons_total")));
+      }
       throw new Error("Досягнуто ліміт записів у цьому розділі. Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.");
     }
 
@@ -3533,6 +3597,8 @@ export default function App() {
     const findingIds = new Set(projectFindings.map((finding) => finding.id));
 
     try {
+      await beginTableImport(projectId);
+      void subscriptionAccess.refreshSubscription();
       if (collection === "tasks") {
         const imported = records as TaskRecord[];
         await importProjectWorkRecords(
@@ -3597,6 +3663,18 @@ export default function App() {
         });
       } else if (collection === "persons") {
         const imported = records as Person[];
+        const existingPersonIds = new Set(projectPersons.map((person) => person.id));
+        const newPersonCount = imported.filter((person) => !existingPersonIds.has(person.id)).length;
+        const personLimit = subscriptionAccess.getCapacityLimit("persons_total");
+        const remainingPersons = personLimit && !personLimit.isUnlimited && personLimit.value !== null
+          ? Math.max(0, personLimit.value - subscriptionAccess.getCapacityUsage("persons_total"))
+          : null;
+        if (remainingPersons !== null && newPersonCount > remainingPersons) {
+          throw new Error(
+            `Імпорт містить ${newPersonCount.toLocaleString("uk-UA")} нових осіб, а тариф дозволяє додати ще ${remainingPersons.toLocaleString("uk-UA")}. ` +
+              "Зменште файл, видаліть дублікати або перейдіть на вищий тариф.",
+          );
+        }
         await importProjectPeople(projectId, imported, [], researchIds);
         setProjectPersons((current) => {
           const next = mergeImportedRecords(imported, current);
@@ -3631,8 +3709,6 @@ export default function App() {
     if (workspace && !subscriptionAccess.isAdmin) {
       await assertFamilyTreeFeatureAccess();
     }
-    validateResearchScope("persons", input.personRecords);
-    validateResearchScope("documents", input.documents);
     if (!workspace) {
       const reconciled = reconcileGedcomImportForRetry(input, {
         people: activeDb.persons,
@@ -3656,6 +3732,9 @@ export default function App() {
     }
     if (workspace.role === "viewer") {
       throw new Error("У цьому проєкті у вас є лише право перегляду.");
+    }
+    if (!subscriptionAccess.canCreateFamilyTree) {
+      throw new Error(subscriptionErrorMessage(new Error("PLAN_LIMIT_REACHED:family_trees_total")));
     }
     const projectId = workspace.projectId;
     const researchIds = new Set(projectResearches.map((research) => research.id));
@@ -3698,8 +3777,18 @@ export default function App() {
     if ((hasNewPeople || hasNewDocuments || hasNewFindings || hasNewRelations) && !canCreateProjectRecords) {
       throw new Error("Імпорт нових записів заблокований поточним тарифом.");
     }
+    const personLimit = subscriptionAccess.getCapacityLimit("persons_total");
+    const remainingPersons = personLimit && !personLimit.isUnlimited && personLimit.value !== null
+      ? Math.max(0, personLimit.value - subscriptionAccess.getCapacityUsage("persons_total"))
+      : null;
+    if (remainingPersons !== null && peopleToImport.length > remainingPersons) {
+      throw new Error(
+        `GEDCOM містить ${peopleToImport.length.toLocaleString("uk-UA")} нових осіб, а тариф дозволяє додати ще ${remainingPersons.toLocaleString("uk-UA")}. ` +
+          "Видаліть дублікати, зменште файл або перейдіть на вищий тариф.",
+      );
+    }
     if (hasNewPeople && !canCreateStandardSection(standardSectionQuotaKeys.persons)) {
-      throw new Error("Досягнуто ліміт записів у розділі осіб.");
+      throw new Error(subscriptionErrorMessage(new Error("PLAN_LIMIT_REACHED:persons_total")));
     }
     if (hasNewFindings && !canCreateStandardSection(standardSectionQuotaKeys.findings)) {
       throw new Error("Досягнуто ліміт записів у розділі знахідок.");
@@ -3873,7 +3962,7 @@ export default function App() {
   };
   const navigate = (nextPage: PageKey) => {
     if (nextPage === "familyTree" && !canUseFamilyTreeFeature) {
-      notify("Модуль «Родове дерево» доступний лише запрошеним тестувальникам.", true);
+      notify("Не вдалося підтвердити доступ до модуля «Родове дерево». Оновіть сторінку або спробуйте ще раз.", true);
       return;
     }
     setModuleSearch("");
@@ -3918,7 +4007,7 @@ export default function App() {
   };
   const showPersonInFamilyTree = async (person: Person) => {
     if (!canUseFamilyTreeFeature) {
-      notify("Модуль «Родове дерево» доступний лише запрошеним тестувальникам.", true);
+      notify("Не вдалося підтвердити доступ до модуля «Родове дерево». Оновіть сторінку або спробуйте ще раз.", true);
       return;
     }
     if (!workspace) return;
@@ -3983,7 +4072,7 @@ export default function App() {
         reason: nextPage === "researches"
           ? researchLimitMessage || "Досягнуто ліміт досліджень для поточного тарифу."
           : "Досягнуто ліміт записів у цьому розділі. Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
-        recommendedPlan: "researcher",
+        recommendedPlan: projectCapacityUpgradePlan,
       });
       return;
     }
@@ -4021,9 +4110,9 @@ export default function App() {
       setUpgradeReason({
         featureName: "Власні розділи",
         reason: customSectionLimitMessage || "Створення нового власного розділу недоступне або ліміт уже використано.",
-        recommendedPlan: "researcher",
-        used: subscriptionAccess.getUsage("custom_sections_per_project"),
-        limit: subscriptionAccess.getLimit("custom_sections_per_project")?.value ?? undefined,
+        recommendedPlan: projectCapacityUpgradePlan,
+        used: subscriptionAccess.getCapacityUsage("custom_sections_per_project"),
+        limit: subscriptionAccess.getCapacityLimit("custom_sections_per_project")?.value ?? undefined,
       });
       return;
     }
@@ -4052,7 +4141,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectPersons;
     const previousEntity = previous.find((item) => item.id === person.id);
-    if (!previousEntity && !ensureCanCreateProjectRecord("Нова особа")) return Promise.resolve(null);
+    if (!previousEntity && !ensureCanCreatePerson()) return Promise.resolve(null);
     const optimistic = previous.some((item) => item.id === person.id)
       ? previous.map((item) => (item.id === person.id ? person : item))
       : [person, ...previous];
@@ -4235,6 +4324,7 @@ export default function App() {
       removePersonIdsFromLoadedProject(projectId, uniqueIds);
       invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
       setPersonPedigreeRevision((current) => current + 1);
+      void subscriptionAccess.refreshSubscription();
       notify(
         result.deletedPersons === 1
           ? "Особу видалено. Пов’язані записи відв’язано."
@@ -4298,6 +4388,7 @@ export default function App() {
         current?.projectId === projectId ? null : current
       ));
       setPersonPedigreeRevision((current) => current + 1);
+      void subscriptionAccess.refreshSubscription();
       notify(
         `GEDCOM-набір видалено: ${result.deletedPersons} осіб, ${result.deletedRelations} зв’язків і ${result.deletedFindings} знахідок.`,
       );
@@ -4665,9 +4756,9 @@ export default function App() {
       setUpgradeReason({
         featureName: "Власні розділи",
         reason: "Для створення цих розділів недостатньо доступного ліміту.",
-        recommendedPlan: "researcher",
-        used: subscriptionAccess.getUsage("custom_sections_per_project"),
-        limit: subscriptionAccess.getLimit("custom_sections_per_project")?.value ?? undefined,
+        recommendedPlan: projectCapacityUpgradePlan,
+        used: subscriptionAccess.getCapacityUsage("custom_sections_per_project"),
+        limit: subscriptionAccess.getCapacityLimit("custom_sections_per_project")?.value ?? undefined,
       });
       return;
     }
@@ -4792,20 +4883,17 @@ export default function App() {
     const documentIds = new Set(next.documents.map((item) => item.id));
     const personIds = new Set(next.persons.map((item) => item.id));
     const findingIds = new Set(next.findings.map((item) => item.id));
-    const recordLimit = subscriptionAccess.getLimit("records_per_standard_section");
-    if (recordLimit && !recordLimit.isUnlimited && recordLimit.value !== null) {
-      const counts: Array<[string, number]> = [
-        ["Особи", next.persons.length],
-        ["Документи", next.documents.length],
-        ["Матриця років", next.yearMatrix.length],
-        ["Завдання", next.tasks.length],
-        ["Знахідки", next.findings.length],
-        ["Гіпотези", next.hypotheses.length],
-        ["Запити в архів", next.archiveRequests.length],
-      ];
-      const exceeded = counts.find(([, count]) => count > recordLimit.value!);
-      if (exceeded) {
-        throw new Error(`Резервна копія містить ${exceeded[1]} записів у розділі «${exceeded[0]}», а поточний тариф дозволяє до ${recordLimit.value} записів у розділі.`);
+    const personLimit = subscriptionAccess.getCapacityLimit("persons_total");
+    if (personLimit && !personLimit.isUnlimited && personLimit.value !== null) {
+      const accountUsageWithoutCurrentProject = Math.max(
+        0,
+        subscriptionAccess.getCapacityUsage("persons_total") - projectPersons.length,
+      );
+      const availableForRestore = Math.max(0, personLimit.value - accountUsageWithoutCurrentProject);
+      if (next.persons.length > availableForRestore) {
+        throw new Error(
+          `Резервна копія містить ${next.persons.length.toLocaleString("uk-UA")} осіб, а після заміни поточного проєкту тариф дозволяє зберегти ${availableForRestore.toLocaleString("uk-UA")}.`,
+        );
       }
     }
 
@@ -5028,10 +5116,10 @@ export default function App() {
               <strong>
                 {familyTreeFeatureAccessLoading
                   ? "Перевіряємо доступ до родового дерева…"
-                  : "Модуль «Родове дерево» поки доступний лише запрошеним тестувальникам."}
+                  : "Не вдалося підтвердити доступ до модуля «Родове дерево»."}
               </strong>
               {!familyTreeFeatureAccessLoading ? (
-                <p>Адміністратор може надати доступ зареєстрованому користувачу у розділі тарифів.</p>
+                <p>Оновіть сторінку. Якщо помилка повториться, зверніться до підтримки.</p>
               ) : null}
             </section>
           );
@@ -5071,7 +5159,11 @@ export default function App() {
                 : canCreateStandardSection(standardSectionQuotaKeys[relatedPage])}
               readOnly={readOnly}
               canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
+              canCreateTree={subscriptionAccess.canCreateFamilyTree}
+              treeLimitMessage={familyTreeLimitMessage}
               researchRequired={researchRequiredByPlan}
+              gedcomResearchRequired={false}
+              onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
               onOpenPerson={(personId) => openRelatedRecord("persons", personId)}
               onActiveContextChange={handleFamilyTreeActiveContextChange}
               personProfileNavigationEnabled={personsModuleV2Enabled}
@@ -5099,12 +5191,12 @@ export default function App() {
             reason: page === "researches"
               ? researchLimitMessage || "Досягнуто ліміт досліджень для поточного тарифу."
               : "Досягнуто ліміт записів у цьому розділі. Ви можете редагувати або видаляти наявні записи, але не можете додавати нові.",
-            recommendedPlan: "researcher",
+            recommendedPlan: projectCapacityUpgradePlan,
             used: page === "researches"
-              ? subscriptionAccess.getUsage("researches_per_project")
+              ? subscriptionAccess.getCapacityUsage("researches_per_project")
               : undefined,
             limit: page === "researches"
-              ? subscriptionAccess.getLimit("researches_per_project")?.value ?? undefined
+              ? subscriptionAccess.getCapacityLimit("researches_per_project")?.value ?? undefined
               : undefined,
           });
         };
@@ -5134,7 +5226,7 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
             onOpenScanViewer={openScanViewer}
             onSave={saveFor(page)}
-            onImportRecords={importTableRecords}
+            onImportRecords={subscriptionAccess.canImportTable ? importTableRecords : undefined}
             onDelete={deleteFor(page)}
             onCreateBlocked={showCreateBlocked}
             projectId={workspace?.projectId}
@@ -5185,6 +5277,7 @@ export default function App() {
                 }}
                 onShowInTree={canUseFamilyTreeFeature ? showPersonInFamilyTree : undefined}
                 onOpenMap={showPersonOnMap}
+                onOpenPhoto={(photo, photos) => openScanViewer(photo, undefined, [...photos])}
                 onSavePerson={savePerson}
                 onDeletePersons={deletePersons}
                 onDeleteGedcomImport={deleteGedcomImport}
@@ -5204,8 +5297,11 @@ export default function App() {
                 customFieldLimitMessage={customFieldLimitMessage}
                 readOnly={readOnly}
                 canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
+                canCreateTree={subscriptionAccess.canCreateFamilyTree}
+                canImportTable={subscriptionAccess.canImportTable}
+                onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
                 projectName={workspace?.projectName}
-                researchRequired={researchRequiredByPlan}
+                researchRequired={false}
                 canUseGedcom={canUseFamilyTreeFeature}
                 pedigreeCacheScope={`${account?.id ?? ""}:${personPedigreeRevision}`}
                 pedigreeContext={
@@ -5253,8 +5349,11 @@ export default function App() {
             onCreateRelated={createRelatedRecord}
             readOnly={readOnly}
             canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
+            canCreateTree={subscriptionAccess.canCreateFamilyTree}
+            canImportTable={subscriptionAccess.canImportTable}
+            onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
             projectName={workspace?.projectName}
-            researchRequired={researchRequiredByPlan}
+            researchRequired={false}
             canUseGedcom={canUseFamilyTreeFeature}
           />
         );
@@ -5307,7 +5406,7 @@ export default function App() {
             onUpgradeRequired={() => setUpgradeReason({
               featureName: "Власні розділи",
               reason: customSectionLimitMessage || "Створення власних розділів недоступне або тарифний ліміт уже використано.",
-              recommendedPlan: "researcher",
+              recommendedPlan: projectCapacityUpgradePlan,
             })}
             onCustomFieldUpgradeRequired={showCustomFieldBlocked}
             sectionCreateRequest={sectionCreateRequest ?? undefined}
@@ -5421,13 +5520,13 @@ export default function App() {
           workspace={workspace}
           onClose={() => setTeamOpen(false)}
           onInvitationAccepted={acceptWorkspaceInvitation}
-          canInviteMember={subscriptionAccess.canInviteMember}
+          canInviteEditor={subscriptionAccess.canInviteEditor}
           onUpgradeRequired={() => setUpgradeReason({
-            featureName: "Запрошення учасників",
-            reason: "Запрошення учасників недоступне або ліміт поточного тарифу вже використано.",
-            recommendedPlan: "researcher",
-            used: subscriptionAccess.getUsage("project_members"),
-            limit: subscriptionAccess.getLimit("project_members")?.value ?? undefined,
+            featureName: "Редакторські місця",
+            reason: `Використано всі редакторські місця поточного тарифу. Глядачів можна запрошувати без обмежень.${projectCapacityOwnerGuidance}`,
+            recommendedPlan: projectCapacityUpgradePlan,
+            used: subscriptionAccess.getCapacityUsage("editors_total"),
+            limit: subscriptionAccess.getCapacityLimit("editors_total")?.value ?? undefined,
           })}
           onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
           onActivity={(relatedId, text, actionType) =>
@@ -5441,7 +5540,7 @@ export default function App() {
       {upgradeReason ? (
         <UpgradeRequiredModal
           {...upgradeReason}
-          currentPlan={subscriptionAccess.effectivePlan ?? "free"}
+          currentPlan={projectCapacityPlan}
           trialExpired={subscriptionAccess.subscription?.status === "expired"}
           onClose={() => setUpgradeReason(null)}
           onOpenPlans={() => {

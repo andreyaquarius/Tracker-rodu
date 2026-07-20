@@ -282,7 +282,7 @@ export function ScanAttachmentsEditor({
         type: blob.type || scan.mimeType || "application/octet-stream",
       });
       const uploaded = await saveScan(file, policy, { driveFolderPath });
-      const replacement = uploadedReplacement(scan, uploaded);
+      const replacement = uploadedReplacement(scan, uploaded, true);
       onChange(scans.map((item) => item.id === scan.id ? replacement : item));
     } catch (copyError) {
       setError(
@@ -458,7 +458,11 @@ export function ScanAttachmentsEditor({
   );
 }
 
-function uploadedReplacement(scan: ScanAttachment, uploaded: ScanAttachment): ScanAttachment {
+function uploadedReplacement(
+  scan: ScanAttachment,
+  uploaded: ScanAttachment,
+  preserveAvatarCrop = false,
+): ScanAttachment {
   return {
     ...uploaded,
     id: scan.id,
@@ -468,6 +472,7 @@ function uploadedReplacement(scan: ScanAttachment, uploaded: ScanAttachment): Sc
     sourceExpiresAt: scan.sourceExpiresAt,
     sourceDurability: scan.sourceDurability,
     availability: "available",
+    ...(preserveAvatarCrop && scan.avatarCrop ? { avatarCrop: scan.avatarCrop } : {}),
   };
 }
 

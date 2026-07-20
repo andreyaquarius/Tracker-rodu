@@ -50,6 +50,7 @@ import {
 } from "../utils/personRelation";
 import {
   isPhotoReferenceAvailable,
+  personAvatarImageStyle,
   primaryPersonPhoto,
 } from "../utils/personPhotos.ts";
 import { PersonEventsView } from "../components/PersonEventsView.tsx";
@@ -110,6 +111,9 @@ export function PersonsPage({
   onCreateRelated,
   readOnly = false,
   canCreate = true,
+  canCreateTree = true,
+  canImportTable = true,
+  onSubscriptionChanged,
   researchRequired = false,
   canUseGedcom = false,
   projectId,
@@ -148,6 +152,9 @@ export function PersonsPage({
   onCreateRelated: (page: PageKey, initialValues: Record<string, unknown>) => void;
   readOnly?: boolean;
   canCreate?: boolean;
+  canCreateTree?: boolean;
+  canImportTable?: boolean;
+  onSubscriptionChanged?: () => void;
   projectName?: string;
   researchRequired?: boolean;
   canUseGedcom?: boolean;
@@ -381,7 +388,7 @@ export function PersonsPage({
               customFieldDefinitions,
             )}
           />
-          {canCreateRecords ? (
+          {canCreateRecords && canImportTable ? (
             <TableDataImportButton
               collection="persons"
               db={db}
@@ -393,7 +400,7 @@ export function PersonsPage({
           {canUseGedcom ? (
             <GedcomImportButton
               key={`persons-gedcom-import:${projectId ?? "local"}`}
-              disabled={!canCreateRecords}
+              disabled={!canCreateRecords || !canCreateTree}
               defaultResearchId={researchFilter || (researches.length === 1 ? researches[0].id : "")}
               researchRequired={researchRequired}
               onImportPersons={(records) => onImportRecords("persons", records)}
@@ -415,6 +422,7 @@ export function PersonsPage({
                   // idempotent barrier before the callback returns.
                   await registerGedcomImportTree(importOperationId, result.treeId);
                 }
+                if (result) onSubscriptionChanged?.();
                 return result ? { treeId: result.treeId } : undefined;
               } : undefined}
             />
@@ -998,6 +1006,7 @@ function PersonPrimaryPhoto({ person }: { person: Person }) {
         <img
           src={source.url}
           alt={`Головне фото: ${personDisplayName(person)}`}
+          style={personAvatarImageStyle(photo)}
           onError={() => {
             if (source.revoke) URL.revokeObjectURL(source.url);
             setSource(null);

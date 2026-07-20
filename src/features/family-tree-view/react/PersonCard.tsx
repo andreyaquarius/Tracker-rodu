@@ -10,6 +10,7 @@ import {
   leaseTreePersonPhotoSource,
   type TreePersonPhotoSourceResolver,
 } from "./personPhotoSourceCache.ts";
+import { personAvatarImageStyle } from "../../../utils/personPhotos.ts";
 
 export interface PersonCardProps {
   node: LayoutNode;
@@ -289,6 +290,7 @@ function PersonAvatar({
           decoding="async"
           draggable={false}
           referrerPolicy="no-referrer"
+          style={personAvatarImageStyle(photo)}
           onError={() => setFailed(true)}
         />
       ) : (

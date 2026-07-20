@@ -9,15 +9,79 @@ import { buildFamilyTreeProjection } from "../src/utils/familyTreeProjection.ts"
 import { attachTrackerPersonPhotos } from "../src/features/family-tree-view/adapters/trackerPersonPhotos.ts";
 import type { FamilyGraphData } from "../src/features/family-tree-view/types.ts";
 import {
+  DEFAULT_PERSON_AVATAR_CROP,
   isPhotoReferenceAvailable,
+  normalizePersonAvatarCrop,
   normalizePersonPhotoState,
+  personAvatarImageStyle,
   personPhotoMetadataForStorage,
   personPhotoStateFromMetadata,
   personPhotosFromGedcomMedia,
   primaryPersonPhoto,
   primaryPersonPhotoFromCustomFields,
   PERSON_SCANS_METADATA_KEY,
+  updatePersonAvatarCrop,
 } from "../src/utils/personPhotos.ts";
+
+test("normalizes avatar crop defaults and clamps finite values", () => {
+  assert.deepEqual(normalizePersonAvatarCrop(undefined), DEFAULT_PERSON_AVATAR_CROP);
+  assert.deepEqual(normalizePersonAvatarCrop("invalid"), DEFAULT_PERSON_AVATAR_CROP);
+  assert.deepEqual(normalizePersonAvatarCrop({ x: Number.NaN, y: "20", zoom: null }), {
+    x: 50,
+    y: 50,
+    zoom: 1,
+  });
+  assert.deepEqual(normalizePersonAvatarCrop({ x: -15, y: 140, zoom: 8 }), {
+    x: 0,
+    y: 100,
+    zoom: 3,
+  });
+  assert.deepEqual(normalizePersonAvatarCrop({ x: 24.5, y: 61.25, zoom: 1.75 }), {
+    x: 24.5,
+    y: 61.25,
+    zoom: 1.75,
+  });
+});
+
+test("builds deterministic avatar image styles from normalized crop metadata", () => {
+  assert.deepEqual(personAvatarImageStyle({ x: 25, y: 75, zoom: 2 }), {
+    objectPosition: "25% 75%",
+    transform: "scale(2)",
+    transformOrigin: "25% 75%",
+  });
+  assert.deepEqual(personAvatarImageStyle({ x: -1, y: 101, zoom: 0 }), {
+    objectPosition: "0% 100%",
+    transform: "scale(1)",
+    transformOrigin: "0% 100%",
+  });
+  assert.deepEqual(personAvatarImageStyle({ avatarCrop: { x: 30, y: 40, zoom: 1.5 } }), {
+    objectPosition: "30% 40%",
+    transform: "scale(1.5)",
+    transformOrigin: "30% 40%",
+  });
+});
+
+test("updates avatar crop immutably for only the requested photo", () => {
+  const first = personPhotosFromGedcomMedia(
+    [media("https://example.test/first.jpg", true)],
+    "2026-07-12T00:00:00.000Z",
+    () => "first",
+  ).photos[0];
+  const second = { ...first, id: "second", name: "second.jpg" };
+  const sourcePhotos = [first, second];
+
+  const updated = updatePersonAvatarCrop(sourcePhotos, "second", {
+    x: 10,
+    y: 90,
+    zoom: 2.5,
+  });
+
+  assert.notEqual(updated, sourcePhotos);
+  assert.equal(updated[0], first);
+  assert.notEqual(updated[1], second);
+  assert.equal(second.avatarCrop, undefined);
+  assert.deepEqual(updated[1].avatarCrop, { x: 10, y: 90, zoom: 2.5 });
+});
 
 test("converts remote GEDCOM media into available person photos and keeps the primary marker", () => {
   let id = 0;
@@ -117,8 +181,10 @@ test("round-trips photo gallery metadata without embedding image bytes", () => {
     "2026-07-12T00:00:00.000Z",
     () => "photo",
   ).photos;
+  photos[0].avatarCrop = { x: 35, y: 42, zoom: 1.6 };
   const stored = personPhotoMetadataForStorage({ photos, primaryPhotoId: "photo" });
   assert.deepEqual(personPhotoStateFromMetadata(stored), stored);
+  assert.deepEqual(stored.photos[0].avatarCrop, { x: 35, y: 42, zoom: 1.6 });
   assert.equal("data" in stored.photos[0], false);
   assert.equal("base64" in stored.photos[0], false);
 });

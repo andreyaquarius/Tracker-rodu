@@ -9,6 +9,7 @@ import type {
   Person,
   PersonRelation,
   Research,
+  ScanAttachment,
   TaskRecord,
 } from "../../types";
 import type { PageKey } from "../../components/Sidebar";
@@ -84,6 +85,7 @@ export interface PersonsModuleV2Props {
   onNavigate: (target: PersonRouteTarget, options?: { replace?: boolean }) => void;
   onShowInTree?: (person: Person) => void;
   onOpenMap?: (person: Person) => void;
+  onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[]) => void;
   onSavePerson: PersonSaveHandler;
   onDeletePersons?: (personIds: readonly string[]) => Promise<void>;
   onDeleteGedcomImport?: (group: GedcomImportGroup) => Promise<void>;
@@ -112,6 +114,9 @@ export interface PersonsModuleV2Props {
   customFieldLimitMessage?: string;
   readOnly?: boolean;
   canCreate?: boolean;
+  canCreateTree?: boolean;
+  canImportTable?: boolean;
+  onSubscriptionChanged?: () => void;
   projectName?: string;
   researchRequired?: boolean;
   canUseGedcom?: boolean;
@@ -150,6 +155,7 @@ export function PersonsModuleV2({
   onNavigate,
   onShowInTree,
   onOpenMap,
+  onOpenPhoto,
   onSavePerson,
   onDeletePersons,
   onDeleteGedcomImport,
@@ -167,6 +173,9 @@ export function PersonsModuleV2({
   customFieldLimitMessage,
   readOnly = false,
   canCreate = true,
+  canCreateTree = true,
+  canImportTable = true,
+  onSubscriptionChanged,
   projectName = "Трекер Роду",
   researchRequired = false,
   canUseGedcom = false,
@@ -428,6 +437,7 @@ export function PersonsModuleV2({
             : undefined}
           onShowInTree={onShowInTree}
           onOpenMap={onOpenMap}
+          onOpenPhoto={onOpenPhoto}
           onAddEvent={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
           onOpenPerson={(person) => onNavigate({ mode: "profile", personId: person.id })}
           onOpenRelated={(page, record) => onOpenRelated(page, record.id, record)}
@@ -454,7 +464,7 @@ export function PersonsModuleV2({
 
   const headerActions: ReactNode = (
     <>
-      {!readOnly && canCreate ? (
+      {!readOnly && canCreate && canImportTable ? (
         <TableDataImportButton
           collection="persons"
           db={db}
@@ -466,7 +476,7 @@ export function PersonsModuleV2({
       {!readOnly && canUseGedcom ? (
         <GedcomImportButton
           key={`persons-v2-gedcom-import:${projectId ?? "local"}`}
-          disabled={!canCreate || gedcomImportGroups.length > 0}
+          disabled={!canCreate || !canCreateTree || gedcomImportGroups.length > 0}
           defaultResearchId={researches.length === 1 ? researches[0].id : ""}
           researchRequired={researchRequired}
           onImportPersons={(records) => onImportRecords("persons", records)}
@@ -489,6 +499,7 @@ export function PersonsModuleV2({
             if (result && importOperationId) {
               await registerGedcomImportTree(importOperationId, result.treeId);
             }
+            if (result) onSubscriptionChanged?.();
             return result ? { treeId: result.treeId } : undefined;
           } : undefined}
         />
@@ -667,6 +678,7 @@ export function PersonsModuleV2({
           directAncestor={detailPerson ? effectiveDirectAncestorIds.has(detailPerson.id) : false}
           onClose={() => setPreviewPersonId("")}
           onOpenProfile={(person) => onNavigate({ mode: "profile", personId: person.id })}
+          onOpenPhoto={onOpenPhoto}
           onShowInTree={onShowInTree}
           onEdit={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
           onDelete={!readOnly && onDeletePersons && !deletingPersons

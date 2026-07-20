@@ -35,6 +35,7 @@ test("special perspective bars keep accessible progress and compact controls", (
   assert.match(page, />\s*Зупинити\s*</);
   assert.match(page, /Повернутися до родового дерева/);
   assert.match(page, /family-tree-v2-perspective-bar-compact/);
+  assert.match(page, /family-tree-v2-toolbar-status[\s\S]*?family-tree-v2-toolbar-perspective/);
   assert.match(page, /Нащадки: <span>\{allDescendantsLabel\}<\/span>/);
   assert.doesNotMatch(page, /Окремий граф; базове родове дерево не змінено/);
   assert.match(page, /Продовжити завантаження/);
@@ -43,7 +44,7 @@ test("special perspective bars keep accessible progress and compact controls", (
   assert.match(styles, /\.family-tree-v2-perspective-progress/);
   assert.match(
     styles,
-    /\.family-tree-v2-perspective-bar-compact\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*38px;/s,
+    /\.family-tree-v2-perspective-bar-compact\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*32px;/s,
   );
 });
 

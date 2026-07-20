@@ -34,7 +34,13 @@ import { createId } from "../../utils/id";
 import { normalizeCustomFieldValues } from "../../utils/customFields";
 import { PERSON_EVENT_TYPES, normalizePersonEvents, personEventLabel } from "../../utils/geo";
 import { createPersonMapEvent, updatePersonEventById } from "../../utils/personEventGeo.ts";
-import { normalizePersonPhotoState } from "../../utils/personPhotos";
+import {
+  normalizePersonAvatarCrop,
+  normalizePersonPhotoState,
+  personAvatarImageStyle,
+  primaryPersonPhoto,
+  updatePersonAvatarCrop,
+} from "../../utils/personPhotos";
 import { resolveEditorSectionAtViewport } from "../../utils/personEditorSectionNavigation";
 import {
   personEducation,
@@ -42,6 +48,8 @@ import {
   withPersonStandardFields,
 } from "../../utils/personStandardFields";
 import type { PersonSaveHandler } from "./contracts";
+import { PersonAvatarFramingEditorV2 } from "./PersonAvatarFramingEditorV2.tsx";
+import { usePersonPhotoPreviewSource } from "./PersonPhotoAlbumV2.tsx";
 
 const genders: PersonGender[] = ["невідомо", "чоловік", "жінка"];
 const CORE_MAP_EVENT_TYPES = new Set<PersonEventType>(["birth", "marriage", "death", "residence"]);
@@ -233,6 +241,35 @@ function personInitials(fullName: string): string {
     .slice(0, 2)
     .join("");
   return initials.toLocaleUpperCase("uk") || "?";
+}
+
+function PersonEditorSummaryAvatarV2({
+  photo,
+  name,
+}: {
+  photo?: NonNullable<Person["photos"]>[number];
+  name: string;
+}) {
+  const preview = usePersonPhotoPreviewSource(photo);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [photo?.id, preview.url]);
+
+  return (
+    <span className="person-editor-v2-avatar" aria-hidden="true">
+      {preview.url && !failed ? (
+        <img
+          src={preview.url}
+          alt=""
+          draggable={false}
+          style={personAvatarImageStyle(photo)}
+          onError={() => setFailed(true)}
+        />
+      ) : personInitials(name)}
+    </span>
+  );
 }
 
 function displayLifeYears(draft: PersonDraft): string {
@@ -576,12 +613,17 @@ export function PersonEditorV2({
   };
 
   const photoState = normalizePersonPhotoState(form.photos, form.primaryPhotoId);
+  const primaryPhoto = primaryPersonPhoto(photoState.photos, photoState.primaryPhotoId);
   const updatePhotos = (photos: Person["photos"]) => {
     markEdited();
     setForm((current) => {
       const next = normalizePersonPhotoState(photos, current.primaryPhotoId);
       return { ...current, photos: next.photos, primaryPhotoId: next.primaryPhotoId };
     });
+  };
+  const updateAvatarCrop = (crop: NonNullable<typeof primaryPhoto>["avatarCrop"]) => {
+    if (!primaryPhoto) return;
+    updatePhotos(updatePersonAvatarCrop(photoState.photos, primaryPhoto.id, crop));
   };
 
   const eventPerson = {
@@ -859,9 +901,10 @@ export function PersonEditorV2({
         <div className="person-editor-v2-layout" inert={saving ? true : undefined}>
           <aside className="person-editor-v2-sidebar">
             <div className="person-editor-v2-summary">
-              <span className="person-editor-v2-avatar" aria-hidden="true">
-                {personInitials(displayedFullName)}
-              </span>
+              <PersonEditorSummaryAvatarV2
+                photo={primaryPhoto}
+                name={displayedFullName}
+              />
               <strong>{displayedFullName || "Особа без імені"}</strong>
               <span>{displayLifeYears(form)}</span>
               <span className="person-editor-v2-status-badge">{form.status}</span>
@@ -955,17 +998,26 @@ export function PersonEditorV2({
                 onChange={updatePhotos}
               />
               {photoState.photos.length ? (
-                <label className="field-wide">
-                  <span>Головне фото</span>
-                  <select
-                    value={photoState.primaryPhotoId}
-                    onChange={(event) => update("primaryPhotoId", event.target.value)}
-                  >
-                    {photoState.photos.map((photo) => (
-                      <option key={photo.id} value={photo.id}>{photo.name}</option>
-                    ))}
-                  </select>
-                </label>
+                <>
+                  <label className="field-wide">
+                    <span>Головне фото</span>
+                    <select
+                      value={photoState.primaryPhotoId}
+                      onChange={(event) => update("primaryPhotoId", event.target.value)}
+                    >
+                      {photoState.photos.map((photo) => (
+                        <option key={photo.id} value={photo.id}>{photo.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="field-wide">
+                    <PersonAvatarFramingEditorV2
+                      photo={primaryPhoto}
+                      value={normalizePersonAvatarCrop(primaryPhoto?.avatarCrop)}
+                      onChange={updateAvatarCrop}
+                    />
+                  </div>
+                </>
               ) : null}
             </EditorSection>
 

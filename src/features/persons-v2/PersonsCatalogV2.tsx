@@ -22,6 +22,10 @@ import {
   personTimelineDateDisplay,
   personTimelineEventDisplayTitle,
 } from "./presentation";
+import {
+  personAvatarImageStyle,
+  primaryPersonPhoto,
+} from "../../utils/personPhotos.ts";
 
 export type PersonsCatalogSegmentV2 = "all" | "direct" | "confirmed" | "hypotheses";
 export type PersonsCatalogViewV2 = "list" | "grid";
@@ -606,7 +610,13 @@ function PersonIdentityV2({ person, photoUrl, large = false }: {
   return (
     <div className={`persons-v2-identity${large ? " is-large" : ""}`}>
       <span className="persons-v2-avatar" aria-hidden="true">
-        {photoUrl ? <img src={photoUrl} alt="" /> : personInitialsV2(person)}
+        {photoUrl ? (
+          <img
+            src={photoUrl}
+            alt=""
+            style={personAvatarImageStyle(primaryPersonPhoto(person.photos, person.primaryPhotoId))}
+          />
+        ) : personInitialsV2(person)}
       </span>
       <span>
         <strong>{personDisplayNameV2(person)}</strong>

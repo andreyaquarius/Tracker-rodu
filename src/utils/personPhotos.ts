@@ -1,4 +1,4 @@
-import type { ScanAttachment } from "../types";
+import type { PersonAvatarCrop, ScanAttachment } from "../types";
 import type { GedcomImportMediaDraft } from "../types/familyTree";
 import { externalLinkExpiry } from "./externalLinkExpiry.ts";
 
@@ -9,6 +9,54 @@ export interface PersonPhotoState {
 
 /** Internal person custom-fields bucket shared by persistence and graph adapters. */
 export const PERSON_SCANS_METADATA_KEY = "__trackerRoduPersonScans";
+
+export const DEFAULT_PERSON_AVATAR_CROP: Readonly<PersonAvatarCrop> = Object.freeze({
+  x: 50,
+  y: 50,
+  zoom: 1,
+});
+
+export function normalizePersonAvatarCrop(value: unknown): PersonAvatarCrop {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    x: normalizedCropNumber(record.x, DEFAULT_PERSON_AVATAR_CROP.x, 0, 100),
+    y: normalizedCropNumber(record.y, DEFAULT_PERSON_AVATAR_CROP.y, 0, 100),
+    zoom: normalizedCropNumber(record.zoom, DEFAULT_PERSON_AVATAR_CROP.zoom, 1, 3),
+  };
+}
+
+export function personAvatarImageStyle(value: unknown): {
+  objectPosition: string;
+  transform: string;
+  transformOrigin: string;
+} {
+  const crop = normalizePersonAvatarCrop(
+    value && typeof value === "object" && !Array.isArray(value) && "avatarCrop" in value
+      ? (value as { avatarCrop?: unknown }).avatarCrop
+      : value,
+  );
+  const focalPoint = `${crop.x}% ${crop.y}%`;
+  return {
+    objectPosition: focalPoint,
+    transform: `scale(${crop.zoom})`,
+    transformOrigin: focalPoint,
+  };
+}
+
+export function updatePersonAvatarCrop(
+  photos: readonly ScanAttachment[] | undefined,
+  photoId: string,
+  crop: unknown,
+): ScanAttachment[] {
+  const normalizedCrop = normalizePersonAvatarCrop(crop);
+  return (photos ?? []).map((photo) => (
+    photo.id === photoId
+      ? { ...photo, avatarCrop: normalizedCrop }
+      : photo
+  ));
+}
 
 const gedcomImageFormats = new Set([
   "bmp", "gif", "jpeg", "jpg", "png", "svg", "svg+xml", "tif", "tiff", "webp",
@@ -141,4 +189,15 @@ function fileNameFromReference(reference: string): string {
 function finiteNonNegativeNumber(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function normalizedCropNumber(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, value))
+    : fallback;
 }

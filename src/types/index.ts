@@ -6,6 +6,12 @@ export interface BaseEntity {
   updatedAt: string;
 }
 
+export interface PersonAvatarCrop {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
 export interface ScanAttachment {
   id: EntityId;
   name: string;
@@ -31,6 +37,8 @@ export interface ScanAttachment {
   sourceExpiresAt?: string;
   sourceDurability?: "temporary" | "unknown";
   statusMessage?: string;
+  /** Presentation-only focal point and zoom used when this photo is an avatar. */
+  avatarCrop?: PersonAvatarCrop;
 }
 
 export type GeoSource = "search" | "map_click" | "import" | "unknown";

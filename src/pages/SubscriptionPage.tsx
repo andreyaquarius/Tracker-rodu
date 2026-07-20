@@ -11,11 +11,6 @@ import {
   type AdminSubscriptionRow,
 } from "../services/subscriptionService";
 import {
-  adminSetFamilyTreeFeatureAccess,
-  loadAdminFamilyTreeFeatureAccess,
-  type FamilyTreeFeatureAccessUser,
-} from "../services/familyTreeFeatureAccess";
-import {
   adminDeleteAnnouncement,
   adminSaveAnnouncement,
   loadAdminAnnouncements,
@@ -36,7 +31,6 @@ import type {
   SubscriptionPlan,
   SubscriptionStatus,
 } from "../types/subscription";
-import { filterFamilyTreeAccessCandidates } from "../utils/familyTreeFeatureAccess";
 import { formatDateForDisplay } from "../utils/dateHelpers";
 
 interface SubscriptionPageProps {
@@ -49,6 +43,9 @@ interface SubscriptionPageProps {
 
 const limitLabels: Record<PlanLimitKey, string> = {
   projects: "Проєкти",
+  family_trees_total: "Родові дерева",
+  persons_total: "Особи у ваших проєктах",
+  editors_total: "Редактори, крім власника",
   researches_total: "Дослідження загалом",
   researches_per_project: "Дослідження у проєкті",
   records_per_standard_section: "Записи в розділах",
@@ -60,15 +57,21 @@ const limitLabels: Record<PlanLimitKey, string> = {
   hypothesis_ai_reviews_per_month: "ШІ-аналізи гіпотез",
 };
 
-const hiddenPlanLimitKeys = new Set<PlanLimitKey>(["researches_total", "hypothesis_ai_reviews_per_month"]);
-const planCardLimitOrder: PlanLimitKey[] = [
-  "projects",
+const hiddenPlanLimitKeys = new Set<PlanLimitKey>([
+  "researches_total",
   "researches_per_project",
   "records_per_standard_section",
+  "project_members",
   "table_imports_per_month",
+  "hypothesis_ai_reviews_per_month",
+]);
+const planCardLimitOrder: PlanLimitKey[] = [
+  "projects",
+  "family_trees_total",
+  "persons_total",
+  "editors_total",
   "custom_fields_per_project",
   "custom_sections_per_project",
-  "project_members",
   "ai_credits_per_month",
 ];
 
@@ -82,13 +85,9 @@ export function SubscriptionPage({
   const [plans, setPlans] = useState<Array<{ plan: SubscriptionPlan; limits: PlanLimit[] }>>([]);
   const [adminRows, setAdminRows] = useState<AdminSubscriptionRow[]>([]);
   const [featureFlags, setFeatureFlags] = useState<AppFeatureFlag[]>([]);
-  const [familyTreeAccessUsers, setFamilyTreeAccessUsers] = useState<
-    FamilyTreeFeatureAccessUser[]
-  >([]);
   const [adminAnnouncements, setAdminAnnouncements] = useState<AppAnnouncement[]>([]);
   const [announcementsError, setAnnouncementsError] = useState("");
   const [featureFlagsError, setFeatureFlagsError] = useState("");
-  const [familyTreeAccessError, setFamilyTreeAccessError] = useState("");
   const [pageError, setPageError] = useState("");
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelMessage, setCancelMessage] = useState("");
@@ -96,7 +95,6 @@ export function SubscriptionPage({
   const refreshPage = async () => {
     setPageError("");
     setFeatureFlagsError("");
-    setFamilyTreeAccessError("");
     setAnnouncementsError("");
     try {
       const nextPlans = await loadSubscriptionPlans();
@@ -104,16 +102,6 @@ export function SubscriptionPage({
       if (context?.isAdmin) {
         const nextAdminRows = await loadAdminSubscriptions();
         setAdminRows(nextAdminRows);
-        try {
-          const nextAccessUsers = await loadAdminFamilyTreeFeatureAccess();
-          setFamilyTreeAccessUsers(nextAccessUsers);
-          setFamilyTreeAccessError("");
-        } catch {
-          setFamilyTreeAccessUsers([]);
-          setFamilyTreeAccessError(
-            "Контроль доступу до родового дерева ще не налаштований у базі. Застосуйте міграцію 202607120002_family_tree_feature_access.sql.",
-          );
-        }
         try {
           const nextAnnouncements = await loadAdminAnnouncements();
           setAdminAnnouncements(nextAnnouncements);
@@ -218,14 +206,14 @@ export function SubscriptionPage({
       ) : context?.subscription.status === "trialing" ? (
         <section className="subscription-status-band">
           <div>
-            <span className="eyebrow">Пробний період: повний доступ</span>
+            <span className="eyebrow">Пробний період: можливості Professional</span>
             <h2>Пробний доступ до тарифу «Професійний»</h2>
           </div>
           <div className="subscription-status-value">
             <strong>{trialDaysRemaining}</strong>
             <span>днів залишилося</span>
           </div>
-          <p>Діє до {formatDate(context.subscription.trialEndsAt)}. Платіжна картка не потрібна.</p>
+          <p>До 15 000 осіб, 5 редакторів і 100 ШІ-кредитів. Діє до {formatDate(context.subscription.trialEndsAt)}. Платіжна картка не потрібна.</p>
         </section>
       ) : (
         <section className="subscription-status-band">
@@ -268,9 +256,15 @@ export function SubscriptionPage({
             <div className="usage-item" key={item.key}>
               <span>{limitLabels[item.key]}</span>
               <strong>{usageValue(context?.effectivePlanCode ?? "free", item)}</strong>
+              <UsageProgress item={item} />
             </div>
           ))}
         </div>
+        <p className="subscription-counting-note">
+          Особи рахуються у всіх проєктах, якими ви володієте; одна картка у кількох деревах
+          рахується один раз. Редактор рахується один раз для всіх ваших проєктів. Власник і
+          глядачі редакторські місця не займають, а кількість глядачів не обмежується.
+        </p>
       </section>
 
       {!isPermanentAdmin ? (
@@ -292,6 +286,18 @@ export function SubscriptionPage({
                       <strong>{planLimitValue(plan.code, limit)}</strong>
                     </li>
                   ))}
+                  <li>
+                    <span>Глядачі</span>
+                    <strong>Без тарифного ліміту</strong>
+                  </li>
+                  <li>
+                    <span>Основні модулі</span>
+                    <strong>Включено</strong>
+                  </li>
+                  <li>
+                    <span>GEDCOM імпорт та експорт</span>
+                    <strong>Включено</strong>
+                  </li>
                 </ul>
                 <button type="button" className="button button-secondary" disabled>
                   {plan.code === context?.effectivePlanCode ? "Активний тариф" : "Оплата готується"}
@@ -312,11 +318,6 @@ export function SubscriptionPage({
           <AdminFeatureFlags
             flags={featureFlags}
             loadError={featureFlagsError}
-            onChanged={refreshPage}
-          />
-          <AdminFamilyTreeAccess
-            users={familyTreeAccessUsers}
-            loadError={familyTreeAccessError}
             onChanged={refreshPage}
           />
           <AdminSubscriptions rows={adminRows} onChanged={refreshPage} />
@@ -651,173 +652,6 @@ function AdminFeatureFlags({ flags, loadError, onChanged }: {
   );
 }
 
-function AdminFamilyTreeAccess({ users, loadError, onChanged }: {
-  users: FamilyTreeFeatureAccessUser[];
-  loadError: string;
-  onChanged: () => Promise<void>;
-}) {
-  const [selectedUserId, setSelectedUserId] = useState("");
-  const [userQuery, setUserQuery] = useState("");
-  const [busyUserId, setBusyUserId] = useState("");
-  const [error, setError] = useState("");
-  const availableUsers = users.filter((user) => !user.isAdmin && !user.isEnabled);
-  const enabledUsers = users.filter((user) => user.isEnabled);
-  const matchingUsers = useMemo(
-    () => filterFamilyTreeAccessCandidates(users, userQuery),
-    [users, userQuery],
-  );
-  const visibleMatchingUsers = matchingUsers.slice(0, 12);
-  const selectedUser = availableUsers.find((user) => user.userId === selectedUserId) ?? null;
-
-  useEffect(() => {
-    if (selectedUserId && !availableUsers.some((user) => user.userId === selectedUserId)) {
-      setSelectedUserId("");
-    }
-  }, [selectedUserId, availableUsers.map((user) => user.userId).join("|")]);
-
-  const updateAccess = async (userId: string, isEnabled: boolean) => {
-    setBusyUserId(userId);
-    setError("");
-    try {
-      await adminSetFamilyTreeFeatureAccess({ userId, isEnabled });
-      setSelectedUserId("");
-      setUserQuery("");
-      await onChanged();
-    } catch (updateError) {
-      setError(
-        updateError instanceof Error
-          ? updateError.message
-          : "Не вдалося змінити доступ до родового дерева.",
-      );
-    } finally {
-      setBusyUserId("");
-    }
-  };
-
-  return (
-    <section className="subscription-admin-section feature-flags-section">
-      <div className="section-heading">
-        <div>
-          <h2>Тестувальники родового дерева</h2>
-          <p>
-            Доступ охоплює модуль «Родове дерево», імпорт і експорт GEDCOM.
-            Участь у конкретному проєкті перевіряється окремо.
-          </p>
-        </div>
-      </div>
-      {loadError ? <div className="alert alert-notice">{loadError}</div> : null}
-      {error ? <div className="alert alert-error">{error}</div> : null}
-      {!loadError ? (
-        <div className="subscription-admin-filters family-tree-access-form">
-          <label className="family-tree-access-search-field">
-            <span>Знайти користувача</span>
-            <input
-              type="search"
-              value={userQuery}
-              placeholder="Ім’я або email"
-              autoComplete="off"
-              aria-describedby="family-tree-access-search-status"
-              disabled={Boolean(busyUserId) || !availableUsers.length}
-              onChange={(event) => {
-                setUserQuery(event.target.value);
-                setSelectedUserId("");
-              }}
-            />
-          </label>
-          <div className="family-tree-access-selected-user">
-            <span>Обраний користувач</span>
-            <div className="family-tree-access-selected-value">
-              {selectedUser ? (
-                <>
-                  <strong>{selectedUser.displayName || selectedUser.email}</strong>
-                  {selectedUser.displayName ? <small>{selectedUser.email}</small> : null}
-                </>
-              ) : (
-                <strong className="muted-text">Не обрано</strong>
-              )}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="button button-primary"
-            disabled={!selectedUserId || Boolean(busyUserId)}
-            onClick={() => void updateAccess(selectedUserId, true)}
-          >
-            {busyUserId ? "Зберігаємо…" : "Надати доступ"}
-          </button>
-          <div className="family-tree-access-search-panel">
-            <div
-              id="family-tree-access-search-status"
-              className="family-tree-access-search-status"
-              role="status"
-              aria-live="polite"
-            >
-              {!availableUsers.length
-                ? "Усі зареєстровані користувачі вже мають доступ."
-                : !userQuery.trim()
-                  ? "Введіть ім’я або email користувача."
-                  : !matchingUsers.length
-                    ? "Користувачів не знайдено."
-                    : matchingUsers.length > visibleMatchingUsers.length
-                      ? `Знайдено ${matchingUsers.length}. Показано перші ${visibleMatchingUsers.length}.`
-                      : `Знайдено: ${matchingUsers.length}.`}
-            </div>
-            {userQuery.trim() && visibleMatchingUsers.length ? (
-              <div className="family-tree-access-search-results">
-                {visibleMatchingUsers.map((user) => (
-                  <button
-                    type="button"
-                    key={user.userId}
-                    className={`family-tree-access-search-result${selectedUserId === user.userId ? " selected" : ""}`}
-                    aria-pressed={selectedUserId === user.userId}
-                    disabled={Boolean(busyUserId)}
-                    onClick={() => setSelectedUserId(user.userId)}
-                  >
-                    <strong>{user.displayName || user.email}</strong>
-                    {user.displayName ? <small>{user.email}</small> : null}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-      <div className="feature-flag-list">
-        {enabledUsers.map((user) => (
-          <article className="feature-flag-item" key={user.userId}>
-            <div>
-              <h3>{user.displayName || user.email}</h3>
-              <p>{user.email}</p>
-              <small>
-                {user.isAdmin
-                  ? "Адміністратор — постійний доступ"
-                  : user.grantedAt
-                    ? `Доступ надано ${formatDate(user.grantedAt)}`
-                    : "Запрошений тестувальник"}
-              </small>
-            </div>
-            {user.isAdmin ? (
-              <span className="status-pill">Власник</span>
-            ) : (
-              <button
-                type="button"
-                className="button button-secondary danger"
-                disabled={busyUserId === user.userId}
-                onClick={() => void updateAccess(user.userId, false)}
-              >
-                {busyUserId === user.userId ? "Вимикаємо…" : "Забрати доступ"}
-              </button>
-            )}
-          </article>
-        ))}
-        {!enabledUsers.length && !loadError ? (
-          <div className="empty-inline">Тестувальників ще не додано.</div>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
 function AdminSubscriptions({ rows, onChanged }: {
   rows: AdminSubscriptionRow[];
   onChanged: () => Promise<void>;
@@ -1032,13 +866,13 @@ function priceLabel(plan: SubscriptionPlan): ReactNode {
 }
 
 function planLimitValue(planCode: PlanCode, limit: PlanLimit): string | number | null {
-  if (limit.key === "records_per_standard_section" && !limit.isUnlimited && limit.value !== null) {
-    return `До ${limit.value}`;
+  if (limit.key === "persons_total" && !limit.isUnlimited && limit.value !== null) {
+    return `До ${limit.value.toLocaleString("uk-UA")}`;
   }
   if (limit.key === "ai_credits_per_month" && !limit.isUnlimited && limit.value !== null) {
     return `${limit.value} на місяць`;
   }
-  if (limit.isUnlimited) return "Без обмежень";
+  if (limit.isUnlimited) return "Без тарифного ліміту";
   return limit.value;
 }
 
@@ -1046,12 +880,49 @@ function usageValue(
   _planCode: PlanCode,
   item: PlanLimit & { used: number },
 ): string {
-  if (item.isUnlimited) return "Без обмежень";
-  return `${item.used} із ${item.value ?? 0}`;
+  if (item.isUnlimited) return "Без тарифного ліміту";
+  return `${item.used.toLocaleString("uk-UA")} із ${(item.value ?? 0).toLocaleString("uk-UA")}`;
+}
+
+const progressLimitKeys = new Set<PlanLimitKey>([
+  "persons_total",
+  "family_trees_total",
+  "editors_total",
+  "ai_credits_per_month",
+]);
+
+function UsageProgress({ item }: {
+  item: PlanLimit & { used: number };
+}) {
+  if (!progressLimitKeys.has(item.key) || item.isUnlimited || item.value === null) return null;
+  const percent = item.value <= 0 ? 100 : Math.min(100, Math.round((item.used / item.value) * 100));
+  const status = item.value <= 0 || item.used >= item.value
+    ? { level: "reached", label: item.value <= 0 ? "Недоступно на цьому тарифі" : "Ліміт вичерпано" }
+    : percent >= 90
+      ? { level: "critical", label: "Ліміт майже вичерпано" }
+      : percent >= 70
+        ? { level: "warning", label: "Використано понад 70%" }
+        : { level: "normal", label: "Є достатній запас" };
+  return (
+    <div className={`usage-progress ${status.level}`}>
+      <div
+        className="usage-progress-track"
+        role="progressbar"
+        aria-label={`Використання: ${limitLabels[item.key]}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+      >
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <small>{status.label}</small>
+    </div>
+  );
 }
 
 function isVisibleLimit(planCode: PlanCode, limit: PlanLimit): boolean {
   if (hiddenPlanLimitKeys.has(limit.key)) return false;
+  if (limit.key === "editors_total") return true;
   if (limit.key === "ai_credits_per_month" && planCode === "free") return true;
   return limit.isUnlimited || limit.value !== 0;
 }

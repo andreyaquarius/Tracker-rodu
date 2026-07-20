@@ -469,6 +469,7 @@ export function applyPersonPhotoBackups(
         id: existing.id,
         sourceReference: redactExternalPhotoSource(existing.sourceReference || sourceReference),
         sourceExternalId: existing.sourceExternalId || replacement.source.sourceExternalId,
+        ...(existing.avatarCrop ? { avatarCrop: existing.avatarCrop } : {}),
       };
       if (replacement.requestedPrimary && !primaryPhotoId) primaryPhotoId = existing.id;
     } else if (replacement.allowAppend) {
@@ -510,6 +511,7 @@ function uploadedPhotoReplacement(
     sourceExternalId: source.sourceExternalId,
     sourceExpiresAt: source.sourceExpiresAt,
     sourceDurability: source.sourceDurability,
+    ...(source.avatarCrop ? { avatarCrop: source.avatarCrop } : {}),
   };
 }
 

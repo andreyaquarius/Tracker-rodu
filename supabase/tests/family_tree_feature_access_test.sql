@@ -8,7 +8,7 @@ select plan(14);
 select has_table(
   'public',
   'family_tree_feature_access',
-  'the private family-tree allow-list exists'
+  'the legacy family-tree rollout registry remains available for administration'
 );
 select has_function(
   'public',
@@ -101,8 +101,8 @@ select set_config(
 );
 select is(
   public.get_my_family_tree_feature_access(),
-  false,
-  'a registered user is denied before being invited'
+  true,
+  'every authenticated account receives core family-tree access'
 );
 
 select throws_ok(
@@ -133,7 +133,7 @@ select set_config(
 select is(
   public.get_my_family_tree_feature_access(),
   true,
-  'an invited tester receives access'
+  'a legacy beta row does not change core family-tree access'
 );
 
 select set_config(
@@ -163,8 +163,8 @@ select set_config(
 );
 select is(
   public.get_my_family_tree_feature_access(),
-  false,
-  'revoking the tester takes effect immediately'
+  true,
+  'revoking a legacy beta row does not remove core family-tree access'
 );
 
 reset role;

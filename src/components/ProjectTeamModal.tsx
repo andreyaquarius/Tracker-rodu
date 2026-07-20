@@ -18,7 +18,7 @@ import {
 } from "../services/projectCollaboration";
 import { Modal } from "./Modal";
 import type { ActivityActionType } from "../types";
-import { subscriptionErrorMessage } from "../services/subscriptionService";
+import { subscriptionErrorCode, subscriptionErrorMessage } from "../services/subscriptionService";
 import { formatDateForDisplay } from "../utils/dateHelpers";
 
 interface ProjectTeamModalProps {
@@ -26,7 +26,7 @@ interface ProjectTeamModalProps {
   workspace: SupabaseWorkspace | null;
   onClose: () => void;
   onInvitationAccepted: (projectId: string) => Promise<void>;
-  canInviteMember?: boolean;
+  canInviteEditor?: boolean;
   onUpgradeRequired?: () => void;
   onSubscriptionChanged?: () => void;
   onActivity?: (
@@ -59,7 +59,7 @@ export function ProjectTeamModal({
   workspace,
   onClose,
   onInvitationAccepted,
-  canInviteMember = true,
+  canInviteEditor = true,
   onUpgradeRequired,
   onSubscriptionChanged,
   onActivity,
@@ -103,10 +103,6 @@ export function ProjectTeamModal({
   const invite = async (event: FormEvent) => {
     event.preventDefault();
     if (!workspace) return;
-    if (!canInviteMember) {
-      onUpgradeRequired?.();
-      return;
-    }
     setBusyId("invite");
     setError("");
     setNotice("");
@@ -126,6 +122,9 @@ export function ProjectTeamModal({
       );
       onSubscriptionChanged?.();
     } catch (inviteError) {
+      if (subscriptionErrorCode(inviteError) === "PLAN_LIMIT_REACHED:editors_total") {
+        onUpgradeRequired?.();
+      }
       setError(subscriptionErrorMessage(inviteError) || describeError(inviteError, "Не вдалося створити запрошення."));
     } finally {
       setBusyId("");
@@ -151,8 +150,12 @@ export function ProjectTeamModal({
         `Змінено роль учасника ${member.displayName} на «${roleLabel(nextRole)}».`,
         "member_updated",
       );
+      onSubscriptionChanged?.();
     } catch (updateError) {
-      setError(describeError(updateError, "Не вдалося змінити роль учасника."));
+      if (subscriptionErrorCode(updateError) === "PLAN_LIMIT_REACHED:editors_total") {
+        onUpgradeRequired?.();
+      }
+      setError(subscriptionErrorMessage(updateError) || describeError(updateError, "Не вдалося змінити роль учасника."));
     } finally {
       setBusyId("");
     }
@@ -171,6 +174,7 @@ export function ProjectTeamModal({
         `Видалено учасника ${member.displayName} з проєкту.`,
         "member_deleted",
       );
+      onSubscriptionChanged?.();
     } catch (removeError) {
       setError(describeError(removeError, "Не вдалося видалити учасника."));
     } finally {
@@ -196,8 +200,12 @@ export function ProjectTeamModal({
         `Змінено роль у запрошенні для ${invitation.email} на «${roleLabel(nextRole)}».`,
         "invitation_updated",
       );
+      onSubscriptionChanged?.();
     } catch (updateError) {
-      setError(describeError(updateError, "Не вдалося змінити роль у запрошенні."));
+      if (subscriptionErrorCode(updateError) === "PLAN_LIMIT_REACHED:editors_total") {
+        onUpgradeRequired?.();
+      }
+      setError(subscriptionErrorMessage(updateError) || describeError(updateError, "Не вдалося змінити роль у запрошенні."));
     } finally {
       setBusyId("");
     }
@@ -216,6 +224,7 @@ export function ProjectTeamModal({
         `Скасовано запрошення для ${invitation.email}.`,
         "invitation_deleted",
       );
+      onSubscriptionChanged?.();
     } catch (revokeError) {
       setError(describeError(revokeError, "Не вдалося скасувати запрошення."));
     } finally {
@@ -335,8 +344,11 @@ export function ProjectTeamModal({
                   className="button button-primary"
                   disabled={Boolean(busyId)}
                 >
-                  {busyId === "invite" ? "Створення…" : canInviteMember ? "Запросити" : "🔒 Запросити · PRO"}
+                  {busyId === "invite" ? "Створення…" : "Запросити"}
                 </button>
+                {role === "editor" && !canInviteEditor ? (
+                  <small>Новий редактор потребуватиме вільного редакторського місця. Уже врахований редактор місце повторно не займає.</small>
+                ) : null}
               </form>
             ) : null}
 

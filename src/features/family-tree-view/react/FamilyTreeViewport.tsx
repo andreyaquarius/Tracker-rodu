@@ -153,11 +153,9 @@ export function FamilyTreeViewport({
   }, [camera.compensateWorldShift, layoutState.anchorShift]);
 
   useEffect(() => {
-    if (layoutState.layout?.warnings.length) {
-      onLayoutWarnings?.(
-        layoutState.layout.warnings.map(warning => warning.message),
-      );
-    }
+    onLayoutWarnings?.(
+      (layoutState.layout?.warnings ?? []).map(warning => warning.message),
+    );
   }, [layoutState.layout?.warnings, onLayoutWarnings]);
 
   const visibleNodeCandidates = useMemo(() => {

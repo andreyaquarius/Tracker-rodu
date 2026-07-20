@@ -151,6 +151,12 @@ export function useSubscription(projectId?: string, enabled = true, scopeKey = "
   const scopedLoading = loadedScopeKey === resolvedScopeKey ? loading : enabled;
   const getLimit = useCallback((key: PlanLimitKey) => context?.limits[key] ?? null, [context]);
   const getUsage = useCallback((key: PlanLimitKey) => context?.usage[key] ?? 0, [context]);
+  const getCapacityLimit = useCallback((key: PlanLimitKey) => (
+    context?.projectCapacity?.limits[key] ?? context?.limits[key] ?? null
+  ), [context]);
+  const getCapacityUsage = useCallback((key: PlanLimitKey) => (
+    context?.projectCapacity?.usage[key] ?? context?.usage[key] ?? 0
+  ), [context]);
   const getRemaining = useCallback((key: PlanLimitKey) => {
     const limit = getLimit(key);
     if (!limit || limit.isUnlimited || limit.value === null) return null;
@@ -159,8 +165,14 @@ export function useSubscription(projectId?: string, enabled = true, scopeKey = "
   const withinLimit = useCallback((key: PlanLimitKey) => {
     return hasPlanCapacity(getLimit(key), getUsage(key));
   }, [getLimit, getUsage]);
+  const withinCapacityLimit = useCallback((key: PlanLimitKey) => {
+    return hasPlanCapacity(getCapacityLimit(key), getCapacityUsage(key));
+  }, [getCapacityLimit, getCapacityUsage]);
   const canUseFeature = useCallback((feature: SubscriptionFeature) => {
     const key: Record<SubscriptionFeature, PlanLimitKey> = {
+      family_trees: "family_trees_total",
+      persons: "persons_total",
+      editors: "editors_total",
       custom_sections: "custom_sections_per_project",
       custom_fields: "custom_fields_per_project",
       table_import: "table_imports_per_month",
@@ -168,8 +180,8 @@ export function useSubscription(projectId?: string, enabled = true, scopeKey = "
       hypothesis_ai_review: "ai_credits_per_month",
       project_members: "project_members",
     };
-    return withinLimit(key[feature]);
-  }, [withinLimit]);
+    return withinCapacityLimit(key[feature]);
+  }, [withinCapacityLimit]);
   const canCreateProjectRecords = context?.canCreateProjectRecords ?? true;
 
   const trialDaysRemaining = useMemo(() => {
@@ -194,16 +206,22 @@ export function useSubscription(projectId?: string, enabled = true, scopeKey = "
     loading: scopedLoading,
     error,
     canCreateProject: withinLimit("projects"),
-    canCreateResearch: canCreateProjectRecords && withinLimit("researches_total") && withinLimit("researches_per_project"),
+    canCreateFamilyTree: canCreateProjectRecords && withinCapacityLimit("family_trees_total"),
+    canCreatePerson: canCreateProjectRecords && withinCapacityLimit("persons_total"),
+    canCreateResearch: canCreateProjectRecords && withinCapacityLimit("researches_total") && withinCapacityLimit("researches_per_project"),
     canCreateCustomSection: canCreateProjectRecords && canUseFeature("custom_sections"),
     canCreateCustomField: canCreateProjectRecords && canUseFeature("custom_fields"),
     canImportTable: canCreateProjectRecords && canUseFeature("table_import"),
     canUseIncludedHypothesisAiReview: canUseFeature("ai_credit"),
-    canInviteMember: canCreateProjectRecords && canUseFeature("project_members"),
+    canInviteEditor: canCreateProjectRecords && canUseFeature("editors"),
+    // Kept for older callers. Viewer invitations are intentionally not tied to this value.
+    canInviteMember: canCreateProjectRecords && canUseFeature("editors"),
     canUseFeature,
     getLimit,
     getUsage,
     getRemaining,
+    getCapacityLimit,
+    getCapacityUsage,
     refreshSubscription,
   };
 }

@@ -11,6 +11,7 @@ import type {
   Person,
   PersonRelation,
   Research,
+  ScanAttachment,
   TaskRecord,
 } from "../../types";
 import {
@@ -20,6 +21,11 @@ import {
   personLifeYears,
   personRelationLabel,
 } from "./model";
+import {
+  isPhotoReferenceAvailable,
+  personAvatarImageStyle,
+  primaryPersonPhoto,
+} from "../../utils/personPhotos.ts";
 
 export interface PersonPreviewDrawerV2Props {
   person: Person | null;
@@ -34,6 +40,7 @@ export interface PersonPreviewDrawerV2Props {
   directAncestor?: boolean;
   onClose: () => void;
   onOpenProfile?: (person: Person) => void;
+  onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[]) => void;
   onShowInTree?: (person: Person) => void;
   onEdit?: (person: Person) => void;
   onDelete?: (person: Person) => void;
@@ -55,6 +62,7 @@ export function PersonPreviewDrawerV2({
   directAncestor = false,
   onClose,
   onOpenProfile,
+  onOpenPhoto,
   onShowInTree,
   onEdit,
   onDelete,
@@ -142,6 +150,16 @@ export function PersonPreviewDrawerV2({
   };
 
   const name = previewPersonNameV2(person);
+  const photos = person.photos ?? [];
+  const availablePhotos = photos.filter(isPhotoReferenceAvailable);
+  const primaryPhoto = primaryPersonPhoto(photos, person.primaryPhotoId);
+  const canOpenPrimaryPhoto = Boolean(
+    photoUrl
+      && !photoFailed
+      && primaryPhoto
+      && isPhotoReferenceAvailable(primaryPhoto)
+      && onOpenPhoto,
+  );
   const linkedRelations = relations.filter(
     (relation) => relation.personId === person.id || relation.relatedPersonId === person.id,
   );
@@ -191,13 +209,35 @@ export function PersonPreviewDrawerV2({
         >
           ×
         </button>
-        <div className="persons-v2-preview__photo">
-          {photoUrl && !photoFailed ? (
-            <img src={photoUrl} alt={`Фото: ${name}`} onError={() => setPhotoFailed(true)} />
-          ) : (
-            <span aria-hidden="true">{previewInitialsV2(person)}</span>
-          )}
-        </div>
+        {canOpenPrimaryPhoto && primaryPhoto ? (
+          <button
+            type="button"
+            className="persons-v2-preview__photo is-clickable"
+            aria-label={`Переглянути головне фото: ${name}`}
+            onClick={() => onOpenPhoto?.(primaryPhoto, availablePhotos)}
+          >
+            <img
+              src={photoUrl}
+              alt={`Фото: ${name}`}
+              style={personAvatarImageStyle(primaryPhoto)}
+              onError={() => setPhotoFailed(true)}
+            />
+            <span className="persons-v2-preview__photo-action" aria-hidden="true">Переглянути</span>
+          </button>
+        ) : (
+          <div className="persons-v2-preview__photo">
+            {photoUrl && !photoFailed ? (
+              <img
+                src={photoUrl}
+                alt={`Фото: ${name}`}
+                style={personAvatarImageStyle(primaryPhoto)}
+                onError={() => setPhotoFailed(true)}
+              />
+            ) : (
+              <span aria-hidden="true">{previewInitialsV2(person)}</span>
+            )}
+          </div>
+        )}
         <div>
           <h2 id="persons-v2-preview-title">{name}</h2>
           <div className="persons-v2-preview__badges">

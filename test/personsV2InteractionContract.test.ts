@@ -18,11 +18,27 @@ const preview = readFileSync(
   new URL("../src/features/persons-v2/PersonPreviewDrawerV2.tsx", import.meta.url),
   "utf8",
 );
+const album = readFileSync(
+  new URL("../src/features/persons-v2/PersonPhotoAlbumV2.tsx", import.meta.url),
+  "utf8",
+);
+const editor = readFileSync(
+  new URL("../src/features/persons-v2/PersonEditorV2.tsx", import.meta.url),
+  "utf8",
+);
+const framingEditor = readFileSync(
+  new URL("../src/features/persons-v2/PersonAvatarFramingEditorV2.tsx", import.meta.url),
+  "utf8",
+);
 const moduleSource = readFileSync(
   new URL("../src/features/persons-v2/PersonsModuleV2.tsx", import.meta.url),
   "utf8",
 );
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const treeCard = readFileSync(
+  new URL("../src/features/family-tree-view/react/PersonCard.tsx", import.meta.url),
+  "utf8",
+);
 const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
 test("persons V2 catalogue resets checkboxes and localizes last-event summaries", () => {
@@ -79,4 +95,35 @@ test("persons V2 preview no longer becomes a partial fixed overlay at the deskto
   assert.match(preview, /aria-modal=\{compactOverlay \|\| undefined\}/u);
   assert.match(preview, /setAttribute\("inert", ""\)/u);
   assert.match(preview, /event\.key === "Escape"/u);
+});
+
+test("persons V2 exposes a real photo album and opens photos from the profile card", () => {
+  assert.match(profile, /\| "album"/u);
+  assert.match(profile, /album:\s*"Альбом"/u);
+  assert.match(profile, /album:\s*photos\.length/u);
+  assert.match(profile, /case "album": return <AlbumPanelV2/u);
+  assert.match(profile, /aria-label=\{`Переглянути головне фото:/u);
+  assert.match(profile, /onOpenPhoto\?\.\(primaryPhoto, availablePhotos\)/u);
+  assert.match(album, /getScanPreviewSource\(photo\)/u);
+  assert.match(album, /URL\.revokeObjectURL/u);
+  assert.match(album, /photo\.availability/u);
+  assert.match(album, /Головне фото/u);
+  assert.match(moduleSource, /onOpenPhoto=\{onOpenPhoto\}/u);
+  assert.match(app, /onOpenPhoto=\{\(photo, photos\) => openScanViewer\(photo, undefined, \[\.\.\.photos\]\)\}/u);
+  assert.match(styles, /\.persons-v2-photo-album__grid[\s\S]*?repeat\(auto-fill, minmax\(min\(100%, 220px\), 1fr\)\)/u);
+  assert.match(styles, /button\.persons-v2-photo-album__preview:focus-visible/u);
+});
+
+test("persons V2 edits and reuses persistent avatar framing everywhere", () => {
+  assert.match(editor, /<PersonAvatarFramingEditorV2/u);
+  assert.match(editor, /updatePersonAvatarCrop\(photoState\.photos, primaryPhoto\.id, crop\)/u);
+  assert.match(framingEditor, /onPointerDown=\{startDragging\}/u);
+  assert.match(framingEditor, /label="Положення по горизонталі"/u);
+  assert.match(framingEditor, /label="Положення по вертикалі"/u);
+  assert.match(framingEditor, /label="Масштаб"/u);
+  assert.match(catalog, /personAvatarImageStyle\(primaryPersonPhoto/u);
+  assert.match(preview, /style=\{personAvatarImageStyle\(primaryPhoto\)\}/u);
+  assert.match(profile, /style=\{personAvatarImageStyle\(primaryPhoto\)\}/u);
+  assert.match(treeCard, /style=\{personAvatarImageStyle\(photo\)\}/u);
+  assert.match(styles, /\.person-avatar-framing-v2__preview[\s\S]*?cursor:\s*crosshair/u);
 });

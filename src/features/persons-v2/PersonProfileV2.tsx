@@ -15,6 +15,7 @@ import type {
   Person,
   PersonRelation,
   Research,
+  ScanAttachment,
   TaskRecord,
 } from "../../types";
 import {
@@ -33,11 +34,18 @@ import {
   resolvedFindingSourceUrl,
   stripFindingSourceUrls,
 } from "../../utils/findingSourceUrl.ts";
+import {
+  isPhotoReferenceAvailable,
+  personAvatarImageStyle,
+  primaryPersonPhoto,
+} from "../../utils/personPhotos.ts";
+import { PersonPhotoAlbumV2 } from "./PersonPhotoAlbumV2.tsx";
 
 export type PersonProfileTabV2 =
   | "overview"
   | "timeline"
   | "family"
+  | "album"
   | "documents"
   | "findings"
   | "notes";
@@ -99,6 +107,7 @@ export interface PersonProfileV2Props {
     person: Person,
   ) => void;
   onSelectEvent?: (event: PersonTimelineItem) => void;
+  onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[]) => void;
 }
 
 interface LinkedRelationV2 {
@@ -111,6 +120,7 @@ const profileTabsV2: readonly PersonProfileTabV2[] = [
   "overview",
   "timeline",
   "family",
+  "album",
   "documents",
   "findings",
   "notes",
@@ -120,6 +130,7 @@ const profileTabLabelsV2: Record<PersonProfileTabV2, string> = {
   overview: "Огляд",
   timeline: "Хронологія",
   family: "Родина",
+  album: "Альбом",
   documents: "Документи",
   findings: "Знахідки",
   notes: "Нотатки",
@@ -157,6 +168,7 @@ export function PersonProfileV2({
   onBrowseRelated,
   onCreateRelated,
   onSelectEvent,
+  onOpenPhoto,
 }: PersonProfileV2Props) {
   const componentId = useId().replace(/:/g, "");
   const [internalTab, setInternalTab] = useState<PersonProfileTabV2>(defaultTab);
@@ -165,6 +177,16 @@ export function PersonProfileV2({
   const pendingKeyboardFocus = useRef<PersonProfileTabV2 | null>(null);
   const activeTab = controlledTab ?? internalTab;
   const name = personDisplayName(person);
+  const photos = person.photos ?? [];
+  const availablePhotos = photos.filter(isPhotoReferenceAvailable);
+  const primaryPhoto = primaryPersonPhoto(photos, person.primaryPhotoId);
+  const canOpenPrimaryPhoto = Boolean(
+    photoUrl
+      && !photoFailed
+      && primaryPhoto
+      && isPhotoReferenceAvailable(primaryPhoto)
+      && onOpenPhoto,
+  );
 
   useEffect(() => {
     setPhotoFailed(false);
@@ -252,6 +274,7 @@ export function PersonProfileV2({
   const tabCounts: Partial<Record<PersonProfileTabV2, number>> = {
     timeline: timeline.length,
     family: linkedRelations.length,
+    album: photos.length,
     documents: linkedDocuments.length,
     findings: linkedFindings.length,
   };
@@ -265,13 +288,35 @@ export function PersonProfileV2({
           </button>
         ) : null}
         <div className="persons-v2-profile__identity">
-          <div className="persons-v2-profile__photo">
-            {photoUrl && !photoFailed ? (
-              <img src={photoUrl} alt={`Фото: ${name}`} onError={() => setPhotoFailed(true)} />
-            ) : (
-              <span aria-hidden="true">{personInitials(person)}</span>
-            )}
-          </div>
+          {canOpenPrimaryPhoto && primaryPhoto ? (
+            <button
+              type="button"
+              className="persons-v2-profile__photo is-clickable"
+              aria-label={`Переглянути головне фото: ${name}`}
+              onClick={() => onOpenPhoto?.(primaryPhoto, availablePhotos)}
+            >
+              <img
+                src={photoUrl}
+                alt={`Фото: ${name}`}
+                style={personAvatarImageStyle(primaryPhoto)}
+                onError={() => setPhotoFailed(true)}
+              />
+              <span className="persons-v2-profile__photo-action" aria-hidden="true">Переглянути</span>
+            </button>
+          ) : (
+            <div className="persons-v2-profile__photo">
+              {photoUrl && !photoFailed ? (
+                <img
+                  src={photoUrl}
+                  alt={`Фото: ${name}`}
+                  style={personAvatarImageStyle(primaryPhoto)}
+                  onError={() => setPhotoFailed(true)}
+                />
+              ) : (
+                <span aria-hidden="true">{personInitials(person)}</span>
+              )}
+            </div>
+          )}
           <div>
             <h1 id={`${componentId}-title`}>{name}</h1>
             <p>{personLifeYears(person) || "Роки життя не вказані"} · {person.gender}</p>
@@ -386,6 +431,7 @@ export function PersonProfileV2({
               onBrowseRelated={onBrowseRelated}
               onCreateRelated={onCreateRelated}
               onSelectEvent={onSelectEvent}
+              onOpenPhoto={onOpenPhoto}
             />
           ) : null}
         </section>
@@ -424,6 +470,7 @@ interface PersonProfilePanelV2Props {
     person: Person,
   ) => void;
   onSelectEvent?: (event: PersonTimelineItem) => void;
+  onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[]) => void;
 }
 
 function PersonProfilePanelV2(props: PersonProfilePanelV2Props) {
@@ -431,10 +478,22 @@ function PersonProfilePanelV2(props: PersonProfilePanelV2Props) {
     case "overview": return <OverviewPanelV2 {...props} />;
     case "timeline": return <TimelinePanelV2 {...props} />;
     case "family": return <FamilyPanelV2 {...props} />;
+    case "album": return <AlbumPanelV2 {...props} />;
     case "documents": return <DocumentsPanelV2 {...props} />;
     case "findings": return <FindingsPanelV2 {...props} />;
     case "notes": return <NotesPanelV2 {...props} />;
   }
+}
+
+function AlbumPanelV2({ person, onOpenPhoto }: PersonProfilePanelV2Props) {
+  return (
+    <ProfileSectionV2 title={`Альбом особи (${person.photos?.length ?? 0})`}>
+      <PersonPhotoAlbumV2
+        person={person}
+        onOpenPhoto={onOpenPhoto}
+      />
+    </ProfileSectionV2>
+  );
 }
 
 function OverviewPanelV2(props: PersonProfilePanelV2Props) {
@@ -847,7 +906,15 @@ function RelationCardV2({ relation, relationLabel, person, photoUrl, onOpenPerso
   const content = (
     <>
       <span className="persons-v2-profile__relative-avatar" aria-hidden="true">
-        {photoUrl ? <img src={photoUrl} alt="" /> : person ? personInitials(person) : "?"}
+        {photoUrl ? (
+          <img
+            src={photoUrl}
+            alt=""
+            style={personAvatarImageStyle(
+              person ? primaryPersonPhoto(person.photos, person.primaryPhotoId) : undefined,
+            )}
+          />
+        ) : person ? personInitials(person) : "?"}
       </span>
       <span>
         <strong>{person ? personDisplayName(person) : "Невідома або недоступна особа"}</strong>

@@ -145,7 +145,11 @@ export interface ProductionFamilyTreePageProps {
   researches?: Research[];
   readOnly?: boolean;
   canCreate?: boolean;
+  canCreateTree?: boolean;
+  treeLimitMessage?: string;
   researchRequired?: boolean;
+  gedcomResearchRequired?: boolean;
+  onSubscriptionChanged?: () => void;
   onImportRecords?: (
     collection: "persons",
     records: AppEntity[],
@@ -177,13 +181,16 @@ export function ProductionFamilyTreePage({
   researches = [],
   readOnly = false,
   canCreate = true,
-  researchRequired = false,
+  canCreateTree = true,
+  treeLimitMessage,
+  gedcomResearchRequired = false,
   onImportRecords,
   onImportGedcom,
   onBackupGedcomPhotos,
   onSaveRelation,
   onOpenPerson,
   onActiveContextChange,
+  onSubscriptionChanged,
 }: ProductionFamilyTreePageProps) {
   const [entryPoints, setEntryPoints] = useState<FamilyTreeEntryPoint[]>([]);
   const [selectedTreeId, setSelectedTreeId] = useState("");
@@ -352,11 +359,13 @@ export function ProductionFamilyTreePage({
     setSelectedTreeId(result.treeId);
     setRootDialogOpen(false);
     setReloadRevision((value) => value + 1);
+    onSubscriptionChanged?.();
   }
 
   const canImportGedcom = Boolean(
     !readOnly &&
       canCreate &&
+      canCreateTree &&
       onImportRecords &&
       onSaveRelation,
   );
@@ -449,6 +458,7 @@ export function ProductionFamilyTreePage({
       throw archiveError;
     }
     setReloadRevision((value) => value + 1);
+    onSubscriptionChanged?.();
     return { treeId: result.treeId, archiveBatchId: archiveBatchId || undefined };
   }
 
@@ -519,7 +529,7 @@ export function ProductionFamilyTreePage({
       hideTrigger
       disabled={!canImportGedcom}
       defaultResearchId={gedcomResearchId}
-      researchRequired={researchRequired}
+      researchRequired={gedcomResearchRequired}
       onImportPersons={(records) => onImportRecords("persons", records)}
       onImportGedcom={onImportGedcom}
       onBackupGedcomPhotos={onBackupGedcomPhotos}
@@ -572,7 +582,10 @@ export function ProductionFamilyTreePage({
           <span className="eyebrow">Початок дерева</span>
           <h2>{selectedEntry ? "У дереві ще немає домашньої особи" : "У проєкті ще немає родового дерева"}</h2>
           <p>Створіть першу канонічну особу. Вона залишиться у звичайному модулі осіб і буде домашньою точкою дерева.</p>
-          {!readOnly && canCreate ? (
+          {!selectedEntry && !canCreateTree && treeLimitMessage ? (
+            <div className="alert alert-notice">{treeLimitMessage}</div>
+          ) : null}
+          {!readOnly && canCreate && (selectedEntry || canCreateTree) ? (
             <button type="button" className="button" onClick={() => setRootDialogOpen(true)}>
               Створити першу особу
             </button>
@@ -591,6 +604,7 @@ export function ProductionFamilyTreePage({
           onOpenTreeTools={openTreeTools}
           onFocusPersonChange={handleActiveTreeFocusPersonChange}
           onOpenPerson={onOpenPerson}
+          onSubscriptionChanged={onSubscriptionChanged}
           initialFocusPersonId={routedFocusPersonId}
         />
       ) : null}
@@ -601,8 +615,8 @@ export function ProductionFamilyTreePage({
           selectedTreeId={selectedEntry?.id ?? ""}
           researches={researches}
           selectedResearchId={gedcomResearchId}
-          researchRequired={researchRequired}
-          canImportGedcom={canImportGedcom && (!researchRequired || Boolean(gedcomResearchId))}
+          researchRequired={gedcomResearchRequired}
+          canImportGedcom={canImportGedcom && (!gedcomResearchRequired || Boolean(gedcomResearchId))}
           canBackupGedcomPhotos={Boolean(!readOnly && onBackupGedcomPhotos)}
           gedcomPhotoBackupCount={pendingGedcomPhotoCount}
           canExportGedcom={Boolean(selectedEntry?.id && selectedEntry.rootPersonId)}
@@ -670,6 +684,7 @@ function LoadedFamilyTree({
   onOpenTreeTools,
   onFocusPersonChange,
   onOpenPerson,
+  onSubscriptionChanged,
   initialFocusPersonId,
 }: {
   projectId: string;
@@ -682,6 +697,7 @@ function LoadedFamilyTree({
   onOpenTreeTools: () => void;
   onFocusPersonChange: (personId: string) => void;
   onOpenPerson?: (personId: string) => void;
+  onSubscriptionChanged?: () => void;
   initialFocusPersonId?: string;
 }) {
   const client = useMemo(() => createTrackerNeighborhoodClient(), []);
@@ -1685,6 +1701,7 @@ function LoadedFamilyTree({
     setBuilderTarget(null);
     setNotice("Родича створено й приєднано до дерева.");
     reloadPedigreeAfterMutation();
+    onSubscriptionChanged?.();
   }
 
   async function submitAttach(payload: FamilyTreeAttachSubmit) {
@@ -1837,7 +1854,6 @@ function LoadedFamilyTree({
         </div>
 
         <label className="family-tree-v2-search">
-          <span>Знайти особу</span>
           <input
             type="search"
             value={searchQuery}
@@ -1861,6 +1877,166 @@ function LoadedFamilyTree({
             </div>
           ) : null}
         </label>
+
+        <div className="family-tree-v2-toolbar-status" aria-label="Стан родового дерева">
+          {perspective.kind === "family-corridor" ? (
+            <div
+              ref={perspectiveBarRef}
+              className="family-tree-v2-toolbar-perspective family-tree-v2-perspective-bar-compact"
+              role="region"
+              aria-label="Режим лінії нащадків"
+              tabIndex={-1}
+            >
+              <strong className="family-tree-v2-perspective-heading" title={`Лінія нащадків: ${corridorLabel}`}>
+                Лінія нащадків: <span>{corridorLabel}</span>
+              </strong>
+              <SpecialPerspectiveProgress
+                compact
+                loading={specialNeighborhood.loading}
+                canceled={specialNeighborhood.canceled}
+                error={specialNeighborhood.error}
+                loadedPersons={specialPerspectiveLoadedPersons}
+                mountedNodeLimit={MAX_RENDERED_FAMILY_TREE_NODES}
+              />
+              {corridorBreadcrumbs.length ? (
+                <details className="family-tree-v2-corridor-menu">
+                  <summary
+                    aria-label="Відкриті покоління сімейного коридору"
+                    title="Перейти до відкритого покоління"
+                  >
+                    Шлях: {corridorBreadcrumbs.length}
+                  </summary>
+                  <nav className="family-tree-v2-corridor-breadcrumbs" aria-label="Відкриті покоління сімейного коридору">
+                    <ol>
+                      <li>
+                        <button type="button" onClick={leaveFamilyCorridor}>
+                          Родове дерево
+                        </button>
+                      </li>
+                      {corridorBreadcrumbs.map(({ index, item, label }) => {
+                        const current = index === corridorBreadcrumbs.length - 1;
+                        return (
+                          <li key={item.scope.id}>
+                            <span aria-hidden="true">›</span>
+                            <button
+                              type="button"
+                              aria-current={current ? "page" : undefined}
+                              disabled={current}
+                              onClick={() => selectCorridorBreadcrumb(index)}
+                            >
+                              Покоління {index + 1}: {label}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </nav>
+                </details>
+              ) : null}
+              <div className="family-tree-v2-perspective-actions">
+                {specialNeighborhood.loading ? (
+                  <button type="button" className="button button-secondary" onClick={specialNeighborhood.cancel}>
+                    Зупинити
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  aria-label="Повернутися до родового дерева"
+                  title="Повернутися до родового дерева"
+                  onClick={leaveFamilyCorridor}
+                >
+                  ← До дерева
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {perspective.kind === "all-descendants" ? (
+            <div
+              ref={perspectiveBarRef}
+              className="family-tree-v2-toolbar-perspective family-tree-v2-perspective-bar-compact"
+              role="region"
+              aria-label="Режим усіх нащадків"
+              tabIndex={-1}
+            >
+              <strong className="family-tree-v2-perspective-heading" title={`Нащадки: ${allDescendantsLabel}`}>
+                Нащадки: <span>{allDescendantsLabel}</span>
+              </strong>
+              <SpecialPerspectiveProgress
+                compact
+                loading={progressiveDescendants.loading}
+                canceled={progressiveDescendants.canceled}
+                error={progressiveDescendants.error}
+                loadedPersons={specialPerspectiveLoadedPersons}
+                loadedGenerations={progressiveDescendants.loadedGenerations}
+                pagesLoaded={progressiveDescendants.pagesLoaded}
+                mountedNodeLimit={MAX_RENDERED_FAMILY_TREE_NODES}
+                truncated={allDescendantsTruncated}
+              />
+              <div className="family-tree-v2-perspective-actions">
+                {progressiveDescendants.loading ? (
+                  <button type="button" className="button button-secondary" onClick={progressiveDescendants.cancel}>
+                    Зупинити
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  aria-label="Повернутися до родового дерева"
+                  title="Повернутися до родового дерева"
+                  onClick={leaveFamilyCorridor}
+                >
+                  ← До дерева
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {notice ? (
+            <div className="family-tree-v2-notice" role="status" title={notice}>{notice}</div>
+          ) : null}
+          {activeError ? (
+            <details className="family-tree-v2-toolbar-error" role="alert">
+              <summary
+                aria-label={`Помилка дерева: ${activeError.message}`}
+                title={activeError.message}
+              >
+                Помилка дерева
+              </summary>
+              <div className="form-error family-tree-v2-toolbar-error-panel">
+                <span>{activeError.message}</span>
+              </div>
+            </details>
+          ) : null}
+          {homeLineageError ? (
+            <details className="family-tree-v2-toolbar-error" role="alert">
+              <summary
+                aria-label={`Помилка гілки: ${homeLineageError.message}`}
+                title={homeLineageError.message}
+              >
+                Помилка гілки
+              </summary>
+              <div className="form-error family-tree-v2-toolbar-error-panel family-tree-v2-root-lineage-error">
+                <span>Не вдалося завантажити гілку кореневої особи: {homeLineageError.message}</span>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={homeLineageNeighborhood.reload}
+                  disabled={homeLineageNeighborhood.loading}
+                >
+                  {homeLineageNeighborhood.loading ? "Повторення…" : "Повторити гілку"}
+                </button>
+              </div>
+            </details>
+          ) : null}
+          {layoutWarnings.length ? (
+            <details className="family-tree-v2-warnings">
+              <summary>Попередження схеми: {layoutWarnings.length}</summary>
+              <ul>{layoutWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+            </details>
+          ) : null}
+        </div>
 
         <details ref={viewSettingsRef} className="family-tree-v2-view-settings">
           <summary className="button button-secondary" aria-controls="family-tree-v2-view-settings-panel">Параметри</summary>
@@ -1904,141 +2080,6 @@ function LoadedFamilyTree({
           {activeLoading ? "Оновлення…" : "Оновити"}
         </button>
       </div>
-
-      {notice || activeError || homeLineageError || layoutWarnings.length ? (
-        <div className="family-tree-v2-status-strip">
-          {notice ? <div className="family-tree-v2-notice" role="status">{notice}</div> : null}
-          {activeError ? <div className="form-error" role="alert">{activeError.message}</div> : null}
-          {homeLineageError ? (
-            <div className="form-error family-tree-v2-root-lineage-error" role="alert">
-              <span>Не вдалося завантажити гілку кореневої особи: {homeLineageError.message}</span>
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={homeLineageNeighborhood.reload}
-                disabled={homeLineageNeighborhood.loading}
-              >
-                {homeLineageNeighborhood.loading ? "Повторення…" : "Повторити гілку"}
-              </button>
-            </div>
-          ) : null}
-          {layoutWarnings.length ? (
-            <details className="family-tree-v2-warnings">
-              <summary>Попередження схеми: {layoutWarnings.length}</summary>
-              <ul>{layoutWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-            </details>
-          ) : null}
-        </div>
-      ) : null}
-
-      {perspective.kind === "family-corridor" ? (
-        <>
-          <div
-            ref={perspectiveBarRef}
-            className="family-tree-v2-perspective-bar family-tree-v2-perspective-bar-compact"
-            role="region"
-            aria-label="Режим лінії нащадків"
-            tabIndex={-1}
-          >
-            <strong className="family-tree-v2-perspective-heading">
-              Лінія нащадків: <span>{corridorLabel}</span>
-            </strong>
-            <SpecialPerspectiveProgress
-              compact
-              loading={specialNeighborhood.loading}
-              canceled={specialNeighborhood.canceled}
-              error={specialNeighborhood.error}
-              loadedPersons={specialPerspectiveLoadedPersons}
-              mountedNodeLimit={MAX_RENDERED_FAMILY_TREE_NODES}
-            />
-            <div className="family-tree-v2-perspective-actions">
-              {specialNeighborhood.loading ? (
-                <button type="button" className="button button-secondary" onClick={specialNeighborhood.cancel}>
-                  Зупинити
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="button button-secondary"
-                aria-label="Повернутися до родового дерева"
-                title="Повернутися до родового дерева"
-                onClick={leaveFamilyCorridor}
-              >
-                ← До дерева
-              </button>
-            </div>
-          </div>
-          <nav
-            className="family-tree-v2-corridor-breadcrumbs"
-            aria-label="Відкриті покоління сімейного коридору"
-          >
-            <ol>
-              <li>
-                <button type="button" onClick={leaveFamilyCorridor}>
-                  Родове дерево
-                </button>
-              </li>
-              {corridorBreadcrumbs.map(({ index, item, label }) => {
-                const current = index === corridorBreadcrumbs.length - 1;
-                return (
-                  <li key={item.scope.id}>
-                    <span aria-hidden="true">›</span>
-                    <button
-                      type="button"
-                      aria-current={current ? "page" : undefined}
-                      disabled={current}
-                      onClick={() => selectCorridorBreadcrumb(index)}
-                    >
-                      Покоління {index + 1}: {label}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </nav>
-        </>
-      ) : null}
-
-      {perspective.kind === "all-descendants" ? (
-        <div
-          ref={perspectiveBarRef}
-          className="family-tree-v2-perspective-bar family-tree-v2-perspective-bar-compact"
-          role="region"
-          aria-label="Режим усіх нащадків"
-          tabIndex={-1}
-        >
-          <strong className="family-tree-v2-perspective-heading">
-            Нащадки: <span>{allDescendantsLabel}</span>
-          </strong>
-          <SpecialPerspectiveProgress
-            compact
-            loading={progressiveDescendants.loading}
-            canceled={progressiveDescendants.canceled}
-            error={progressiveDescendants.error}
-            loadedPersons={specialPerspectiveLoadedPersons}
-            loadedGenerations={progressiveDescendants.loadedGenerations}
-            pagesLoaded={progressiveDescendants.pagesLoaded}
-            mountedNodeLimit={MAX_RENDERED_FAMILY_TREE_NODES}
-            truncated={allDescendantsTruncated}
-          />
-          <div className="family-tree-v2-perspective-actions">
-            {progressiveDescendants.loading ? (
-              <button type="button" className="button button-secondary" onClick={progressiveDescendants.cancel}>
-                Зупинити
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="button button-secondary"
-              aria-label="Повернутися до родового дерева"
-              title="Повернутися до родового дерева"
-              onClick={leaveFamilyCorridor}
-            >
-              ← До дерева
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       {specialPerspectiveActive && (
         perspective.kind === "all-descendants"

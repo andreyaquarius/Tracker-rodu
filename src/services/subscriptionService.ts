@@ -15,6 +15,9 @@ import type {
 
 const limitKeys: PlanLimitKey[] = [
   "projects",
+  "family_trees_total",
+  "persons_total",
+  "editors_total",
   "researches_total",
   "researches_per_project",
   "records_per_standard_section",
@@ -28,6 +31,9 @@ const limitKeys: PlanLimitKey[] = [
 
 const usageProperty: Record<PlanLimitKey, string> = {
   projects: "projects",
+  family_trees_total: "familyTreesTotal",
+  persons_total: "personsTotal",
+  editors_total: "editorsTotal",
   researches_total: "researchesTotal",
   researches_per_project: "researchesPerProject",
   records_per_standard_section: "recordsPerStandardSection",
@@ -48,6 +54,34 @@ const publishedAiCreditsPerMonth: Record<PlanCode, number> = {
   free: 5,
   researcher: 50,
   professional: 100,
+};
+
+const publishedHeadlineLimits: Record<
+  PlanCode,
+  Pick<Record<PlanLimitKey, PlanLimit>,
+    "projects" | "family_trees_total" | "persons_total" | "editors_total" | "ai_credits_per_month">
+> = {
+  free: {
+    projects: { key: "projects", value: 1, isUnlimited: false },
+    family_trees_total: { key: "family_trees_total", value: 1, isUnlimited: false },
+    persons_total: { key: "persons_total", value: 500, isUnlimited: false },
+    editors_total: { key: "editors_total", value: 0, isUnlimited: false },
+    ai_credits_per_month: { key: "ai_credits_per_month", value: publishedAiCreditsPerMonth.free, isUnlimited: false },
+  },
+  researcher: {
+    projects: { key: "projects", value: null, isUnlimited: true },
+    family_trees_total: { key: "family_trees_total", value: null, isUnlimited: true },
+    persons_total: { key: "persons_total", value: 15_000, isUnlimited: false },
+    editors_total: { key: "editors_total", value: 2, isUnlimited: false },
+    ai_credits_per_month: { key: "ai_credits_per_month", value: publishedAiCreditsPerMonth.researcher, isUnlimited: false },
+  },
+  professional: {
+    projects: { key: "projects", value: null, isUnlimited: true },
+    family_trees_total: { key: "family_trees_total", value: null, isUnlimited: true },
+    persons_total: { key: "persons_total", value: null, isUnlimited: true },
+    editors_total: { key: "editors_total", value: 5, isUnlimited: false },
+    ai_credits_per_month: { key: "ai_credits_per_month", value: publishedAiCreditsPerMonth.professional, isUnlimited: false },
+  },
 };
 
 export async function loadSubscriptionContext(projectId?: string): Promise<SubscriptionContext> {
@@ -236,7 +270,7 @@ export function subscriptionErrorCode(error: unknown): string {
     : typeof error === "object" && error && "message" in error
       ? String(error.message)
       : String(error ?? "");
-  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE|PLAN_SCOPE_CREATE_BLOCKED|PLAN_SECTION_RECORD_LIMIT_REACHED):[a-z_]+|AI_CREDITS_LIMIT_REACHED|AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED|ADMIN_SUBSCRIPTION_MANAGED_EXTERNALLY|START_PLAN_NOT_CONFIGURED|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
+  const match = message.match(/(PLAN_LIMIT_REACHED|FEATURE_NOT_AVAILABLE|PLAN_SCOPE_CREATE_BLOCKED|PLAN_SECTION_RECORD_LIMIT_REACHED):[a-z_]+|GEDCOM_(?:PERSON|TREE)_LIMIT_REACHED|AI_CREDITS_LIMIT_REACHED|AI_HYPOTHESIS_ANALYSIS_LIMIT_REACHED|ADMIN_SUBSCRIPTION_MANAGED_EXTERNALLY|START_PLAN_NOT_CONFIGURED|RESEARCH_REQUIRED_BY_PLAN|INVALID_RESEARCH_REFERENCE/i);
   return match?.[0] ?? "";
 }
 
@@ -244,6 +278,11 @@ export function subscriptionErrorMessage(error: unknown): string {
   const code = subscriptionErrorCode(error);
   const messages: Record<string, string> = {
     "PLAN_LIMIT_REACHED:projects": "Ви використали доступну кількість проєктів.",
+    "PLAN_LIMIT_REACHED:family_trees_total": "Ви використали доступну кількість родових дерев.",
+    "PLAN_LIMIT_REACHED:persons_total": "Досягнуто загальний ліміт осіб у ваших проєктах.",
+    "PLAN_LIMIT_REACHED:editors_total": "Використано всі редакторські місця вашого тарифу. Глядачів можна запрошувати без обмежень.",
+    GEDCOM_PERSON_LIMIT_REACHED: "GEDCOM містить більше нових осіб, ніж дозволяє вільне місце вашого тарифу. Видаліть дублікати, зменште файл або перейдіть на вищий тариф.",
+    GEDCOM_TREE_LIMIT_REACHED: "Для імпорту GEDCOM потрібно створити ще одне родове дерево, але ліміт дерев поточного тарифу вже використано.",
     "PLAN_LIMIT_REACHED:researches_total": "Ви використали доступну кількість досліджень.",
     "PLAN_LIMIT_REACHED:researches_per_project": "У цьому проєкті досягнуто ліміт досліджень.",
     "PLAN_LIMIT_REACHED:records_per_standard_section": "Досягнуто ліміт записів у цьому розділі.",
@@ -278,6 +317,7 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
   const rawLimits = asRecord(raw.limits);
   const rawUsage = asRecord(raw.usage);
   const rawSectionQuotas = asRecord(raw.sectionQuotas);
+  const rawProjectCapacity = asRecord(raw.projectCapacity);
   const projectAccessMode = nullableString(raw.projectAccessMode) as SubscriptionAccessMode | null;
   const effectivePlanCode = String(raw.effectivePlanCode ?? rawPlan.code ?? "free") as PlanCode;
   const limits = {} as Record<PlanLimitKey, PlanLimit>;
@@ -285,15 +325,42 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
   for (const key of limitKeys) {
     const hasLimit = Object.prototype.hasOwnProperty.call(rawLimits, key);
     const limit = hasLimit ? asRecord(rawLimits[key]) : {};
-    const fallbackLimit = key === "ai_credits_per_month" ? publishedAiCreditsPerMonth[effectivePlanCode] : 0;
+    const publishedLimit = (publishedHeadlineLimits[effectivePlanCode] as Partial<
+      Record<PlanLimitKey, PlanLimit>
+    >)[key];
+    const fallbackLimit = publishedLimit?.value ?? 0;
     limits[key] = {
       key,
       value: hasLimit
         ? limit.value === null || limit.value === undefined ? null : Number(limit.value)
         : fallbackLimit,
-      isUnlimited: hasLimit ? Boolean(limit.isUnlimited) : false,
+      isUnlimited: hasLimit ? Boolean(limit.isUnlimited) : Boolean(publishedLimit?.isUnlimited),
     };
     usage[key] = Number(rawUsage[usageProperty[key]] ?? 0);
+  }
+  const projectCapacityPlanCode = String(
+    rawProjectCapacity.effectivePlanCode ?? effectivePlanCode,
+  ) as PlanCode;
+  const rawProjectCapacityLimits = asRecord(rawProjectCapacity.limits);
+  const rawProjectCapacityUsage = asRecord(rawProjectCapacity.usage);
+  const projectCapacityLimits = {} as Record<PlanLimitKey, PlanLimit>;
+  const projectCapacityUsage = {} as SubscriptionUsage;
+  for (const key of limitKeys) {
+    const hasLimit = Object.prototype.hasOwnProperty.call(rawProjectCapacityLimits, key);
+    const rawLimit = hasLimit ? asRecord(rawProjectCapacityLimits[key]) : {};
+    const publishedLimit = (publishedHeadlineLimits[projectCapacityPlanCode] as Partial<
+      Record<PlanLimitKey, PlanLimit>
+    >)[key];
+    projectCapacityLimits[key] = {
+      key,
+      value: hasLimit
+        ? rawLimit.value === null || rawLimit.value === undefined ? null : Number(rawLimit.value)
+        : publishedLimit?.value ?? 0,
+      isUnlimited: hasLimit
+        ? Boolean(rawLimit.isUnlimited)
+        : Boolean(publishedLimit?.isUnlimited),
+    };
+    projectCapacityUsage[key] = Number(rawProjectCapacityUsage[usageProperty[key]] ?? 0);
   }
   const subscription: UserSubscription = {
     id: String(rawSubscription.id ?? ""),
@@ -322,6 +389,14 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
     plan,
     limits,
     usage,
+    projectCapacity: Object.keys(rawProjectCapacity).length
+      ? {
+          ownerId: String(rawProjectCapacity.ownerId ?? ""),
+          effectivePlanCode: projectCapacityPlanCode,
+          limits: projectCapacityLimits,
+          usage: projectCapacityUsage,
+        }
+      : null,
     sectionQuotas: mapSectionQuotas(rawSectionQuotas),
     isAdmin: Boolean(raw.isAdmin),
     projectAccessMode,
@@ -331,15 +406,11 @@ function mapContext(raw: Record<string, unknown>): SubscriptionContext {
 }
 
 function withDefaultPlanLimits(planCode: PlanCode, limits: PlanLimit[]): PlanLimit[] {
-  if (limits.some((limit) => limit.key === "ai_credits_per_month")) return limits;
-  return [
-    ...limits,
-    {
-      key: "ai_credits_per_month",
-      value: publishedAiCreditsPerMonth[planCode],
-      isUnlimited: false,
-    },
-  ];
+  const byKey = new Map(limits.map((limit) => [limit.key, limit]));
+  for (const limit of Object.values(publishedHeadlineLimits[planCode])) {
+    if (!byKey.has(limit.key)) byKey.set(limit.key, limit);
+  }
+  return Array.from(byKey.values());
 }
 
 function mapSectionQuotas(raw: Record<string, unknown>): Record<string, SectionQuota> {

@@ -23,7 +23,7 @@ test("unlimited plans remain available regardless of usage", () => {
 
 test("missing limits fail closed while zero limits block immediately", () => {
   assert.equal(hasPlanCapacity(null, 0), false);
-  const blocked = { key: "project_members" as const, value: 0, isUnlimited: false };
+  const blocked = { key: "editors_total" as const, value: 0, isUnlimited: false };
   assert.equal(hasPlanCapacity(blocked, 0), false);
 });
 

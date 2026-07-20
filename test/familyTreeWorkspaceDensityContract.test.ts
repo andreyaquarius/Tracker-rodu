@@ -66,15 +66,17 @@ test("secondary tree fields open in a dismissible overlay instead of adding tool
     appCss,
     /@media\s*\(max-width:\s*1380px\)[\s\S]*?\.family-tree-v2-history\s*\{[^}]*flex:\s*1 0 100%;/,
   );
+  assert.doesNotMatch(page, /className="family-tree-v2-search">\s*<span>/);
+  assert.doesNotMatch(appCss, /\.family-tree-v2-search\s*>\s*span/);
   assert.match(
     appCss,
-    /@media\s*\(max-width:\s*1380px\)[\s\S]*?\.family-tree-v2-search\s*>\s*span\s*\{[^}]*display:\s*none;/,
+    /\.family-tree-v2-search\s*\{[^}]*width:\s*clamp\(180px, 24vw, 360px\);[^}]*flex:\s*0 1 clamp\(180px, 24vw, 360px\);/s,
+  );
+  assert.match(
+    appCss,
+    /\.family-tree-v2-host-toolbar\s*>\s*\.button,[\s\S]*?\.family-tree-v2-search\s*>\s*input\s*\{[^}]*height:\s*38px;[^}]*min-height:\s*38px;/,
   );
   assert.doesNotMatch(appCss, /max-height:\s*210px;\s*\n\s*overflow-y:\s*auto;/);
-  assert.match(
-    appCss,
-    /@media\s*\(max-height:\s*820px\)[\s\S]*?\.family-tree-v2-search\s*>\s*span\s*\{[^}]*display:\s*none;/,
-  );
 });
 
 test("status chrome and canvas controls no longer reserve separate full-width rows", () => {
@@ -82,10 +84,25 @@ test("status chrome and canvas controls no longer reserve separate full-width ro
     page,
     /Повернуто попередній вигляд родового дерева\./,
   );
-  assert.match(page, /className="family-tree-v2-status-strip"/);
+  assert.match(page, /className="family-tree-v2-toolbar-status"/);
+  assert.match(page, /className="family-tree-v2-toolbar-perspective family-tree-v2-perspective-bar-compact"/);
+  assert.doesNotMatch(page, /className="family-tree-v2-status-strip"/);
+  assert.doesNotMatch(appCss, /\.family-tree-v2-status-strip/);
   assert.match(
     appCss,
-    /@media\s*\(max-height:\s*820px\)[\s\S]*?\.family-tree-v2-status-strip\s*\{[^}]*position:\s*absolute;/,
+    /\.family-tree-v2-toolbar-status\s*\{[^}]*display:\s*flex;[^}]*flex:\s*1 1 220px;[^}]*min-width:\s*0;/s,
+  );
+  assert.match(
+    appCss,
+    /\.family-tree-v2-warnings\s*\{[^}]*position:\s*static;/s,
+  );
+  assert.match(
+    appCss,
+    /\.family-tree-v2-warnings ul\s*\{[^}]*right:\s*9px;[^}]*left:\s*9px;[^}]*width:\s*auto;/s,
+  );
+  assert.match(
+    viewport,
+    /onLayoutWarnings\?\.\(\s*\(layoutState\.layout\?\.warnings \?\? \[\]\)\.map/,
   );
   assert.match(
     viewport,
