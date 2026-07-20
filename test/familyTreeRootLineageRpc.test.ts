@@ -11,7 +11,7 @@ const migration = readFileSync(
 );
 
 const implementationStart = migration.indexOf(
-  "create function security_private.get_family_tree_root_lineage_v1",
+  "create or replace function security_private.get_family_tree_root_lineage_v1",
 );
 const implementationEnd = migration.indexOf(
   "$implementation$;",
@@ -40,7 +40,7 @@ test("root-lineage RPC follows the trusted implementation plus public invoker fa
 
   assert.match(
     migration,
-    /create function public\.get_family_tree_root_lineage_v1[\s\S]*?security invoker[\s\S]*?set search_path = pg_catalog[\s\S]*?select security_private\.get_family_tree_root_lineage_v1\(\$1\)/i,
+    /create or replace function public\.get_family_tree_root_lineage_v1[\s\S]*?security invoker[\s\S]*?set search_path = pg_catalog[\s\S]*?select security_private\.get_family_tree_root_lineage_v1\(\$1\)/i,
   );
   assert.match(
     migration,
@@ -52,7 +52,7 @@ test("root-lineage RPC follows the trusted implementation plus public invoker fa
   );
   assert.doesNotMatch(
     migration,
-    /create function public\.get_family_tree_root_lineage_v1[\s\S]*?security definer/i,
+    /create or replace function public\.get_family_tree_root_lineage_v1[\s\S]*?security definer/i,
   );
 });
 

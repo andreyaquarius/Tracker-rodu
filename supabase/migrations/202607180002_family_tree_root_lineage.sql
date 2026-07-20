@@ -5,7 +5,7 @@ begin;
 -- that breadth: it only needs the focus person and the transitive parent
 -- closure.  Keep this implementation separate so a 16-generation overlay
 -- cannot spend its statement budget building data that the overlay discards.
-create function security_private.get_family_tree_root_lineage_v1(
+create or replace function security_private.get_family_tree_root_lineage_v1(
   p_request jsonb
 )
 returns jsonb
@@ -537,7 +537,7 @@ revoke all on function security_private.get_family_tree_root_lineage_v1(jsonb)
 grant execute on function security_private.get_family_tree_root_lineage_v1(jsonb)
   to authenticated, service_role;
 
-create function public.get_family_tree_root_lineage_v1(p_request jsonb)
+create or replace function public.get_family_tree_root_lineage_v1(p_request jsonb)
 returns jsonb
 language sql
 volatile

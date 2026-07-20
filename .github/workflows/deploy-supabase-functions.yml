@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "supabase/functions/**"
+      - "supabase/migrations/**"
       - "supabase/config.toml"
       # process-gedcom-exports reuses Edge-safe GEDCOM modules from the app
       # source tree. Changes there must redeploy the function as well.
@@ -91,6 +92,12 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Link Supabase project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --yes
+
+      - name: Apply database migrations
+        run: supabase db push --linked --yes
 
       - name: Deploy Edge Functions
         run: |

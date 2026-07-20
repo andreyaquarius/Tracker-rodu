@@ -48,6 +48,21 @@ test("Edge deployment watches the shared application module roots", () => {
   assert.match(DEPLOY_WORKFLOW, /- "src\/utils\/\*\*"/);
 });
 
+test("Supabase deployment applies pending database migrations before Edge functions", () => {
+  assert.match(DEPLOY_WORKFLOW, /- "supabase\/migrations\/\*\*"/);
+  assert.match(
+    DEPLOY_WORKFLOW,
+    /supabase link --project-ref "\$SUPABASE_PROJECT_REF" --yes/,
+  );
+  const migrationPosition = DEPLOY_WORKFLOW.indexOf("supabase db push --linked --yes");
+  const functionPosition = DEPLOY_WORKFLOW.indexOf("supabase functions deploy");
+  assert.ok(migrationPosition >= 0, "Expected the workflow to apply pending migrations");
+  assert.ok(
+    functionPosition > migrationPosition,
+    "Database migrations must finish before compatible Edge Functions deploy",
+  );
+});
+
 function localModuleSpecifiers(source: string): string[] {
   const specifiers: string[] = [];
   const staticImport = /(?:from\s*|import\s*)["'](\.{1,2}\/[^"']+)["']/g;
