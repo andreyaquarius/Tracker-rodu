@@ -192,17 +192,15 @@ function personDraftFromRecord(
   const trackerPrivacy = childValueByTag(childLines, "_TRK_PRIVACY");
   const privacyStatus = gedcomTrackerPrivacyStatus(trackerPrivacy) ?? gedcomResnToPrivacyStatus(privacyRestriction);
   const explicitLiving = gedcomLivingValue(childValueByTag(childLines, "LIVING") || childValueByTag(childLines, "_LIVING") || childValueByTag(childLines, "LIVN"));
-  const isLiving = inferGedcomLivingStatus({
+  const deathAssertion = gedcomDeathAssertion(childLines, lineLookup);
+  const birthDate = events.find((event) => event.eventType === "birth")?.eventDate ?? "";
+  const vitalStatus = inferGedcomVitalStatus({
     explicitLiving,
     privacyRestriction,
-    hasDeathEvent: events.some((event) => event.eventType === "death" || event.eventType === "burial" || event.eventType === "cremation"),
+    deathAssertion,
+    birthDate,
   });
-  const hasDeathEvent = events.some((event) => event.eventType === "death" || event.eventType === "burial" || event.eventType === "cremation");
-  const vitalStatus: "living" | "deceased" | "unknown" = hasDeathEvent
-    ? "deceased"
-    : explicitLiving === true || gedcomPrivacySuggestsLiving(privacyRestriction)
-      ? "living"
-      : "unknown";
+  const isLiving = vitalStatus === "living";
 
   return {
     xref: record.pointer ?? "",
@@ -250,19 +248,74 @@ function gedcomLivingValue(value: string): boolean | null {
   return null;
 }
 
-function inferGedcomLivingStatus(input: {
+type GedcomVitalStatus = "living" | "deceased" | "unknown";
+type GedcomDeathAssertion = "present" | "absent" | "unknown";
+
+const GEDCOM_PRESUMED_LIVING_MAX_AGE = 110;
+
+function inferGedcomVitalStatus(input: {
   explicitLiving: boolean | null;
   privacyRestriction: string;
-  hasDeathEvent: boolean;
-}): boolean {
-  if (input.hasDeathEvent) return false;
-  if (input.explicitLiving !== null) return input.explicitLiving;
-  return gedcomPrivacySuggestsLiving(input.privacyRestriction);
+  deathAssertion: GedcomDeathAssertion;
+  birthDate: string;
+}): GedcomVitalStatus {
+  if (input.deathAssertion === "present") return "deceased";
+  if (input.explicitLiving === false) return "deceased";
+  if (input.explicitLiving === true || input.deathAssertion === "absent") return "living";
+  if (gedcomPrivacySuggestsLiving(input.privacyRestriction)) return "living";
+  if (gedcomBirthDateSuggestsLiving(input.birthDate)) return "living";
+  return "unknown";
 }
 
 function gedcomPrivacySuggestsLiving(value: string): boolean {
   const normalized = value.trim().toLowerCase();
-  return normalized === "privacy" || normalized === "confidential";
+  return normalized === "privacy" || normalized === "confidential" || normalized === "locked";
+}
+
+function gedcomDeathAssertion(lines: GedcomLine[], lineLookup: GedcomLineLookup): GedcomDeathAssertion {
+  let explicitlyAbsent = false;
+
+  for (const line of lines) {
+    if (line.tag === "NO" && line.value.trim().toUpperCase() === "DEAT") {
+      explicitlyAbsent = true;
+      continue;
+    }
+    if (!isGedcomDeathEventTag(line.tag)) continue;
+    const occurrence = gedcomEventOccurrence(lineLookup, line);
+    if (occurrence === "present") return "present";
+    if (line.tag === "DEAT" && occurrence === "absent") explicitlyAbsent = true;
+  }
+
+  return explicitlyAbsent ? "absent" : "unknown";
+}
+
+function isGedcomDeathEventTag(tag: string): boolean {
+  return tag === "DEAT" || tag === "BURI" || tag === "CREM";
+}
+
+function gedcomEventOccurrence(
+  lineLookup: GedcomLineLookup,
+  line: GedcomLine,
+): "present" | "absent" | "unknown" {
+  const normalizedValue = line.value.trim().toLowerCase();
+  if (["n", "no", "false", "0"].includes(normalizedValue)) return "absent";
+  if (["y", "yes", "true", "1"].includes(normalizedValue)) return "present";
+  if (normalizedValue) return "present";
+
+  const evidenceTags = new Set(["DATE", "PLAC", "ADDR", "AGE", "CAUS", "NOTE", "SOUR", "OBJE"]);
+  return childrenOfLine(lineLookup, line).some((child) => evidenceTags.has(child.tag))
+    ? "present"
+    : "unknown";
+}
+
+function gedcomBirthDateSuggestsLiving(value: string, referenceYear = new Date().getUTCFullYear()): boolean {
+  const normalized = value.trim().toUpperCase().replace(/\s+/g, " ");
+  if (!normalized || normalized.startsWith("BEF ")) return false;
+  const years = [...normalized.matchAll(/\b(\d{4})\b/g)]
+    .map((match) => Number(match[1]))
+    .filter((year) => year > 0 && year <= referenceYear + 1);
+  if (!years.length) return false;
+  return Math.min(...years) >= referenceYear - GEDCOM_PRESUMED_LIVING_MAX_AGE;
 }
 
 function familyDraftFromRecord(
@@ -364,7 +417,7 @@ function blankNameDraft(): GedcomImportNameDraft {
 }
 
 function eventDraftFromLine(lineLookup: GedcomLineLookup, line: GedcomLine): GedcomImportEventDraft | null {
-  if (line.tag === "DEAT" && line.value.trim().toLowerCase() === "n") return null;
+  if (isGedcomDeathEventTag(line.tag) && gedcomEventOccurrence(lineLookup, line) !== "present") return null;
   const typeValue = childValue(lineLookup, line, "TYPE");
   const eventValue = decodeGedcomAtSigns(line.value);
   const notes = collectEventDescription(lineLookup, line);

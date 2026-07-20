@@ -121,6 +121,77 @@ test("does not treat GEDCOM DEAT N as a death event", () => {
   assert.equal(person.events.some((event) => event.eventType === "death"), false);
 });
 
+test("infers a recent birth without a death assertion as living", () => {
+  const recentBirthYear = new Date().getUTCFullYear() - 40;
+  const oldBirthYear = new Date().getUTCFullYear() - 130;
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Recent /Person/",
+    "1 BIRT",
+    `2 DATE ${recentBirthYear}`,
+    "0 @I2@ INDI",
+    "1 NAME Historical /Person/",
+    "1 BIRT",
+    `2 DATE ${oldBirthYear}`,
+    "0 TRLR",
+  ].join("\n"));
+
+  const recent = draft.people.find((person) => person.xref === "@I1@");
+  const historical = draft.people.find((person) => person.xref === "@I2@");
+  assert.equal(recent?.isLiving, true);
+  assert.equal(recent?.vitalStatus, "living");
+  assert.equal(historical?.isLiving, false);
+  assert.equal(historical?.vitalStatus, "unknown");
+});
+
+test("ignores an empty death placeholder and accepts explicit negative death assertions", () => {
+  const recentBirthYear = new Date().getUTCFullYear() - 30;
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Empty /Placeholder/",
+    "1 BIRT",
+    `2 DATE ${recentBirthYear}`,
+    "1 DEAT",
+    "0 @I2@ INDI",
+    "1 NAME Legacy /Negative/",
+    "1 DEAT NO",
+    "0 @I3@ INDI",
+    "1 NAME GedcomSeven /Negative/",
+    "1 NO DEAT",
+    "0 TRLR",
+  ].join("\n"));
+
+  for (const person of draft.people) {
+    assert.equal(person.isLiving, true);
+    assert.equal(person.vitalStatus, "living");
+    assert.equal(person.events.some((event) => event.eventType === "death"), false);
+  }
+});
+
+test("treats a death structure with evidence as deceased and lets it override living markers", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Dated /Death/",
+    "1 _LIVING Y",
+    "1 DEAT",
+    "2 DATE 2020",
+    "0 @I2@ INDI",
+    "1 NAME Explicit /Deceased/",
+    "1 _LIVING N",
+    "0 TRLR",
+  ].join("\n"));
+
+  assert.equal(draft.people.find((person) => person.xref === "@I1@")?.vitalStatus, "deceased");
+  assert.equal(
+    draft.people.find((person) => person.xref === "@I1@")?.events.some((event) => event.eventType === "death"),
+    true,
+  );
+  assert.equal(draft.people.find((person) => person.xref === "@I2@")?.vitalStatus, "deceased");
+});
+
 test("reads MyHeritage-style married surname extension", () => {
   const draft = buildGedcomImportDraft([
     "0 HEAD",

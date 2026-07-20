@@ -39,6 +39,7 @@ const treeCard = readFileSync(
   new URL("../src/features/family-tree-view/react/PersonCard.tsx", import.meta.url),
   "utf8",
 );
+const layout = readFileSync(new URL("../src/components/Layout.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
 test("persons V2 catalogue resets checkboxes and localizes last-event summaries", () => {
@@ -95,6 +96,14 @@ test("persons V2 preview no longer becomes a partial fixed overlay at the deskto
   assert.match(preview, /aria-modal=\{compactOverlay \|\| undefined\}/u);
   assert.match(preview, /setAttribute\("inert", ""\)/u);
   assert.match(preview, /event\.key === "Escape"/u);
+});
+
+test("persons V2 uses the full desktop workspace and fits list columns without a wide-screen scrollbar", () => {
+  assert.match(layout, /props\.page === "persons"[\s\S]*?"page persons-v2-page"/u);
+  assert.match(styles, /\.persons-v2-page\s*\{[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*none;/u);
+  assert.match(styles, /\.persons-v2-catalog-shell\s*\{[\s\S]*?max-width:\s*100%;[\s\S]*?min-width:\s*0;/u);
+  assert.match(styles, /@container persons-catalog-shell \(min-width: 1181px\)[\s\S]*?\.persons-v2-list table\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?table-layout:\s*fixed;/u);
+  assert.match(styles, /@media \(max-width: 560px\)[\s\S]*?\.persons-v2-list table\s*\{[\s\S]*?min-width:\s*980px;/u);
 });
 
 test("persons V2 exposes a real photo album and opens photos from the profile card", () => {

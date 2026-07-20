@@ -44,6 +44,11 @@ export function Layout(props: LayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     readSidebarCollapsed(browserLocalStorage()),
   );
+  const pageClassName = props.page === "familyTree"
+    ? "page family-tree-page"
+    : props.page === "persons"
+      ? "page persons-v2-page"
+      : "page";
 
   useEffect(() => {
     writeSidebarCollapsed(browserLocalStorage(), sidebarCollapsed);
@@ -115,7 +120,7 @@ export function Layout(props: LayoutProps) {
               </>
             )}
           />
-          <main className={props.page === "familyTree" ? "page family-tree-page" : "page"}>{props.children}</main>
+          <main className={pageClassName}>{props.children}</main>
         </div>
       </div>
     </WorkspaceWindowsProvider>

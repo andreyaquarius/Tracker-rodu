@@ -24,8 +24,15 @@ export function buildGedcomImportReport(
 ): GedcomImportReport {
   const vitalStats = draft.people.reduce(
     (acc, person) => {
-      if (person.isLiving) acc.livingPersons += 1;
-      else if (person.events.some((event) => ["death", "burial", "cremation"].includes(event.eventType))) {
+      const vitalStatus = person.vitalStatus ?? (
+        person.isLiving
+          ? "living"
+          : person.events.some((event) => ["death", "burial", "cremation"].includes(event.eventType))
+            ? "deceased"
+            : "unknown"
+      );
+      if (vitalStatus === "living") acc.livingPersons += 1;
+      else if (vitalStatus === "deceased") {
         acc.deceasedPersons += 1;
       } else {
         acc.unknownVitalStatusPersons += 1;

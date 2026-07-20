@@ -44,7 +44,31 @@ test("builds a user-facing GEDCOM import report", () => {
   assert.equal(report.potentialDuplicates, 1);
 
   const formatted = formatGedcomImportReport(report);
-  assert.match(formatted, /4/);
-  assert.match(formatted, /3/);
-  assert.match(formatted, /2/);
+  assert.match(formatted, /^Живих: 2$/m);
+  assert.match(formatted, /^Померлих: 1$/m);
+  assert.match(formatted, /^Невідомий статус: 1$/m);
+});
+
+test("uses the normalized GEDCOM vital status as the report source of truth", () => {
+  let id = 0;
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Recent /Person/",
+    "1 BIRT",
+    `2 DATE ${new Date().getUTCFullYear() - 35}`,
+    "0 @I2@ INDI",
+    "1 NAME Explicit /Deceased/",
+    "1 _LIVING N",
+    "0 TRLR",
+  ].join("\n"));
+  const built = buildGedcomAppImport(draft, {
+    idFactory: () => `status-id-${++id}`,
+    nowFactory: () => "2026-07-20T00:00:00.000Z",
+  });
+
+  const report = buildGedcomImportReport(draft, built);
+  assert.equal(report.livingPersons, 1);
+  assert.equal(report.deceasedPersons, 1);
+  assert.equal(report.unknownVitalStatusPersons, 0);
 });
