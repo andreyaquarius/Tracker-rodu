@@ -66,17 +66,14 @@ test("migration contract authorizes first, locks a stable version, masks viewers
   assert.match(sql, /before insert or update of[\s\S]+parent_set_id[\s\S]+execute function public\.prevent_bloodline_parent_cycle/);
 });
 
-test("production renderer requires an explicit production flag but is always enabled locally", () => {
+test("production renderer is the default authenticated tree experience", () => {
   const page = readFileSync(new URL("../../src/pages/FamilyTreePage.tsx", import.meta.url), "utf8");
   const app = readFileSync(new URL("../../src/App.tsx", import.meta.url), "utf8");
   assert.match(page, /useProductionRenderer = false/);
   assert.match(page, /return <ProductionFamilyTreePage/);
   assert.match(page, /return <LegacyFamilyTreePage/);
-  assert.match(
-    app,
-    /shouldUseProductionFamilyTreeRenderer\(\s*featureFlags,\s*import\.meta\.env\.DEV,\s*\)/,
-  );
-  assert.doesNotMatch(app, /featureFlags\.family_tree_renderer_v2 !== false/);
+  assert.match(app, /<FamilyTreePage[\s\S]*?useProductionRenderer/u);
+  assert.doesNotMatch(app, /shouldUseProductionFamilyTreeRenderer|family_tree_renderer_v2/u);
 });
 
 test("family tree routes person opens to V2 profiles while preserving legacy windows", () => {

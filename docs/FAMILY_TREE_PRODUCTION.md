@@ -97,7 +97,7 @@ Server trigger перевіряє self-cycle, parent-set/tree/child identity і 
 
 ## Feature flag і rollback
 
-Міграція створює enabled flag `family_tree_renderer_v2`. У `App.tsx` production renderer запускається лише тоді, коли сервер явно повернув `true`. Поки flag завантажується, відсутній або RPC-міграція ще не розгорнута, застосунок fail-closed повертається до старого renderer замість запиту неіснуючого `graph_version`. Для миттєвого UI rollback вимкніть flag; старий renderer і дані не видаляються. Відкат не потребує schema/data migration.
+Міграція історично створювала rollout flag `family_tree_renderer_v2`. Після загального запуску модуль використовує production renderer для кожного авторизованого користувача і більше не повертається до старого інтерфейсу через відсутній або вимкнений flag. Доступ до даних і редагування надалі визначаються членством у проєкті, роллю та тарифними лімітами.
 
 ## Перевірка
 

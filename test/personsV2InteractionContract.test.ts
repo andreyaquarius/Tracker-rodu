@@ -71,10 +71,11 @@ test("persons V2 linked records can browse, create, and open real application re
   assert.match(app, /onCreateRelated=\{createRelatedRecord\}/u);
 });
 
-test("persons V2 uses the same access entitlement as the family-tree module", () => {
+test("persons V2 is the only catalogue for authenticated accounts and keeps tariff creation gates", () => {
+  assert.match(app, /resolveFamilyTreeFeatureAccess\(\{[\s\S]*?isAuthenticated:\s*Boolean\(account\)/u);
   assert.match(app, /canUsePersonsModuleV2\(\{[\s\S]*?canUseFamilyTreeFeature,[\s\S]*?\}\)/u);
-  assert.doesNotMatch(app, /personsModuleV2RolloutEnabled/u);
-  assert.match(app, /personsModuleV2AccessLoading[\s\S]*?Перевіряємо доступ до нового модуля осіб/u);
+  assert.match(app, /<PersonsModuleV2[\s\S]*?canCreateTree=\{subscriptionAccess\.canCreateFamilyTree\}/u);
+  assert.doesNotMatch(app, /loadMyFamilyTreeFeatureAccess|personsModuleV2AccessLoading|<PersonsPage/u);
 });
 
 test("persons V2 findings keep long GEDCOM sources inside their cards and expose one safe link", () => {

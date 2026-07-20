@@ -21,36 +21,24 @@ const planMigration = readFileSync(
   ),
   "utf8",
 );
+const coreAccessMigration = readFileSync(
+  new URL(
+    "../supabase/migrations/202607200002_core_genealogy_module_access.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
-test("app administrator keeps family-tree access while the server result loads", () => {
+test("every authenticated account can open the family-tree module", () => {
   assert.equal(resolveFamilyTreeFeatureAccess({
-    isAppAdmin: true,
-    serverAllowed: false,
-    serverLoading: true,
-  }), true);
-  assert.equal(resolveFamilyTreeFeatureAccess({
-    isAppAdmin: true,
-    serverAllowed: false,
-    serverLoading: false,
+    isAuthenticated: true,
   }), true);
 });
 
-test("non-admin family-tree access waits for the authenticated server result", () => {
+test("anonymous visitors cannot open the private family-tree module", () => {
   assert.equal(resolveFamilyTreeFeatureAccess({
-    isAppAdmin: false,
-    serverAllowed: true,
-    serverLoading: true,
+    isAuthenticated: false,
   }), false);
-  assert.equal(resolveFamilyTreeFeatureAccess({
-    isAppAdmin: false,
-    serverAllowed: false,
-    serverLoading: false,
-  }), false);
-  assert.equal(resolveFamilyTreeFeatureAccess({
-    isAppAdmin: false,
-    serverAllowed: true,
-    serverLoading: false,
-  }), true);
 });
 
 test("family-tree tester search matches Ukrainian names and email tokens", () => {
@@ -107,4 +95,17 @@ test("tree-centred plans retain RPC isolation but replace beta entitlement with 
     /create or replace function security_private\.can_use_family_tree_feature\(\)[\s\S]*select auth\.uid\(\) is not null/i,
   );
   assert.match(planMigration, /Family tree and Persons V2 are core plan features/i);
+  assert.match(
+    coreAccessMigration,
+    /create or replace function public\.can_use_family_tree_feature\(\)[\s\S]*select auth\.uid\(\) is not null/i,
+  );
+  assert.match(
+    coreAccessMigration,
+    /create or replace function security_private\.gedcom_export_request_authorized[\s\S]*member\.role in \('owner', 'editor'\)/i,
+  );
+  const exportAuthorization = coreAccessMigration.slice(
+    coreAccessMigration.indexOf("create or replace function security_private.gedcom_export_request_authorized"),
+    coreAccessMigration.indexOf("revoke all on function security_private.can_use_family_tree_feature"),
+  );
+  assert.doesNotMatch(exportAuthorization, /family_tree_feature_access/i);
 });

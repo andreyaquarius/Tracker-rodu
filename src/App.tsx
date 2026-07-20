@@ -34,10 +34,8 @@ import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
-import { PersonsPage } from "./pages/PersonsPage";
 import { MapPage } from "./pages/MapPage";
 import { FamilyTreePage } from "./pages/FamilyTreePage";
-import { shouldUseProductionFamilyTreeRenderer } from "./utils/familyTreeRendererFlag";
 import { FamilyTreeErrorBoundary } from "./components/familyTree/FamilyTreeErrorBoundary";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
@@ -98,7 +96,6 @@ import {
 } from "./services/subscriptionService";
 import {
   assertFamilyTreeFeatureAccess,
-  loadMyFamilyTreeFeatureAccess,
 } from "./services/familyTreeFeatureAccess";
 import { readFamilyTreeEntryPointForPerson } from "./services/familyTreeNeighborhoodService";
 import {
@@ -593,11 +590,6 @@ export default function App() {
   const [scanViewer, setScanViewer] = useState<ActiveDocumentScanViewer | null>(null);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
-  const [familyTreeFeatureAccess, setFamilyTreeFeatureAccess] = useState({
-    accountId: "",
-    allowed: false,
-    loading: true,
-  });
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
@@ -722,52 +714,17 @@ export default function App() {
     };
   }, [account?.id, route.kind]);
 
-  useEffect(() => {
-    let active = true;
-    if (!account || route.kind === "public") {
-      setFamilyTreeFeatureAccess({ accountId: "", allowed: false, loading: false });
-      return () => {
-        active = false;
-      };
-    }
-
-    const accountId = account.id;
-    setFamilyTreeFeatureAccess({ accountId, allowed: false, loading: true });
-    void loadMyFamilyTreeFeatureAccess()
-      .then((allowed) => {
-        if (active) setFamilyTreeFeatureAccess({ accountId, allowed, loading: false });
-      })
-      .catch(() => {
-        // Core tree access stays fail-closed when the authenticated server
-        // verification is unavailable; this is no longer a private allow-list.
-        if (active) setFamilyTreeFeatureAccess({ accountId, allowed: false, loading: false });
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [account?.id, route.kind]);
-
-  // Keep the administrator fallback while the core entitlement migration is
-  // rolling out. Server-side SQL grants every authenticated account access.
-  const familyTreeAccessIsCurrent = Boolean(account)
-    && familyTreeFeatureAccess.accountId === account?.id;
-  const familyTreeFeatureAccessLoading = Boolean(account)
-    && (!familyTreeAccessIsCurrent || familyTreeFeatureAccess.loading);
+  // Family Tree and Persons V2 are core authenticated modules. Subscription
+  // limits still control creation capacity; project RLS still controls which
+  // records the signed-in account may read or edit.
   const canUseFamilyTreeFeature = resolveFamilyTreeFeatureAccess({
-    isAppAdmin: familyTreeAccessIsCurrent
-      && !subscriptionAccess.loading
-      && subscriptionAccess.isAdmin,
-    serverAllowed: familyTreeAccessIsCurrent && familyTreeFeatureAccess.allowed,
-    serverLoading: familyTreeFeatureAccessLoading,
+    isAuthenticated: Boolean(account),
   });
 
   const canOpenGeneHelp = subscriptionAccess.isAdmin || featureFlags.genehelp_public === true;
   const personsModuleV2Enabled = canUsePersonsModuleV2({
     canUseFamilyTreeFeature,
   });
-  const personsModuleV2AccessLoading = !personsModuleV2Enabled
-    && familyTreeFeatureAccessLoading;
   useEffect(() => {
     const projectId = workspace?.projectId;
     if (!personsModuleV2Enabled || !projectId) return;
@@ -4399,9 +4356,6 @@ export default function App() {
     }
   };
 
-  const deletePerson = (id: string) => {
-    void deletePersons([id]).catch(() => undefined);
-  };
   const saveRelation = (relation: PersonRelation): Promise<PersonRelation | null> => {
     if (!workspace) {
       app.setDatabase((current) => ({
@@ -5113,14 +5067,7 @@ export default function App() {
         if (!canUseFamilyTreeFeature) {
           return (
             <section className="panel empty-state">
-              <strong>
-                {familyTreeFeatureAccessLoading
-                  ? "Перевіряємо доступ до родового дерева…"
-                  : "Не вдалося підтвердити доступ до модуля «Родове дерево»."}
-              </strong>
-              {!familyTreeFeatureAccessLoading ? (
-                <p>Оновіть сторінку. Якщо помилка повториться, зверніться до підтримки.</p>
-              ) : null}
+              <strong>Увійдіть до облікового запису, щоб відкрити родове дерево.</strong>
             </section>
           );
         }
@@ -5167,10 +5114,7 @@ export default function App() {
               onOpenPerson={(personId) => openRelatedRecord("persons", personId)}
               onActiveContextChange={handleFamilyTreeActiveContextChange}
               personProfileNavigationEnabled={personsModuleV2Enabled}
-              useProductionRenderer={shouldUseProductionFamilyTreeRenderer(
-                featureFlags,
-                import.meta.env.DEV,
-              )}
+              useProductionRenderer
             />
           </FamilyTreeErrorBoundary>
         );
@@ -5239,13 +5183,6 @@ export default function App() {
         );
       }
       case "persons":
-        if (personsModuleV2AccessLoading) {
-          return (
-            <section className="panel empty-state">
-              <strong>Перевіряємо доступ до нового модуля осіб…</strong>
-            </section>
-          );
-        }
         if (personsModuleV2Enabled) {
           return (
             <Suspense fallback={<div className="panel empty-state">Завантажуємо модуль осіб…</div>}>
@@ -5315,47 +5252,9 @@ export default function App() {
           );
         }
         return (
-          <PersonsPage
-            db={activeDb}
-            projectId={workspace?.projectId}
-            persons={activeDb.persons}
-            relations={activeDb.personRelations}
-            researches={activeDb.researches}
-            findings={activeDb.findings}
-            tasks={activeDb.tasks}
-            hypotheses={activeDb.hypotheses}
-            archiveRequests={activeDb.archiveRequests}
-            customFieldDefinitions={activeDb.settings.customFields.filter(
-              (field) => field.module === "persons",
-            )}
-            onAddCustomField={canManageStructure && canCreateProjectRecords ? addCustomField : undefined}
-            onDeleteCustomField={canManageStructure ? deleteCustomField : undefined}
-            canAddCustomField={canCreateCustomField}
-            customFieldLimitMessage={customFieldLimitMessage}
-            initialSearch={moduleSearch}
-            initialOpenPersonId={
-              route.kind === "project" && route.page === "persons" && route.personId
-                ? route.personId
-                : openEntityId
-            }
-            onSavePerson={savePerson}
-            onImportRecords={importTableRecords}
-            onImportGedcom={importGedcomRecords}
-            onBackupGedcomPhotos={workspace ? backupImportedGedcomPhotos : undefined}
-            onDeletePerson={deletePerson}
-            onSaveRelation={saveRelation}
-            onDeleteRelation={deleteRelation}
-            onOpenRelated={openRelatedRecord}
-            onCreateRelated={createRelatedRecord}
-            readOnly={readOnly}
-            canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
-            canCreateTree={subscriptionAccess.canCreateFamilyTree}
-            canImportTable={subscriptionAccess.canImportTable}
-            onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
-            projectName={workspace?.projectName}
-            researchRequired={false}
-            canUseGedcom={canUseFamilyTreeFeature}
-          />
+          <section className="panel empty-state">
+            <strong>Увійдіть до облікового запису, щоб відкрити модуль осіб.</strong>
+          </section>
         );
       case "yearMatrix":
         return (

@@ -38,7 +38,7 @@ test("new persons use insert and App passes the editor base version", () => {
   const appSavePerson = sliceBetween(
     appSource,
     "const savePerson = (person: Person): Promise<Person | null> => {",
-    "const deletePerson =",
+    "const deletePersons =",
   );
   assert.match(appSavePerson, /saveProjectPerson\([\s\S]*?baseUpdatedAt\(person\) \?\? previousEntity\?\.updatedAt/);
   assert.doesNotMatch(appSavePerson, /assertProjectRecordUnchanged/);

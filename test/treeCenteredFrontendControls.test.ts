@@ -28,10 +28,8 @@ test("person and GEDCOM creation no longer inherit the legacy research requireme
   assert.doesNotMatch(app, /validateResearchScope\("persons", input\.personRecords\)/u);
   assert.doesNotMatch(app, /validateResearchScope\("documents", input\.documents\)/u);
   assert.match(app, /gedcomResearchRequired=\{false\}/u);
-  assert.ok(
-    (app.match(/researchRequired=\{false\}/gu)?.length ?? 0) >= 2,
-    "both person-module variants disable the obsolete requirement",
-  );
+  assert.match(app, /<PersonsModuleV2[\s\S]*?researchRequired=\{false\}/u);
+  assert.doesNotMatch(app, /<PersonsPage/u);
 });
 
 test("tree and person capacity changes refresh subscription state immediately", () => {

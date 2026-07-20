@@ -53,12 +53,16 @@ on conflict (user_id) do update
 set email = excluded.email,
     display_name = excluded.display_name;
 
-insert into public.app_admins (user_id, granted_by)
-values (
-  'e1000000-0000-0000-0000-000000000001',
-  'e1000000-0000-0000-0000-000000000001'
-)
-on conflict (user_id) do nothing;
+update public.user_subscriptions subscription
+set plan_id = plan.id,
+    status = 'active',
+    current_period_start = now(),
+    current_period_end = now() + interval '1 month',
+    trial_started_at = null,
+    trial_ends_at = null
+from public.subscription_plans plan
+where plan.code = 'researcher'
+  and subscription.user_id = 'e1000000-0000-0000-0000-000000000001'::uuid;
 
 insert into public.projects (id, owner_id, name)
 values
