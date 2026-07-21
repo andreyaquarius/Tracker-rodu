@@ -1468,24 +1468,8 @@ function LoadedFamilyTree({
     setAnchorOccurrenceId(undefined);
   }
 
-  function visiblePersonIdsForFamily(
-    continuation: FamilyContinuation,
-  ): ReadonlySet<string> {
-    if (isSpecialFamilyTreePerspective(perspective)) {
-      return new Set(displayedGraph.persons.map(person => person.id));
-    }
-    const prospectiveCorridor = buildFamilyCorridorProjection({
-      graph,
-      selectedFamily: {
-        familyKey: continuation.scope.id,
-        familyGroupId: continuation.scope.familyGroupId,
-        parentIds: continuation.scope.parentIds,
-        unionIds: continuation.scope.unionIds,
-      },
-      originalFocusPersonId: focusPersonId,
-      lineageAnchorPersonId: homePersonId,
-    });
-    return new Set(prospectiveCorridor.graph.persons.map(person => person.id));
+  function visiblePersonIdsForFamily(): ReadonlySet<string> {
+    return new Set(displayedGraphWithoutPhotos.persons.map(person => person.id));
   }
 
   async function toggleFamilyContinuation(
@@ -1522,32 +1506,7 @@ function LoadedFamilyTree({
       });
     };
     setAnchorOccurrenceId(anchorOccurrenceId);
-    const visiblePersonIds = visiblePersonIdsForFamily(continuation);
-    if (perspective.kind === "pedigree") {
-      const returnTo = captureCurrentPedigreeSnapshot();
-      setPerspective({
-        kind: "family-corridor",
-        sessionId: nextPerspectiveSessionId("family-corridor"),
-        scope: continuation.scope,
-        continuation,
-        ...(activeOwnerPersonId
-          ? { ownerPersonId: activeOwnerPersonId }
-          : {}),
-        trail: [openedTrailItem],
-        returnTo,
-      });
-      if (activeOwnerPersonId) {
-        setSelectedPersonId(activeOwnerPersonId);
-      }
-      setFamilyContinuationOwnerByScope(
-        activeOwnerPersonId
-          ? new Map([[continuation.scope.id, activeOwnerPersonId]])
-          : new Map(),
-      );
-      setNotice("");
-      return;
-    }
-
+    const visiblePersonIds = visiblePersonIdsForFamily();
     const result = await neighborhood.expandFamilyContinuation(
       continuation,
       visiblePersonIds,
@@ -1611,7 +1570,11 @@ function LoadedFamilyTree({
             : value,
         );
       }
-      setNotice("Дітей цієї пари відкрито; дерево перебудовано без сторонніх гілок.");
+      setNotice(
+        perspective.kind === "family-corridor"
+          ? "Дітей цієї пари відкрито; дерево перебудовано без сторонніх гілок."
+          : "Дітей цієї людини відкрито поруч із її карткою.",
+      );
     } else if (result === "collapsed") {
       const current = perspectiveRef.current;
       if (current.kind === "family-corridor") {

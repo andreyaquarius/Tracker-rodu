@@ -48,8 +48,12 @@ test("special perspective bars keep accessible progress and compact controls", (
   );
 });
 
-test("family corridor renders and mutates an ordered breadcrumb trail", () => {
-  assert.match(page, /trail: \[openedTrailItem\]/);
+test("family corridor state mutates an existing ordered breadcrumb trail", () => {
+  assert.doesNotMatch(
+    page,
+    /trail: \[openedTrailItem\]/,
+    "the direct-children control must not enter a separate family corridor",
+  );
   assert.match(page, /appendFamilyCorridorTrailItem/);
   assert.match(page, /keepFamilyCorridorTrailThrough/);
   assert.match(page, /aria-label="Відкриті покоління сімейного коридору"/);
