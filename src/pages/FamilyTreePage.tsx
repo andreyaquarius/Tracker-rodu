@@ -170,6 +170,7 @@ export type FamilyTreePageProps = {
   researchRequired?: boolean;
   gedcomResearchRequired?: boolean;
   onSubscriptionChanged?: () => void;
+  onPersonRelationsDetached?: (relationIds: readonly string[]) => void;
   onOpenPerson?: (personId: string) => void;
   onActiveContextChange?: (context: {
     projectId: string;
@@ -238,6 +239,7 @@ export function LegacyFamilyTreePage({
   treeLimitMessage,
   researchRequired = false,
   onSubscriptionChanged,
+  onPersonRelationsDetached,
   onOpenPerson,
   onActiveContextChange,
   personProfileNavigationEnabled = false,
@@ -1033,17 +1035,19 @@ export function LegacyFamilyTreePage({
   };
 
   const detachRelationship = async (input: FamilyTreeDetachInput) => {
-    if (!projectId) return;
+    if (!projectId || !toolbarState.treeId) return;
     const confirmed = window.confirm(
       `Від’єднати зв’язок з «${input.label}»? Особа залишиться в базі, буде видалено лише зв’язок у дереві.`,
     );
     if (!confirmed) return;
     const result = await mutations.deleteRelationship({
       projectId,
+      treeId: toolbarState.treeId,
       kind: input.kind,
       relationshipId: input.relationshipId,
     });
     if (result === null) return;
+    onPersonRelationsDetached?.(result.deletedLegacyRelationIds);
     setBuilderNotice("Зв’язок від’єднано. Особу не видалено.");
     await refetch();
   };

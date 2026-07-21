@@ -4239,6 +4239,19 @@ export default function App() {
     setProjectArchiveRequests(nextRequests);
   };
 
+  const removePersonRelationIdsFromLoadedProject = (
+    projectId: string,
+    relationIds: readonly string[],
+  ) => {
+    if (!relationIds.length || activeWorkspaceIdRef.current !== projectId) return;
+    const removedRelationIds = new Set(relationIds);
+    setProjectPersonRelations((current) => {
+      const next = current.filter((relation) => !removedRelationIds.has(relation.id));
+      saveProjectPeopleCache(projectId, projectPersons, next);
+      return next;
+    });
+  };
+
   const deletePersons = async (personIds: readonly string[]): Promise<void> => {
     const uniqueIds = [...new Set(personIds.map((id) => id.trim()).filter(Boolean))];
     if (!uniqueIds.length) return;
@@ -5111,6 +5124,10 @@ export default function App() {
               researchRequired={researchRequiredByPlan}
               gedcomResearchRequired={false}
               onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
+              onPersonRelationsDetached={(relationIds) => {
+                if (!workspace) return;
+                removePersonRelationIdsFromLoadedProject(workspace.projectId, relationIds);
+              }}
               onOpenPerson={(personId) => openRelatedRecord("persons", personId)}
               onActiveContextChange={handleFamilyTreeActiveContextChange}
               personProfileNavigationEnabled={personsModuleV2Enabled}

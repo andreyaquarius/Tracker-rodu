@@ -4,9 +4,11 @@ import { readFileSync } from "node:fs";
 import {
   appendFamilyCorridorTrailItem,
   capturePedigreeReturnSnapshot,
+  createAllDescendantsInitialGraph,
   familyTreePerspectiveKey,
   isSpecialFamilyTreePerspective,
   keepFamilyCorridorTrailThrough,
+  resolveAllDescendantsRootPerson,
   specialPerspectiveReturnSnapshot,
   type FamilyCorridorTrailItem,
   type FamilyTreePerspective,
@@ -95,6 +97,7 @@ test("three perspectives have explicit and stable identities", () => {
     kind: "all-descendants",
     sessionId: "descendants-2",
     rootPersonId: "ancestor",
+    rootPerson: { id: "ancestor", displayName: "ancestor" },
     returnTo,
   };
 
@@ -110,6 +113,30 @@ test("three perspectives have explicit and stable identities", () => {
   assert.equal(isSpecialFamilyTreePerspective(pedigree), false);
   assert.equal(isSpecialFamilyTreePerspective(corridor), true);
   assert.equal(specialPerspectiveReturnSnapshot(descendants), returnTo);
+});
+
+test("sequential descendant rerooting seeds a person discovered outside the original pedigree snapshot", () => {
+  const returnTo = snapshot();
+  const overlayRoot = { id: "older-ancestor", displayName: "older ancestor" };
+  const currentGraph: FamilyGraphData = {
+    ...returnTo.pedigreeGraph,
+    persons: [...returnTo.pedigreeGraph.persons, overlayRoot],
+  };
+
+  const resolved = resolveAllDescendantsRootPerson({
+    rootPersonId: overlayRoot.id,
+    currentGraph,
+    returnTo,
+  });
+
+  assert.equal(resolved, overlayRoot);
+  const initialGraph = createAllDescendantsInitialGraph(resolved!, returnTo);
+  assert.deepEqual(initialGraph.persons, [overlayRoot]);
+  assert.equal(initialGraph.graphVersion, returnTo.graphVersion);
+  assert.equal(
+    initialGraph.permissionFingerprint,
+    returnTo.permissionFingerprint,
+  );
 });
 
 function trailItem(
@@ -194,6 +221,11 @@ test("production uses independent pedigree, corridor and progressive descendant 
     /perspective\.kind === "pedigree"[\s\S]*?\? pedigreeGraph[\s\S]*?: perspective\.kind === "family-corridor"/,
   );
   assert.match(page, /kind: "all-descendants"/);
+  assert.match(
+    page,
+    /resolveAllDescendantsRootPerson\(\{[\s\S]*?currentGraph:\s*displayedGraphWithoutPhotos,[\s\S]*?rootPerson,[\s\S]*?returnTo,/,
+    "a sequential descendant session must capture its root from the graph visible at click time",
+  );
   assert.match(page, /captureCurrentPedigreeSnapshot\(\)/);
   assert.match(page, /restorePedigreeSnapshot\(perspective\.returnTo/);
   assert.match(

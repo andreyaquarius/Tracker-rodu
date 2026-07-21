@@ -14,6 +14,10 @@ const hook = readFileSync(
   ),
   "utf8",
 );
+const productionPage = readFileSync(
+  new URL("../src/pages/ProductionFamilyTreePage.tsx", import.meta.url),
+  "utf8",
+);
 
 test("production neighborhood transport prefers v2 and falls back for a missing or timed-out RPC", () => {
   assert.deepEqual(familyTreeNeighborhoodRpcCandidates({}), [
@@ -114,4 +118,48 @@ test("new base loads, reloads and branch expansions clear the canceled state", (
   assert.ok(reloadStart >= 0 && reloadEnd > reloadStart);
   assert.match(hook.slice(reloadStart, reloadEnd), /setCanceled\(false\)/);
   assert.match(hook.slice(reloadStart, reloadEnd), /setReloadKey\(/);
+});
+
+test("person branch expansion reports failure instead of showing a false success notice", () => {
+  const personBranchStart = hook.indexOf("const expandPersonContinuation");
+  const personBranchEnd = hook.indexOf("const expandContinuation", personBranchStart);
+  assert.ok(personBranchStart >= 0 && personBranchEnd > personBranchStart);
+  const personBranch = hook.slice(personBranchStart, personBranchEnd);
+
+  assert.match(
+    personBranch,
+    /Promise<PersonContinuationExpansionResult>/,
+  );
+  assert.match(personBranch, /setError\([\s\S]*?return "failed";/);
+  assert.match(personBranch, /controller\.signal\.aborted[\s\S]*?return "aborted";/);
+  assert.match(
+    personBranch,
+    /branchLayersRef\.current\.set\([\s\S]*?activeBranchLayerKeysRef\.current\.add\(layerKey\)[\s\S]*?return "expanded";/,
+  );
+
+  const pageHandlerStart = productionPage.indexOf(
+    "async function expandContinuation(token: string, node: LayoutNode)",
+  );
+  const pageHandlerEnd = productionPage.indexOf(
+    "async function toggleFullscreen()",
+    pageHandlerStart,
+  );
+  assert.ok(pageHandlerStart >= 0 && pageHandlerEnd > pageHandlerStart);
+  const pageHandler = productionPage.slice(pageHandlerStart, pageHandlerEnd);
+  assert.match(
+    pageHandler,
+    /setNotice\(""\);[\s\S]*?await neighborhood\.expandContinuation\(token, node\);/,
+    "a new attempt must clear any stale success notice before awaiting the server",
+  );
+  assert.match(
+    pageHandler,
+    /const result = await neighborhood\.expandContinuation\(token, node\);[\s\S]*?if \(result === "expanded"\) setNotice\("Гілку розгорнуто\."\);/,
+  );
+  assert.equal(
+    pageHandler
+      .split(/\r?\n/)
+      .some(line => line.trim() === 'setNotice("Гілку розгорнуто.");'),
+    false,
+    "the handler must not emit an unconditional success notice",
+  );
 });

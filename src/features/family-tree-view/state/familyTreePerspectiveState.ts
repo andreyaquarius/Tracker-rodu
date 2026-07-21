@@ -5,6 +5,7 @@ import type {
   FamilyScope,
   OccurrenceId,
   PersonId,
+  TreePerson,
   UnionId,
 } from "../types.ts";
 
@@ -76,8 +77,50 @@ export type FamilyTreePerspective =
       kind: "all-descendants";
       sessionId: string;
       rootPersonId: PersonId;
+      /** Immutable root seed captured from the graph that opened this session. */
+      rootPerson: TreePerson;
       returnTo: FamilyTreePedigreeReturnSnapshot;
     };
+
+export interface AllDescendantsRootSeedInput {
+  rootPersonId: PersonId;
+  currentGraph: FamilyGraphData;
+  returnTo: FamilyTreePedigreeReturnSnapshot;
+}
+
+/**
+ * Resolves the selected root from the graph visible at click time. A person
+ * discovered by the progressive view or the deeper home-lineage overlay may
+ * legitimately be absent from the original pedigree return snapshot.
+ */
+export function resolveAllDescendantsRootPerson({
+  rootPersonId,
+  currentGraph,
+  returnTo,
+}: AllDescendantsRootSeedInput): TreePerson | undefined {
+  return currentGraph.persons.find(person => person.id === rootPersonId) ??
+    returnTo.pedigreeGraph.persons.find(person => person.id === rootPersonId);
+}
+
+/**
+ * The descendants frontier RPC returns newly discovered children and
+ * co-parents, not the frontier/root row itself. Keep the captured root in the
+ * client seed so projection cannot collapse to an empty graph after rerooting.
+ */
+export function createAllDescendantsInitialGraph(
+  rootPerson: TreePerson,
+  returnTo: FamilyTreePedigreeReturnSnapshot,
+): FamilyGraphData {
+  return {
+    persons: [rootPerson],
+    unions: [],
+    parentChildRelations: [],
+    continuations: [],
+    familyContinuations: [],
+    graphVersion: returnTo.graphVersion,
+    permissionFingerprint: returnTo.permissionFingerprint,
+  };
+}
 
 export interface CapturePedigreeSnapshotInput {
   treeId: string;

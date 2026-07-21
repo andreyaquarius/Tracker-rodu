@@ -317,7 +317,7 @@ export function PersonProfileV2({
               )}
             </div>
           )}
-          <div>
+          <div className="persons-v2-profile__identity-copy">
             <h1 id={`${componentId}-title`}>{name}</h1>
             <p>{personLifeYears(person) || "Роки життя не вказані"} · {person.gender}</p>
             <div className="persons-v2-profile__badges">

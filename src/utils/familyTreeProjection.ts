@@ -504,8 +504,11 @@ function mapPersonEventType(type: PersonEvent["type"]): FamilyTreePersonTimeline
 function statusToEvidence(status: Person["status"]): EvidenceStatus {
   switch (String(status)) {
     case "доведена":
+    case "відома особисто":
+    case "відома документально":
       return "proven";
     case "частково доведена":
+    case "відома з переказів":
       return "likely";
     case "сумнівна":
       return "disputed";

@@ -645,7 +645,7 @@ test("deep descendant pedigree reduction is stable with retained positions", () 
   assertNoRouteCrossesUnrelatedCard(first);
 });
 
-test("@I500254@ reduction keeps one downstream couple and one non-duplicate convergence portal", () => {
+test("@I500254@ reduction keeps one canonical downstream couple for both incoming families", () => {
   const result = run(convergenceCoupleFixture());
   const left = nodeFor(result, "convergence-left");
   const right = nodeFor(result, "convergence-right");
@@ -664,29 +664,19 @@ test("@I500254@ reduction keeps one downstream couple and one non-duplicate conv
     new Set(couple.memberOccurrenceIds),
     new Set([left.occurrenceId, right.occurrenceId]),
   );
-  const nodesByOccurrenceId = new Map(
-    result.nodes.map(node => [node.occurrenceId, node]),
-  );
   const reachesTarget = (
     union: NonNullable<typeof leftUpstream>,
     targetOccurrenceId: string,
-  ): boolean =>
-    union.childOccurrenceIds.some(childOccurrenceId => {
-      if (childOccurrenceId === targetOccurrenceId) return true;
-      const child = nodesByOccurrenceId.get(childOccurrenceId);
-      return (
-        child?.kind === "convergence" &&
-        child.referenceToOccurrenceId === targetOccurrenceId
-      );
-    });
+  ): boolean => union.childOccurrenceIds.includes(targetOccurrenceId);
   assert.ok(reachesTarget(leftUpstream, left.occurrenceId));
   assert.ok(reachesTarget(rightUpstream, right.occurrenceId));
-  const portals = result.nodes.filter(node => node.kind === "convergence");
-  assert.equal(portals.length, 1, "a reduction uses one compact portal, not a duplicate card");
   assert.equal(
-    portals[0]!.personId,
-    undefined,
-    "the convergence portal must not increment a person's card count",
+    result.nodes.filter(
+      node => node.kind === "convergence" ||
+        node.referenceReason === "already-visible",
+    ).length,
+    0,
+    "a reduction must not invent a portal or duplicate person card",
   );
   assert.ok(near(left.y, right.y), "the convergence partners must share a row");
   assertNoCardOverlaps(result);
@@ -695,7 +685,13 @@ test("@I500254@ reduction keeps one downstream couple and one non-duplicate conv
 test("@I500254@ convergence-couple keeps upstream families centered and separated", () => {
   const result = run(convergenceCoupleFixture());
 
-  assertOrdinaryFamiliesCentered(result);
+  // Two different upstream families cannot both own the same rigid couple
+  // centre. Their real ingress routes remain, while every ordinary family is
+  // still centred below its own parent bundle.
+  assertOrdinaryFamiliesCentered(
+    result,
+    new Set(["left-convergence-family", "right-convergence-family"]),
+  );
   assertUpstreamFamilyBlocksSeparated(result, true);
 });
 

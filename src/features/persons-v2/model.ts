@@ -108,7 +108,13 @@ const CORE_EVENT_TYPES = new Set<PersonEvent["type"]>([
   "death",
   "residence",
 ]);
-const CONFIRMED_STATUSES = new Set<PersonStatus>(["доведена", "частково доведена"]);
+const CONFIRMED_STATUSES = new Set<PersonStatus>([
+  "доведена",
+  "частково доведена",
+  "відома особисто",
+  "відома з переказів",
+  "відома документально",
+]);
 const HYPOTHESIS_STATUSES = new Set<PersonStatus>(["гіпотетична"]);
 const UKRAINIAN_COLLATOR = new Intl.Collator("uk-UA", {
   sensitivity: "base",

@@ -2680,6 +2680,26 @@ test("self, two-node, and three-node cycles are cut deterministically", () => {
   }
 });
 
+test("graph indexing is reused only while immutable collection identities stay stable", () => {
+  const graph: FamilyGraphData = {
+    persons: [person("a"), person("b")],
+    unions: [],
+    parentChildRelations: [],
+  };
+  const initial = buildGraphIndex(graph);
+  assert.equal(buildGraphIndex(graph), initial, "an unchanged graph reuses its index");
+
+  graph.parentChildRelations = [
+    { id: "ab", parentId: "a", childId: "b", kind: "biological" },
+  ];
+  const updated = buildGraphIndex(graph);
+  assert.notEqual(updated, initial, "a replaced readonly collection invalidates the cache");
+  assert.deepEqual(
+    updated.relationsByParentId.get("a")?.map(relation => relation.id),
+    ["ab"],
+  );
+});
+
 test("layout traverses a sixty-generation chain without a product cap", () => {
   const depth = 60;
   const persons = Array.from({ length: depth + 1 }, (_, index) =>

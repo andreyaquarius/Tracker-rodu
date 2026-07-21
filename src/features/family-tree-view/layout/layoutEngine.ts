@@ -15,6 +15,7 @@ import type {
   TreePerson,
 } from "../types.ts";
 import {
+  buildGraphIndex,
   compareCodePoints,
   comparePeopleByBirth,
   compareRelations,
@@ -673,7 +674,15 @@ function buildBundles(
   const disjoint = new DisjointSet();
   for (const node of structuralNodes) disjoint.add(node.occurrenceId);
 
-  for (const union of scene.unions) {
+  const unionsByMemberOccurrenceId = new Map<string, SceneUnion[]>();
+  const unionOrder = new Map<string, number>();
+  for (const [unionIndex, union] of scene.unions.entries()) {
+    unionOrder.set(union.occurrenceId, unionIndex);
+    for (const memberOccurrenceId of union.memberOccurrenceIds) {
+      const incident = unionsByMemberOccurrenceId.get(memberOccurrenceId);
+      if (incident) incident.push(union);
+      else unionsByMemberOccurrenceId.set(memberOccurrenceId, [union]);
+    }
     const members = union.memberOccurrenceIds
       .map(id => nodesById.get(id))
       .filter((node): node is SceneNode => Boolean(node))
@@ -695,8 +704,18 @@ function buildBundles(
   const bundleByOccurrenceId = new Map<string, Bundle>();
   for (const [root, nodes] of groups) {
     const generation = nodes[0]!.generation;
-    const incidentUnions = scene.unions.filter(union =>
-      union.memberOccurrenceIds.some(id => nodes.some(node => node.occurrenceId === id)),
+    const incidentUnionIds = new Set<string>();
+    const incidentUnions: SceneUnion[] = [];
+    for (const node of nodes) {
+      for (const union of unionsByMemberOccurrenceId.get(node.occurrenceId) ?? []) {
+        if (incidentUnionIds.has(union.occurrenceId)) continue;
+        incidentUnionIds.add(union.occurrenceId);
+        incidentUnions.push(union);
+      }
+    }
+    incidentUnions.sort(
+      (left, right) =>
+        unionOrder.get(left.occurrenceId)! - unionOrder.get(right.occurrenceId)!,
     );
     const ordered = orderBundleNodes(nodes, incidentUnions);
     let cursor = 0;
@@ -978,11 +997,13 @@ function solveBundlePositions(
   bundleByOccurrenceId: ReadonlyMap<string, Bundle>,
   layers: ReadonlyMap<number, Bundle[]>,
   settings: LayoutSettings,
+  familyBlocks: readonly StructuralFamilyBlock[] = structuralFamilyBlocks(
+    scene.unions,
+  ),
 ): void {
   const focusBundle = scene.focusOccurrenceId
     ? bundleByOccurrenceId.get(scene.focusOccurrenceId)
     : undefined;
-  const familyBlocks = structuralFamilyBlocks(scene.unions);
   const layerRankByBundleId = new Map<string, number>();
   for (const layer of layers.values()) {
     layer.forEach((bundle, index) => layerRankByBundleId.set(bundle.id, index));
@@ -1197,6 +1218,7 @@ function planDescendantForest(
   layers: ReadonlyMap<number, Bundle[]>,
   settings: LayoutSettings,
   allowSpanningOwner = false,
+  allowNodesAboveFocus = false,
 ): DescendantLayoutPlan | undefined {
   const structuralNodes = scene.nodes.filter(
     node => node.kind === "person" || node.kind === "reference",
@@ -1208,7 +1230,8 @@ function planDescendantForest(
     !scene.focusOccurrenceId ||
     !focusNode ||
     structuralNodes.length === 0 ||
-    structuralNodes.some(node => node.generation > focusNode.generation)
+    (!allowNodesAboveFocus &&
+      structuralNodes.some(node => node.generation > focusNode.generation))
   ) {
     return undefined;
   }
@@ -1796,10 +1819,10 @@ function planDescendantForest(
 
 /**
  * Descendant-only fallback for a shared-child DAG. A convergence couple keeps
- * one canonical bundle and exposes the non-owning ingress as a compact portal;
- * the resulting forest can use the same rigid subtree planner as an ordinary
- * tree. The generation solver below is retained only for malformed/cyclic DAGs
- * that cannot produce a spanning forest. The ancestor solver is never used.
+ * one canonical bundle while the contour planner selects one spanning owner;
+ * both real incoming families remain available to edge routing. The generation
+ * solver below is retained only for malformed/cyclic DAGs that cannot produce
+ * a spanning forest. The ancestor solver is never used.
  */
 function packDescendantFallbackLayers(
   scene: OccurrenceScene,
@@ -1808,11 +1831,6 @@ function packDescendantFallbackLayers(
   bundleByOccurrenceId: ReadonlyMap<string, Bundle>,
   settings: LayoutSettings,
 ): DescendantLayoutPlan | undefined {
-  const mutableBundles = bundles as Bundle[];
-  const mutableBundleByOccurrenceId = bundleByOccurrenceId as Map<
-    string,
-    Bundle
-  >;
   const families = structuralFamilyBlocks(scene.unions);
   const incomingByChildBundleId = new Map<
     string,
@@ -1861,99 +1879,10 @@ function packDescendantFallbackLayers(
     const layer = childBundle ? layers.get(childBundle.generation) : undefined;
     if (!childBundle || !layer) continue;
 
-    // When two different people from the two arms become one couple, their
-    // cards form a single bundle. A tree contour cannot own that bundle twice;
-    // choosing either arm as owner otherwise creates one enormous secondary
-    // family bus through every intervening branch. Keep the canonical couple
-    // once and replace the non-owning ingress with a small convergence portal.
-    // It is a navigation marker, not another person card, so duplicate counts
-    // and the descendant subtree remain canonical.
-    let convergencePortalBundle: Bundle | undefined;
-    let convergencePortalSide: "left" | "right" | undefined;
-    if (
-      new Set(incoming.map(entry => entry.childOccurrenceId)).size === 2
-    ) {
-      const lineageScore = (entry: (typeof incoming)[number]): number =>
-        entry.parentBundle.nodes.filter(
-          node =>
-            node.personId &&
-            settings.primaryLineagePersonIds.has(node.personId),
-        ).length;
-      const ownerIndex =
-        lineageScore(incoming[1]!) > lineageScore(incoming[0]!) ? 1 : 0;
-      const nonOwningIndex = ownerIndex === 0 ? 1 : 0;
-      const nonOwningIngress = incoming[nonOwningIndex]!;
-      convergencePortalSide = nonOwningIndex === 0 ? "left" : "right";
-      const targetNode = childBundle.nodes.find(
-        node => node.occurrenceId === nonOwningIngress.childOccurrenceId,
-      );
-      if (targetNode?.personId) {
-        const portalOccurrenceId =
-          `convergence:${nonOwningIngress.family.id}:` +
-          nonOwningIngress.childOccurrenceId;
-        const portalNode: SceneNode = {
-          occurrenceId: portalOccurrenceId,
-          kind: "convergence",
-          generation: childBundle.generation,
-          x: childBundle.x,
-          y: 0,
-          width: 44,
-          height: 44,
-          orderKey:
-            `${nonOwningIngress.family.orderKey}|convergence:` +
-            targetNode.orderKey,
-          focusDistance: targetNode.focusDistance,
-          referenceToOccurrenceId: targetNode.occurrenceId,
-          actionPersonId: targetNode.personId,
-          ...(targetNode.sex ? { sex: targetNode.sex } : {}),
-        };
-        convergencePortalBundle = {
-          id: `bundle:${portalOccurrenceId}`,
-          generation: childBundle.generation,
-          nodes: [portalNode],
-          nodeCenterOffsets: new Map([[portalOccurrenceId, 0]]),
-          width: portalNode.width,
-          orderKey: portalNode.orderKey,
-          ancestorSectorStartPath: [],
-          ancestorSectorEndPath: [],
-          x: childBundle.x,
-        };
-        scene.nodes.push(portalNode);
-        mutableBundles.push(convergencePortalBundle);
-        mutableBundleByOccurrenceId.set(
-          portalOccurrenceId,
-          convergencePortalBundle,
-        );
-        layer.push(convergencePortalBundle);
-        for (const union of nonOwningIngress.family.unions) {
-          if (
-            !union.childOccurrenceIds.includes(
-              nonOwningIngress.childOccurrenceId,
-            )
-          ) {
-            continue;
-          }
-          union.childOccurrenceIds = union.childOccurrenceIds.map(
-            occurrenceId =>
-              occurrenceId === nonOwningIngress.childOccurrenceId
-                ? portalOccurrenceId
-                : occurrenceId,
-          );
-          const relations = union.relationByChildOccurrenceId.get(
-            nonOwningIngress.childOccurrenceId,
-          );
-          union.relationByChildOccurrenceId.delete(
-            nonOwningIngress.childOccurrenceId,
-          );
-          if (relations) {
-            union.relationByChildOccurrenceId.set(
-              portalOccurrenceId,
-              relations,
-            );
-          }
-        }
-      }
-    }
+    // Keep the shared couple canonical. The rigid contour planner below picks
+    // one spanning owner for geometry, while edge routing retains both real
+    // incoming families. A synthetic reference/portal would render the same
+    // person twice (for example, a selected ancestor's mother).
 
     const otherChildren = (
       entry: (typeof incoming)[number],
@@ -1978,13 +1907,7 @@ function packDescendantFallbackLayers(
     const rightChildren = otherChildren(incoming[1]!);
     const component = [
       ...leftChildren,
-      ...(convergencePortalBundle && convergencePortalSide === "left"
-        ? [convergencePortalBundle]
-        : []),
       childBundle,
-      ...(convergencePortalBundle && convergencePortalSide === "right"
-        ? [convergencePortalBundle]
-        : []),
       ...rightChildren,
     ];
     const componentIds = new Set(component.map(bundle => bundle.id));
@@ -2035,6 +1958,7 @@ function packDescendantFallbackLayers(
     bundleByOccurrenceId,
     layers,
     dagSettings,
+    true,
     true,
   );
   if (rigidSpanningPlan) return rigidSpanningPlan;
@@ -3158,30 +3082,30 @@ function sideFamilyRouteGeometry(
     hub,
     partner,
     lineY,
-    // Match the familiar genealogy convention: each partnership owns a
-    // parallel horizontal line between facing side ports. Intermediate cards
-    // visually occlude longer lines because cards render above the edge canvas.
+    // Preserve the established multi-partner convention: every partnership
+    // leaves and enters through facing side ports on its own parallel line.
     hubPortX,
     partnerPortX,
     junctionX: familyJunctionX(family, members, descendantPlan),
   };
 }
 
-function reserveSiblingBusLane(
-  lanes: Array<Array<[number, number]>>,
+function reserveSortedIntervalLane(
+  laneEndXs: number[],
   interval: [number, number],
 ): number {
-  for (let laneIndex = 0; laneIndex < lanes.length; laneIndex += 1) {
-    const available = lanes[laneIndex]!.every(taken =>
-      interval[1] + SIBLING_BUS_INTERVAL_MARGIN <= taken[0] ||
-      taken[1] + SIBLING_BUS_INTERVAL_MARGIN <= interval[0],
-    );
-    if (!available) continue;
-    lanes[laneIndex]!.push(interval);
+  // Callers sort intervals by their left edge. Every new interval can only be
+  // appended after the last interval already assigned to a lane, so checking
+  // one right edge is equivalent to rescanning the lane's entire history.
+  for (let laneIndex = 0; laneIndex < laneEndXs.length; laneIndex += 1) {
+    if (laneEndXs[laneIndex]! + SIBLING_BUS_INTERVAL_MARGIN > interval[0]) {
+      continue;
+    }
+    laneEndXs[laneIndex] = interval[1];
     return laneIndex;
   }
-  lanes.push([interval]);
-  return lanes.length - 1;
+  laneEndXs.push(interval[1]);
+  return laneEndXs.length - 1;
 }
 
 function createSiblingBusLanePlan(
@@ -3220,7 +3144,7 @@ function createSiblingBusLanePlan(
   const laneByFamily = new Map<string, number>();
   const laneCountByCorridor = new Map<number, number>();
   for (const [corridor, entries] of intervalsByCorridor) {
-    const lanes: Array<Array<[number, number]>> = [];
+    const laneEndXs: number[] = [];
     const sorted = [...entries].sort(
       (left, right) =>
         left.interval[0] - right.interval[0] ||
@@ -3230,10 +3154,10 @@ function createSiblingBusLanePlan(
     for (const entry of sorted) {
       laneByFamily.set(
         entry.familyId,
-        reserveSiblingBusLane(lanes, entry.interval),
+        reserveSortedIntervalLane(laneEndXs, entry.interval),
       );
     }
-    laneCountByCorridor.set(corridor, Math.max(1, lanes.length));
+    laneCountByCorridor.set(corridor, Math.max(1, laneEndXs.length));
   }
   return { laneByFamily, laneCountByCorridor };
 }
@@ -3335,13 +3259,13 @@ function routeEdges(
   scene: OccurrenceScene,
   nodes: readonly SceneNode[],
   settings: LayoutSettings,
+  families: readonly StructuralFamilyBlock[],
   lanePlan: SiblingBusLanePlan,
   descendantPlan?: DescendantLayoutPlan,
 ): { unions: LayoutUnion[]; edges: LayoutEdge[] } {
   const nodesById = new Map(nodes.map(node => [node.occurrenceId, node]));
   const edges: LayoutEdge[] = [];
   const unions: LayoutUnion[] = [];
-  const families = structuralFamilyBlocks(scene.unions);
   const routedBusY = siblingBusYByFamily(
     families,
     nodesById,
@@ -3790,7 +3714,9 @@ export function layoutGraphEngine(
   mode: LayoutEngineMode,
 ): LayoutResult {
   const settings = normalizedSettings(input);
-  const personsById = new Map(input.graph.persons.map(person => [person.id, person]));
+  // Reuse the same weakly cached canonical index as scene construction instead
+  // of rebuilding a second 10k+ person map on every visual reflow.
+  const personsById = buildGraphIndex(input.graph).personsById;
   const scene = buildOccurrenceScene(input.graph, input.options);
   if (scene.nodes.length === 0) {
     return {
@@ -3816,6 +3742,7 @@ export function layoutGraphEngine(
     bundleByOccurrenceId,
     personsById,
   );
+  const structuralFamilies = structuralFamilyBlocks(scene.unions);
   let descendantLayoutPlan: DescendantLayoutPlan | undefined;
   if (mode === "descendant-forest") {
     descendantLayoutPlan = planDescendantForest(
@@ -3824,6 +3751,8 @@ export function layoutGraphEngine(
       bundleByOccurrenceId,
       layers,
       settings,
+      false,
+      true,
     );
     // A shared-child DAG cannot be represented as one rigid tree contour.
     // Keep its deterministic generation packing, but never fall through to
@@ -3844,6 +3773,7 @@ export function layoutGraphEngine(
       bundleByOccurrenceId,
       layers,
       settings,
+      structuralFamilies,
     );
   }
   const structuralNodes = positionNodes(bundles, settings);
@@ -3855,7 +3785,6 @@ export function layoutGraphEngine(
       personsById,
     );
   }
-  const structuralFamilies = structuralFamilyBlocks(scene.unions);
   const structuralNodesById = new Map(
     structuralNodes.map(node => [node.occurrenceId, node]),
   );
@@ -3878,6 +3807,7 @@ export function layoutGraphEngine(
     scene,
     nodes,
     settings,
+    structuralFamilies,
     siblingBusLanePlan,
     descendantLayoutPlan,
   );

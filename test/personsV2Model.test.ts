@@ -268,13 +268,16 @@ test("catalog model combines query, status, gender, life-state, and saved-segmen
   const people = [
     person({ id: "confirmed", fullName: "Андрій Каленський", status: "доведена", birthPlace: "Каленці" }),
     person({ id: "partial", fullName: "Богдан Каленський", status: "частково доведена", gender: "чоловік" }),
+    person({ id: "personal", fullName: "Ганна Особиста", status: "відома особисто" }),
+    person({ id: "oral", fullName: "Дмитро Переказ", status: "відома з переказів" }),
+    person({ id: "documented", fullName: "Євдокія Документальна", status: "відома документально" }),
     person({ id: "hypothesis", fullName: "Олена Петрина", status: "гіпотетична", gender: "жінка", isLiving: true }),
     person({ id: "doubtful", fullName: "Ярина Кухар", status: "сумнівна", gender: "жінка" }),
   ];
 
   assert.deepEqual(
     filterAndSortPersons(people, { segment: "confirmed" }).map((item) => item.id),
-    ["confirmed", "partial"],
+    ["confirmed", "partial", "personal", "oral", "documented"],
   );
   assert.deepEqual(
     filterAndSortPersons(people, { segment: "hypotheses" }).map((item) => item.id),
@@ -293,6 +296,12 @@ test("catalog model combines query, status, gender, life-state, and saved-segmen
     filterAndSortPersons(people, { query: "каленці андрій", status: "доведена" })
       .map((item) => item.id),
     ["confirmed"],
+  );
+  assert.deepEqual(
+    filterAndSortPersons(people, {
+      status: ["відома особисто", "відома з переказів", "відома документально"],
+    }).map((item) => item.id),
+    ["personal", "oral", "documented"],
   );
 });
 

@@ -36,6 +36,10 @@ import { useProgressiveDescendantGraph } from "../features/family-tree-view/reac
 import { buildFamilyCorridorProjection } from "../features/family-tree-view/state/familyCorridorProjection";
 import { buildAllDescendantsProjection } from "../features/family-tree-view/state/allDescendantsProjection";
 import {
+  familyTreeDetachCandidatesFromRelationships,
+  type FamilyTreeDetachCandidate,
+} from "../features/family-tree-view/state/familyTreeDetach.ts";
+import {
   buildRootLineageProjection,
   mergeRootLineageOverlay,
 } from "../features/family-tree-view/state/rootLineageProjection";
@@ -47,9 +51,11 @@ import {
 import {
   appendFamilyCorridorTrailItem,
   capturePedigreeReturnSnapshot,
+  createAllDescendantsInitialGraph,
   familyTreePerspectiveKey,
   isSpecialFamilyTreePerspective,
   keepFamilyCorridorTrailThrough,
+  resolveAllDescendantsRootPerson,
   type FamilyCorridorTrailItem,
   type FamilyTreeGenerationSettings,
   type FamilyTreePedigreeReturnSnapshot,
@@ -70,7 +76,9 @@ import { useFamilyTreeMutations } from "../hooks/useFamilyTreeMutations";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 import {
   createFamilyTreeFromLegacyImport,
+  listDetachableFamilyTreeRelationships,
   type FamilyTreeBuilderAction,
+  type DetachableFamilyTreeRelationship,
 } from "../services/familyTreeMutationService";
 import { saveGedcomArchive } from "../services/gedcomArchiveService.ts";
 import { requestGedcomExport } from "../services/gedcomExportService.ts";
@@ -150,6 +158,7 @@ export interface ProductionFamilyTreePageProps {
   researchRequired?: boolean;
   gedcomResearchRequired?: boolean;
   onSubscriptionChanged?: () => void;
+  onPersonRelationsDetached?: (relationIds: readonly string[]) => void;
   onImportRecords?: (
     collection: "persons",
     records: AppEntity[],
@@ -191,6 +200,7 @@ export function ProductionFamilyTreePage({
   onOpenPerson,
   onActiveContextChange,
   onSubscriptionChanged,
+  onPersonRelationsDetached,
 }: ProductionFamilyTreePageProps) {
   const [entryPoints, setEntryPoints] = useState<FamilyTreeEntryPoint[]>([]);
   const [selectedTreeId, setSelectedTreeId] = useState("");
@@ -605,6 +615,7 @@ export function ProductionFamilyTreePage({
           onFocusPersonChange={handleActiveTreeFocusPersonChange}
           onOpenPerson={onOpenPerson}
           onSubscriptionChanged={onSubscriptionChanged}
+          onPersonRelationsDetached={onPersonRelationsDetached}
           initialFocusPersonId={routedFocusPersonId}
         />
       ) : null}
@@ -685,6 +696,7 @@ function LoadedFamilyTree({
   onFocusPersonChange,
   onOpenPerson,
   onSubscriptionChanged,
+  onPersonRelationsDetached,
   initialFocusPersonId,
 }: {
   projectId: string;
@@ -698,6 +710,7 @@ function LoadedFamilyTree({
   onFocusPersonChange: (personId: string) => void;
   onOpenPerson?: (personId: string) => void;
   onSubscriptionChanged?: () => void;
+  onPersonRelationsDetached?: (relationIds: readonly string[]) => void;
   initialFocusPersonId?: string;
 }) {
   const client = useMemo(() => createTrackerNeighborhoodClient(), []);
@@ -725,6 +738,10 @@ function LoadedFamilyTree({
   const [selectedPersonId, setSelectedPersonId] = useState(focusPersonId);
   const [searchQuery, setSearchQuery] = useState("");
   const [relativeMenuPersonId, setRelativeMenuPersonId] = useState("");
+  const [detachableRelationships, setDetachableRelationships] =
+    useState<DetachableFamilyTreeRelationship[]>([]);
+  const [detachRelationshipsLoading, setDetachRelationshipsLoading] = useState(false);
+  const [detachRelationshipsError, setDetachRelationshipsError] = useState("");
   const [builderTarget, setBuilderTarget] = useState<{ action: FamilyTreeBuilderAction; personId: string } | null>(null);
   const [attachTarget, setAttachTarget] = useState<{ action: FamilyTreeAttachAction; personId: string } | null>(null);
   const [anchorOccurrenceId, setAnchorOccurrenceId] = useState<string>();
@@ -816,20 +833,10 @@ function LoadedFamilyTree({
     : undefined;
   const progressiveInitialGraph = useMemo<FamilyGraphData | undefined>(() => {
     if (perspective.kind !== "all-descendants") return undefined;
-    const snapshot = perspective.returnTo.pedigreeGraph;
-    const root = snapshot.persons.find(person =>
-      person.id === perspective.rootPersonId
+    return createAllDescendantsInitialGraph(
+      perspective.rootPerson,
+      perspective.returnTo,
     );
-    if (!root) return undefined;
-    return {
-      persons: [root],
-      unions: [],
-      parentChildRelations: [],
-      continuations: [],
-      familyContinuations: [],
-      graphVersion: snapshot.graphVersion,
-      permissionFingerprint: snapshot.permissionFingerprint,
-    };
   }, [perspective]);
   const specialNeighborhood = useFamilyTreeNeighborhood({
     client,
@@ -1249,10 +1256,20 @@ function LoadedFamilyTree({
     const returnTo = isSpecialFamilyTreePerspective(perspective)
       ? perspective.returnTo
       : captureCurrentPedigreeSnapshot();
+    const rootPerson = resolveAllDescendantsRootPerson({
+      rootPersonId,
+      currentGraph: displayedGraphWithoutPhotos,
+      returnTo,
+    });
+    if (!rootPerson) {
+      setNotice("Не вдалося відкрити нащадків: дані вибраної особи ще не завантажені.");
+      return;
+    }
     setPerspective({
       kind: "all-descendants",
       sessionId: nextPerspectiveSessionId("all-descendants"),
       rootPersonId,
+      rootPerson,
       returnTo,
     });
     setSelectedPersonId(rootPersonId);
@@ -1660,6 +1677,47 @@ function LoadedFamilyTree({
       label: personLabel(person),
       detail: [formatDateForDisplay(person.birthDate), person.birthPlace].filter(Boolean).join(" · "),
     })), [persons, targetPersonId]);
+  const personLabelsById = useMemo(
+    () => new Map(persons.map((person) => [person.id, personLabel(person)])),
+    [persons],
+  );
+  const detachCandidates = useMemo(
+    () => familyTreeDetachCandidatesFromRelationships(
+      detachableRelationships,
+      personLabelsById,
+    ),
+    [detachableRelationships, personLabelsById],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    if (!relativeMenuPersonId) {
+      setDetachableRelationships([]);
+      setDetachRelationshipsLoading(false);
+      setDetachRelationshipsError("");
+      return () => { cancelled = true; };
+    }
+    setDetachRelationshipsLoading(true);
+    setDetachRelationshipsError("");
+    void listDetachableFamilyTreeRelationships({
+      projectId,
+      treeId: entryPoint.id,
+      personId: relativeMenuPersonId,
+    }).then((relationships) => {
+      if (cancelled) return;
+      setDetachableRelationships(relationships);
+    }).catch((relationshipError: unknown) => {
+      if (cancelled) return;
+      setDetachableRelationships([]);
+      setDetachRelationshipsError(
+        relationshipError instanceof Error
+          ? relationshipError.message
+          : "Не вдалося завантажити родинні зв’язки.",
+      );
+    }).finally(() => {
+      if (!cancelled) setDetachRelationshipsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [entryPoint.id, projectId, relativeMenuPersonId]);
 
   async function submitRelative(payload: FamilyTreePersonDialogSubmit) {
     if (!builderTarget) return;
@@ -1742,7 +1800,31 @@ function LoadedFamilyTree({
     reloadPedigreeAfterMutation();
   }
 
+  async function detachRelative(candidate: FamilyTreeDetachCandidate) {
+    const confirmed = window.confirm(
+      `Відв’язати «${candidate.personLabel}» (${candidate.relationLabel.toLocaleLowerCase("uk")})? ` +
+      "Буде видалено лише цей зв’язок у дереві. Обидві особи залишаться у проєкті.",
+    );
+    if (!confirmed) return;
+    const result = await mutations.deleteRelationship({
+      projectId,
+      treeId: entryPoint.id,
+      kind: candidate.kind,
+      relationshipId: candidate.relationshipId,
+    });
+    if (result === null) return;
+    onPersonRelationsDetached?.(result.deletedLegacyRelationIds);
+    setRelativeMenuPersonId("");
+    setNotice("Родинний зв’язок відв’язано. Особи залишилися у проєкті.");
+    reloadPedigreeAfterMutation();
+    onSubscriptionChanged?.();
+  }
+
   async function expandContinuation(token: string, node: LayoutNode) {
+    // A previous successful expansion can leave a green notice visible while
+    // the next request is pending. Clear it before this attempt so a timeout or
+    // rejection is represented only by the neighborhood error state.
+    setNotice("");
     const requestFocusPersonId = focusPersonId;
     const requestSessionId = isSpecialFamilyTreePerspective(perspective)
       ? perspective.sessionId
@@ -1763,9 +1845,11 @@ function LoadedFamilyTree({
     setAnchorOccurrenceId(node.sourceOccurrenceId ?? node.occurrenceId);
     if (token.startsWith("local:")) {
       if (node.continuation?.expanded) {
-        await neighborhood.expandContinuation(token, node);
+        const result = await neighborhood.expandContinuation(token, node);
         if (!requestIsCurrent()) return;
-        setNotice("Гілку приховано. Повторне натискання відновить її без нового запиту.");
+        if (result === "collapsed") {
+          setNotice("Гілку приховано. Повторне натискання відновить її без нового запиту.");
+        }
         return;
       }
       if (token.endsWith(":other-parent-sets")) {
@@ -1778,9 +1862,12 @@ function LoadedFamilyTree({
       );
       return;
     }
-    await neighborhood.expandContinuation(token, node);
+    const result = await neighborhood.expandContinuation(token, node);
     if (!requestIsCurrent()) return;
-    setNotice("Гілку розгорнуто.");
+    if (result === "expanded") setNotice("Гілку розгорнуто.");
+    if (result === "collapsed") {
+      setNotice("Гілку приховано. Повторне натискання відновить її без нового запиту.");
+    }
   }
 
   async function toggleFullscreen() {
@@ -2131,7 +2218,7 @@ function LoadedFamilyTree({
             ownerPersonId,
           );
         }}
-        onAddRelative={!readOnly && canCreate ? (personId) => {
+        onAddRelative={!readOnly ? (personId) => {
           mutations.resetError();
           setRelativeMenuPersonId(personId);
         } : undefined}
@@ -2144,6 +2231,7 @@ function LoadedFamilyTree({
       {relativeMenuPersonId ? (
         <RelativeMenu
           targetName={targetName}
+          canCreate={canCreate}
           onClose={() => setRelativeMenuPersonId("")}
           onCreate={(action) => {
             setBuilderTarget({ action, personId: relativeMenuPersonId });
@@ -2153,6 +2241,11 @@ function LoadedFamilyTree({
             setAttachTarget({ action, personId: relativeMenuPersonId });
             setRelativeMenuPersonId("");
           }}
+          detachCandidates={detachCandidates}
+          detachLoading={detachRelationshipsLoading}
+          detachError={detachRelationshipsError || mutations.error}
+          isSaving={mutations.isMutating}
+          onDetach={(candidate) => void detachRelative(candidate)}
         />
       ) : null}
       {builderTarget ? (
@@ -2243,14 +2336,26 @@ function SpecialPerspectiveProgress({
 
 function RelativeMenu({
   targetName,
+  canCreate,
   onClose,
   onCreate,
   onAttach,
+  detachCandidates,
+  detachLoading,
+  detachError,
+  isSaving,
+  onDetach,
 }: {
   targetName: string;
+  canCreate: boolean;
   onClose: () => void;
   onCreate: (action: Exclude<FamilyTreeBuilderAction, "create_root">) => void;
   onAttach: (action: FamilyTreeAttachAction) => void;
+  detachCandidates: readonly FamilyTreeDetachCandidate[];
+  detachLoading: boolean;
+  detachError: string;
+  isSaving: boolean;
+  onDetach: (candidate: FamilyTreeDetachCandidate) => void;
 }) {
   const createActions: Array<[Exclude<FamilyTreeBuilderAction, "create_root">, string]> = [
     ["add_father", "Додати батька"],
@@ -2262,24 +2367,59 @@ function RelativeMenu({
   ];
   return (
     <Modal
-      title={`Додати родича${targetName ? ` для ${targetName}` : ""}`}
+      title={`Керування родичами${targetName ? ` для ${targetName}` : ""}`}
       className="family-tree-relative-modal"
       onClose={onClose}
       mode="dialog"
     >
       <div className="family-tree-v2-relative-menu">
         <p>Створити нову канонічну особу</p>
-        <div className="family-tree-v2-relative-grid">
-          {createActions.map(([action, label]) => (
-            <button key={action} type="button" className="button button-secondary" onClick={() => onCreate(action)}>{label}</button>
-          ))}
-        </div>
+        {canCreate ? (
+          <div className="family-tree-v2-relative-grid">
+            {createActions.map(([action, label]) => (
+              <button key={action} type="button" className="button button-secondary" onClick={() => onCreate(action)}>{label}</button>
+            ))}
+          </div>
+        ) : (
+          <div className="family-tree-v2-relative-empty">
+            Ліміт осіб поточного тарифу вичерпано. Наявну особу все ще можна приєднати або відв’язати.
+          </div>
+        )}
         <p>Приєднати особу, яка вже є у проєкті</p>
         <div className="family-tree-v2-relative-grid">
           <button type="button" className="button button-secondary" onClick={() => onAttach("attach_parent")}>Приєднати як одного з батьків</button>
           <button type="button" className="button button-secondary" onClick={() => onAttach("attach_partner")}>Приєднати як партнера</button>
           <button type="button" className="button button-secondary" onClick={() => onAttach("attach_child")}>Приєднати як дитину</button>
         </div>
+        <p>Відв’язати раніше приєднану особу</p>
+        {detachLoading ? (
+          <div className="family-tree-v2-relative-empty" role="status">
+            Завантажуємо прямі зв’язки особи…
+          </div>
+        ) : detachError ? (
+          <div className="family-tree-v2-relative-empty is-error" role="alert">
+            {detachError}
+          </div>
+        ) : detachCandidates.length ? (
+          <div className="family-tree-v2-relative-grid family-tree-v2-detach-grid">
+            {detachCandidates.map((candidate) => (
+              <button
+                key={candidate.key}
+                type="button"
+                className="button button-secondary family-tree-v2-detach-action"
+                disabled={isSaving}
+                onClick={() => onDetach(candidate)}
+              >
+                <span>{candidate.relationLabel}: {candidate.personLabel}</span>
+                <small>Видалити лише зв’язок</small>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="family-tree-v2-relative-empty">
+            Для цієї особи немає прямих зв’язків, які можна відв’язати.
+          </div>
+        )}
       </div>
     </Modal>
   );

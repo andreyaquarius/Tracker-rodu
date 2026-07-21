@@ -18,6 +18,7 @@ import {
   normalizeTaskReminderTimestamp,
   taskReminderValidationError,
 } from "./taskReminders";
+import { PERSON_STATUSES } from "./personStatus.ts";
 
 export interface ImportTableRow {
   sourceRowNumber: number;
@@ -390,7 +391,7 @@ function personFieldType(key: string): FieldConfig["type"] {
 
 function personFieldOptions(key: string): string[] | undefined {
   if (key === "gender") return ["невідомо", "чоловік", "жінка"];
-  if (key === "status") return ["доведена", "частково доведена", "гіпотетична", "сумнівна", "спростована"];
+  if (key === "status") return [...PERSON_STATUSES];
   if (key === "privacyStatus") return ["private", "project", "public", "confidential"];
   return undefined;
 }

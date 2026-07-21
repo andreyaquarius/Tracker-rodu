@@ -215,6 +215,228 @@ test("all-descendants fill uses the persisted home lineage instead of the descen
   assertFillRemainsRootedAtHome(result, "all descendants ancestor root");
 });
 
+test("all-descendants keeps rigid horizontal family blocks when the root overlay has older ancestors", () => {
+  const persons = [
+    person("older-father", "male"),
+    person("older-mother", "female"),
+    person("selected-root", "male"),
+    person("selected-partner", "female"),
+  ];
+  const unions: FamilyGraphData["unions"] = [
+    {
+      id: "older-family",
+      kind: "parent-set",
+      memberIds: ["older-father", "older-mother"],
+    },
+    {
+      id: "selected-family",
+      kind: "parent-set",
+      memberIds: ["selected-root", "selected-partner"],
+    },
+  ];
+  const parentChildRelations: FamilyGraphData["parentChildRelations"] = [
+    {
+      id: "older-father-selected",
+      parentId: "older-father",
+      childId: "selected-root",
+      unionId: "older-family",
+      kind: "biological",
+      role: "father",
+    },
+    {
+      id: "older-mother-selected",
+      parentId: "older-mother",
+      childId: "selected-root",
+      unionId: "older-family",
+      kind: "biological",
+      role: "mother",
+    },
+  ];
+  for (const branch of ["left", "middle", "right"] as const) {
+    persons.push(
+      person(`${branch}-child`, "male"),
+      person(`${branch}-partner`, "female"),
+    );
+    parentChildRelations.push(
+      {
+        id: `selected-${branch}-child`,
+        parentId: "selected-root",
+        childId: `${branch}-child`,
+        unionId: "selected-family",
+        kind: "biological",
+        role: "father",
+      },
+      {
+        id: `selected-partner-${branch}-child`,
+        parentId: "selected-partner",
+        childId: `${branch}-child`,
+        unionId: "selected-family",
+        kind: "biological",
+        role: "mother",
+      },
+    );
+    unions.push({
+      id: `${branch}-family`,
+      kind: "parent-set",
+      memberIds: [`${branch}-child`, `${branch}-partner`],
+    });
+    for (let index = 1; index <= 4; index += 1) {
+      const grandchildId = `${branch}-grandchild-${index}`;
+      persons.push(person(grandchildId, index % 2 ? "male" : "female"));
+      parentChildRelations.push(
+        {
+          id: `${branch}-child-${grandchildId}`,
+          parentId: `${branch}-child`,
+          childId: grandchildId,
+          unionId: `${branch}-family`,
+          kind: "biological",
+          role: "father",
+        },
+        {
+          id: `${branch}-partner-${grandchildId}`,
+          parentId: `${branch}-partner`,
+          childId: grandchildId,
+          unionId: `${branch}-family`,
+          kind: "biological",
+          role: "mother",
+        },
+      );
+    }
+  }
+  const graph: FamilyGraphData = { persons, unions, parentChildRelations };
+  const result = layoutDescendantForest({
+    graph,
+    options: {
+      focusPersonId: "selected-root",
+      layoutMode: "descendant-forest",
+      ancestorDepth: 20,
+      descendantDepth: 20,
+      collateralDepth: 20,
+      maxVisibleNodes: 100,
+      showAllParentSets: true,
+      showUnknownParentPlaceholders: false,
+      primaryLineagePersonIds: [
+        "older-father",
+        "selected-root",
+        "middle-child",
+        "middle-grandchild-2",
+      ],
+      lineageTargetPersonId: "middle-grandchild-2",
+    },
+  });
+  const nodeByPersonId = new Map(
+    result.nodes
+      .filter(node => node.personId)
+      .map(node => [node.personId!, node]),
+  );
+  const center = (personId: string): number => {
+    const node = nodeByPersonId.get(personId);
+    assert.ok(node, `missing ${personId}`);
+    return node.x + node.width / 2;
+  };
+  for (const branch of ["left", "middle", "right"] as const) {
+    const parentCenter =
+      (center(`${branch}-child`) + center(`${branch}-partner`)) / 2;
+    const childCenters = Array.from(
+      { length: 4 },
+      (_, index) => center(`${branch}-grandchild-${index + 1}`),
+    );
+    const childCenter =
+      (Math.min(...childCenters) + Math.max(...childCenters)) / 2;
+    assert.ok(
+      Math.abs(parentCenter - childCenter) < 0.001,
+      `${branch} descendant block must remain centred`,
+    );
+  }
+  const branchIntervals = (["left", "middle", "right"] as const).map(
+    branch => {
+      const values = Array.from(
+        { length: 4 },
+        (_, index) => center(`${branch}-grandchild-${index + 1}`),
+      );
+      return { branch, left: Math.min(...values), right: Math.max(...values) };
+    },
+  );
+  assert.ok(branchIntervals[0]!.right < branchIntervals[1]!.left);
+  assert.ok(branchIntervals[1]!.right < branchIntervals[2]!.left);
+});
+
+test("parents above the descendant-view root stay canonical when both grandparent branches enter their couple", () => {
+  const graph: FamilyGraphData = {
+    persons: [
+      person("focus-child", "male"),
+      person("father", "male"),
+      person("mother", "female"),
+      person("paternal-grandfather", "male"),
+      person("paternal-grandmother", "female"),
+      person("maternal-grandfather", "male"),
+      person("maternal-grandmother", "female"),
+    ],
+    unions: [
+      { id: "parents", kind: "parent-set", memberIds: ["father", "mother"] },
+      {
+        id: "paternal-grandparents",
+        kind: "parent-set",
+        memberIds: ["paternal-grandfather", "paternal-grandmother"],
+      },
+      {
+        id: "maternal-grandparents",
+        kind: "parent-set",
+        memberIds: ["maternal-grandfather", "maternal-grandmother"],
+      },
+    ],
+    parentChildRelations: [
+      { id: "father-focus", parentId: "father", childId: "focus-child", unionId: "parents", kind: "biological", role: "father" },
+      { id: "mother-focus", parentId: "mother", childId: "focus-child", unionId: "parents", kind: "biological", role: "mother" },
+      { id: "pgf-father", parentId: "paternal-grandfather", childId: "father", unionId: "paternal-grandparents", kind: "biological", role: "father" },
+      { id: "pgm-father", parentId: "paternal-grandmother", childId: "father", unionId: "paternal-grandparents", kind: "biological", role: "mother" },
+      { id: "mgf-mother", parentId: "maternal-grandfather", childId: "mother", unionId: "maternal-grandparents", kind: "biological", role: "father" },
+      { id: "mgm-mother", parentId: "maternal-grandmother", childId: "mother", unionId: "maternal-grandparents", kind: "biological", role: "mother" },
+    ],
+  };
+  const result = layoutDescendantForest({
+    graph,
+    options: {
+      focusPersonId: "focus-child",
+      layoutMode: "descendant-forest",
+      ancestorDepth: 20,
+      descendantDepth: 20,
+      collateralDepth: 20,
+      maxVisibleNodes: 100,
+      showAllParentSets: true,
+      showUnknownParentPlaceholders: false,
+      primaryLineagePersonIds: graph.persons.map(value => value.id),
+      lineageTargetPersonId: "focus-child",
+    },
+  });
+  const occurrenceId = (personId: string): string => {
+    const matches = result.nodes.filter(node => node.personId === personId);
+    assert.equal(matches.length, 1, `${personId} must have one canonical card`);
+    return matches[0]!.occurrenceId;
+  };
+  const fatherOccurrenceId = occurrenceId("father");
+  const motherOccurrenceId = occurrenceId("mother");
+  for (const personId of graph.persons.map(value => value.id)) {
+    occurrenceId(personId);
+  }
+  assert.equal(
+    result.nodes.some(
+      node =>
+        node.kind === "convergence" ||
+        node.referenceReason === "already-visible",
+    ),
+    false,
+  );
+  assert.ok(
+    result.unions.find(value => value.unionId === "paternal-grandparents")
+      ?.childOccurrenceIds.includes(fatherOccurrenceId),
+  );
+  assert.ok(
+    result.unions.find(value => value.unionId === "maternal-grandparents")
+      ?.childOccurrenceIds.includes(motherOccurrenceId),
+  );
+});
+
 test("descendant convergence cannot erase the persisted root person's ancestors", () => {
   const graph: FamilyGraphData = {
     persons: [
@@ -275,10 +497,22 @@ test("descendant convergence cannot erase the persisted root person's ancestors"
   for (const collateralId of ["a", "a-partner", "x"]) {
     assert.equal(roleFor(collateralId), undefined);
   }
-  assert.ok(
-    result.nodes.some(node => node.kind === "convergence"),
-    "fixture must exercise the convergence-portal rewrite",
+  assert.equal(
+    result.nodes.filter(
+      node =>
+        node.kind === "convergence" ||
+        node.referenceReason === "already-visible",
+    ).length,
+    0,
+    "the shared couple must not create a portal or duplicate person card",
   );
+  for (const personId of graph.persons.map(value => value.id)) {
+    assert.equal(
+      result.nodes.filter(node => node.personId === personId).length,
+      1,
+      `${personId} must have exactly one visible card`,
+    );
+  }
 });
 
 test("production passes the persisted home as one lineage target for every perspective", () => {

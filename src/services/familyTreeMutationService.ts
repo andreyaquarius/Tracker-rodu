@@ -78,6 +78,40 @@ export interface FamilyTreeMutationBaseInput {
   treeId: EntityId;
 }
 
+export type FamilyTreeRelationshipKind =
+  | "parent_child"
+  | "partner"
+  | "association";
+
+export interface DeleteRelationshipInput extends FamilyTreeMutationBaseInput {
+  kind: FamilyTreeRelationshipKind;
+  relationshipId: EntityId;
+}
+
+export interface DeleteRelationshipResult {
+  deleted: true;
+  kind: FamilyTreeRelationshipKind;
+  relationshipId: EntityId;
+  treeId: EntityId;
+  deletedMappings: number;
+  deletedLegacyRelations: number;
+  deletedLegacyRelationIds: EntityId[];
+}
+
+export type DetachableRelationshipDirection = "parent" | "child" | "partner";
+
+export interface DetachableFamilyTreeRelationship {
+  kind: Extract<FamilyTreeRelationshipKind, "parent_child" | "partner">;
+  direction: DetachableRelationshipDirection;
+  relationshipId: EntityId;
+  relatedPersonId: EntityId;
+  relationshipType: string;
+  evidenceStatus: EvidenceStatus;
+  parentRoleLabel?: ParentRoleLabel;
+  parentSetId?: EntityId;
+  familyGroupId?: EntityId | null;
+}
+
 export interface FamilyTreeCreateRootPersonInput {
   projectId: EntityId;
   treeId?: EntityId;
@@ -220,6 +254,16 @@ type PartnerRelationshipRow = {
   person_a_id: string;
   person_b_id: string;
 };
+type DetachableParentRelationshipRow = ParentRelationshipRow & {
+  id: string;
+  relationship_type: string;
+  parent_role_label: ParentRoleLabel;
+  evidence_status: EvidenceStatus;
+};
+type DetachablePartnerRelationshipRow = PartnerRelationshipRow & {
+  relationship_type: string;
+  evidence_status: EvidenceStatus;
+};
 type FamilyGroupRow = {
   id: string;
   primary_partner_1_id: string | null;
@@ -232,6 +276,10 @@ const PARENT_SET_SELECT = "id, family_group_id, set_type, is_preferred_for_displ
 const PARENT_RELATIONSHIP_SELECT = "parent_id, child_id, parent_set_id, family_group_id";
 const PARTNER_RELATIONSHIP_SELECT = "id, family_group_id, person_a_id, person_b_id";
 const FAMILY_GROUP_SELECT = "id, primary_partner_1_id, primary_partner_2_id";
+const DETACHABLE_PARENT_RELATIONSHIP_SELECT =
+  "id, parent_id, child_id, parent_set_id, family_group_id, relationship_type, parent_role_label, evidence_status";
+const DETACHABLE_PARTNER_RELATIONSHIP_SELECT =
+  "id, family_group_id, person_a_id, person_b_id, relationship_type, evidence_status";
 const MAIDEN_SURNAME_KEY = "__trackerRoduMaidenSurname";
 
 export async function createRootPersonInTree(
@@ -920,23 +968,153 @@ export async function updatePartnerRelationship(input: {
   if (error) throw error;
 }
 
-export async function deleteRelationship(input: {
-  projectId: EntityId;
-  kind: "parent_child" | "partner" | "association";
-  relationshipId: EntityId;
-}): Promise<void> {
-  const table =
-    input.kind === "parent_child"
-      ? "parent_child_relationships"
-      : input.kind === "partner"
-        ? "partner_relationships"
-        : "association_relationships";
-  const { error } = await getSupabaseClient()
-    .from(table)
-    .delete()
-    .eq("project_id", input.projectId)
-    .eq("id", input.relationshipId);
+export async function listDetachableFamilyTreeRelationships(
+  input: FamilyTreeMutationBaseInput & { personId: EntityId },
+): Promise<DetachableFamilyTreeRelationship[]> {
+  const client = getSupabaseClient();
+  const [parents, children, partnersA, partnersB] = await Promise.all([
+    client
+      .from("parent_child_relationships")
+      .select(DETACHABLE_PARENT_RELATIONSHIP_SELECT)
+      .eq("project_id", input.projectId)
+      .eq("tree_id", input.treeId)
+      .eq("child_id", input.personId),
+    client
+      .from("parent_child_relationships")
+      .select(DETACHABLE_PARENT_RELATIONSHIP_SELECT)
+      .eq("project_id", input.projectId)
+      .eq("tree_id", input.treeId)
+      .eq("parent_id", input.personId),
+    client
+      .from("partner_relationships")
+      .select(DETACHABLE_PARTNER_RELATIONSHIP_SELECT)
+      .eq("project_id", input.projectId)
+      .eq("tree_id", input.treeId)
+      .eq("person_a_id", input.personId),
+    client
+      .from("partner_relationships")
+      .select(DETACHABLE_PARTNER_RELATIONSHIP_SELECT)
+      .eq("project_id", input.projectId)
+      .eq("tree_id", input.treeId)
+      .eq("person_b_id", input.personId),
+  ]);
+  for (const result of [parents, children, partnersA, partnersB]) {
+    if (result.error) throw result.error;
+  }
+
+  const relationships: DetachableFamilyTreeRelationship[] = [];
+  for (const row of (parents.data ?? []) as unknown as DetachableParentRelationshipRow[]) {
+    relationships.push({
+      kind: "parent_child",
+      direction: "parent",
+      relationshipId: row.id,
+      relatedPersonId: row.parent_id,
+      relationshipType: row.relationship_type,
+      evidenceStatus: row.evidence_status,
+      parentRoleLabel: row.parent_role_label,
+      parentSetId: row.parent_set_id,
+      familyGroupId: row.family_group_id,
+    });
+  }
+  for (const row of (children.data ?? []) as unknown as DetachableParentRelationshipRow[]) {
+    relationships.push({
+      kind: "parent_child",
+      direction: "child",
+      relationshipId: row.id,
+      relatedPersonId: row.child_id,
+      relationshipType: row.relationship_type,
+      evidenceStatus: row.evidence_status,
+      parentRoleLabel: row.parent_role_label,
+      parentSetId: row.parent_set_id,
+      familyGroupId: row.family_group_id,
+    });
+  }
+  for (const row of (partnersA.data ?? []) as unknown as DetachablePartnerRelationshipRow[]) {
+    relationships.push({
+      kind: "partner",
+      direction: "partner",
+      relationshipId: row.id,
+      relatedPersonId: row.person_b_id,
+      relationshipType: row.relationship_type,
+      evidenceStatus: row.evidence_status,
+      familyGroupId: row.family_group_id,
+    });
+  }
+  for (const row of (partnersB.data ?? []) as unknown as DetachablePartnerRelationshipRow[]) {
+    relationships.push({
+      kind: "partner",
+      direction: "partner",
+      relationshipId: row.id,
+      relatedPersonId: row.person_a_id,
+      relationshipType: row.relationship_type,
+      evidenceStatus: row.evidence_status,
+      familyGroupId: row.family_group_id,
+    });
+  }
+  return relationships.sort((left, right) => (
+    left.kind.localeCompare(right.kind) ||
+    left.direction.localeCompare(right.direction) ||
+    left.relatedPersonId.localeCompare(right.relatedPersonId) ||
+    left.relationshipId.localeCompare(right.relationshipId)
+  ));
+}
+
+export async function deleteRelationship(
+  input: DeleteRelationshipInput,
+): Promise<DeleteRelationshipResult> {
+  const { data, error } = await getSupabaseClient().rpc(
+    "detach_family_tree_relationship",
+    {
+      target_project_id: input.projectId,
+      target_tree_id: input.treeId,
+      target_kind: input.kind,
+      target_relationship_id: input.relationshipId,
+    },
+  );
   if (error) throw error;
+  return parseDeleteRelationshipResult(data, input);
+}
+
+function parseDeleteRelationshipResult(
+  value: unknown,
+  input: DeleteRelationshipInput,
+): DeleteRelationshipResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Сервер повернув некоректну відповідь після відв’язування особи.");
+  }
+  const record = value as Record<string, unknown>;
+  const deletedLegacyRelationIds = Array.isArray(record.deletedLegacyRelationIds)
+    ? record.deletedLegacyRelationIds.filter((id): id is string => typeof id === "string")
+    : [];
+  const deletedMappings = nonNegativeInteger(record.deletedMappings);
+  const deletedLegacyRelations = nonNegativeInteger(record.deletedLegacyRelations);
+  if (
+    record.deleted !== true ||
+    record.kind !== input.kind ||
+    record.relationshipId !== input.relationshipId ||
+    record.treeId !== input.treeId ||
+    deletedMappings === null ||
+    deletedLegacyRelations === null ||
+    !Array.isArray(record.deletedLegacyRelationIds) ||
+    deletedLegacyRelationIds.length !== record.deletedLegacyRelationIds.length
+  ) {
+    throw new Error("Сервер не підтвердив точне відв’язування вибраного зв’язку.");
+  }
+  return {
+    deleted: true,
+    kind: input.kind,
+    relationshipId: input.relationshipId,
+    treeId: input.treeId,
+    deletedMappings,
+    deletedLegacyRelations,
+    deletedLegacyRelationIds,
+  };
+}
+
+function nonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 async function createCanonicalPerson(input: FamilyTreeCreatePersonInput): Promise<EntityId> {

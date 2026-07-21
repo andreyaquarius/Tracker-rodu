@@ -29,15 +29,9 @@ import {
   personNationality,
   withPersonStandardFields,
 } from "../utils/personStandardFields.ts";
+import { PERSON_STATUSES } from "../utils/personStatus.ts";
 
 const genders: PersonGender[] = ["невідомо", "чоловік", "жінка"];
-const statuses: PersonStatus[] = [
-  "доведена",
-  "частково доведена",
-  "гіпотетична",
-  "сумнівна",
-  "спростована",
-];
 type PersonDraft = Omit<Person, "id" | "createdAt" | "updatedAt">;
 export type PersonInitialDraft = Partial<PersonDraft>;
 type PersonDateFieldKey = "birthDate" | "marriageDate" | "deathDate";
@@ -238,6 +232,7 @@ export function PersonFormModal({
     marriageDate: "",
     deathDate: "",
   });
+  const [educationDraft, setEducationDraft] = useState(() => personEducation(form).join("\n"));
 
   const update = <K extends keyof PersonDraft>(key: K, value: PersonDraft[K]) => {
     setForm((current) => {
@@ -429,19 +424,22 @@ export function PersonFormModal({
           <label>
             <span>Статус *</span>
             <select value={form.status} onChange={(event) => update("status", event.target.value as PersonStatus)}>
-              {statuses.map((status) => <option key={status}>{status}</option>)}
+              {PERSON_STATUSES.map((status) => <option key={status}>{status}</option>)}
             </select>
           </label>
           <label>
             <span>Прізвище</span>
             <input value={form.surname} onChange={(event) => update("surname", event.target.value)} />
           </label>
-          {form.gender === "жінка" ? (
-            <label>
-              <span>Дівоче прізвище</span>
-              <input value={form.maidenSurname} onChange={(event) => update("maidenSurname", event.target.value)} />
-            </label>
-          ) : null}
+          <label>
+            <span>Дівоче прізвище</span>
+            <input
+              value={form.maidenSurname}
+              disabled={form.gender !== "жінка"}
+              placeholder={form.gender === "жінка" ? "Вкажіть дівоче прізвище" : "Доступне після вибору жіночої статі"}
+              onChange={(event) => update("maidenSurname", event.target.value)}
+            />
+          </label>
           <label>
             <span>Ім’я</span>
             <input value={form.givenName} onChange={(event) => update("givenName", event.target.value)} />
@@ -613,8 +611,11 @@ export function PersonFormModal({
             <textarea
               rows={3}
               placeholder="Кожен заклад або запис — з нового рядка"
-              value={personEducation(form).join("\n")}
-              onChange={(event) => updateStandardFields({ education: event.target.value })}
+              value={educationDraft}
+              onChange={(event) => {
+                setEducationDraft(event.target.value);
+                updateStandardFields({ education: event.target.value });
+              }}
             />
           </label>
           <PersonEventsEditor

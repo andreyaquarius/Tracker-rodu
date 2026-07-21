@@ -48,19 +48,12 @@ import {
   withPersonStandardFields,
 } from "../../utils/personStandardFields";
 import type { PersonSaveHandler } from "./contracts";
+import { PERSON_STATUSES } from "../../utils/personStatus.ts";
 import { PersonAvatarFramingEditorV2 } from "./PersonAvatarFramingEditorV2.tsx";
 import { usePersonPhotoPreviewSource } from "./PersonPhotoAlbumV2.tsx";
 
 const genders: PersonGender[] = ["невідомо", "чоловік", "жінка"];
 const CORE_MAP_EVENT_TYPES = new Set<PersonEventType>(["birth", "marriage", "death", "residence"]);
-const statuses: PersonStatus[] = [
-  "доведена",
-  "частково доведена",
-  "гіпотетична",
-  "сумнівна",
-  "спростована",
-];
-
 const privacyStatuses: Array<{ value: PersonPrivacyStatus; label: string }> = [
   { value: "private", label: "Приватна" },
   { value: "project", label: "Учасники проєкту" },
@@ -438,6 +431,7 @@ export function PersonEditorV2({
   );
   const firstDates = useMemo(() => dateDraftsFromDraft(firstDraft), [firstDraft]);
   const [form, setForm] = useState<PersonDraft>(firstDraft);
+  const [educationDraft, setEducationDraft] = useState(() => personEducation(firstDraft).join("\n"));
   const [persistedPerson, setPersistedPerson] = useState<Person | null>(person);
   const [dateDrafts, setDateDrafts] = useState(firstDates);
   const [baseline, setBaseline] = useState(() => draftSnapshot(firstDraft, firstDates));
@@ -477,6 +471,7 @@ export function PersonEditorV2({
     const nextDraft = draftFromPerson(person, initialFullName, initialResearchId);
     const nextDates = dateDraftsFromDraft(nextDraft);
     setForm(nextDraft);
+    setEducationDraft(personEducation(nextDraft).join("\n"));
     setPersistedPerson(person);
     setDateDrafts(nextDates);
     setBaseline(draftSnapshot(nextDraft, nextDates));
@@ -843,6 +838,7 @@ export function PersonEditorV2({
       const savedDraft = draftFromPerson(savedPerson);
       const savedDates = dateDraftsFromDraft(savedDraft);
       setForm(savedDraft);
+      setEducationDraft(personEducation(savedDraft).join("\n"));
       setDateDrafts(savedDates);
       setBaseline(draftSnapshot(savedDraft, savedDates));
       setValidationErrors({});
@@ -984,7 +980,7 @@ export function PersonEditorV2({
                   value={form.status}
                   onChange={(event) => update("status", event.target.value as PersonStatus)}
                 >
-                  {statuses.map((status) => <option key={status}>{status}</option>)}
+                  {PERSON_STATUSES.map((status) => <option key={status}>{status}</option>)}
                 </select>
               </label>
               <ScanAttachmentsEditor
@@ -1034,15 +1030,15 @@ export function PersonEditorV2({
                   onChange={(event) => update("surname", event.target.value, "fullName")}
                 />
               </label>
-              {form.gender === "жінка" ? (
-                <label>
-                  <span>Дівоче прізвище</span>
-                  <input
-                    value={form.maidenSurname}
-                    onChange={(event) => update("maidenSurname", event.target.value)}
-                  />
-                </label>
-              ) : null}
+              <label>
+                <span>Дівоче прізвище</span>
+                <input
+                  value={form.maidenSurname}
+                  disabled={form.gender !== "жінка"}
+                  placeholder={form.gender === "жінка" ? "Вкажіть дівоче прізвище" : "Доступне після вибору жіночої статі"}
+                  onChange={(event) => update("maidenSurname", event.target.value)}
+                />
+              </label>
               <label>
                 <span>Ім’я</span>
                 <input
@@ -1273,8 +1269,11 @@ export function PersonEditorV2({
                 <textarea
                   rows={3}
                   placeholder="Кожен заклад або запис — з нового рядка"
-                  value={personEducation(form).join("\n")}
-                  onChange={(event) => updateStandardFields({ education: event.target.value })}
+                  value={educationDraft}
+                  onChange={(event) => {
+                    setEducationDraft(event.target.value);
+                    updateStandardFields({ education: event.target.value });
+                  }}
                 />
               </label>
             </EditorSection>

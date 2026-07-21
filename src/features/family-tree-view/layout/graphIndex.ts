@@ -18,6 +18,20 @@ export interface GraphIndex {
   invalidCycleRelationIds: ReadonlySet<string>;
 }
 
+interface CachedGraphIndex {
+  persons: FamilyGraphData["persons"];
+  unions: FamilyGraphData["unions"];
+  parentChildRelations: FamilyGraphData["parentChildRelations"];
+  index: GraphIndex;
+}
+
+// Layout reflows (camera-preserving expansion, resize and appearance changes)
+// commonly reuse the same immutable graph collections. Indexing all 10k+
+// canonical records for every reflow dominated the layout budget even though
+// only up to 400 cards are mounted. A WeakMap gives those repeated reflows the
+// existing index without retaining a graph after its owning view releases it.
+const graphIndexCache = new WeakMap<FamilyGraphData, CachedGraphIndex>();
+
 export function compareCodePoints(a: string, b: string): number {
   if (a === b) return 0;
   return a < b ? -1 : 1;
@@ -230,6 +244,15 @@ function findCycleRelations(
 }
 
 export function buildGraphIndex(graph: FamilyGraphData): GraphIndex {
+  const cached = graphIndexCache.get(graph);
+  if (
+    cached?.persons === graph.persons &&
+    cached.unions === graph.unions &&
+    cached.parentChildRelations === graph.parentChildRelations
+  ) {
+    return cached.index;
+  }
+
   const personsById = new Map<PersonId, TreePerson>();
   for (const person of [...graph.persons].sort(comparePeople)) {
     personsById.set(person.id, person);
@@ -318,7 +341,7 @@ export function buildGraphIndex(graph: FamilyGraphData): GraphIndex {
     childrenByUnionId.set(unionId, unique);
   }
 
-  return {
+  const index: GraphIndex = {
     personsById,
     unionsById,
     unionsByMemberId: sortMapValues(unionsByMemberId, compareUnions),
@@ -328,6 +351,13 @@ export function buildGraphIndex(graph: FamilyGraphData): GraphIndex {
     childrenByUnionId,
     invalidCycleRelationIds,
   };
+  graphIndexCache.set(graph, {
+    persons: graph.persons,
+    unions: graph.unions,
+    parentChildRelations: graph.parentChildRelations,
+    index,
+  });
+  return index;
 }
 
 export function parentRoleOrder(

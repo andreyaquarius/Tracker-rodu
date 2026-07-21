@@ -175,12 +175,15 @@ export function FamilyTreePersonDialog({
             <span>Прізвище</span>
             <input value={person.surname} onChange={(event) => updatePerson({ surname: event.target.value })} />
           </label>
-          {isFemalePerson ? (
-            <label>
-              <span>Дівоче прізвище</span>
-              <input value={person.maidenSurname ?? ""} onChange={(event) => updatePerson({ maidenSurname: event.target.value })} />
-            </label>
-          ) : null}
+          <label>
+            <span>Дівоче прізвище</span>
+            <input
+              value={person.maidenSurname ?? ""}
+              disabled={!isFemalePerson}
+              placeholder={isFemalePerson ? "Вкажіть дівоче прізвище" : "Доступне після вибору жіночої статі"}
+              onChange={(event) => updatePerson({ maidenSurname: event.target.value })}
+            />
+          </label>
           <label>
             <span>Ім’я</span>
             <input value={person.givenName} onChange={(event) => updatePerson({ givenName: event.target.value })} />

@@ -37,9 +37,15 @@ function frontierPage(
     pageNumber?: number;
     graphVersion?: string;
     permissionFingerprint?: string;
+    includeFrontier?: boolean;
   } = {},
 ): DescendantFrontierPageResponse {
-  const people = [...new Set([...request.frontier.personIds, ...childIds])];
+  const people = [
+    ...new Set([
+      ...(options.includeFrontier === false ? [] : request.frontier.personIds),
+      ...childIds,
+    ]),
+  ];
   return {
     persons: people.map(id => ({ id, displayName: id })),
     unions: [],
@@ -186,6 +192,41 @@ test("cancel preserves the graph committed from page one", async () => {
     ["root", "child-a"],
   );
   assert.equal(progress.at(-1)?.canceled, true);
+});
+
+test("a captured root seed survives the production RPC contract that omits frontier people", async () => {
+  const rootPerson = { id: "overlay-root", displayName: "overlay root" };
+  const client = clientWithFrontier(async request =>
+    frontierPage(request, ["child"], { includeFrontier: false }));
+
+  const result = await loadProgressiveDescendantGraph({
+    client,
+    treeId: "tree",
+    rootPersonId: rootPerson.id,
+    maxGenerations: 1,
+    initialGraph: {
+      persons: [rootPerson],
+      unions: [],
+      parentChildRelations: [],
+      continuations: [],
+      familyContinuations: [],
+      graphVersion: "v1",
+      permissionFingerprint: "member",
+    },
+    yieldControl: async () => undefined,
+  });
+
+  assert.deepEqual(
+    result.graph.persons.map(person => person.id),
+    ["overlay-root", "child"],
+  );
+  assert.equal(
+    result.graph.parentChildRelations.some(
+      relation =>
+        relation.parentId === "overlay-root" && relation.childId === "child",
+    ),
+    true,
+  );
 });
 
 test("breadth-first traversal chunks a large frontier and removes cycles", async () => {

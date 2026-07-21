@@ -55,6 +55,7 @@ import {
 } from "../utils/personPhotos.ts";
 import { PersonEventsView } from "../components/PersonEventsView.tsx";
 import { personEducation, personNationality } from "../utils/personStandardFields.ts";
+import { PERSON_STATUSES } from "../utils/personStatus.ts";
 import {
   listPersonLinkedRecords,
   type PersonLinkedRecords,
@@ -454,7 +455,7 @@ export function PersonsPage({
             <span>Статус</span>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="">Усі статуси</option>
-              {["доведена", "частково доведена", "гіпотетична", "сумнівна", "спростована"].map((status) => <option key={status}>{status}</option>)}
+              {PERSON_STATUSES.map((status) => <option key={status}>{status}</option>)}
             </select>
           </label>
           <label>

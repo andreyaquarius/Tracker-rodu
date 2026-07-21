@@ -84,6 +84,9 @@ export type FamilyContinuationExpansionResult =
   | "failed"
   | "aborted";
 
+export type PersonContinuationExpansionResult =
+  FamilyContinuationExpansionResult;
+
 export interface UseFamilyTreeNeighborhoodResult {
   graph: FamilyGraphData;
   loading: boolean;
@@ -92,8 +95,11 @@ export interface UseFamilyTreeNeighborhoodResult {
   cancel: () => void;
   expandPersonContinuation: (
     continuation: TreeContinuation,
-  ) => Promise<void>;
-  expandContinuation: (token: string, node: LayoutNode) => Promise<void>;
+  ) => Promise<PersonContinuationExpansionResult>;
+  expandContinuation: (
+    token: string,
+    node: LayoutNode,
+  ) => Promise<PersonContinuationExpansionResult>;
   expandFamilyContinuation: (
     continuation: FamilyContinuation,
     visiblePersonIds?: ReadonlySet<PersonId>,
@@ -325,7 +331,9 @@ export function useFamilyTreeNeighborhood({
   ]);
 
   const expandPersonContinuation = useCallback(
-    async (continuation: TreeContinuation): Promise<void> => {
+    async (
+      continuation: TreeContinuation,
+    ): Promise<PersonContinuationExpansionResult> => {
       const token = continuation.token;
       const layerKey = familyTreeBranchKey(
         continuation.personId,
@@ -334,15 +342,17 @@ export function useFamilyTreeNeighborhood({
       if (continuation.expanded || activeBranchLayerKeysRef.current.has(layerKey)) {
         activeBranchLayerKeysRef.current.delete(layerKey);
         commitComposedGraph();
-        return;
+        return "collapsed";
       }
       if (branchLayersRef.current.has(layerKey)) {
         setCanceled(false);
         activeBranchLayerKeysRef.current.add(layerKey);
         commitComposedGraph();
-        return;
+        return "expanded";
       }
-      if (isLocalContinuationToken(token) || activeBranchesRef.current.has(token)) return;
+      if (isLocalContinuationToken(token) || activeBranchesRef.current.has(token)) {
+        return "unchanged";
+      }
 
       setCanceled(false);
 
@@ -357,7 +367,7 @@ export function useFamilyTreeNeighborhood({
             "Досягнуто межу 600 осіб у поточному перегляді. Зробіть потрібну особу фокусною, щоб продовжити її гілку.",
           ),
         );
-        return;
+        return "failed";
       }
 
       const epoch = requestEpochRef.current;
@@ -403,7 +413,7 @@ export function useFamilyTreeNeighborhood({
           epoch !== requestEpochRef.current ||
           graphScopeRef.current !== scopeKey
         ) {
-          return;
+          return "aborted";
         }
 
         const current = graphRef.current;
@@ -421,7 +431,7 @@ export function useFamilyTreeNeighborhood({
           baseLoadingRef.current = true;
           syncLoading();
           setReloadKey(value => value + 1);
-          return;
+          return "failed";
         }
         branchLayersRef.current.set(layerKey, {
           key: layerKey,
@@ -435,6 +445,7 @@ export function useFamilyTreeNeighborhood({
         });
         activeBranchLayerKeysRef.current.add(layerKey);
         commitComposedGraph();
+        return "expanded";
       } catch (reason) {
         const active = activeBranchesRef.current.get(token);
         if (
@@ -443,9 +454,10 @@ export function useFamilyTreeNeighborhood({
           epoch !== requestEpochRef.current ||
           graphScopeRef.current !== scopeKey
         ) {
-          return;
+          return "aborted";
         }
         setError(reason instanceof Error ? reason : new Error(String(reason)));
+        return "failed";
       } finally {
         const active = activeBranchesRef.current.get(token);
         if (active?.revision === revision) activeBranchesRef.current.delete(token);
@@ -468,10 +480,13 @@ export function useFamilyTreeNeighborhood({
   );
 
   const expandContinuation = useCallback(
-    async (token: string, node: LayoutNode): Promise<void> => {
+    async (
+      token: string,
+      node: LayoutNode,
+    ): Promise<PersonContinuationExpansionResult> => {
       const continuation = node.continuation;
-      if (!continuation || continuation.token !== token) return;
-      await expandPersonContinuation(continuation);
+      if (!continuation || continuation.token !== token) return "unchanged";
+      return expandPersonContinuation(continuation);
     },
     [expandPersonContinuation],
   );
