@@ -107,6 +107,75 @@ export interface FamilyTreeNeighborhoodClient {
     request: DescendantFrontierPageRequest,
     signal?: AbortSignal,
   ): Promise<DescendantFrontierPageResponse>;
+  /** Clears resolved responses for one tree before a version-conflict rebase. */
+  invalidateTree?(treeId: string): void;
+}
+
+export const FAMILY_TREE_GRAPH_VERSION_CHANGED = "TREE_GRAPH_VERSION_CHANGED";
+export const FAMILY_TREE_PERMISSION_SCOPE_CHANGED = "TREE_PERMISSION_SCOPE_CHANGED";
+
+export type FamilyTreeScopeConflictCode =
+  | typeof FAMILY_TREE_GRAPH_VERSION_CHANGED
+  | typeof FAMILY_TREE_PERMISSION_SCOPE_CHANGED;
+
+/**
+ * Expected optimistic-read conflict returned by the tree RPCs. It must never
+ * be retried as a generic transient database error with the same graph token.
+ */
+export class FamilyTreeScopeConflictError extends Error {
+  readonly conflictCode: FamilyTreeScopeConflictCode;
+
+  constructor(conflictCode: FamilyTreeScopeConflictCode) {
+    super(conflictCode);
+    this.name = "FamilyTreeScopeConflictError";
+    this.conflictCode = conflictCode;
+  }
+}
+
+export function readFamilyTreeScopeConflictCode(
+  value: unknown,
+): FamilyTreeScopeConflictCode | undefined {
+  if (typeof value === "string") {
+    if (value.includes(FAMILY_TREE_GRAPH_VERSION_CHANGED)) {
+      return FAMILY_TREE_GRAPH_VERSION_CHANGED;
+    }
+    if (value.includes(FAMILY_TREE_PERMISSION_SCOPE_CHANGED)) {
+      return FAMILY_TREE_PERMISSION_SCOPE_CHANGED;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as {
+    conflictCode?: unknown;
+    message?: unknown;
+  };
+  return readFamilyTreeScopeConflictCode(candidate.conflictCode) ??
+    readFamilyTreeScopeConflictCode(candidate.message);
+}
+
+export function isFamilyTreeScopeConflictError(
+  value: unknown,
+): value is FamilyTreeScopeConflictError {
+  return value instanceof FamilyTreeScopeConflictError ||
+    readFamilyTreeScopeConflictCode(value) !== undefined;
+}
+
+export function familyTreeTransportError(value: unknown): Error {
+  const conflictCode = readFamilyTreeScopeConflictCode(value);
+  if (conflictCode) return new FamilyTreeScopeConflictError(conflictCode);
+  if (value instanceof Error) return value;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const message = (value as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return new Error(message);
+  }
+  return new Error(String(value));
+}
+
+export function throwIfFamilyTreeScopeConflict(value: unknown): void {
+  const conflictCode = readFamilyTreeScopeConflictCode(value);
+  if (conflictCode) throw new FamilyTreeScopeConflictError(conflictCode);
 }
 
 const LOCAL_CONTINUATION_TOKEN_PREFIX = "local:";
@@ -274,7 +343,10 @@ export interface SupabaseRpcLike {
   rpc<T>(
     functionName: string,
     parameters: Record<string, unknown>,
-  ): PromiseLike<{ data: T | null; error: { message: string } | null }>;
+  ): PromiseLike<{
+    data: T | null;
+    error: { message: string; code?: string } | null;
+  }>;
 }
 
 export interface NeighborhoodCacheOptions {
@@ -299,6 +371,11 @@ interface TreeCacheScope {
   graphVersion: string | number | undefined;
   permissionFingerprint: string;
 }
+
+type ConflictAwareRequest = Pick<
+  NeighborhoodRequest,
+  "treeId" | "knownGraphVersion" | "permissionFingerprint"
+>;
 
 const NO_PERMISSION_FINGERPRINT = "<none>";
 
@@ -369,7 +446,57 @@ export function createCachedNeighborhoodClient(
   const entries = new Map<string, NeighborhoodCacheEntry>();
   const scopes = new Map<string, TreeCacheScope>();
   const treeRequestRevisions = new Map<string, number>();
+  const blockedScopeConflicts = new Map<
+    string,
+    Map<string, FamilyTreeScopeConflictCode>
+  >();
   let cacheEpoch = 0;
+
+  const conflictScopeKey = (request: ConflictAwareRequest): string => [
+    String(request.knownGraphVersion ?? ""),
+    request.permissionFingerprint ?? "",
+  ].join("\u001f");
+
+  const throwIfScopeWasRejected = (request: ConflictAwareRequest): void => {
+    if (request.knownGraphVersion === undefined) return;
+    const conflictCode = blockedScopeConflicts
+      .get(request.treeId)
+      ?.get(conflictScopeKey(request));
+    if (conflictCode) throw new FamilyTreeScopeConflictError(conflictCode);
+  };
+
+  const rememberScopeConflict = (
+    request: ConflictAwareRequest,
+    reason: unknown,
+  ): void => {
+    const conflictCode = readFamilyTreeScopeConflictCode(reason);
+    if (!conflictCode || request.knownGraphVersion === undefined) return;
+    let treeConflicts = blockedScopeConflicts.get(request.treeId);
+    if (!treeConflicts) {
+      treeConflicts = new Map();
+      blockedScopeConflicts.set(request.treeId, treeConflicts);
+    }
+    treeConflicts.set(conflictScopeKey(request), conflictCode);
+  };
+
+  const runWithConflictGuard = async <T>(
+    request: ConflictAwareRequest,
+    load: () => Promise<T>,
+  ): Promise<T> => {
+    throwIfScopeWasRejected(request);
+    try {
+      const response = await load();
+      // A successful unversioned base read is the rebase boundary. Only then
+      // may callers send branch requests again for this tree.
+      if (request.knownGraphVersion === undefined) {
+        blockedScopeConflicts.delete(request.treeId);
+      }
+      return response;
+    } catch (reason) {
+      rememberScopeConflict(request, reason);
+      throw reason;
+    }
+  };
 
   const invalidateTree = (treeId: string): void => {
     for (const [key, entry] of entries) {
@@ -380,6 +507,7 @@ export function createCachedNeighborhoodClient(
       treeId,
       (treeRequestRevisions.get(treeId) ?? 0) + 1,
     );
+    inner.invalidateTree?.(treeId);
   };
 
   const setEntry = (key: string, entry: NeighborhoodCacheEntry): void => {
@@ -400,8 +528,10 @@ export function createCachedNeighborhoodClient(
       // Safe-by-default: without a caller-owned auth/RLS fingerprint there is
       // no reliable way to detect a permission change before a cache hit.
       if (request.permissionFingerprint === undefined) {
-        return inner.load(request, signal);
+        return runWithConflictGuard(request, () => inner.load(request, signal));
       }
+
+      throwIfScopeWasRejected(request);
 
       const requestFingerprint =
         request.permissionFingerprint;
@@ -435,8 +565,17 @@ export function createCachedNeighborhoodClient(
       }
 
       if (!scopes.has(request.treeId)) scopes.set(request.treeId, requestedScope);
-      const response = await inner.load(request, signal);
+      let response: NeighborhoodResponse;
+      try {
+        response = await inner.load(request, signal);
+      } catch (reason) {
+        rememberScopeConflict(request, reason);
+        throw reason;
+      }
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      if (request.knownGraphVersion === undefined) {
+        blockedScopeConflicts.delete(request.treeId);
+      }
       if (
         requestCacheEpoch !== cacheEpoch ||
         treeRequestRevisions.get(request.treeId) !== requestRevision
@@ -479,39 +618,44 @@ export function createCachedNeighborhoodClient(
     async loadFamilyBranch(request, signal) {
       assertServerSafeFamilyRequest(request);
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      if (inner.loadFamilyBranch) {
-        return inner.loadFamilyBranch(request, signal);
-      }
-      const response = await inner.load(
-        {
-          treeId: request.treeId,
-          focusPersonId: request.focusPersonId,
-          maxNodes: request.pageSize,
-          ...(request.knownGraphVersion === undefined
-            ? {}
-            : { knownGraphVersion: request.knownGraphVersion }),
-          ...(request.permissionFingerprint === undefined
-            ? {}
-            : { permissionFingerprint: request.permissionFingerprint }),
-          familyBranches: [
-            {
-              requestId: `family:${request.scope.id}`,
-              scope: request.scope,
-              ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
-              ...(request.pageSize === undefined
-                ? {}
-                : { pageSize: request.pageSize }),
-            },
-          ],
-        },
-        signal,
-      );
-      return { ...response, scope: request.scope };
+      return runWithConflictGuard(request, async () => {
+        if (inner.loadFamilyBranch) {
+          return inner.loadFamilyBranch(request, signal);
+        }
+        const response = await inner.load(
+          {
+            treeId: request.treeId,
+            focusPersonId: request.focusPersonId,
+            maxNodes: request.pageSize,
+            ...(request.knownGraphVersion === undefined
+              ? {}
+              : { knownGraphVersion: request.knownGraphVersion }),
+            ...(request.permissionFingerprint === undefined
+              ? {}
+              : { permissionFingerprint: request.permissionFingerprint }),
+            familyBranches: [
+              {
+                requestId: `family:${request.scope.id}`,
+                scope: request.scope,
+                ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
+                ...(request.pageSize === undefined
+                  ? {}
+                  : { pageSize: request.pageSize }),
+              },
+            ],
+          },
+          signal,
+        );
+        return { ...response, scope: request.scope };
+      });
     },
     async loadDescendantFrontierPage(request, signal) {
       assertDescendantFrontierPageRequest(request);
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const response = await inner.loadDescendantFrontierPage(request, signal);
+      const response = await runWithConflictGuard(
+        request,
+        () => inner.loadDescendantFrontierPage(request, signal),
+      );
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       return response;
     },
@@ -519,6 +663,7 @@ export function createCachedNeighborhoodClient(
       entries.clear();
       scopes.clear();
       treeRequestRevisions.clear();
+      blockedScopeConflicts.clear();
       cacheEpoch += 1;
     },
     invalidateTree,
@@ -544,7 +689,8 @@ export function createSupabaseNeighborhoodClient(
         { p_request: request },
       );
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      if (error) throw new Error(error.message);
+      if (error) throw familyTreeTransportError(error);
+      throwIfFamilyTreeScopeConflict(data);
       if (!data) throw new Error("Сервер повернув порожнє оточення дерева.");
       return data;
     },
@@ -571,7 +717,8 @@ export function createSupabaseNeighborhoodClient(
         },
       );
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      if (error) throw new Error(error.message);
+      if (error) throw familyTreeTransportError(error);
+      throwIfFamilyTreeScopeConflict(data);
       if (!data) throw new Error("Сервер повернув порожню сімейну гілку.");
       return data;
     },
@@ -584,7 +731,8 @@ export function createSupabaseNeighborhoodClient(
           { p_request: request },
         );
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      if (error) throw new Error(error.message);
+      if (error) throw familyTreeTransportError(error);
+      throwIfFamilyTreeScopeConflict(data);
       if (!data) throw new Error("Сервер повернув порожній пакет нащадків.");
       return data;
     },

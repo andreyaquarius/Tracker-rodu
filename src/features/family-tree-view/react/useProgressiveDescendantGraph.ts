@@ -61,6 +61,7 @@ export function useProgressiveDescendantGraph({
   const scopeRef = useRef(scopeKey);
   const controllerRef = useRef<AbortController | undefined>(undefined);
   const runRef = useRef(0);
+  const forceFreshReloadRef = useRef(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   const commit = useCallback((next: ProgressiveDescendantState): void => {
@@ -79,7 +80,11 @@ export function useProgressiveDescendantGraph({
 
     const scopeChanged = scopeRef.current !== scopeKey;
     scopeRef.current = scopeKey;
-    const seedGraph = scopeChanged ? initialGraph : stateRef.current.graph;
+    const forceFreshReload = forceFreshReloadRef.current;
+    forceFreshReloadRef.current = false;
+    const seedGraph = forceFreshReload
+      ? freshDescendantSeed(initialGraph, rootPersonId)
+      : (scopeChanged ? initialGraph : stateRef.current.graph);
     const startingState = stateForGraph(seedGraph, true);
     commit(startingState);
 
@@ -95,8 +100,12 @@ export function useProgressiveDescendantGraph({
       maxGenerations,
       pageSize,
       initialGraph: seedGraph,
-      ...(knownGraphVersion === undefined ? {} : { knownGraphVersion }),
-      ...(permissionFingerprint === undefined
+      ...(
+        forceFreshReload || knownGraphVersion === undefined
+          ? {}
+          : { knownGraphVersion }
+      ),
+      ...(forceFreshReload || permissionFingerprint === undefined
         ? {}
         : { permissionFingerprint }),
       signal: controller.signal,
@@ -162,6 +171,8 @@ export function useProgressiveDescendantGraph({
   }, [commit]);
 
   const reload = useCallback((): void => {
+    forceFreshReloadRef.current = true;
+    client.invalidateTree?.(treeId);
     commit({
       ...stateRef.current,
       loading: true,
@@ -171,9 +182,21 @@ export function useProgressiveDescendantGraph({
       pagesLoaded: 0,
     });
     setReloadKey(value => value + 1);
-  }, [commit]);
+  }, [client, commit, treeId]);
 
   return { ...state, cancel, reload };
+}
+
+function freshDescendantSeed(
+  graph: FamilyGraphData,
+  rootPersonId: PersonId,
+): FamilyGraphData {
+  return {
+    persons: graph.persons.filter(person => person.id === rootPersonId),
+    unions: [],
+    parentChildRelations: [],
+    continuations: [],
+  };
 }
 
 function stateForGraph(

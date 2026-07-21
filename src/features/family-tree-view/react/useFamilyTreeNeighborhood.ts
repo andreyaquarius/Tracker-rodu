@@ -5,6 +5,7 @@ import {
   boundedBranchNodeLimit,
   boundedFamilyBranchChildLimit,
   graphVersionsConflict,
+  isFamilyTreeScopeConflictError,
   isLocalContinuationToken,
   loadBoundedFamilyBranchPages,
   reconcileFamilyContinuations,
@@ -160,11 +161,16 @@ export function useFamilyTreeNeighborhood({
   const branchRevisionRef = useRef(0);
   const baseLoadingRef = useRef(true);
   const baseControllerRef = useRef<AbortController | undefined>(undefined);
+  const forceFreshBaseRef = useRef(false);
   const mountedRef = useRef(true);
   const activeBranchesRef = useRef(new Map<string, ActiveBranchRequest>());
   const branchLayersRef = useRef(new Map<string, FamilyTreeBranchLayer>());
   const activeBranchLayerKeysRef = useRef(new Set<string>());
   const restoreBranchLayerKeysRef = useRef(new Map<PersonId, Set<string>>());
+  const scopeConflictRecoveryRef = useRef({
+    scopeKey,
+    automaticReloadUsed: false,
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -219,6 +225,50 @@ export function useFamilyTreeNeighborhood({
     restoreBranchLayerKeysRef.current.clear();
   }, []);
 
+  const recoverFromScopeConflict = useCallback((): void => {
+    // Invalidate every request that still carries the rejected version before
+    // scheduling a fresh base read. This is deliberately single-flight: if
+    // the graph changes again during that rebase, the user gets a retry action
+    // instead of an unbounded RPC loop.
+    requestEpochRef.current += 1;
+    const baseController = baseControllerRef.current;
+    baseControllerRef.current = undefined;
+    baseController?.abort();
+    abortBranches();
+    client.invalidateTree?.(treeId);
+    forceFreshBaseRef.current = true;
+    baseGraphRef.current = EMPTY_GRAPH;
+    graphRef.current = EMPTY_GRAPH;
+    resetBranchLayers();
+    commit(EMPTY_GRAPH);
+
+    const recovery = scopeConflictRecoveryRef.current;
+    const mayReload = recovery.scopeKey === scopeKey &&
+      !recovery.automaticReloadUsed;
+    if (mayReload) {
+      recovery.automaticReloadUsed = true;
+      baseLoadingRef.current = true;
+      setError(undefined);
+      syncLoading();
+      setReloadKey(value => value + 1);
+      return;
+    }
+
+    baseLoadingRef.current = false;
+    syncLoading();
+    setError(new Error(
+      "Дані родового дерева змінилися під час завантаження. Спробуйте ще раз.",
+    ));
+  }, [
+    abortBranches,
+    client,
+    commit,
+    resetBranchLayers,
+    scopeKey,
+    syncLoading,
+    treeId,
+  ]);
+
   useEffect(() => {
     if (!enabled) return;
     setCanceled(false);
@@ -226,6 +276,14 @@ export function useFamilyTreeNeighborhood({
     const controller = new AbortController();
     baseControllerRef.current = controller;
     const scopeChanged = graphScopeRef.current !== scopeKey;
+    const forceFreshBase = forceFreshBaseRef.current;
+    forceFreshBaseRef.current = false;
+    if (scopeChanged || scopeConflictRecoveryRef.current.scopeKey !== scopeKey) {
+      scopeConflictRecoveryRef.current = {
+        scopeKey,
+        automaticReloadUsed: false,
+      };
+    }
 
     abortBranches();
     resetBranchLayers();
@@ -238,7 +296,7 @@ export function useFamilyTreeNeighborhood({
       commit(baseGraphRef.current);
     }
 
-    const knownGraphVersion = scopeChanged
+    const knownGraphVersion = scopeChanged || forceFreshBase
       ? undefined
       : graphRef.current.graphVersion;
     baseLoadingRef.current = true;
@@ -256,7 +314,7 @@ export function useFamilyTreeNeighborhood({
           collateralDepth,
           maxNodes,
           ...(knownGraphVersion === undefined ? {} : { knownGraphVersion }),
-          ...(permissionFingerprint === undefined
+          ...(forceFreshBase || permissionFingerprint === undefined
             ? {}
             : { permissionFingerprint }),
         },
@@ -286,6 +344,9 @@ export function useFamilyTreeNeighborhood({
         baseLoadingRef.current = false;
         syncLoading();
         setBaseLoadRevision(value => value + 1);
+        if (!defaultVisibleFamilyPersonId) {
+          scopeConflictRecoveryRef.current.automaticReloadUsed = false;
+        }
       })
       .catch(reason => {
         if (
@@ -297,6 +358,10 @@ export function useFamilyTreeNeighborhood({
         }
         if (baseControllerRef.current === controller) {
           baseControllerRef.current = undefined;
+        }
+        if (isFamilyTreeScopeConflictError(reason)) {
+          recoverFromScopeConflict();
+          return;
         }
         setError(reason instanceof Error ? reason : new Error(String(reason)));
         baseLoadingRef.current = false;
@@ -317,10 +382,12 @@ export function useFamilyTreeNeighborhood({
     collateralDepth,
     commit,
     descendantDepth,
+    defaultVisibleFamilyPersonId,
     enabled,
     focusPersonId,
     maxNodes,
     permissionFingerprint,
+    recoverFromScopeConflict,
     reloadKey,
     resetBranchLayers,
     scopeKey,
@@ -424,13 +491,7 @@ export function useFamilyTreeNeighborhood({
             response.permissionFingerprint,
           )
         ) {
-          abortBranches();
-          baseGraphRef.current = EMPTY_GRAPH;
-          resetBranchLayers();
-          commit(EMPTY_GRAPH);
-          baseLoadingRef.current = true;
-          syncLoading();
-          setReloadKey(value => value + 1);
+          recoverFromScopeConflict();
           return "failed";
         }
         branchLayersRef.current.set(layerKey, {
@@ -456,6 +517,10 @@ export function useFamilyTreeNeighborhood({
         ) {
           return "aborted";
         }
+        if (isFamilyTreeScopeConflictError(reason)) {
+          recoverFromScopeConflict();
+          return "failed";
+        }
         setError(reason instanceof Error ? reason : new Error(String(reason)));
         return "failed";
       } finally {
@@ -472,6 +537,7 @@ export function useFamilyTreeNeighborhood({
       focusPersonId,
       maxNodes,
       permissionFingerprint,
+      recoverFromScopeConflict,
       resetBranchLayers,
       scopeKey,
       syncLoading,
@@ -618,13 +684,7 @@ export function useFamilyTreeNeighborhood({
             response.permissionFingerprint,
           )
         ) {
-          abortBranches();
-          baseGraphRef.current = EMPTY_GRAPH;
-          resetBranchLayers();
-          commit(EMPTY_GRAPH);
-          baseLoadingRef.current = true;
-          syncLoading();
-          setReloadKey(value => value + 1);
+          recoverFromScopeConflict();
           return "failed";
         }
 
@@ -651,6 +711,10 @@ export function useFamilyTreeNeighborhood({
         ) {
           return "aborted";
         }
+        if (isFamilyTreeScopeConflictError(reason)) {
+          recoverFromScopeConflict();
+          return "failed";
+        }
         setError(reason instanceof Error ? reason : new Error(String(reason)));
         return "failed";
       } finally {
@@ -669,6 +733,7 @@ export function useFamilyTreeNeighborhood({
       focusPersonId,
       maxNodes,
       permissionFingerprint,
+      recoverFromScopeConflict,
       resetBranchLayers,
       scopeKey,
       syncLoading,
@@ -698,14 +763,19 @@ export function useFamilyTreeNeighborhood({
           attemptedPersonContinuationIds,
           attemptedFamilyScopeIds,
         });
-        if (!next) return;
+        if (!next) {
+          scopeConflictRecoveryRef.current.automaticReloadUsed = false;
+          return;
+        }
+        let result: FamilyContinuationExpansionResult;
         if (next.kind === "person") {
           attemptedPersonContinuationIds.add(next.continuation.id);
-          await expandPersonContinuation(next.continuation);
+          result = await expandPersonContinuation(next.continuation);
         } else {
           attemptedFamilyScopeIds.add(next.continuation.scope.id);
-          await expandFamilyContinuation(next.continuation);
+          result = await expandFamilyContinuation(next.continuation);
         }
+        if (result === "failed" || result === "aborted") return;
       }
     })();
 
@@ -840,9 +910,35 @@ export function useFamilyTreeNeighborhood({
   }, [commitComposedGraph, syncLoading]);
 
   const reload = useCallback((): void => {
+    requestEpochRef.current += 1;
+    const baseController = baseControllerRef.current;
+    baseControllerRef.current = undefined;
+    baseController?.abort();
+    abortBranches();
+    client.invalidateTree?.(treeId);
+    forceFreshBaseRef.current = true;
+    baseGraphRef.current = EMPTY_GRAPH;
+    graphRef.current = EMPTY_GRAPH;
+    resetBranchLayers();
+    commit(EMPTY_GRAPH);
+    scopeConflictRecoveryRef.current = {
+      scopeKey,
+      automaticReloadUsed: false,
+    };
+    baseLoadingRef.current = true;
     setCanceled(false);
+    setError(undefined);
+    syncLoading();
     setReloadKey(value => value + 1);
-  }, []);
+  }, [
+    abortBranches,
+    client,
+    commit,
+    resetBranchLayers,
+    scopeKey,
+    syncLoading,
+    treeId,
+  ]);
   const scopeIsCurrent = graphScopeRef.current === scopeKey;
   const branchTogglePersonIds = branchLayerPersonIds(branchLayersRef.current);
   const collapsedBranchPersonIds = collapsedBranchLayerPersonIds(

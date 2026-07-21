@@ -9,6 +9,7 @@ import type {
 } from "../features/family-tree-view/data/neighborhoodClient.ts";
 import {
   createCachedNeighborhoodClient,
+  throwIfFamilyTreeScopeConflict,
 } from "../features/family-tree-view/data/neighborhoodClient.ts";
 import { getSupabaseClient } from "./supabaseAuth.ts";
 import {
@@ -121,6 +122,7 @@ function createAbortableSupabaseRpcClient(): FamilyTreeNeighborhoodClient {
           },
         );
         payload = await response.json().catch(() => undefined) as unknown;
+        throwIfFamilyTreeScopeConflict(payload);
         const hasFallback = index < rpcCandidates.length - 1;
         if (
           response.ok ||
@@ -185,6 +187,7 @@ function createAbortableSupabaseRpcClient(): FamilyTreeNeighborhoodClient {
         },
       );
       const payload = await response.json().catch(() => undefined) as unknown;
+      throwIfFamilyTreeScopeConflict(payload);
       if (!response.ok) {
         const message = databaseStatementTimeoutMessage(payload) ??
           readPostgrestError(payload) ??
@@ -224,6 +227,7 @@ function createAbortableSupabaseRpcClient(): FamilyTreeNeighborhoodClient {
         },
       );
       const payload = await response.json().catch(() => undefined) as unknown;
+      throwIfFamilyTreeScopeConflict(payload);
       if (!response.ok) {
         const message = databaseStatementTimeoutMessage(payload) ??
           readPostgrestError(payload) ??
