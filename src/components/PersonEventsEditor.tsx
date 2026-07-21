@@ -120,9 +120,10 @@ export function PersonEventsEditor({
                 />
               </label>
               <label>
-                <span>Точна адреса</span>
+                <span>Номер будинку / точна адреса</span>
                 <input
                   value={event.address ?? ""}
+                  placeholder="Наприклад: буд. 27-А або вул. Шевченка, 27-А"
                   onChange={(changeEvent) => updateEvent(event.id, { address: changeEvent.target.value || null })}
                 />
               </label>

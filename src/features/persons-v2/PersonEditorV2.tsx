@@ -1093,6 +1093,18 @@ export function PersonEditorV2({
                 <input value={form.birthPlace} onChange={(event) => update("birthPlace", event.target.value)} />
               </label>
               <label>
+                <span>Номер будинку / точна адреса</span>
+                <input
+                  value={personEvents.find((event) => event.id === "birth")?.address ?? ""}
+                  placeholder="Наприклад: буд. 27-А"
+                  onChange={(event) => patchEvent(
+                    "birth",
+                    { address: event.target.value || null },
+                    "birth",
+                  )}
+                />
+              </label>
+              <label>
                 <span>Рік від</span>
                 <input
                   type="number"
@@ -1139,6 +1151,18 @@ export function PersonEditorV2({
                   onChange={(event) => update("marriagePlace", event.target.value)}
                 />
               </label>
+              <label>
+                <span>Номер будинку / точна адреса</span>
+                <input
+                  value={personEvents.find((event) => event.id === "marriage")?.address ?? ""}
+                  placeholder="Наприклад: буд. 27-А"
+                  onChange={(event) => patchEvent(
+                    "marriage",
+                    { address: event.target.value || null },
+                    "marriage",
+                  )}
+                />
+              </label>
               <ScanAttachmentsEditor
                 title="Документи про шлюб"
                 driveFolderPath={["Особи", drivePersonName, "Шлюб"]}
@@ -1164,6 +1188,18 @@ export function PersonEditorV2({
                   <label>
                     <span>Місце смерті</span>
                     <input value={form.deathPlace} onChange={(event) => update("deathPlace", event.target.value)} />
+                  </label>
+                  <label>
+                    <span>Номер будинку / точна адреса</span>
+                    <input
+                      value={personEvents.find((event) => event.id === "death")?.address ?? ""}
+                      placeholder="Наприклад: буд. 27-А"
+                      onChange={(event) => patchEvent(
+                        "death",
+                        { address: event.target.value || null },
+                        "death",
+                      )}
+                    />
                   </label>
                   <label>
                     <span>Рік від</span>
@@ -1371,6 +1407,17 @@ export function PersonEditorV2({
                               value={mapEvent.date ?? ""}
                               placeholder="Наприклад: 1914–1917"
                               onChange={(changeEvent) => patchEvent(mapEvent.id, { date: changeEvent.target.value || null })}
+                            />
+                          </label>
+                          <label className="field-wide">
+                            <span>Номер будинку / точна адреса</span>
+                            <input
+                              value={mapEvent.address ?? ""}
+                              placeholder="Наприклад: буд. 27-А або вул. Шевченка, 27-А"
+                              onChange={(changeEvent) => patchEvent(
+                                mapEvent.id,
+                                { address: changeEvent.target.value || null },
+                              )}
                             />
                           </label>
                         </div>

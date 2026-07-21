@@ -357,6 +357,12 @@ export function PersonFormModal({
     if (type === "residence") update("residencePlaces", place);
   };
 
+  const updateCoreEventAddress = (type: "birth" | "marriage" | "death", address: string) => {
+    update("events", personEvents.map((event) => (
+      event.id === type ? { ...event, address: address || null } : event
+    )));
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (researchRequired && !form.researchId.trim()) {
@@ -524,6 +530,14 @@ export function PersonFormModal({
             <input value={form.birthPlace} onChange={(event) => update("birthPlace", event.target.value)} />
           </label>
           <label>
+            <span>Номер будинку / точна адреса</span>
+            <input
+              value={personEvents.find((event) => event.id === "birth")?.address ?? ""}
+              placeholder="Наприклад: буд. 27-А"
+              onChange={(event) => updateCoreEventAddress("birth", event.target.value)}
+            />
+          </label>
+          <label>
             <span>Рік народження від</span>
             <input type="number" value={form.birthYearFrom} onChange={(event) => update("birthYearFrom", event.target.value)} />
           </label>
@@ -542,6 +556,14 @@ export function PersonFormModal({
             <span>Місце шлюбу</span>
             <input value={form.marriagePlace} onChange={(event) => update("marriagePlace", event.target.value)} />
           </label>
+          <label>
+            <span>Номер будинку / точна адреса</span>
+            <input
+              value={personEvents.find((event) => event.id === "marriage")?.address ?? ""}
+              placeholder="Наприклад: буд. 27-А"
+              onChange={(event) => updateCoreEventAddress("marriage", event.target.value)}
+            />
+          </label>
           {!form.isLiving ? (
             <>
               <PersonDateInput
@@ -554,6 +576,14 @@ export function PersonFormModal({
               <label>
                 <span>Місце смерті</span>
                 <input value={form.deathPlace} onChange={(event) => update("deathPlace", event.target.value)} />
+              </label>
+              <label>
+                <span>Номер будинку / точна адреса</span>
+                <input
+                  value={personEvents.find((event) => event.id === "death")?.address ?? ""}
+                  placeholder="Наприклад: буд. 27-А"
+                  onChange={(event) => updateCoreEventAddress("death", event.target.value)}
+                />
               </label>
               <label>
                 <span>Рік смерті від</span>
