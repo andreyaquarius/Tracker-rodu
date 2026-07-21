@@ -92,7 +92,11 @@ export interface DeleteRelationshipResult {
   deleted: true;
   kind: FamilyTreeRelationshipKind;
   relationshipId: EntityId;
+  deletedRelationshipIds: EntityId[];
   treeId: EntityId;
+  leftPersonId: EntityId;
+  rightPersonId: EntityId;
+  remainingLogicalEdges: number;
   deletedMappings: number;
   deletedLegacyRelations: number;
   deletedLegacyRelationIds: EntityId[];
@@ -443,7 +447,11 @@ export async function createFamilyTreeFromLegacyImport(
       endDate: gedcom?.endDate,
       endPlace: gedcom?.endPlace,
       notes: gedcom?.rawNotes,
-      metadata: gedcom ? { source: "gedcom_import", familyXref: gedcom.familyXref } : undefined,
+      metadata: {
+        source: "gedcom_import",
+        legacyRelationId: edge.legacyRelationId ?? "",
+        ...(gedcom ? { familyXref: gedcom.familyXref } : {}),
+      },
     });
   }
 
@@ -495,7 +503,13 @@ export async function createFamilyTreeFromLegacyImport(
         duplicateMode: "skip-check",
         ensureMembers: false,
         notes: gedcom?.rawNotes,
-        metadata: gedcom ? { source: "gedcom_import", familyXref: gedcom.familyXref, pedigree: gedcom.pedigree } : undefined,
+        metadata: {
+          source: "gedcom_import",
+          legacyRelationId: edge.legacyRelationId ?? "",
+          ...(gedcom
+            ? { familyXref: gedcom.familyXref, pedigree: gedcom.pedigree }
+            : {}),
+        },
       });
       if (familyGroupId) {
         await upsertFamilyGroupMember(input.projectId, familyGroupId, edge.fromPersonId, "parent", index);
@@ -696,6 +710,7 @@ export async function attachExistingParentToPerson(input: AttachExistingParentTo
     relationshipType: input.relationshipType,
     parentRoleLabel: roleLabelForParentIntent(input.parentIntent, input.relationshipType),
     evidenceStatus: input.evidenceStatus,
+    duplicateMode: "ignore",
   });
   await upsertLegacyPersonRelation({
     projectId: input.projectId,
@@ -760,6 +775,7 @@ export async function attachExistingChildToPerson(input: AttachExistingChildToPe
     relationshipType: input.relationshipType,
     parentRoleLabel: "parent",
     evidenceStatus: input.evidenceStatus,
+    duplicateMode: "ignore",
   });
   await upsertLegacyPersonRelation({
     projectId: input.projectId,
@@ -779,6 +795,7 @@ export async function attachExistingChildToPerson(input: AttachExistingChildToPe
       relationshipType: input.relationshipType,
       parentRoleLabel: "parent",
       evidenceStatus: input.evidenceStatus,
+      duplicateMode: "ignore",
     });
     await upsertLegacyPersonRelation({
       projectId: input.projectId,
@@ -1083,9 +1100,14 @@ function parseDeleteRelationshipResult(
     throw new Error("Сервер повернув некоректну відповідь після відв’язування особи.");
   }
   const record = value as Record<string, unknown>;
+  const deletedRelationshipIds = stringArray(record.deletedRelationshipIds);
+  const uniqueDeletedRelationshipIds = new Set(deletedRelationshipIds);
   const deletedLegacyRelationIds = Array.isArray(record.deletedLegacyRelationIds)
     ? record.deletedLegacyRelationIds.filter((id): id is string => typeof id === "string")
     : [];
+  const leftPersonId = nonEmptyString(record.leftPersonId);
+  const rightPersonId = nonEmptyString(record.rightPersonId);
+  const remainingLogicalEdges = nonNegativeInteger(record.remainingLogicalEdges);
   const deletedMappings = nonNegativeInteger(record.deletedMappings);
   const deletedLegacyRelations = nonNegativeInteger(record.deletedLegacyRelations);
   if (
@@ -1093,6 +1115,14 @@ function parseDeleteRelationshipResult(
     record.kind !== input.kind ||
     record.relationshipId !== input.relationshipId ||
     record.treeId !== input.treeId ||
+    !Array.isArray(record.deletedRelationshipIds) ||
+    deletedRelationshipIds.length !== record.deletedRelationshipIds.length ||
+    uniqueDeletedRelationshipIds.size !== deletedRelationshipIds.length ||
+    !deletedRelationshipIds.includes(input.relationshipId) ||
+    !leftPersonId ||
+    !rightPersonId ||
+    leftPersonId === rightPersonId ||
+    remainingLogicalEdges !== 0 ||
     deletedMappings === null ||
     deletedLegacyRelations === null ||
     !Array.isArray(record.deletedLegacyRelationIds) ||
@@ -1104,11 +1134,25 @@ function parseDeleteRelationshipResult(
     deleted: true,
     kind: input.kind,
     relationshipId: input.relationshipId,
+    deletedRelationshipIds,
     treeId: input.treeId,
+    leftPersonId,
+    rightPersonId,
+    remainingLogicalEdges,
     deletedMappings,
     deletedLegacyRelations,
     deletedLegacyRelationIds,
   };
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function nonNegativeInteger(value: unknown): number | null {

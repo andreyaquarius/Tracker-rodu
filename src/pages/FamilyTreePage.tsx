@@ -44,6 +44,7 @@ import { useFamilyTreeMutations } from "../hooks/useFamilyTreeMutations";
 import {
   createFamilyTreeFromLegacyImport,
   type FamilyTreeBuilderAction,
+  type DeleteRelationshipResult,
 } from "../services/familyTreeMutationService";
 import { useWorkspaceWindows } from "../components/WorkspaceWindows";
 import type {
@@ -170,7 +171,9 @@ export type FamilyTreePageProps = {
   researchRequired?: boolean;
   gedcomResearchRequired?: boolean;
   onSubscriptionChanged?: () => void;
-  onPersonRelationsDetached?: (relationIds: readonly string[]) => void;
+  onPersonRelationsDetached?: (
+    result: DeleteRelationshipResult,
+  ) => void | Promise<void>;
   onOpenPerson?: (personId: string) => void;
   onActiveContextChange?: (context: {
     projectId: string;
@@ -1047,7 +1050,7 @@ export function LegacyFamilyTreePage({
       relationshipId: input.relationshipId,
     });
     if (result === null) return;
-    onPersonRelationsDetached?.(result.deletedLegacyRelationIds);
+    await onPersonRelationsDetached?.(result);
     setBuilderNotice("Зв’язок від’єднано. Особу не видалено.");
     await refetch();
   };

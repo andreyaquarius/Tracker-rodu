@@ -124,6 +124,7 @@ import {
   getProjectPerson,
   getProjectPersonRelation,
   importProjectPeople,
+  listProjectPersonRelationsBetween,
   listProjectPeople,
   loadProjectPeopleCache,
   saveProjectPeopleCache,
@@ -131,6 +132,8 @@ import {
   saveProjectPersonPhotoBackups,
   saveProjectPersonRelation,
 } from "./services/projectPeople";
+import type { DeleteRelationshipResult } from "./services/familyTreeMutationService";
+import { reconcileProjectPersonRelationsForPair } from "./utils/personRelationReconciliation";
 import type { GedcomImportGroup } from "./utils/gedcomImportGroups.ts";
 import {
   clearProjectDocumentsCache,
@@ -607,6 +610,8 @@ export default function App() {
   const [researchesReadyForProject, setResearchesReadyForProject] = useState<string | null>(null);
   const [projectPersons, setProjectPersons] = useState<Person[]>([]);
   const [projectPersonRelations, setProjectPersonRelations] = useState<PersonRelation[]>([]);
+  const projectPersonsRef = useRef(projectPersons);
+  projectPersonsRef.current = projectPersons;
   const [projectDocuments, setProjectDocuments] = useState<DocumentRecord[]>([]);
   const [projectYearMatrix, setProjectYearMatrix] = useState<YearMatrixRecord[]>([]);
   const [documentsReadyForProject, setDocumentsReadyForProject] = useState<string | null>(null);
@@ -4239,17 +4244,48 @@ export default function App() {
     setProjectArchiveRequests(nextRequests);
   };
 
-  const removePersonRelationIdsFromLoadedProject = (
+  const reconcilePersonRelationsAfterTreeDetach = async (
     projectId: string,
-    relationIds: readonly string[],
-  ) => {
-    if (!relationIds.length || activeWorkspaceIdRef.current !== projectId) return;
-    const removedRelationIds = new Set(relationIds);
-    setProjectPersonRelations((current) => {
-      const next = current.filter((relation) => !removedRelationIds.has(relation.id));
-      saveProjectPeopleCache(projectId, projectPersons, next);
-      return next;
-    });
+    result: DeleteRelationshipResult,
+  ): Promise<void> => {
+    if (activeWorkspaceIdRef.current !== projectId) return;
+
+    if (result.deletedLegacyRelationIds.length) {
+      const removedRelationIds = new Set(result.deletedLegacyRelationIds);
+      setProjectPersonRelations((current) => {
+        const next = current.filter((relation) => !removedRelationIds.has(relation.id));
+        saveProjectPeopleCache(projectId, projectPersonsRef.current, next);
+        return next;
+      });
+    }
+
+    try {
+      const authoritative = await listProjectPersonRelationsBetween(
+        projectId,
+        result.leftPersonId,
+        result.rightPersonId,
+      );
+      if (activeWorkspaceIdRef.current !== projectId) return;
+      setProjectPersonRelations((current) => {
+        const next = reconcileProjectPersonRelationsForPair(
+          current,
+          authoritative,
+          result.leftPersonId,
+          result.rightPersonId,
+          result.deletedLegacyRelationIds,
+        );
+        saveProjectPeopleCache(projectId, projectPersonsRef.current, next);
+        return next;
+      });
+    } catch (error) {
+      notify(
+        describeError(
+          error,
+          "Родинний зв’язок відв’язано, але не вдалося оновити зв’язки в картці особи. Оновіть сторінку.",
+        ),
+        true,
+      );
+    }
   };
 
   const deletePersons = async (personIds: readonly string[]): Promise<void> => {
@@ -5124,9 +5160,9 @@ export default function App() {
               researchRequired={researchRequiredByPlan}
               gedcomResearchRequired={false}
               onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
-              onPersonRelationsDetached={(relationIds) => {
+              onPersonRelationsDetached={(result) => {
                 if (!workspace) return;
-                removePersonRelationIdsFromLoadedProject(workspace.projectId, relationIds);
+                return reconcilePersonRelationsAfterTreeDetach(workspace.projectId, result);
               }}
               onOpenPerson={(personId) => openRelatedRecord("persons", personId)}
               onActiveContextChange={handleFamilyTreeActiveContextChange}

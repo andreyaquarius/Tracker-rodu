@@ -231,9 +231,11 @@ export function buildLegacyFamilyTreeImportPlan(
       end_date: gedcom?.endDate ?? "",
       end_place: gedcom?.endPlace ?? "",
       notes: gedcom?.rawNotes ?? "",
-      metadata: gedcom
-        ? { source: "gedcom_import", familyXref: gedcom.familyXref }
-        : { source: "family_tree_builder" },
+      metadata: {
+        source: "gedcom_import",
+        legacyRelationId: edge.legacyRelationId ?? "",
+        ...(gedcom ? { familyXref: gedcom.familyXref } : {}),
+      },
     });
   }
 
@@ -300,9 +302,13 @@ export function buildLegacyFamilyTreeImportPlan(
         is_social: traits.isSocial,
         privacy_status: "private",
         notes: gedcom?.rawNotes ?? "",
-        metadata: gedcom
-          ? { source: "gedcom_import", familyXref: gedcom.familyXref, pedigree: gedcom.pedigree }
-          : { source: "family_tree_builder" },
+        metadata: {
+          source: "gedcom_import",
+          legacyRelationId: edge.legacyRelationId ?? "",
+          ...(gedcom
+            ? { familyXref: gedcom.familyXref, pedigree: gedcom.pedigree }
+            : {}),
+        },
       });
       if (familyGroupId) {
         addFamilyMember({

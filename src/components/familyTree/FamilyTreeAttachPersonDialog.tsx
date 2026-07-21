@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   EvidenceStatus,
   ParentChildRelationshipType,
@@ -96,6 +96,8 @@ export function FamilyTreeAttachPersonDialog({
   const [evidenceStatus, setEvidenceStatus] = useState<EvidenceStatus>("proven");
   const [secondParentId, setSecondParentId] = useState("");
   const [localError, setLocalError] = useState("");
+  const [submitPending, setSubmitPending] = useState(false);
+  const submitInFlightRef = useRef(false);
 
   const filteredCandidates = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("uk");
@@ -110,15 +112,19 @@ export function FamilyTreeAttachPersonDialog({
   const needsParentType = action === "attach_parent" || action === "attach_child";
   const isPartnerAction = action === "attach_partner";
   const canChooseSecondParent = action === "attach_child" && partnerOptions.length > 0;
+  const submitDisabled = isSaving || submitPending;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (submitInFlightRef.current || isSaving) return;
     if (!existingPersonId) {
       setLocalError("Оберіть існуючу особу для прив’язки.");
       return;
     }
     setLocalError("");
-    void onSubmit({
+    submitInFlightRef.current = true;
+    setSubmitPending(true);
+    const payload: FamilyTreeAttachSubmit = {
       action,
       existingPersonId,
       parentIntent,
@@ -127,7 +133,21 @@ export function FamilyTreeAttachPersonDialog({
       evidenceStatus,
       secondParentId: secondParentId || undefined,
       familyGroupId: partnerOptions.find((option) => option.personId === secondParentId)?.familyGroupId ?? null,
-    });
+    };
+    void (async () => {
+      try {
+        await onSubmit(payload);
+      } catch (submitError) {
+        setLocalError(
+          submitError instanceof Error
+            ? submitError.message
+            : "Не вдалося прив’язати вибрану особу.",
+        );
+      } finally {
+        submitInFlightRef.current = false;
+        setSubmitPending(false);
+      }
+    })();
   };
 
   return (
@@ -227,11 +247,11 @@ export function FamilyTreeAttachPersonDialog({
         </div>
 
         <div className="modal-actions">
-          <button type="button" className="button button-secondary" onClick={onClose} disabled={isSaving}>
+          <button type="button" className="button button-secondary" onClick={onClose} disabled={submitDisabled}>
             Скасувати
           </button>
-          <button type="submit" className="button" disabled={isSaving || !filteredCandidates.length}>
-            {isSaving ? "Прив’язування..." : "Прив’язати без дублювання"}
+          <button type="submit" className="button" disabled={submitDisabled || !filteredCandidates.length}>
+            {submitDisabled ? "Прив’язування..." : "Прив’язати без дублювання"}
           </button>
         </div>
       </form>

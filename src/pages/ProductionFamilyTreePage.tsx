@@ -77,6 +77,7 @@ import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 import {
   createFamilyTreeFromLegacyImport,
   listDetachableFamilyTreeRelationships,
+  type DeleteRelationshipResult,
   type FamilyTreeBuilderAction,
   type DetachableFamilyTreeRelationship,
 } from "../services/familyTreeMutationService";
@@ -158,7 +159,9 @@ export interface ProductionFamilyTreePageProps {
   researchRequired?: boolean;
   gedcomResearchRequired?: boolean;
   onSubscriptionChanged?: () => void;
-  onPersonRelationsDetached?: (relationIds: readonly string[]) => void;
+  onPersonRelationsDetached?: (
+    result: DeleteRelationshipResult,
+  ) => void | Promise<void>;
   onImportRecords?: (
     collection: "persons",
     records: AppEntity[],
@@ -710,7 +713,9 @@ function LoadedFamilyTree({
   onFocusPersonChange: (personId: string) => void;
   onOpenPerson?: (personId: string) => void;
   onSubscriptionChanged?: () => void;
-  onPersonRelationsDetached?: (relationIds: readonly string[]) => void;
+  onPersonRelationsDetached?: (
+    result: DeleteRelationshipResult,
+  ) => void | Promise<void>;
   initialFocusPersonId?: string;
 }) {
   const client = useMemo(() => createTrackerNeighborhoodClient(), []);
@@ -1822,7 +1827,7 @@ function LoadedFamilyTree({
       relationshipId: candidate.relationshipId,
     });
     if (result === null) return;
-    onPersonRelationsDetached?.(result.deletedLegacyRelationIds);
+    await onPersonRelationsDetached?.(result);
     setRelativeMenuPersonId("");
     setNotice("Родинний зв’язок відв’язано. Особи залишилися у проєкті.");
     reloadPedigreeAfterMutation();
@@ -2279,7 +2284,7 @@ function LoadedFamilyTree({
           isSaving={mutations.isMutating}
           error={mutations.error}
           onClose={() => setAttachTarget(null)}
-          onSubmit={(payload) => void submitAttach(payload)}
+          onSubmit={submitAttach}
         />
       ) : null}
     </section>

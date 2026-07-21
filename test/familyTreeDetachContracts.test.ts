@@ -8,7 +8,7 @@ const service = readFileSync(
 );
 const migration = readFileSync(
   new URL(
-    "../supabase/migrations/202607210001_detach_family_tree_relationship.sql",
+    "../supabase/migrations/202607210004_logical_family_tree_relationship_detach.sql",
     import.meta.url,
   ),
   "utf8",
@@ -92,7 +92,7 @@ test("detach RPC sends the exact target and accepts only a strict confirmation",
   );
 });
 
-test("detach migration deletes mapping, then the exact edge, then only orphan legacy rows", () => {
+test("detach migration deletes mappings, logical duplicates, then only orphan legacy rows", () => {
   const mappingDelete = migration.indexOf(
     "delete from public.legacy_person_relation_graph_edges mapping",
   );
@@ -124,7 +124,7 @@ test("detach migration deletes mapping, then the exact edge, then only orphan le
   assert.ok(associationDelete < legacyDelete);
   assert.match(
     migration.slice(legacyDelete),
-    /relation\.id = any\(mapped_relation_ids\)[\s\S]*?and not exists\s*\([\s\S]*?from public\.legacy_person_relation_graph_edges remaining[\s\S]*?remaining\.relation_id = relation\.id/,
+    /relation\.id = any\(candidate_relation_ids\)[\s\S]*?and not exists\s*\([\s\S]*?from public\.legacy_person_relation_graph_edges remaining[\s\S]*?remaining\.relation_id = relation\.id/,
   );
   assert.doesNotMatch(migration, /delete from public\.persons\b/i);
   assert.doesNotMatch(migration, /delete from public\.family_tree_persons\b/i);
@@ -175,19 +175,40 @@ test("detach migration enforces project/tree scope and exposes an authenticated 
   );
 });
 
-test("exact-detach pgTAP fixture keeps its declared plan and rollback boundary", () => {
+test("logical detach exposes the pair reconciliation contract and narrow GEDCOM repair", () => {
+  assert.match(migration, /'deletedRelationshipIds',\s*pg_catalog\.to_jsonb\(deleted_relationship_ids\)/);
+  assert.match(migration, /'leftPersonId',\s*left_person_id/);
+  assert.match(migration, /'rightPersonId',\s*right_person_id/);
+  assert.match(migration, /'remainingLogicalEdges',\s*remaining_logical_edges/);
+  assert.match(migration, /target_relationship_id\s*=\s*any\(deleted_relationship_ids\)/);
+  assert.match(migration, /remaining_logical_edges\s*<>\s*0/);
+  assert.match(
+    migration,
+    /backfill_gedcom_relation_graph_mappings[\s\S]*?settings\s*->>\s*'import_source_key'[\s\S]*?relation\.import_source_key[\s\S]*?gedcom_metadata\s*->>\s*'familyXref'/,
+  );
+  assert.match(
+    migration,
+    /relationship\.parent_id\s*=\s*left_person_id[\s\S]*?relationship\.child_id\s*=\s*right_person_id[\s\S]*?relationship\.relationship_type\s*=\s*logical_relationship_type/,
+  );
+});
+
+test("logical-detach pgTAP fixture keeps its declared plan and rollback boundary", () => {
   const plan = Number(pgTap.match(/select\s+plan\((\d+)\)/i)?.[1]);
   const assertions = pgTap.match(
-    /^select\s+(?:has_function|is|isnt|ok|throws_ok)\s*\(/gim,
+    /^select\s+(?:has_function|is|isnt|ok|throws_ok|lives_ok)\s*\(/gim,
   ) ?? [];
 
-  assert.equal(plan, 16);
+  assert.equal(plan, 32);
   assert.equal(assertions.length, plan);
   assert.match(pgTap, /^begin;/i);
   assert.match(pgTap, /select \* from finish\(\);\s*rollback;\s*$/i);
   assert.match(pgTap, /an edge id from another tree cannot be detached/);
   assert.match(pgTap, /an edge id from another project cannot be detached/);
   assert.match(pgTap, /a different exact edge for the same pair survives/);
+  assert.match(pgTap, /logical detach removes every same-pair same-type canonical duplicate/);
+  assert.match(pgTap, /the GEDCOM fixture starts without a compatibility mapping/);
+  assert.match(pgTap, /a legacy assertion mapped to another tree survives logical detach/);
+  assert.match(pgTap, /the same logical relationship can be attached again after detach/);
   assert.match(pgTap, /detaching a relationship never deletes either person/);
   assert.match(pgTap, /detaching a relationship preserves both tree memberships/);
 });

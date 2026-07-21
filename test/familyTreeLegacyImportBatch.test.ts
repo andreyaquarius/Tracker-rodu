@@ -40,6 +40,7 @@ test("builds FK-safe GEDCOM family rows and preserves familyXref metadata", () =
   assert.equal(familyGroup.metadata.familyXref, "@F1@");
   assert.equal(familyGroup.metadata.rawNotes, "union");
   assert.equal(plan.partnerRelationships[0].metadata.familyXref, "@F1@");
+  assert.equal(plan.partnerRelationships[0].metadata.legacyRelationId, "spouse");
   assert.equal(plan.partnerRelationships[0].start_date, "1900");
   assert.equal(parentSet.metadata.familyXref, "@F1@");
   assert.equal(parentSet.metadata.pedigree, "birth");
@@ -47,6 +48,10 @@ test("builds FK-safe GEDCOM family rows and preserves familyXref metadata", () =
   assert.ok(plan.parentChildRelationships.every((row) => row.parent_set_id === parentSet.id));
   assert.ok(plan.parentChildRelationships.every((row) => row.family_group_id === familyGroup.id));
   assert.ok(plan.parentChildRelationships.every((row) => row.metadata.familyXref === "@F1@"));
+  assert.deepEqual(
+    plan.parentChildRelationships.map((row) => row.metadata.legacyRelationId),
+    ["father-rel", "mother-rel"],
+  );
 
   const memberKeys = new Set(plan.familyGroupMembers.map((row) =>
     `${row.person_id}|${row.member_role}`));
@@ -88,6 +93,39 @@ test("orders parent-child rows ancestor-first for the database cycle trigger", (
     "root>child",
     "child>grandchild",
   ]);
+  assert.deepEqual(
+    plan.parentChildRelationships.map((row) => row.metadata.legacyRelationId),
+    ["shallow", "deep"],
+    "batch metadata must keep the source relation id even when its full legacy row is unavailable",
+  );
+});
+
+test("covers every canonical GEDCOM edge with permanent legacy relation metadata", () => {
+  const plan = buildLegacyFamilyTreeImportPlan({
+    projectId,
+    treeId,
+    relations: [],
+    partnerEdges: [
+      partnerEdge("first", "second", "partner-source"),
+    ],
+    parentChildEdges: [
+      parentEdge("first", "child", "father-source", "father"),
+      parentEdge("second", "child", "mother-source", "mother"),
+    ],
+    idFactory: sequentialIds(),
+  });
+
+  assert.deepEqual(
+    plan.partnerRelationships.map((row) => row.metadata),
+    [{ source: "gedcom_import", legacyRelationId: "partner-source" }],
+  );
+  assert.deepEqual(
+    plan.parentChildRelationships.map((row) => row.metadata),
+    [
+      { source: "gedcom_import", legacyRelationId: "father-source" },
+      { source: "gedcom_import", legacyRelationId: "mother-source" },
+    ],
+  );
 });
 
 test("keeps repeated unions for the same couple separate by GEDCOM FAM xref", () => {

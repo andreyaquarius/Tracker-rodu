@@ -369,6 +369,34 @@ async function listProjectRelationRows(projectId: string): Promise<RelationRow[]
   }
 }
 
+async function listProjectRelationRowsBetween(
+  projectId: string,
+  leftPersonId: string,
+  rightPersonId: string,
+): Promise<RelationRow[]> {
+  const client = getSupabaseClient();
+  const personIds = [leftPersonId, rightPersonId];
+  const selectRows = (columns: string) => selectRowsInParallel<RelationRow>(
+    () => client
+      .from("person_relations")
+      .select(columns)
+      .eq("project_id", projectId)
+      .in("person_id", personIds)
+      .in("related_person_id", personIds)
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true }) as unknown as PagedRangeRequest<RelationRow>,
+    SELECT_BATCH_SIZE,
+    SELECT_CONCURRENCY_PER_TABLE,
+  );
+
+  try {
+    return await selectRows(RELATION_SELECT);
+  } catch (error) {
+    if (!isMissingPersonRelationProvenanceColumnsError(error)) throw error;
+    return selectRows(LEGACY_RELATION_SELECT);
+  }
+}
+
 export async function listProjectPeople(projectId: string): Promise<{
   persons: Person[];
   relations: PersonRelation[];
@@ -431,6 +459,45 @@ export async function getProjectPersonRelation(
     const row = await loadRelation(LEGACY_RELATION_SELECT);
     return row ? relationFromRow(row) : null;
   }
+}
+
+/**
+ * Reads the authoritative compatibility relations for one unordered person
+ * pair. Family-tree mutations use this after changing canonical graph edges so
+ * the Persons module and its local cache cannot retain an orphaned assertion.
+ */
+export async function listProjectPersonRelationsBetween(
+  projectId: string,
+  leftPersonId: string,
+  rightPersonId: string,
+): Promise<PersonRelation[]> {
+  if (!leftPersonId || !rightPersonId || leftPersonId === rightPersonId) return [];
+  const rows = await listProjectRelationRowsBetween(
+    projectId,
+    leftPersonId,
+    rightPersonId,
+  );
+  return rows
+    .filter((row) => isPersonRelationForPair(
+      row.person_id,
+      row.related_person_id,
+      leftPersonId,
+      rightPersonId,
+    ))
+    .map(relationFromRow);
+}
+
+function isPersonRelationForPair(
+  personId: string,
+  relatedPersonId: string,
+  leftPersonId: string,
+  rightPersonId: string,
+): boolean {
+  return (
+    personId === leftPersonId && relatedPersonId === rightPersonId
+  ) || (
+    personId === rightPersonId && relatedPersonId === leftPersonId
+  );
 }
 
 export async function importProjectPeople(
