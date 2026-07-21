@@ -274,7 +274,7 @@ test("merging the narrow route lineage preserves the target neighborhood without
   assert.equal(merged.permissionFingerprint, "permission-project-a");
 });
 
-test("production overlays one stable root closure after every perspective projection", () => {
+test("production keeps the stable root overlay out of the strict all-descendants perspective", () => {
   const production = readFileSync(
     new URL("../src/pages/ProductionFamilyTreePage.tsx", import.meta.url),
     "utf8",
@@ -282,7 +282,8 @@ test("production overlays one stable root closure after every perspective projec
 
   assert.match(
     production,
-    /const homeLineageOverlayActive\s*=\s*perspective\.kind !== "pedigree" \|\| focusPersonId !== homePersonId/,
+    /const homeLineageOverlayActive\s*=\s*perspective\.kind !== "all-descendants"\s*&&\s*\(perspective\.kind !== "pedigree" \|\| focusPersonId !== homePersonId\)/,
+    "the descendants session must not fetch the persisted home ancestor closure",
   );
   assert.match(
     production,
@@ -304,7 +305,18 @@ test("production overlays one stable root closure after every perspective projec
   );
   assert.match(
     production,
-    /const perspectiveGraph = perspective\.kind === "pedigree"[\s\S]*?corridorProjection\?\.graph[\s\S]*?allDescendantsProjection\?\.graph[\s\S]*?const rootLineageSourceGraph[\s\S]*?const displayedGraphWithoutPhotos = useMemo\([\s\S]*?mergeRootLineageOverlay\([\s\S]*?perspectiveGraph,[\s\S]*?rootLineageProjection\.graph/,
+    /const rootLineageSourceGraph = useMemo\(\(\) => \{[\s\S]*?if \(perspective\.kind === "family-corridor"\)/,
+    "only the family corridor may seed its structural bridge from the return snapshot",
+  );
+  assert.match(
+    production,
+    /const displayedGraphWithoutPhotos = useMemo\(\s*\(\) => perspective\.kind === "all-descendants"\s*\? perspectiveGraph\s*:\s*rootLineageProjection\?\.hasRoot\s*\? mergeRootLineageOverlay/,
+    "the final display boundary must bypass every ancestor overlay for all descendants",
+  );
+  assert.match(
+    production,
+    /buildAllDescendantsProjection\(\{[\s\S]*?rootPersonId: perspective\.rootPersonId,[\s\S]*?originalFocusPersonId: homePersonId/,
+    "the visible root-to-home path stays inside the descendant closure without adding older ancestors",
   );
   assert.match(
     production,

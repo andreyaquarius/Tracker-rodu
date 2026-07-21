@@ -764,8 +764,13 @@ function LoadedFamilyTree({
   const perspectiveBarRef = useRef<HTMLDivElement>(null);
   const viewSettingsRef = useDismissibleDetails();
   const mutations = useFamilyTreeMutations();
+  // The all-descendants perspective has a strict visual boundary: the
+  // selected person is its oldest visible generation. Loading or merging the
+  // persisted home-person ancestor closure here would re-introduce parents
+  // above that person after the descendants projector has removed them.
   const homeLineageOverlayActive =
-    perspective.kind !== "pedigree" || focusPersonId !== homePersonId;
+    perspective.kind !== "all-descendants" &&
+    (perspective.kind !== "pedigree" || focusPersonId !== homePersonId);
   const homeLineageRequestKey = homeLineageOverlayActive
     ? `${entryPoint.id}:${homePersonId}`
     : "";
@@ -955,10 +960,10 @@ function LoadedFamilyTree({
       ? buildAllDescendantsProjection({
           graph,
           rootPersonId: perspective.rootPersonId,
-          originalFocusPersonId: perspective.returnTo.focusPersonId,
+          originalFocusPersonId: homePersonId,
         })
       : undefined,
-    [graph, perspective],
+    [graph, homePersonId, perspective],
   );
   const layoutFocusPersonId = perspective.kind === "pedigree"
     ? focusPersonId
@@ -972,7 +977,7 @@ function LoadedFamilyTree({
       : allDescendantsProjection?.graph ?? graph;
   const rootLineageSourceGraph = useMemo(() => {
     let source = graph;
-    if (perspective.kind !== "pedigree") {
+    if (perspective.kind === "family-corridor") {
       source = mergeRootLineageOverlay(source, {
         ...perspective.returnTo.pedigreeGraph,
         continuations: [],
@@ -1008,17 +1013,21 @@ function LoadedFamilyTree({
       rootLineageSourceGraph,
     ],
   );
-  // Perspective projectors intentionally discard unrelated records. Apply the
-  // persisted root closure afterwards so every mode receives the same fill
-  // source while retaining its own visual focus and continuations.
+  // A corridor may need the persisted root closure as a structural bridge.
+  // All-descendants is intentionally different: its selected person is the
+  // oldest visible generation, so it must never receive an ancestor overlay.
+  // Keep the explicit branch here as a second boundary against a future
+  // change accidentally enabling the overlay request for this perspective.
   const displayedGraphWithoutPhotos = useMemo(
-    () => rootLineageProjection?.hasRoot
+    () => perspective.kind === "all-descendants"
+      ? perspectiveGraph
+      : rootLineageProjection?.hasRoot
       ? mergeRootLineageOverlay(
           perspectiveGraph,
           rootLineageProjection.graph,
         )
       : perspectiveGraph,
-    [perspectiveGraph, rootLineageProjection],
+    [perspective.kind, perspectiveGraph, rootLineageProjection],
   );
   const displayedGraph = useMemo(
     () => attachTrackerPersonPhotos(displayedGraphWithoutPhotos, persons),

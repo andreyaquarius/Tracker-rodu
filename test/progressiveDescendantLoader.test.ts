@@ -11,6 +11,8 @@ import type {
   FamilyTreeNeighborhoodClient,
   NeighborhoodResponse,
 } from "../src/features/family-tree-view/data/neighborhoodClient.ts";
+import { buildAllDescendantsProjection } from "../src/features/family-tree-view/state/allDescendantsProjection.ts";
+import type { FamilyGraphData } from "../src/features/family-tree-view/types.ts";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -226,6 +228,232 @@ test("a captured root seed survives the production RPC contract that omits front
         relation.parentId === "overlay-root" && relation.childId === "child",
     ),
     true,
+  );
+});
+
+test("progressive pages preserve every co-parent and descendant branch for projection", async () => {
+  const requests: DescendantFrontierPageRequest[] = [];
+  const client = clientWithFrontier(async request => {
+    requests.push(request);
+    if (request.frontier.generation === 0) {
+      return {
+        persons: [
+          { id: "child-a", displayName: "child-a" },
+          { id: "child-b", displayName: "child-b" },
+          { id: "partner-a", displayName: "partner-a" },
+          { id: "partner-b", displayName: "partner-b" },
+        ],
+        unions: [
+          {
+            id: "partnership:root-partner-a",
+            kind: "partnership",
+            memberIds: ["root", "partner-a"],
+          },
+          {
+            id: "partnership:root-partner-b",
+            kind: "partnership",
+            memberIds: ["root", "partner-b"],
+          },
+          {
+            id: "parent-set:root-family-a",
+            kind: "parent-set",
+            memberIds: ["root", "partner-a"],
+          },
+          {
+            id: "parent-set:root-family-b",
+            kind: "parent-set",
+            memberIds: ["root", "partner-b"],
+          },
+        ],
+        parentChildRelations: [
+          {
+            id: "root-child-a",
+            parentId: "root",
+            childId: "child-a",
+            unionId: "parent-set:root-family-a",
+            kind: "biological",
+          },
+          {
+            id: "partner-a-child-a",
+            parentId: "partner-a",
+            childId: "child-a",
+            unionId: "parent-set:root-family-a",
+            kind: "biological",
+          },
+          {
+            id: "root-child-b",
+            parentId: "root",
+            childId: "child-b",
+            unionId: "parent-set:root-family-b",
+            kind: "biological",
+          },
+          {
+            id: "partner-b-child-b",
+            parentId: "partner-b",
+            childId: "child-b",
+            unionId: "parent-set:root-family-b",
+            kind: "biological",
+          },
+        ],
+        continuations: [],
+        nextFrontier: {
+          generation: 1,
+          personIds: ["child-a", "child-b"],
+        },
+        hasMore: false,
+        progress: {
+          currentGeneration: 0,
+          nextGeneration: 1,
+          frontierCount: 1,
+          pageSize: request.pageSize ?? 100,
+          pageNumber: 1,
+          returnedDescendantCount: 2,
+          returnedPersonCount: 4,
+          returnedUnionCount: 4,
+          returnedRelationCount: 4,
+          frontierComplete: true,
+        },
+        graphVersion: "v1",
+        permissionFingerprint: "member",
+      };
+    }
+    return {
+      persons: [
+        { id: "grandchild-a", displayName: "grandchild-a" },
+        { id: "grandchild-b", displayName: "grandchild-b" },
+        { id: "child-a-partner", displayName: "child-a-partner" },
+        { id: "child-b-partner", displayName: "child-b-partner" },
+      ],
+      unions: [
+        {
+          id: "partnership:child-a-partner",
+          kind: "partnership",
+          memberIds: ["child-a", "child-a-partner"],
+        },
+        {
+          id: "partnership:child-b-partner",
+          kind: "partnership",
+          memberIds: ["child-b", "child-b-partner"],
+        },
+        {
+          id: "parent-set:child-a-family",
+          kind: "parent-set",
+          memberIds: ["child-a", "child-a-partner"],
+        },
+        {
+          id: "parent-set:child-b-family",
+          kind: "parent-set",
+          memberIds: ["child-b", "child-b-partner"],
+        },
+      ],
+      parentChildRelations: [
+        {
+          id: "child-a-grandchild-a",
+          parentId: "child-a",
+          childId: "grandchild-a",
+          unionId: "parent-set:child-a-family",
+          kind: "biological",
+        },
+        {
+          id: "child-a-partner-grandchild-a",
+          parentId: "child-a-partner",
+          childId: "grandchild-a",
+          unionId: "parent-set:child-a-family",
+          kind: "biological",
+        },
+        {
+          id: "child-b-grandchild-b",
+          parentId: "child-b",
+          childId: "grandchild-b",
+          unionId: "parent-set:child-b-family",
+          kind: "biological",
+        },
+        {
+          id: "child-b-partner-grandchild-b",
+          parentId: "child-b-partner",
+          childId: "grandchild-b",
+          unionId: "parent-set:child-b-family",
+          kind: "biological",
+        },
+      ],
+      continuations: [],
+      nextFrontier: {
+        generation: 2,
+        personIds: ["grandchild-a", "grandchild-b"],
+      },
+      hasMore: false,
+      progress: {
+        currentGeneration: 1,
+        nextGeneration: 2,
+        frontierCount: 2,
+        pageSize: request.pageSize ?? 100,
+        pageNumber: 1,
+        returnedDescendantCount: 2,
+        returnedPersonCount: 4,
+        returnedUnionCount: 4,
+        returnedRelationCount: 4,
+        frontierComplete: true,
+      },
+      graphVersion: "v1",
+      permissionFingerprint: "member",
+    };
+  });
+  const initialGraph: FamilyGraphData = {
+    persons: [{ id: "root", displayName: "root" }],
+    unions: [],
+    parentChildRelations: [],
+    continuations: [],
+    graphVersion: "v1",
+    permissionFingerprint: "member",
+  };
+
+  const loaded = await loadProgressiveDescendantGraph({
+    client,
+    treeId: "tree",
+    rootPersonId: "root",
+    maxGenerations: 2,
+    pageSize: 200,
+    initialGraph,
+    yieldControl: async () => undefined,
+  });
+  const projection = buildAllDescendantsProjection({
+    graph: loaded.graph,
+    rootPersonId: "root",
+  });
+
+  assert.deepEqual(
+    requests.map(request => request.frontier),
+    [
+      { generation: 0, personIds: ["root"] },
+      { generation: 1, personIds: ["child-a", "child-b"] },
+    ],
+  );
+  assert.deepEqual(projection.descendantPersonIds, [
+    "root",
+    "child-a",
+    "child-b",
+    "grandchild-a",
+    "grandchild-b",
+  ]);
+  assert.deepEqual(projection.connectorPersonIds, [
+    "child-a-partner",
+    "child-b-partner",
+    "partner-a",
+    "partner-b",
+  ]);
+  assert.deepEqual(
+    projection.graph.persons.map(person => person.id).sort(),
+    [
+      "child-a",
+      "child-a-partner",
+      "child-b",
+      "child-b-partner",
+      "grandchild-a",
+      "grandchild-b",
+      "partner-a",
+      "partner-b",
+      "root",
+    ],
   );
 });
 

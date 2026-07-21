@@ -169,6 +169,147 @@ test("all-descendants keeps descendants and co-parents but excludes spouse-side 
   assert.deepEqual(graph, before);
 });
 
+test("all-descendants keeps every selected-person partnership and descendant branch while excluding the ancestor side", () => {
+  const personIds = [
+    "ancestor",
+    "ancestor-partner",
+    "ancestor-side-child",
+    "root",
+    "root-sibling",
+    "partner-a",
+    "partner-b",
+    "childless-partner",
+    "partner-a-other-partner",
+    "partner-a-other-child",
+    "child-a",
+    "child-b",
+    "child-a-partner",
+    "grandchild-a",
+  ];
+  const graph: FamilyGraphData = {
+    persons: personIds.map(id => ({ id, displayName: id })),
+    unions: [
+      union("ancestor-partnership", "partnership", ["ancestor", "ancestor-partner"]),
+      union("ancestor-family", "parent-set", ["ancestor", "ancestor-partner"]),
+      union("root-partner-a", "partnership", ["root", "partner-a"]),
+      union("root-partner-b", "partnership", ["root", "partner-b"]),
+      union("root-childless-partner", "partnership", ["root", "childless-partner"]),
+      union("root-family-a", "parent-set", ["root", "partner-a"]),
+      union("root-family-b", "parent-set", ["root", "partner-b"]),
+      union("partner-a-side-partnership", "partnership", [
+        "partner-a",
+        "partner-a-other-partner",
+      ]),
+      union("partner-a-side-family", "parent-set", [
+        "partner-a",
+        "partner-a-other-partner",
+      ]),
+      union("child-a-partnership", "partnership", ["child-a", "child-a-partner"]),
+      union("child-a-family", "parent-set", ["child-a", "child-a-partner"]),
+    ],
+    parentChildRelations: [
+      relation("ancestor-root", "ancestor", "root", "ancestor-family"),
+      relation(
+        "ancestor-partner-root",
+        "ancestor-partner",
+        "root",
+        "ancestor-family",
+      ),
+      relation(
+        "ancestor-side-child",
+        "ancestor",
+        "ancestor-side-child",
+        "ancestor-family",
+      ),
+      relation("ancestor-sibling", "ancestor", "root-sibling", "ancestor-family"),
+      relation("root-child-a", "root", "child-a", "root-family-a"),
+      relation("partner-a-child-a", "partner-a", "child-a", "root-family-a"),
+      relation("root-child-b", "root", "child-b", "root-family-b"),
+      relation("partner-b-child-b", "partner-b", "child-b", "root-family-b"),
+      relation(
+        "partner-a-other-child",
+        "partner-a",
+        "partner-a-other-child",
+        "partner-a-side-family",
+      ),
+      relation(
+        "partner-a-other-partner-child",
+        "partner-a-other-partner",
+        "partner-a-other-child",
+        "partner-a-side-family",
+      ),
+      relation(
+        "child-a-grandchild",
+        "child-a",
+        "grandchild-a",
+        "child-a-family",
+      ),
+      relation(
+        "child-a-partner-grandchild",
+        "child-a-partner",
+        "grandchild-a",
+        "child-a-family",
+      ),
+    ],
+  };
+
+  const result = buildAllDescendantsProjection({ graph, rootPersonId: "root" });
+
+  assert.deepEqual(result.descendantPersonIds, [
+    "root",
+    "child-a",
+    "child-b",
+    "grandchild-a",
+  ]);
+  assert.deepEqual(result.connectorPersonIds, [
+    "child-a-partner",
+    "childless-partner",
+    "partner-a",
+    "partner-b",
+  ]);
+  assert.deepEqual(ids(result.graph.persons), [
+    "child-a",
+    "child-a-partner",
+    "child-b",
+    "childless-partner",
+    "grandchild-a",
+    "partner-a",
+    "partner-b",
+    "root",
+  ]);
+  assert.deepEqual(ids(result.graph.unions), [
+    "child-a-family",
+    "child-a-partnership",
+    "root-childless-partner",
+    "root-family-a",
+    "root-family-b",
+    "root-partner-a",
+    "root-partner-b",
+  ]);
+  assert.deepEqual(ids(result.graph.parentChildRelations), [
+    "child-a-grandchild",
+    "child-a-partner-grandchild",
+    "partner-a-child-a",
+    "partner-b-child-b",
+    "root-child-a",
+    "root-child-b",
+  ]);
+  for (const excludedId of [
+    "ancestor",
+    "ancestor-partner",
+    "ancestor-side-child",
+    "root-sibling",
+    "partner-a-other-partner",
+    "partner-a-other-child",
+  ]) {
+    assert.equal(
+      result.graph.persons.some(person => person.id === excludedId),
+      false,
+      `${excludedId} belongs outside the selected person's descendant closure`,
+    );
+  }
+});
+
 test("all-descendants traversal is finite and deterministic for a cycle", () => {
   const graph: FamilyGraphData = {
     persons: ["a", "b", "c"].map(id => ({ id, displayName: id })),
