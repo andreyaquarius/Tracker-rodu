@@ -1,6 +1,8 @@
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
+import { ApplicationRouteError } from "./components/ApplicationRouteError.tsx";
+import { installChunkLoadRecovery } from "./utils/chunkLoadRecovery.ts";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
 
@@ -24,12 +26,17 @@ function restoreSpaRedirect(): void {
 }
 
 restoreSpaRedirect();
+installChunkLoadRecovery();
 
 // A data router gives form screens a real navigation blocker.  The app still
 // owns all route rendering in <App />, so this is intentionally a single
 // catch-all route rather than a second route configuration.
 const router = createBrowserRouter([
-  { path: "*", element: <App /> },
+  {
+    path: "*",
+    element: <App />,
+    errorElement: <ApplicationRouteError />,
+  },
 ]);
 
 createRoot(document.getElementById("root")!).render(
