@@ -67,7 +67,7 @@ const moduleLabels: Record<CollectionKey, string> = {
   tasks: "Завдання",
   findings: "Знахідки",
   hypotheses: "Гіпотези",
-  archiveRequests: "Запити в архів",
+  archiveRequests: "Запити",
   persons: "Особи",
 };
 
@@ -322,7 +322,10 @@ function entityTitle(module: CollectionKey, entity: AppEntity): string {
       return (entity as Hypothesis).title || "Гіпотеза без назви";
     case "archiveRequests": {
       const request = entity as ArchiveRequest;
-      return request.subject || `Запит до ${request.archive || "архіву"}`;
+      const institution = request.archive === "Інший архів або установа"
+        ? request.archiveDetails || request.archive
+        : request.archive || request.archiveDetails;
+      return request.subject || `Запит до ${institution || "установи"}`;
     }
     case "persons": {
       const person = entity as Person;

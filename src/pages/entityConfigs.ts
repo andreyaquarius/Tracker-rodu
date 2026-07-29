@@ -170,18 +170,18 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
   },
   archiveRequests: {
     collection: "archiveRequests",
-    title: "Запити в архів",
+    title: "Запити",
     singular: "запит",
-    description: "Облік звернень до архівів, надісланих запитів і отриманих відповідей.",
-    emptyText: "Запитів до архівів поки немає.",
-    searchPlaceholder: "Пошук за архівом, темою запиту, особою або коментарем…",
+    description: "Облік звернень до архівів, бібліотек, державних органів та інших установ.",
+    emptyText: "Запитів поки немає.",
+    searchPlaceholder: "Пошук за установою, темою запиту, особою або коментарем…",
     statusKey: "status",
     statusOptions: ["чернетка", "надіслано", "очікується відповідь", "отримано відповідь", "виконано", "відмовлено"],
     fields: [
       researchField,
       { key: "personIds", label: "Пов’язані особи", type: "persons", wide: true },
       { key: "archive", label: "Архів", type: "select", options: archiveOptions, required: true },
-      { key: "archiveDetails", label: "Уточнення архіву або установи", wide: true },
+      { key: "archiveDetails", label: "Назва установи (якщо її немає у списку)", wide: true },
       { key: "requestDate", label: "Дата запиту", type: "date", required: true },
       { key: "responseDate", label: "Дата відповіді", type: "date" },
       {
@@ -199,18 +199,18 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
         attachmentPolicy: "archive-request",
         attachmentAccept: ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         attachmentDescription: "Додайте один файл запиту у форматі Word (DOC, DOCX) або PDF. Максимальний розмір — 25 МБ.",
-        attachmentLimitMessage: "До одного архівного запиту можна прикріпити лише один файл запиту.",
+        attachmentLimitMessage: "До одного запиту можна прикріпити лише один файл запиту.",
         maxFiles: 1,
       },
       {
         key: "responseScans",
-        label: "Файл відповіді архіву",
+        label: "Файл відповіді установи",
         type: "scans",
         wide: true,
         attachmentPolicy: "archive-request",
         attachmentAccept: ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        attachmentDescription: "Додайте один файл відповіді архіву у форматі Word (DOC, DOCX) або PDF. Максимальний розмір — 25 МБ.",
-        attachmentLimitMessage: "До одного архівного запиту можна прикріпити лише один файл відповіді.",
+        attachmentDescription: "Додайте один файл відповіді установи у форматі Word (DOC, DOCX) або PDF. Максимальний розмір — 25 МБ.",
+        attachmentLimitMessage: "До одного запиту можна прикріпити лише один файл відповіді.",
         maxFiles: 1,
       },
       { key: "notes", label: "Коментарі та нотатки", type: "textarea", wide: true },
@@ -218,7 +218,14 @@ export const configs: Record<Exclude<CollectionKey, "yearMatrix" | "persons">, E
     columns: [
       { key: "requestDate", label: "Дата запиту" },
       { key: "researchId", label: "Дослідження" },
-      { key: "archive", label: "Архів" },
+      { key: "archive", label: "Архів / установа", render: (item) => {
+        const row = item as unknown as Record<string, string>;
+        const archive = String(row.archive ?? "").trim();
+        const institution = String(row.archiveDetails ?? "").trim();
+        return archive === "Інший архів або установа"
+          ? institution || archive
+          : archive || institution || "—";
+      } },
       { key: "subject", label: "Про що запит" },
       { key: "responseDate", label: "Дата відповіді" },
       { key: "status", label: "Статус" },

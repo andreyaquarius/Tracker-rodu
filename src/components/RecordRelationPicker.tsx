@@ -13,7 +13,7 @@ const standardGroups: Array<{ key: CollectionKey; label: string }> = [
   { key: "findings", label: "Знахідки" },
   { key: "tasks", label: "Завдання" },
   { key: "hypotheses", label: "Гіпотези" },
-  { key: "archiveRequests", label: "Запити в архів" },
+  { key: "archiveRequests", label: "Запити" },
   { key: "yearMatrix", label: "Матриця років" },
 ];
 

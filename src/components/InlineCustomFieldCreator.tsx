@@ -165,7 +165,7 @@ export function InlineCustomFieldCreator({
                 <option value="findings">Знахідки</option>
                 <option value="tasks">Завдання</option>
                 <option value="hypotheses">Гіпотези</option>
-                <option value="archiveRequests">Запити в архів</option>
+                <option value="archiveRequests">Запити</option>
                 <option value="yearMatrix">Матриця років</option>
                 {db.customSections.map((section) => (
                   <option key={section.id} value={`custom:${section.id}`}>{section.name}</option>

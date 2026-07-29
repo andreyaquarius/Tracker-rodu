@@ -514,7 +514,7 @@ function activityModuleLabel(collection: CollectionKey): string {
     tasks: "Завдання",
     findings: "Знахідки",
     hypotheses: "Гіпотези",
-    archiveRequests: "Запити в архів",
+    archiveRequests: "Запити",
     persons: "Особи",
   };
   return labels[collection];
@@ -1616,8 +1616,8 @@ export default function App() {
           describeError(
             error,
             fallbackHypotheses.length || fallbackRequests.length
-              ? "Не вдалося оновити гіпотези й архівні запити з бази. Показано локальний кеш."
-              : "Не вдалося завантажити гіпотези й архівні запити з бази.",
+              ? "Не вдалося оновити гіпотези й запити з бази. Показано локальний кеш."
+              : "Не вдалося завантажити гіпотези й запити з бази.",
           ),
           true,
         );
@@ -3406,7 +3406,7 @@ export default function App() {
     const projectId = workspace.projectId;
     const previous = projectArchiveRequests;
     const previousEntity = previous.find((item) => item.id === request.id);
-    if (!previousEntity && !ensureCanCreateProjectRecord("Новий запит в архів")) return;
+    if (!previousEntity && !ensureCanCreateProjectRecord("Новий запит")) return;
     const optimistic = previous.some((item) => item.id === request.id)
       ? previous.map((item) => (item.id === request.id ? request : item))
       : [request, ...previous];
@@ -3460,7 +3460,7 @@ export default function App() {
           setProjectArchiveRequests(previous);
         }
         notify(
-          describeError(error, "Не вдалося зберегти запит до архіву."),
+          describeError(error, "Не вдалося зберегти запит."),
           true,
         );
       });
@@ -3495,7 +3495,7 @@ export default function App() {
         setProjectArchiveRequests(previous);
       }
       notify(
-        describeError(error, "Не вдалося видалити запит до архіву."),
+        describeError(error, "Не вдалося видалити запит."),
         true,
       );
     });
@@ -4927,7 +4927,7 @@ export default function App() {
       documentIds,
       personIds,
     );
-    onProgress?.("Відновлюємо гіпотези та запити в архів…", 66);
+    onProgress?.("Відновлюємо гіпотези та запити…", 66);
     await importProjectAnalysisRecords(
       projectId,
       next.hypotheses,

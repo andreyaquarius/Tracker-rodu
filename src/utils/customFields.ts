@@ -12,7 +12,7 @@ export const customFieldModuleLabels: Record<CustomFieldModule, string> = {
   findings: "Знахідки",
   tasks: "Завдання",
   hypotheses: "Гіпотези",
-  archiveRequests: "Запити в архів",
+  archiveRequests: "Запити",
   yearMatrix: "Матриця років",
 };
 

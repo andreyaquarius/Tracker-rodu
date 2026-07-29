@@ -101,12 +101,15 @@ export function createActivityEntries(
   if (collection === "archiveRequests") {
     const request = next as ArchiveRequest;
     const oldRequest = previous as ArchiveRequest | undefined;
+    const institution = request.archive === "Інший архів або установа"
+      ? request.archiveDetails || request.archive
+      : request.archive || request.archiveDetails || "установи";
     if (!oldRequest) {
-      add("archive_request_created", `Додано запит до архіву «${request.archive}»`);
+      add("archive_request_created", `Додано запит до установи «${institution}»`);
     } else if (oldRequest.status !== request.status) {
       add(
         "archive_request_status_changed",
-        `Статус запиту до «${request.archive}» змінено на «${request.status}»`,
+        `Статус запиту до «${institution}» змінено на «${request.status}»`,
       );
     }
   }

@@ -18,7 +18,7 @@ export const hierarchyRootKeys: CustomFieldModule[] = [
 export const hierarchyRootLabels: Record<CustomFieldModule, string> = {
   researches: "Дослідження",
   documents: "Документи",
-  archiveRequests: "Запити в архів",
+  archiveRequests: "Запити",
   yearMatrix: "Матриця років",
   tasks: "Завдання",
   findings: "Знахідки",

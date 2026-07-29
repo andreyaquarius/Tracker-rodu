@@ -758,13 +758,17 @@ function scanDriveFolderPath(
 
   if (collection === "archiveRequests") {
     const fileGroup = field.key === "responseScans"
-      ? "Відповіді архіву"
+      ? "Відповіді установи"
       : field.key === "requestScans"
         ? "Запити"
         : "";
+    const archive = String(record.archive ?? "").trim();
+    const institution = archive === "Інший архів або установа"
+      ? String(record.archiveDetails ?? "").trim() || archive
+      : archive;
     return compactDrivePath([
-      "Запити в архів",
-      String(record.archive ?? "").trim(),
+      "Запити",
+      institution,
       shortFolderSegment(record.subject, 90),
       fileGroup,
     ]);
@@ -1392,6 +1396,9 @@ export function EntityModal({
     if (config.collection === "archiveRequests" && field.key === "requestDate") {
       const status = String(form.status ?? "чернетка").trim() || "чернетка";
       return status !== "чернетка";
+    }
+    if (config.collection === "archiveRequests" && field.key === "archiveDetails") {
+      return isFreeArchiveOption(String(form.archive ?? ""));
     }
     if (requiresArchiveReferenceField(config.collection, field, config.fields, form)) {
       return true;

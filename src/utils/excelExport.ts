@@ -153,13 +153,13 @@ export const standardLabels: Record<CollectionKey, Record<string, string>> = {
     researchId: "Дослідження",
     personIds: "Пов’язані особи",
     archive: "Архів",
-    archiveDetails: "Уточнення архіву або установи",
+    archiveDetails: "Назва установи (якщо її немає у списку)",
     requestDate: "Дата запиту",
     responseDate: "Дата відповіді",
     subject: "Про що запит",
     status: "Статус",
     requestScans: "Файл запиту",
-    responseScans: "Файл відповіді архіву",
+    responseScans: "Файл відповіді установи",
     notes: "Коментарі та нотатки",
   },
   persons: {
@@ -563,7 +563,7 @@ function collectionSheetName(collection: CollectionKey): string {
     tasks: "Завдання",
     findings: "Знахідки",
     hypotheses: "Гіпотези",
-    archiveRequests: "Запити в архів",
+    archiveRequests: "Запити",
     persons: "Особи",
   }[collection];
 }

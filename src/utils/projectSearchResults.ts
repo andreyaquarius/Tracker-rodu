@@ -42,7 +42,7 @@ export function mapProjectSearchResults(value: unknown): ProjectSearchResult[] {
       entityId: stringValue(row.entityId) || id,
       module: stringValue(row.module) || page,
       page,
-      moduleLabel: stringValue(row.moduleLabel),
+      moduleLabel: page === "archiveRequests" ? "Запити" : stringValue(row.moduleLabel),
       title: stringValue(row.title),
       description: stringValue(row.description),
     }];

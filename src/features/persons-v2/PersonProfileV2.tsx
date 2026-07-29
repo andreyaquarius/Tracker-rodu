@@ -8,7 +8,9 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  AppDatabase,
   ArchiveRequest,
+  CustomFieldDefinition,
   DocumentRecord,
   Finding,
   Hypothesis,
@@ -18,6 +20,8 @@ import type {
   ScanAttachment,
   TaskRecord,
 } from "../../types";
+import { CustomFieldsView } from "../../components/CustomFields";
+import { normalizeCustomFieldValues } from "../../utils/customFields";
 import {
   buildPersonTimeline,
   calculatePersonProfileCompleteness,
@@ -70,7 +74,9 @@ type PersonProfileRelatedRecordV2 =
   | ArchiveRequest;
 
 export interface PersonProfileV2Props {
+  db: AppDatabase;
   person: Person;
+  customFieldDefinitions?: CustomFieldDefinition[];
   research?: Research | null;
   persons?: readonly Person[];
   relations?: readonly PersonRelation[];
@@ -137,7 +143,9 @@ const profileTabLabelsV2: Record<PersonProfileTabV2, string> = {
 };
 
 export function PersonProfileV2({
+  db,
   person,
+  customFieldDefinitions = [],
   research,
   persons = [],
   relations = [],
@@ -409,7 +417,9 @@ export function PersonProfileV2({
           {activeTab === tab ? (
             <PersonProfilePanelV2
               tab={tab}
+              db={db}
               person={person}
+              customFieldDefinitions={customFieldDefinitions}
               places={places.all}
               completeness={completeness}
               timeline={timeline}
@@ -442,7 +452,9 @@ export function PersonProfileV2({
 
 interface PersonProfilePanelV2Props {
   tab: PersonProfileTabV2;
+  db: AppDatabase;
   person: Person;
+  customFieldDefinitions: CustomFieldDefinition[];
   places: readonly string[];
   completeness: ReturnType<typeof calculatePersonProfileCompleteness>;
   timeline: readonly PersonTimelineItem[];
@@ -498,7 +510,9 @@ function AlbumPanelV2({ person, onOpenPhoto }: PersonProfilePanelV2Props) {
 
 function OverviewPanelV2(props: PersonProfilePanelV2Props) {
   const {
+    db,
     person,
+    customFieldDefinitions,
     places,
     completeness,
     timeline,
@@ -558,6 +572,18 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
         <ProfileSectionV2 title="Біографічна нотатка">
           <p className="persons-v2-profile__biography">{person.notes || "Біографічну нотатку ще не додано."}</p>
         </ProfileSectionV2>
+
+        {customFieldDefinitions.length ? (
+          <ProfileSectionV2 title="Власні поля">
+            <div className="details-grid persons-v2-profile__custom-fields">
+              <CustomFieldsView
+                db={db}
+                definitions={customFieldDefinitions}
+                values={normalizeCustomFieldValues(person.customFields)}
+              />
+            </div>
+          </ProfileSectionV2>
+        ) : null}
       </div>
 
       <aside className="persons-v2-profile__side-column" aria-label="Зведення профілю">
@@ -855,7 +881,7 @@ function NotesPanelV2({
         }))} onOpen={onOpenRelated ? (hypothesis) => onOpenRelated("hypotheses", hypothesis) : undefined} />
       </ProfileSectionV2>
       <ProfileSectionV2
-        title={`Архівні запити (${archiveRequests.length})`}
+        title={`Запити (${archiveRequests.length})`}
         action={(
           <RelatedSectionActionsV2
             browseLabel="Усі запити"
@@ -867,7 +893,7 @@ function NotesPanelV2({
       >
         <LinkedRecordListV2 records={archiveRequests.map((request) => ({
           record: request,
-          title: request.subject || "Архівний запит",
+          title: request.subject || "Запит",
           meta: [request.archive, request.status, request.requestDate].filter(Boolean).join(" · "),
         }))} onOpen={onOpenRelated ? (request) => onOpenRelated("archiveRequests", request) : undefined} />
       </ProfileSectionV2>

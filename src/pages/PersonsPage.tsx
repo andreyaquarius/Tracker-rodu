@@ -683,7 +683,7 @@ export function PersonCardModal({
     ["findings", "Знахідки", linkedFindings.length],
     ["tasks", "Завдання", linkedTasks.length],
     ["hypotheses", "Гіпотези", linkedHypotheses.length],
-    ["archiveRequests", "Запити в архів", linkedArchiveRequests.length],
+    ["archiveRequests", "Запити", linkedArchiveRequests.length],
     ["relations", "Зв’язки", linkedRelationItems.length],
     ["notes", "Нотатки"],
   ];
@@ -1054,7 +1054,7 @@ function LinkedRecordsSection({
     finding: ["Знахідки особи", "Додати знахідку"],
     task: ["Завдання особи", "Додати завдання"],
     hypothesis: ["Гіпотези про особу", "Додати гіпотезу"],
-    archiveRequest: ["Запити в архів про особу", "Додати запит"],
+    archiveRequest: ["Запити про особу", "Додати запит"],
   } as const;
   const [title, buttonLabel] = labels[type];
   return (

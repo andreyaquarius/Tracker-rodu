@@ -74,6 +74,7 @@ const personDateFields: Array<{ key: PersonDateFieldKey; label: string }> = [
 
 const editorSections = [
   { key: "main", label: "Основне" },
+  { key: "photos", label: "Фото" },
   { key: "names", label: "Імена" },
   { key: "birth", label: "Народження" },
   { key: "marriage", label: "Шлюб" },
@@ -957,7 +958,7 @@ export function PersonEditorV2({
             <EditorSection
               id={`${editorPrefix}-main`}
               title="Основне"
-              description="Дослідження, статус картки та фотографії особи."
+              description="Дослідження, статус картки, стать і життєвий статус особи."
             >
               <label>
                 <span>Дослідження{researchRequired ? " *" : ""}</span>
@@ -983,6 +984,43 @@ export function PersonEditorV2({
                   {PERSON_STATUSES.map((status) => <option key={status}>{status}</option>)}
                 </select>
               </label>
+              <label>
+                <span>Стать</span>
+                <select
+                  value={form.gender}
+                  onChange={(event) => update("gender", event.target.value as PersonGender)}
+                >
+                  {genders.map((gender) => <option key={gender}>{gender}</option>)}
+                </select>
+              </label>
+              <fieldset className="life-status-toggle">
+                <legend>Статус життя</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name={`${editorPrefix}-life-status`}
+                    checked={form.isLiving}
+                    onChange={() => updateLifeStatus(true)}
+                  />
+                  <span>Жива</span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name={`${editorPrefix}-life-status`}
+                    checked={!form.isLiving}
+                    onChange={() => updateLifeStatus(false)}
+                  />
+                  <span>Померла або статус невідомий</span>
+                </label>
+              </fieldset>
+            </EditorSection>
+
+            <EditorSection
+              id={`${editorPrefix}-photos`}
+              title="Фото"
+              description="Фотографії особи, вибір головного зображення та кадрування аватара."
+            >
               <ScanAttachmentsEditor
                 title="Фотографії особи"
                 description="Зображення зберігаються у Google Drive; у картці залишаються посилання та метадані."
@@ -1237,39 +1275,9 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-status`}
-              title="Стать, статус і приватність"
+              title="Статус і приватність"
               description="Приватність живих людей потрібно перевіряти особливо уважно."
             >
-              <label>
-                <span>Стать</span>
-                <select
-                  value={form.gender}
-                  onChange={(event) => update("gender", event.target.value as PersonGender)}
-                >
-                  {genders.map((gender) => <option key={gender}>{gender}</option>)}
-                </select>
-              </label>
-              <fieldset className="life-status-toggle">
-                <legend>Статус життя</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name={`${editorPrefix}-life-status`}
-                    checked={form.isLiving}
-                    onChange={() => updateLifeStatus(true)}
-                  />
-                  <span>Жива</span>
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name={`${editorPrefix}-life-status`}
-                    checked={!form.isLiving}
-                    onChange={() => updateLifeStatus(false)}
-                  />
-                  <span>Померла або статус невідомий</span>
-                </label>
-              </fieldset>
               <label>
                 <span>Приватність</span>
                 <select

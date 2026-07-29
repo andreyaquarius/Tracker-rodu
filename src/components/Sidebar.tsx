@@ -32,7 +32,7 @@ const mainItems: Array<{
   { key: "familyTree", label: "Родове дерево", icon: "tree" },
   { key: "researches", label: "Дослідження", icon: "compass" },
   { key: "documents", label: "Документи", icon: "file-text" },
-  { key: "archiveRequests", label: "Запити в архів", icon: "archive" },
+  { key: "archiveRequests", label: "Запити", icon: "archive" },
   { key: "yearMatrix", label: "Матриця років", icon: "calendar-days" },
   { key: "tasks", label: "Завдання", icon: "list-checks" },
   { key: "findings", label: "Знахідки", icon: "bookmark-check" },

@@ -418,7 +418,9 @@ export function PersonsModuleV2({
         {detail.loading ? <PersonDetailNoticeV2>Завантажуємо пов’язані матеріали…</PersonDetailNoticeV2> : null}
         {detail.error ? <PersonDetailNoticeV2 error>{detail.error}</PersonDetailNoticeV2> : null}
         <PersonProfileV2
+          db={db}
           person={routePerson}
+          customFieldDefinitions={customFieldDefinitions}
           research={research}
           persons={persons}
           relations={relations}
@@ -548,7 +550,7 @@ export function PersonsModuleV2({
       impact.findings ? `знахідок: ${impact.findings}` : "",
       impact.tasks ? `завдань: ${impact.tasks}` : "",
       impact.hypotheses ? `гіпотез: ${impact.hypotheses}` : "",
-      impact.archiveRequests ? `архівних запитів: ${impact.archiveRequests}` : "",
+      impact.archiveRequests ? `запитів: ${impact.archiveRequests}` : "",
       impact.documents ? `повʼязаних документів: ${impact.documents}` : "",
     ].filter(Boolean).join("; ");
     const confirmed = window.confirm(
@@ -561,7 +563,7 @@ export function PersonsModuleV2({
           ? "Родинні звʼязки цієї особи буде видалено."
           : "",
         linkedRecords
-          ? "Знахідки, завдання, гіпотези, архівні запити й документи не видаляються — застосунок відвʼяже їх від цієї особи."
+          ? "Знахідки, завдання, гіпотези, запити й документи не видаляються — застосунок відвʼяже їх від цієї особи."
           : "",
         "Також буде очищено технічні посилання та вкладення профілю; самі файли на Google Drive не видаляються.",
         "Перед видаленням перегляньте й за потреби вручну відвʼяжіть важливі записи. Якщо продовжити, решту привʼязок застосунок відвʼяже автоматично. Цю дію не можна скасувати.",
@@ -605,7 +607,7 @@ export function PersonsModuleV2({
       impact.findings ? `знахідок: ${impact.findings}` : "",
       impact.tasks ? `завдань: ${impact.tasks}` : "",
       impact.hypotheses ? `гіпотез: ${impact.hypotheses}` : "",
-      impact.archiveRequests ? `архівних запитів: ${impact.archiveRequests}` : "",
+      impact.archiveRequests ? `запитів: ${impact.archiveRequests}` : "",
     ].filter(Boolean).join("; ");
     const confirmed = window.confirm(
       [
