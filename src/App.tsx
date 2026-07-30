@@ -150,6 +150,26 @@ import {
   saveProjectYearMatrixRecords,
 } from "./services/projectDocuments";
 import {
+  isExternalPdfViewerV2Enabled,
+  syncDocumentSourcesForDocument,
+} from "./services/documentSourceSync.ts";
+import {
+  createFindingDocumentReference,
+  type CreateFindingDocumentReferenceInput,
+} from "./services/findingDocumentReferences.ts";
+import {
+  createPdfOperationalRequestId,
+  emitPdfOperationalEvent,
+} from "./services/pdfOperationalTelemetry.ts";
+import {
+  findingDocumentReopenLaunchMode,
+  findingDocumentReopenTargetLabel,
+  resolveFindingDocumentReopenTargets,
+  selectFindingDocumentReopenTarget,
+  type FindingDocumentRestoreState,
+  type FindingDocumentSourceVersionStatus,
+} from "./services/findingDocumentReopen.ts";
+import {
   clearProjectWorkRecordsCache,
   deleteProjectFinding,
   deleteProjectTask,
@@ -262,6 +282,12 @@ import {
 
 const PersonsModuleV2 = lazy(() => import("./features/persons-v2/PersonsModuleV2")
   .then((module) => ({ default: module.PersonsModuleV2 })));
+
+type AppDocumentScanViewer = ActiveDocumentScanViewer & {
+  findingReferenceId?: string;
+  restore?: FindingDocumentRestoreState;
+  sourceVersionStatus?: FindingDocumentSourceVersionStatus;
+};
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
@@ -590,7 +616,7 @@ export default function App() {
   } | null>(null);
   const workspaceDeletionAbortRef = useRef<AbortController | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
-  const [scanViewer, setScanViewer] = useState<ActiveDocumentScanViewer | null>(null);
+  const [scanViewer, setScanViewer] = useState<AppDocumentScanViewer | null>(null);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
@@ -727,6 +753,9 @@ export default function App() {
   });
 
   const canOpenGeneHelp = subscriptionAccess.isAdmin || featureFlags.genehelp_public === true;
+  const externalPdfViewerV2Enabled =
+    import.meta.env.VITE_EXTERNAL_PDF_VIEWER_V2?.trim().toLocaleLowerCase() !== "false"
+    && isExternalPdfViewerV2Enabled(featureFlags);
   const personsModuleV2Enabled = canUsePersonsModuleV2({
     canUseFamilyTreeFeature,
   });
@@ -2835,6 +2864,22 @@ export default function App() {
         refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("documents", previousEntity, saved);
         syncEntityAttachmentMetadata("documents", saved);
+        if (externalPdfViewerV2Enabled) {
+          void syncDocumentSourcesForDocument(projectId, saved)
+            .then((result) => {
+              if (!result.failures.length) return;
+              notify(
+                `Документ збережено, але ${result.failures.length} зовнішніх PDF-джерел не вдалося додати до нового реєстру. Старий перегляд залишається доступним.`,
+                true,
+              );
+            })
+            .catch(() => {
+              notify(
+                "Документ збережено, але реєстр зовнішніх PDF тимчасово недоступний. Старий перегляд залишається доступним.",
+                true,
+              );
+            });
+        }
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectDocumentsCache(projectId);
           const documents = cached.documents.map((item) =>
@@ -3163,6 +3208,9 @@ export default function App() {
     }
 
     const finding = entity as Finding;
+    const documentReferenceDraft = (entity as Finding & {
+      documentReferenceDraft?: Omit<CreateFindingDocumentReferenceInput, "findingId">;
+    }).documentReferenceDraft;
     const projectId = workspace.projectId;
     const previous = projectFindings;
     const previousEntity = previous.find((item) => item.id === finding.id);
@@ -3186,7 +3234,27 @@ export default function App() {
         new Set(projectDocuments.map((document) => document.id)),
         new Set([...projectPersons.map((person) => person.id), ...finding.personIds]),
       ))
-      .then((saved) => {
+      .then(async (saved) => {
+        if (externalPdfViewerV2Enabled && documentReferenceDraft) {
+          try {
+            await createFindingDocumentReference(projectId, {
+              ...documentReferenceDraft,
+              findingId: saved.id,
+            });
+            if (documentReferenceDraft.selection) {
+              void emitPdfOperationalEvent(projectId, {
+                event: "finding_created_from_pdf_selection",
+                requestId: createPdfOperationalRequestId(),
+                statusCode: 200,
+              });
+            }
+          } catch (error) {
+            throw new Error(describeError(
+              error,
+              "Не вдалося записати прив’язку до сторінки PDF. Форма залишиться відкритою — повторіть збереження.",
+            ));
+          }
+        }
         refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("findings", previousEntity, saved);
         syncEntityAttachmentMetadata("findings", saved);
@@ -4062,6 +4130,95 @@ export default function App() {
       context,
       openedAt: Date.now(),
     });
+  };
+  const openFindingDocumentReference = async (findingId: string): Promise<void> => {
+    if (!workspace) {
+      notify("Повторне відкриття PDF доступне лише для знахідок поточного проєкту.", true);
+      return;
+    }
+    try {
+      const resolution = await resolveFindingDocumentReopenTargets(
+        workspace.projectId,
+        findingId,
+        projectDocuments,
+      );
+      if (!resolution.targets.length) {
+        notify(
+          resolution.issues[0]?.message
+            ?? "Для цієї знахідки не вдалося знайти збережену сторінку PDF.",
+          true,
+        );
+        return;
+      }
+
+      let target = resolution.targets[0];
+      if (resolution.targets.length > 1) {
+        const choice = window.prompt(
+          [
+            "До знахідки прив’язано кілька сторінок PDF:",
+            "",
+            ...resolution.targets.map(findingDocumentReopenTargetLabel),
+            "",
+            `Введіть номер від 1 до ${resolution.targets.length}:`,
+          ].join("\n"),
+          "1",
+        );
+        if (choice === null) return;
+        const selected = selectFindingDocumentReopenTarget(resolution.targets, choice);
+        if (!selected) {
+          notify(`Введіть ціле число від 1 до ${resolution.targets.length}.`, true);
+          return;
+        }
+        target = selected;
+      }
+
+      const launchMode = findingDocumentReopenLaunchMode(target);
+      if (launchMode === "unavailable") {
+        notify(
+          "Оригінальний PDF недоступний, а збереженої копії фрагмента немає. Перевірте доступ до джерела або додайте snapshot повторно.",
+          true,
+        );
+        return;
+      }
+      if (launchMode === "snapshot" && target.snapshot) {
+        setScanViewer({
+          scan: target.snapshot.scan,
+          scans: [target.snapshot.scan],
+          pageIndex: 0,
+          context: target.viewer.context,
+          findingReferenceId: target.referenceId,
+          openedAt: Date.now(),
+        });
+        notify("Оригінальний PDF недоступний. Відкрито збережену копію фрагмента зі знахідки.");
+        return;
+      }
+
+      setScanViewer({
+        ...target.viewer,
+        findingReferenceId: target.referenceId,
+        restore: target.restore,
+        sourceVersionStatus: target.source.versionStatus,
+        openedAt: Date.now(),
+      });
+
+      const warnings: string[] = [];
+      if (target.source.versionStatus === "changed") {
+        warnings.push(
+          "Зовнішній PDF було оновлено. Відкрито збережену фізичну сторінку без зміни старих координат знахідки.",
+        );
+      }
+      if (resolution.issues.length) {
+        warnings.push(
+          `Ще ${resolution.issues.length} ${resolution.issues.length === 1 ? "прив’язка недоступна" : "прив’язки недоступні"}.`,
+        );
+      }
+      if (warnings.length) notify(warnings.join(" "));
+    } catch (error) {
+      notify(
+        describeError(error, "Не вдалося повторно відкрити PDF-джерело цієї знахідки."),
+        true,
+      );
+    }
   };
   const createFindingFromViewedDocument = (initialValues: Record<string, unknown>) => {
     createRelatedRecord("findings", initialValues);
@@ -5222,11 +5379,25 @@ export default function App() {
             }
             onOpenRelated={openRelatedRecord}
             onOpenScanViewer={openScanViewer}
+            onOpenFindingDocumentReference={
+              externalPdfViewerV2Enabled && workspace
+                ? openFindingDocumentReference
+                : undefined
+            }
             onSave={saveFor(page)}
             onImportRecords={subscriptionAccess.canImportTable ? importTableRecords : undefined}
             onDelete={deleteFor(page)}
             onCreateBlocked={showCreateBlocked}
             projectId={workspace?.projectId}
+            externalPdfSourceAdd={
+              externalPdfViewerV2Enabled && workspace && account && !readOnly
+                ? {
+                    enabled: true,
+                    projectId: workspace.projectId,
+                    userId: account.id,
+                  }
+                : undefined
+            }
             onCreateTask={page === "hypotheses" ? (task) => saveTask(task) : undefined}
             readOnly={readOnly}
             canCreate={pageCanCreate}
@@ -5461,7 +5632,15 @@ export default function App() {
         {displayedContent}
       </Layout>
       <DocumentWorkspaceViewer
+        key={`${scanViewer?.openedAt ?? "closed"}:${externalPdfViewerV2Enabled ? "v2" : "legacy"}`}
         viewer={scanViewer}
+        externalPdfViewerV2={externalPdfViewerV2Enabled && workspace && account ? {
+          enabled: true,
+          projectId: workspace.projectId,
+          projectName: workspace.projectName,
+          userId: account.id,
+          canEdit: workspace.role !== "viewer",
+        } : undefined}
         onClose={() => setScanViewer(null)}
         onOpenDocument={(documentId) => openRelatedRecord("documents", documentId)}
         onCreateFinding={createFindingFromViewedDocument}

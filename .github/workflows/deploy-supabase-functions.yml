@@ -27,10 +27,34 @@ jobs:
       TASK_REMINDER_CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
       GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
       GA4_MEASUREMENT_ID: G-SF2725LS4P
+      APP_URL: ${{ vars.APP_URL }}
+      ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify PDF viewer contracts
+        run: |
+          npm run typecheck
+          node --test \
+            "test/documentSource*.test.ts" \
+            "test/externalPdf*.test.ts" \
+            "test/findingDocument*.test.ts" \
+            "test/googleDriveDocumentSourceAdapter.test.ts" \
+            "test/googleDrivePdfGatewayMigration.test.ts" \
+            "test/pdf*.test.ts" \
+            "test/scanStorageExternalPreviewStrategy.test.ts" \
+            "test/integration/externalPdfViewerCoreIntegration.test.ts"
 
       - name: Verify Supabase deployment configuration
         run: |
@@ -54,11 +78,15 @@ jobs:
             echo "::error::Repository secret GA4_API_SECRET is missing."
             exit 1
           fi
+          if [ -z "$APP_URL" ] || [ -z "$ALLOWED_ORIGIN" ]; then
+            echo "::error::Repository variables APP_URL and ALLOWED_ORIGIN are required for the PDF gateway CORS allowlist."
+            exit 1
+          fi
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.108.0
 
       - name: Verify Supabase account and project access
         run: |
@@ -96,6 +124,9 @@ jobs:
       - name: Link Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --yes
 
+      - name: Preview database migrations
+        run: supabase db push --linked --dry-run
+
       - name: Apply database migrations
         run: supabase db push --linked --yes
 
@@ -105,6 +136,8 @@ jobs:
             TASK_REMINDER_CRON_SECRET="$TASK_REMINDER_CRON_SECRET" \
             GA4_API_SECRET="$GA4_API_SECRET" \
             GA4_MEASUREMENT_ID="$GA4_MEASUREMENT_ID" \
+            APP_URL="$APP_URL" \
+            ALLOWED_ORIGIN="$ALLOWED_ORIGIN" \
             --project-ref "$SUPABASE_PROJECT_REF"
 
           for function_dir in supabase/functions/*; do

@@ -85,10 +85,10 @@ type GooglePickerApi = {
     SIZE_BYTES?: string;
     RESOURCE_KEY?: string;
   };
-  Feature: { MULTISELECT_ENABLED: string };
+  Feature: { MULTISELECT_ENABLED: string; SUPPORT_DRIVES?: string };
   PickerBuilder: new () => GooglePickerBuilder;
   Response: { ACTION: string; DOCUMENTS: string };
-  ViewId: { DOCS: string };
+  ViewId: { DOCS: string; FOLDERS: string };
 };
 
 type GoogleApiLoader = {
@@ -144,12 +144,34 @@ export interface GoogleDriveUploadProgress {
   percent: number;
 }
 
-export interface GoogleDriveUploadOptions {
-  folderPath?: string[];
-  /** Stable, non-secret key used to resume an interrupted logical upload. */
+interface GoogleDriveUploadBaseOptions {
+  /**
+   * Stable, non-secret key used to resume one logical upload. Callers that can
+   * retry with a new attachmentId (for example PDF export) must provide it.
+   */
   deduplicationKey?: string;
   onProgress?: (progress: GoogleDriveUploadProgress) => void;
+  signal?: AbortSignal;
 }
+
+type GoogleDriveUploadFolderPath = {
+  folderPath?: string[];
+  destinationFolderId?: never;
+  destinationFolderName?: never;
+  destinationFolderResourceKey?: never;
+};
+
+type GoogleDriveUploadExplicitFolder = {
+  folderPath?: never;
+  destinationFolderId: string;
+  destinationFolderName?: string;
+  destinationFolderResourceKey?: string;
+};
+
+/** A caller may use either an app-managed path or one Picker-selected folder, never both. */
+export type GoogleDriveUploadOptions = GoogleDriveUploadBaseOptions & (
+  GoogleDriveUploadFolderPath | GoogleDriveUploadExplicitFolder
+);
 
 export interface GoogleDriveUploadedFile {
   id: string;
@@ -171,11 +193,28 @@ export interface GoogleDriveFileMetadata {
   resourceKey?: string;
 }
 
+/**
+ * Short-lived, in-memory access details for byte-range PDF streaming.
+ * The Authorization header must never be persisted, logged, or appended to a URL.
+ */
+export interface GoogleDriveDownloadAccess {
+  url: string;
+  httpHeaders: Readonly<Record<string, string>>;
+  expiresAt: string;
+}
+
 export interface GoogleDrivePickerFile {
   id: string;
   name: string;
   mimeType: string;
   size: number;
+  webViewLink: string;
+  resourceKey?: string;
+}
+
+export interface GoogleDrivePickerFolder {
+  id: string;
+  name: string;
   webViewLink: string;
   resourceKey?: string;
 }
@@ -298,6 +337,109 @@ export async function pickGoogleDriveFiles(
   });
 }
 
+/** Opens a single-selection Picker that only accepts a destination folder. */
+export async function pickGoogleDriveFolder(
+  title = "Оберіть папку для збереження",
+): Promise<GoogleDrivePickerFolder | null> {
+  const apiKey = import.meta.env.VITE_GOOGLE_PICKER_API_KEY?.trim() ?? "";
+  const appId = import.meta.env.VITE_GOOGLE_DRIVE_APP_ID?.trim() ?? "";
+  const missingConfiguration = [
+    !apiKey ? "VITE_GOOGLE_PICKER_API_KEY" : "",
+    !appId ? "VITE_GOOGLE_DRIVE_APP_ID" : "",
+  ].filter(Boolean);
+  if (missingConfiguration.length) {
+    throw new Error(
+      `Для вибору папки Google Drive не налаштовано ${missingConfiguration.join(" та ")}.`,
+    );
+  }
+
+  const [accessToken] = await Promise.all([
+    getGoogleDriveAccessToken(false, "consent"),
+    loadGooglePickerApi(),
+  ]);
+  const pickerApi = (window as GoogleWindow).google?.picker;
+  if (!pickerApi) throw new Error("Не вдалося завантажити вікно вибору папки Google Drive.");
+
+  const folderView = new pickerApi.DocsView(pickerApi.ViewId.FOLDERS)
+    .setIncludeFolders(true)
+    .setSelectFolderEnabled(true)
+    .setMode(pickerApi.DocsViewMode.LIST);
+
+  return new Promise<GoogleDrivePickerFolder | null>((resolve, reject) => {
+    let settled = false;
+    const finish = (folder: GoogleDrivePickerFolder | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(folder);
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    try {
+      let builder = new pickerApi.PickerBuilder()
+        .addView(folderView)
+        .setOAuthToken(accessToken)
+        .setDeveloperKey(apiKey)
+        .setAppId(appId)
+        .setOrigin(window.location.origin)
+        .setLocale("uk")
+        .setTitle(title.trim() || "Оберіть папку для збереження")
+        .setMaxItems(1)
+        .setCallback((response) => {
+          const action = String(
+            response[pickerApi.Response.ACTION]
+            ?? response.action
+            ?? "",
+          );
+          if (action === pickerApi.Action.CANCEL) {
+            finish(null);
+            return;
+          }
+          if (action === pickerApi.Action.ERROR) {
+            fail(new Error("Google Drive повідомив про помилку під час вибору папки."));
+            return;
+          }
+          if (action !== pickerApi.Action.PICKED) return;
+
+          const rawDocuments = response[pickerApi.Response.DOCUMENTS] ?? response.docs;
+          const document = Array.isArray(rawDocuments)
+            ? rawDocuments[0] as GooglePickerDocument | undefined
+            : undefined;
+          const id = document ? pickerStringField(document, pickerApi.Document.ID, "id") : "";
+          const mimeType = document
+            ? pickerStringField(document, pickerApi.Document.MIME_TYPE, "mimeType")
+            : "";
+          if (!document || !id || (mimeType && mimeType !== GOOGLE_FOLDER_MIME_TYPE)) {
+            fail(new Error("Оберіть саме папку Google Drive."));
+            return;
+          }
+          const resourceKeyField = pickerApi.Document.RESOURCE_KEY;
+          const resourceKey = resourceKeyField
+            ? pickerStringField(document, resourceKeyField, "resourceKey")
+            : pickerStringField(document, "resourceKey");
+          finish({
+            id,
+            name: pickerStringField(document, pickerApi.Document.NAME, "name") || "Папка Google Drive",
+            webViewLink: pickerStringField(document, pickerApi.Document.URL, "url")
+              || googleDriveViewUrl(id, resourceKey),
+            resourceKey: resourceKey || undefined,
+          });
+        });
+      if (pickerApi.Feature.SUPPORT_DRIVES) {
+        builder = builder.enableFeature(pickerApi.Feature.SUPPORT_DRIVES);
+      }
+      builder.build().setVisible(true);
+    } catch (error) {
+      fail(error instanceof Error
+        ? error
+        : new Error("Не вдалося відкрити вікно вибору папки Google Drive."));
+    }
+  });
+}
+
 export function isGoogleDriveAuthorized(): boolean {
   return Boolean(activeToken && activeToken.expiresAt > Date.now() + 60_000);
 }
@@ -324,6 +466,12 @@ export async function uploadFileToGoogleDrive(
   attachmentId: string,
   options: GoogleDriveUploadOptions = {},
 ): Promise<GoogleDriveUploadedFile> {
+  throwIfGoogleDriveAborted(options.signal);
+  const folderPath = options.folderPath?.map((part) => part.trim()).filter(Boolean) ?? [];
+  const destinationFolderId = normalizeDriveFolderId(options.destinationFolderId);
+  if (folderPath.length && destinationFolderId) {
+    throw new Error("Для завантаження вкажіть або шлях папок, або одну вибрану папку Google Drive.");
+  }
   const deduplicationKey = safeDriveAppProperty(options.deduplicationKey ?? "");
   if (!deduplicationKey) {
     return uploadNewFileToGoogleDrive(target, file, attachmentId, options, "");
@@ -331,7 +479,7 @@ export async function uploadFileToGoogleDrive(
 
   const promiseKey = `${target.projectId}:${deduplicationKey}`;
   const active = deduplicatedUploadPromises.get(promiseKey);
-  if (active) return active;
+  if (active) return waitForGoogleDrivePromise(active, options.signal);
   const upload = uploadNewFileToGoogleDrive(
     target,
     file,
@@ -342,7 +490,7 @@ export async function uploadFileToGoogleDrive(
     deduplicatedUploadPromises.delete(promiseKey);
   });
   deduplicatedUploadPromises.set(promiseKey, upload);
-  return upload;
+  return waitForGoogleDrivePromise(upload, options.signal);
 }
 
 async function uploadNewFileToGoogleDrive(
@@ -352,12 +500,22 @@ async function uploadNewFileToGoogleDrive(
   options: GoogleDriveUploadOptions,
   deduplicationKey: string,
 ): Promise<GoogleDriveUploadedFile> {
-  const projectFolderId = await ensureProjectFolder(target);
-  const folderId = options.folderPath?.length
-    ? await ensureNestedFolderPath(target, projectFolderId, options.folderPath)
-    : projectFolderId;
+  const explicitFolderId = normalizeDriveFolderId(options.destinationFolderId);
+  const folderPath = options.folderPath?.map((part) => part.trim()).filter(Boolean) ?? [];
+  let folderId = explicitFolderId;
+  if (!folderId) {
+    const projectFolderId = await waitForGoogleDrivePromise(
+      ensureProjectFolder(target),
+      options.signal,
+    );
+    throwIfGoogleDriveAborted(options.signal);
+    folderId = folderPath.length
+      ? await ensureNestedFolderPath(target, projectFolderId, folderPath, options.signal)
+      : projectFolderId;
+  }
+  throwIfGoogleDriveAborted(options.signal);
   if (deduplicationKey) {
-    const existing = await findFileByDeduplicationKey(target, deduplicationKey);
+    const existing = await findFileByDeduplicationKey(target, deduplicationKey, options.signal);
     if (existing) return existing;
   }
   const metadata = {
@@ -381,33 +539,52 @@ async function uploadNewFileToGoogleDrive(
     "\r\n",
     `--${boundary}--`,
   ]);
-  const response = await driveUploadFetch(
-    `${GOOGLE_DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,webViewLink,md5Checksum,modifiedTime,headRevisionId,size`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": `multipart/related; boundary=${boundary}`,
+  try {
+    const response = await driveUploadFetch(
+      `${GOOGLE_DRIVE_UPLOAD_API}/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink,md5Checksum,modifiedTime,headRevisionId,size`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/related; boundary=${boundary}`,
+          ...(googleDriveResourceKeyHeaders(folderId, options.destinationFolderResourceKey) ?? {}),
+        },
+        body,
+        signal: options.signal,
       },
-      body,
-    },
-    options.onProgress,
-  );
-  const uploaded = await response.json() as DriveFile;
-  if (!uploaded.id) {
-    throw new Error("Хмарне сховище не повернуло ідентифікатор завантаженого файла.");
+      options.onProgress,
+      // A multipart create is not safe to replay after an ambiguous network
+      // result. The appProperty lets the caller retry the whole operation and
+      // reconcile the first upload instead of silently creating a duplicate.
+      deduplicationKey ? 1 : 4,
+    );
+    throwIfGoogleDriveAborted(options.signal);
+    const uploaded = await response.json() as DriveFile;
+    throwIfGoogleDriveAborted(options.signal);
+    if (!uploaded.id) {
+      throw new Error("Хмарне сховище не повернуло ідентифікатор завантаженого файла.");
+    }
+    return driveUploadedFileFromApi(uploaded);
+  } catch (error) {
+    if (isGoogleDriveAbort(error, options.signal)) {
+      throw new DOMException("Google Drive operation cancelled", "AbortError");
+    }
+    if (deduplicationKey) {
+      const reconciled = await findFileByDeduplicationKey(
+        target,
+        deduplicationKey,
+        options.signal,
+      ).catch(() => null);
+      throwIfGoogleDriveAborted(options.signal);
+      if (reconciled) return reconciled;
+    }
+    throw error;
   }
-  return {
-    id: uploaded.id,
-    webViewLink: uploaded.webViewLink || googleDriveViewUrl(uploaded.id),
-    md5Checksum: uploaded.md5Checksum,
-    modifiedTime: uploaded.modifiedTime,
-    headRevisionId: uploaded.headRevisionId,
-  };
 }
 
 async function findFileByDeduplicationKey(
   target: GoogleDriveProjectTarget,
   deduplicationKey: string,
+  signal?: AbortSignal,
 ): Promise<GoogleDriveUploadedFile | null> {
   const escapedProjectId = escapeDriveQueryValue(target.projectId);
   const escapedKey = escapeDriveQueryValue(deduplicationKey);
@@ -417,17 +594,24 @@ async function findFileByDeduplicationKey(
     `appProperties has { key='trackerRoduDeduplicationKey' and value='${escapedKey}' }`,
   ].join(" and ");
   const response = await driveFetch(
-    `${GOOGLE_DRIVE_API}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,webViewLink,md5Checksum,modifiedTime,headRevisionId)&pageSize=2`,
+    `${GOOGLE_DRIVE_API}/files?q=${encodeURIComponent(query)}&spaces=drive&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,webViewLink,md5Checksum,modifiedTime,headRevisionId)&pageSize=2`,
+    { signal },
   );
+  throwIfGoogleDriveAborted(signal);
   const result = await response.json() as { files?: DriveFile[] };
+  throwIfGoogleDriveAborted(signal);
   const existing = result.files?.[0];
   if (!existing?.id) return null;
+  return driveUploadedFileFromApi(existing);
+}
+
+function driveUploadedFileFromApi(file: DriveFile & { id: string }): GoogleDriveUploadedFile {
   return {
-    id: existing.id,
-    webViewLink: existing.webViewLink || googleDriveViewUrl(existing.id),
-    md5Checksum: existing.md5Checksum,
-    modifiedTime: existing.modifiedTime,
-    headRevisionId: existing.headRevisionId,
+    id: file.id,
+    webViewLink: file.webViewLink || googleDriveViewUrl(file.id),
+    md5Checksum: file.md5Checksum,
+    modifiedTime: file.modifiedTime,
+    headRevisionId: file.headRevisionId,
   };
 }
 
@@ -451,6 +635,32 @@ export async function downloadFileFromGoogleDrive(
     throw error;
   }
   return response.blob();
+}
+
+/**
+ * Creates an ephemeral Google Drive media URL for PDF.js. Unlike
+ * downloadFileFromGoogleDrive, this does not buffer the complete file and lets
+ * PDF.js request byte ranges directly from the Drive API.
+ */
+export async function createGoogleDriveDownloadAccess(
+  fileId: string,
+  resourceKey?: string,
+): Promise<GoogleDriveDownloadAccess> {
+  if (!isSafeGoogleDriveIdentifier(fileId)) {
+    throw new Error("Некоректний ідентифікатор файла Google Drive.");
+  }
+  const accessToken = await getGoogleDriveAccessToken();
+  const tokenExpiresAt = activeToken?.accessToken === accessToken
+    ? activeToken.expiresAt
+    : Date.now() + 5 * 60_000;
+  const headers = new Headers(googleDriveResourceKeyHeaders(fileId, resourceKey));
+  headers.set("Authorization", `Bearer ${accessToken}`);
+
+  return {
+    url: `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+    httpHeaders: Object.freeze(Object.fromEntries(headers.entries())),
+    expiresAt: new Date(tokenExpiresAt).toISOString(),
+  };
 }
 
 export async function getGoogleDriveFileMetadata(
@@ -571,6 +781,7 @@ async function ensureNestedFolderPath(
   target: GoogleDriveProjectTarget,
   rootFolderId: string,
   folderPath: string[],
+  signal?: AbortSignal,
 ): Promise<string> {
   let parentId = rootFolderId;
   let pathKey = "";
@@ -578,7 +789,11 @@ async function ensureNestedFolderPath(
     const segment = safeDriveFolderName(rawSegment);
     if (!segment) continue;
     pathKey = pathKey ? `${pathKey}/${segment}` : segment;
-    parentId = await ensureChildFolder(target, parentId, segment, pathKey);
+    parentId = await waitForGoogleDrivePromise(
+      ensureChildFolder(target, parentId, segment, pathKey),
+      signal,
+    );
+    throwIfGoogleDriveAborted(signal);
   }
   return parentId;
 }
@@ -704,6 +919,15 @@ function safeDriveAppProperty(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 120);
 }
 
+function normalizeDriveFolderId(value: string | undefined): string {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) return "";
+  if (!isSafeGoogleDriveIdentifier(normalized)) {
+    throw new Error("Google Drive повернув некоректний ідентифікатор папки.");
+  }
+  return normalized;
+}
+
 function escapeDriveQueryValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
@@ -749,12 +973,23 @@ function pickerNumberField(
 }
 
 async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  throwIfGoogleDriveAborted(init.signal);
   let token = await getGoogleDriveAccessToken();
-  let response = await retryGoogleDriveRequest(() => fetchWithToken(url, init, token));
+  throwIfGoogleDriveAborted(init.signal);
+  let response = await retryGoogleDriveRequest(
+    () => fetchWithToken(url, init, token),
+    4,
+    init.signal,
+  );
   if (response.status === 401) {
     activeToken = null;
     token = await getGoogleDriveAccessToken(true);
-    response = await retryGoogleDriveRequest(() => fetchWithToken(url, init, token));
+    throwIfGoogleDriveAborted(init.signal);
+    response = await retryGoogleDriveRequest(
+      () => fetchWithToken(url, init, token),
+      4,
+      init.signal,
+    );
   }
   if (!response.ok) {
     const message = await googleApiError(response);
@@ -772,20 +1007,29 @@ async function driveUploadFetch(
   url: string,
   init: RequestInit,
   onProgress?: (progress: GoogleDriveUploadProgress) => void,
+  maxAttempts = 4,
 ): Promise<Response> {
-  if (!onProgress || typeof XMLHttpRequest === "undefined" || !(init.body instanceof Blob)) {
-    return driveFetch(url, init);
-  }
-
+  throwIfGoogleDriveAborted(init.signal);
   let token = await getGoogleDriveAccessToken();
+  throwIfGoogleDriveAborted(init.signal);
+  const request = () => (
+    onProgress && typeof XMLHttpRequest !== "undefined" && init.body instanceof Blob
+      ? xhrFetchWithToken(url, init, token, onProgress)
+      : fetchWithToken(url, init, token)
+  );
   let response = await retryGoogleDriveRequest(
-    () => xhrFetchWithToken(url, init, token, onProgress),
+    request,
+    maxAttempts,
+    init.signal,
   );
   if (response.status === 401) {
     activeToken = null;
     token = await getGoogleDriveAccessToken(true);
+    throwIfGoogleDriveAborted(init.signal);
     response = await retryGoogleDriveRequest(
-      () => xhrFetchWithToken(url, init, token, onProgress),
+      request,
+      maxAttempts,
+      init.signal,
     );
   }
   if (!response.ok) {
@@ -803,21 +1047,25 @@ async function driveUploadFetch(
 async function retryGoogleDriveRequest(
   request: () => Promise<Response>,
   maxAttempts = 4,
+  signal?: AbortSignal | null,
 ): Promise<Response> {
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    throwIfGoogleDriveAborted(signal);
     try {
       const response = await request();
+      throwIfGoogleDriveAborted(signal);
       if (!isRetryableGoogleDriveStatus(response.status) || attempt === maxAttempts - 1) {
         return response;
       }
       const delayMs = googleDriveRetryDelay(response, attempt);
       await response.body?.cancel("retry").catch(() => undefined);
-      await waitForRetry(delayMs);
+      await waitForRetry(delayMs, signal);
     } catch (error) {
       lastError = error;
+      if (isGoogleDriveAbort(error, signal)) throw error;
       if (attempt === maxAttempts - 1) throw error;
-      await waitForRetry(500 * (2 ** attempt));
+      await waitForRetry(500 * (2 ** attempt), signal);
     }
   }
   throw lastError ?? new Error("Не вдалося виконати запит до Google Drive.");
@@ -840,8 +1088,66 @@ function googleDriveRetryDelay(response: Response, attempt: number): number {
   return Math.min(30_000, 500 * (2 ** attempt));
 }
 
-function waitForRetry(delayMs: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+function waitForRetry(delayMs: number, signal?: AbortSignal | null): Promise<void> {
+  if (!signal) {
+    return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+  }
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Google Drive operation cancelled", "AbortError"));
+      return;
+    }
+    const timeoutId = globalThis.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      globalThis.clearTimeout(timeoutId);
+      reject(new DOMException("Google Drive operation cancelled", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function throwIfGoogleDriveAborted(signal?: AbortSignal | null): void {
+  if (signal?.aborted) {
+    throw new DOMException("Google Drive operation cancelled", "AbortError");
+  }
+}
+
+function isGoogleDriveAbort(error: unknown, signal?: AbortSignal | null): boolean {
+  return signal?.aborted === true || (
+    error instanceof DOMException
+      ? error.name === "AbortError"
+      : error instanceof Error && error.name === "AbortError"
+  );
+}
+
+function waitForGoogleDrivePromise<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal | null,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Google Drive operation cancelled", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => finish(() => {
+      reject(new DOMException("Google Drive operation cancelled", "AbortError"));
+    });
+    const finish = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      action();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
 }
 
 function fetchWithToken(url: string, init: RequestInit, accessToken: string): Promise<Response> {
@@ -865,6 +1171,14 @@ function xhrFetchWithToken(
 
   return new Promise<Response>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    const signal = init.signal;
+    if (signal?.aborted) {
+      reject(new DOMException("Google Drive operation cancelled", "AbortError"));
+      return;
+    }
+    const abortRequest = () => xhr.abort();
+    const cleanupAbortListener = () => signal?.removeEventListener("abort", abortRequest);
+    signal?.addEventListener("abort", abortRequest, { once: true });
     xhr.open(init.method ?? "GET", url);
     headers.forEach((value, key) => xhr.setRequestHeader(key, value));
     xhr.responseType = "text";
@@ -878,6 +1192,7 @@ function xhrFetchWithToken(
       });
     };
     xhr.onload = () => {
+      cleanupAbortListener();
       if (xhr.status >= 200 && xhr.status < 300) {
         onProgress({ loaded: body.size, total: body.size, percent: 100 });
       }
@@ -887,8 +1202,14 @@ function xhrFetchWithToken(
         headers: parseXhrHeaders(xhr.getAllResponseHeaders()),
       }));
     };
-    xhr.onerror = () => reject(new Error("Не вдалося завантажити файл у хмарне сховище."));
-    xhr.onabort = () => reject(new Error("Завантаження файлу скасовано."));
+    xhr.onerror = () => {
+      cleanupAbortListener();
+      reject(new Error("Не вдалося завантажити файл у хмарне сховище."));
+    };
+    xhr.onabort = () => {
+      cleanupAbortListener();
+      reject(new DOMException("Google Drive operation cancelled", "AbortError"));
+    };
     xhr.send(body);
   });
 }

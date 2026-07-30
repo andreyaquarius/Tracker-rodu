@@ -56,6 +56,27 @@ test("Picker public configuration is declared, validated, built and permitted by
   assert.match(viteConfig, /frame-src[^\n]*blob:/);
 });
 
+test("Google Drive export can pick exactly one destination folder", () => {
+  const drive = source("../src/services/googleDriveStorage.ts");
+
+  assert.match(drive, /export async function pickGoogleDriveFolder/u);
+  assert.match(drive, /new pickerApi\.DocsView\(pickerApi\.ViewId\.FOLDERS\)/u);
+  assert.match(drive, /\.setIncludeFolders\(true\)/u);
+  assert.match(drive, /\.setSelectFolderEnabled\(true\)/u);
+  assert.match(drive, /\.setMaxItems\(1\)/u);
+  assert.match(drive, /mimeType !== GOOGLE_FOLDER_MIME_TYPE/u);
+});
+
+test("Drive upload destinations are typed as mutually exclusive and support shared-folder resource keys", () => {
+  const drive = source("../src/services/googleDriveStorage.ts");
+
+  assert.match(drive, /destinationFolderId\?: never/u);
+  assert.match(drive, /folderPath\?: never/u);
+  assert.match(drive, /destinationFolderResourceKey\?: string/u);
+  assert.match(drive, /supportsAllDrives=true/u);
+  assert.match(drive, /googleDriveResourceKeyHeaders\(folderId, options\.destinationFolderResourceKey\)/u);
+});
+
 test("Drive attachments retain resource keys for link-shared files", () => {
   const types = source("../src/types/index.ts");
 

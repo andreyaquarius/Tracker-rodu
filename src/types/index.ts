@@ -37,6 +37,26 @@ export interface ScanAttachment {
   sourceExpiresAt?: string;
   sourceDurability?: "temporary" | "unknown";
   statusMessage?: string;
+  /** Bridge metadata used while legacy attachment JSON is migrated to document_sources. */
+  documentSourceId?: string;
+  sourceProvider?: "google_drive" | "wikimedia" | "direct_pdf";
+  sourcePageUrl?: string;
+  canonicalSourceUrl?: string;
+  providerFileTitle?: string;
+  initialPage?: number;
+  /** Validated PDF page count retained until document_sources is persisted. */
+  sourcePageCount?: number;
+  sourceAccessMode?: "direct_cors" | "secure_proxy" | "google_drive_api";
+  sourceWarnings?: string[];
+  sourceFingerprint?: {
+    sha1?: string;
+    md5?: string;
+    etag?: string;
+    revisionId?: string;
+    modifiedTime?: string;
+    lastModified?: string;
+    contentLength?: number;
+  };
   /** Presentation-only focal point and zoom used when this photo is an avatar. */
   avatarCrop?: PersonAvatarCrop;
 }

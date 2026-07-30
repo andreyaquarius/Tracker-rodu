@@ -3,6 +3,7 @@ import { createId } from "../utils/id.ts";
 import { sanitizeWebUrl } from "../utils/safeUrl.ts";
 import { nowIso } from "../utils/dateHelpers.ts";
 import { externalLinkExpiry } from "../utils/externalLinkExpiry.ts";
+import { normalizeExternalDocumentUrl } from "../utils/documentSourceUrlSecurity.ts";
 import {
   getCachedDocumentBlob,
   putCachedDocumentBlob,
@@ -22,6 +23,12 @@ import {
   fetchGedcomPhotoViaProxy,
   isGedcomPhotoProxyUrl,
 } from "./gedcomPhotoProxy.ts";
+import { DocumentSourceError } from "./document-sources/errors.ts";
+import {
+  mediaWikiImageInfoApiCandidates,
+  parseMediaWikiDocumentUrl,
+  parseMediaWikiImageInfoResponse,
+} from "./mediaWikiPdfSource.ts";
 
 export const MAX_ATTACHMENT_SIZE_MB = 25;
 export type AttachmentPolicy = "all" | "finding" | "archive-request" | "document" | "person-photo";
@@ -43,6 +50,7 @@ export type SaveScanOptions = {
   driveFolderPath?: string[];
   deduplicationKey?: string;
   onUploadProgress?: (progress: ScanUploadProgress) => void;
+  signal?: AbortSignal;
 };
 
 export type ScanPreviewKind = "image" | "pdf" | "web";
@@ -51,6 +59,37 @@ export type ScanPreviewSource = {
   kind: ScanPreviewKind;
   url: string;
   revokeOnClose: boolean;
+};
+
+export type ExternalScanPreviewStrategy =
+  | {
+      mode: "embedded";
+      sourceUrl: string;
+    }
+  | {
+      mode: "mediawiki-file";
+      sourceUrl: string;
+      pageTitle: string;
+      initialPage?: number;
+    }
+  | {
+      mode: "source-page";
+      sourceUrl: string;
+      reason: "web-page" | "authenticated-source";
+    };
+
+export type ResolvedMediaWikiFile = {
+  sourceUrl: string;
+  sourcePageUrl: string;
+  fileUrl: string;
+  fileName: string;
+  mimeType: string;
+  providerFileTitle: string;
+  size?: number;
+  pageCount?: number;
+  initialPage?: number;
+  sha1?: string;
+  timestamp?: string;
 };
 
 export type DriveAttachmentPreview = {
@@ -63,6 +102,12 @@ export type DriveAttachmentPreview = {
     size: number;
     mimeType: string;
   }>;
+  provider?: "google_drive" | "wikimedia" | "direct_pdf";
+  sourcePageUrl?: string;
+  canonicalUrl?: string;
+  providerFileTitle?: string;
+  pageCount?: number;
+  initialPage?: number;
 };
 
 let activeProject: { projectId: string; projectName: string } | null = null;
@@ -117,6 +162,7 @@ export async function saveScanToProject(
   const uploaded = await uploadFileToGoogleDrive(target, file, id, {
     folderPath: options.driveFolderPath,
     deduplicationKey: options.deduplicationKey,
+    signal: options.signal,
     onProgress: options.onUploadProgress
       ? (progress) => options.onUploadProgress?.({ ...progress, fileName: file.name })
       : undefined,
@@ -167,7 +213,7 @@ export async function attachAttachmentReference(
   if (isGoogleDriveReference(fileReference)) {
     return attachGoogleDriveReference(fileReference, policy, range);
   }
-  return [externalUrlToAttachment(fileReference, policy)];
+  return [await externalUrlToAttachment(fileReference, policy)];
 }
 
 export async function inspectGoogleDriveAttachment(
@@ -279,6 +325,7 @@ function ensureAttachableDriveFile(file: GoogleDriveFileMetadata, policy: Attach
 }
 
 function driveFileToAttachment(file: GoogleDriveFileMetadata): ScanAttachment {
+  const canonicalSourceUrl = `https://drive.google.com/file/d/${encodeURIComponent(file.id)}/view`;
   return {
     id: createId(),
     name: file.name,
@@ -293,14 +340,45 @@ function driveFileToAttachment(file: GoogleDriveFileMetadata): ScanAttachment {
     driveRevisionId: file.headRevisionId,
     driveResourceKey: file.resourceKey,
     deleteOnRemove: false,
+    sourceProvider: "google_drive",
+    canonicalSourceUrl,
+    sourceFingerprint: {
+      ...(file.md5Checksum ? { md5: file.md5Checksum } : {}),
+      ...(file.headRevisionId ? { revisionId: file.headRevisionId } : {}),
+      ...(file.modifiedTime ? { modifiedTime: file.modifiedTime } : {}),
+      ...(file.size > 0 ? { contentLength: file.size } : {}),
+    },
   };
 }
 
-function inspectExternalUrlAttachment(
+async function inspectExternalUrlAttachment(
   fileReference: string,
   policy: AttachmentPolicy,
-): DriveAttachmentPreview {
+): Promise<DriveAttachmentPreview> {
   const url = externalDocumentUrl(fileReference);
+  const mediaWikiSource = parseMediaWikiDocumentUrl(url.href);
+  if (mediaWikiSource) {
+    const resolved = await resolveMediaWikiFilePage(url.href);
+    const metadata = { name: resolved.fileName, mimeType: resolved.mimeType };
+    ensureExternalUrlMatchesPolicy(metadata, policy);
+    return {
+      kind: "file",
+      source: "external-url",
+      name: resolved.fileName,
+      totalFiles: 1,
+      attachableFiles: [{
+        name: resolved.fileName,
+        size: resolved.size ?? 0,
+        mimeType: resolved.mimeType,
+      }],
+      provider: "wikimedia",
+      sourcePageUrl: resolved.sourcePageUrl,
+      canonicalUrl: resolved.fileUrl,
+      providerFileTitle: resolved.providerFileTitle,
+      pageCount: resolved.pageCount,
+      initialPage: resolved.initialPage,
+    };
+  }
   const metadata = externalUrlMetadata(url);
   ensureExternalUrlMatchesPolicy(metadata, policy);
   return {
@@ -313,14 +391,42 @@ function inspectExternalUrlAttachment(
       size: 0,
       mimeType: metadata.mimeType,
     }],
+    provider: "direct_pdf",
   };
 }
 
-function externalUrlToAttachment(
+async function externalUrlToAttachment(
   fileReference: string,
   policy: AttachmentPolicy,
-): ScanAttachment {
+): Promise<ScanAttachment> {
   const url = externalDocumentUrl(fileReference);
+  const mediaWikiSource = parseMediaWikiDocumentUrl(url.href);
+  if (mediaWikiSource) {
+    const resolved = await resolveMediaWikiFilePage(url.href);
+    const metadata = { name: resolved.fileName, mimeType: resolved.mimeType };
+    ensureExternalUrlMatchesPolicy(metadata, policy);
+    return {
+      id: createId(),
+      name: resolved.fileName,
+      mimeType: resolved.mimeType,
+      size: resolved.size ?? 0,
+      createdAt: nowIso(),
+      storage: "external-url",
+      storagePath: resolved.sourceUrl,
+      webViewLink: resolved.sourceUrl,
+      deleteOnRemove: false,
+      sourceProvider: "wikimedia",
+      sourcePageUrl: resolved.sourcePageUrl,
+      canonicalSourceUrl: resolved.fileUrl,
+      providerFileTitle: resolved.providerFileTitle,
+      initialPage: resolved.initialPage,
+      sourceFingerprint: {
+        ...(resolved.sha1 ? { sha1: resolved.sha1 } : {}),
+        ...(resolved.timestamp ? { modifiedTime: resolved.timestamp } : {}),
+        ...(resolved.size ? { contentLength: resolved.size } : {}),
+      },
+    };
+  }
   const metadata = externalUrlMetadata(url);
   ensureExternalUrlMatchesPolicy(metadata, policy);
   return {
@@ -333,6 +439,7 @@ function externalUrlToAttachment(
     storagePath: url.href,
     webViewLink: url.href,
     deleteOnRemove: false,
+    sourceProvider: "direct_pdf",
   };
 }
 
@@ -366,16 +473,25 @@ export async function getScanBlob(scan: ScanAttachment): Promise<Blob> {
     throw new Error("Google Документ відкривається та редагується безпосередньо у Google Drive.");
   }
   if (scan.storage === "external-url") {
-    const target = sanitizeWebUrl(scan.webViewLink || scan.storagePath);
-    if (!target) throw new Error("Зовнішнє посилання має некоректний або небезпечний формат.");
-    const kind = previewKindFromMetadata(scan.name, scan.mimeType);
-    if (kind === "web") {
-      return new Blob([externalPreviewHtml(target, scan.name)], { type: "text/html" });
+    const strategy = getExternalScanPreviewStrategy(scan);
+    if (strategy.mode === "source-page") {
+      return new Blob([externalPreviewHtml(strategy.sourceUrl, scan.name)], { type: "text/html" });
     }
 
     const cacheIdentity = scanBlobCacheIdentity(scan);
     const cached = await getCachedDocumentBlob(scanBlobCacheKey(scan), cacheIdentity);
     if (cached) return cached;
+
+    let target = strategy.sourceUrl;
+    let kind = previewKindFromMetadata(scan.name, scan.mimeType);
+    if (strategy.mode === "mediawiki-file") {
+      const resolved = await resolveMediaWikiFilePage(strategy.sourceUrl);
+      target = resolved.fileUrl;
+      kind = previewKindFromMetadata(resolved.fileName, resolved.mimeType);
+      if (kind === "web") {
+        throw new Error("Вікіджерела не повернули PDF або зображення для внутрішнього перегляду.");
+      }
+    }
 
     const blob = await fetchExternalDocumentBlob(target, kind);
     await cacheScanBlob(scan, blob).catch(() => undefined);
@@ -405,11 +521,12 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
 
   let response: Response;
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 30_000);
   try {
     response = await fetch(target, {
       credentials: "omit",
       mode: "cors",
+      referrerPolicy: "no-referrer",
       signal: controller.signal,
       headers: {
         Accept: kind === "pdf"
@@ -420,7 +537,7 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
       },
     });
   } catch (error) {
-    window.clearTimeout(timeoutId);
+    globalThis.clearTimeout(timeoutId);
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error("Зовнішній сайт не відповів за 30 секунд. Спробуйте ще раз або додайте фото вручну.");
     }
@@ -462,7 +579,7 @@ async function fetchExternalDocumentBlob(target: string, kind: ScanPreviewKind):
     }
     throw error;
   } finally {
-    window.clearTimeout(timeoutId);
+    globalThis.clearTimeout(timeoutId);
   }
 }
 
@@ -534,19 +651,32 @@ function scanBlobCacheIdentity(scan: ScanAttachment): string {
       || String(scan.size || scan.createdAt || "unknown");
     return `gdrive:${scan.storagePath}:${version}`;
   }
-  const source = scan.webViewLink || scan.storagePath;
-  const version = scan.driveModifiedTime || String(scan.size || scan.createdAt || "unknown");
+  const source = scan.canonicalSourceUrl || scan.webViewLink || scan.storagePath;
+  const version = scan.sourceFingerprint?.sha1
+    || scan.sourceFingerprint?.etag
+    || scan.sourceFingerprint?.lastModified
+    || scan.driveModifiedTime
+    || String(scan.size || scan.createdAt || "unknown");
   return `external:${source}:${version}`;
 }
 
 export async function getScanPreviewSource(scan: ScanAttachment): Promise<ScanPreviewSource> {
   assertScanAvailable(scan);
   if (scan.storage === "external-url") {
-    const target = sanitizeWebUrl(scan.webViewLink || scan.storagePath);
-    if (!target) throw new Error("Зовнішнє посилання має некоректний або небезпечний формат.");
+    const strategy = getExternalScanPreviewStrategy(scan);
+    if (strategy.mode === "mediawiki-file") {
+      const resolved = await resolveMediaWikiFilePage(strategy.sourceUrl);
+      return {
+        kind: previewKindFromMetadata(resolved.fileName, resolved.mimeType),
+        url: resolved.fileUrl,
+        revokeOnClose: false,
+      };
+    }
     return {
-      kind: previewKindFromMetadata(scan.name, scan.mimeType),
-      url: target,
+      kind: strategy.mode === "source-page"
+        ? "web"
+        : previewKindFromMetadata(scan.name, scan.mimeType),
+      url: strategy.sourceUrl,
       revokeOnClose: false,
     };
   }
@@ -647,11 +777,14 @@ function isGoogleDriveReference(value: string): boolean {
 }
 
 function externalDocumentUrl(fileReference: string): URL {
-  const safeUrl = sanitizeWebUrl(fileReference);
-  if (!safeUrl) {
-    throw new Error("Вставте коректне посилання на документ або сторінку джерела.");
+  const normalized = normalizeExternalDocumentUrl(fileReference);
+  if (normalized.removedSensitiveParameters.length) {
+    // A stripped signed URL would usually stop working, while preserving it
+    // would leak a secret into documents.custom_fields. The secure gateway
+    // will eventually exchange such input for an opaque access session.
+    throw new DocumentSourceError("SENSITIVE_URL_NOT_PERSISTABLE");
   }
-  return new URL(safeUrl);
+  return new URL(normalized.url);
 }
 
 function externalUrlMetadata(url: URL): { name: string; mimeType: string } {
@@ -659,7 +792,9 @@ function externalUrlMetadata(url: URL): { name: string; mimeType: string } {
   const title = externalUrlTitle(url);
   return {
     name: title,
-    mimeType: mimeTypeFromExtension(extension) || "text/html",
+    mimeType: isKnownWebPageUrl(url) || isAuthenticatedSourceUrl(url)
+      ? "text/html"
+      : mimeTypeFromExtension(extension) || "text/html",
   };
 }
 
@@ -677,9 +812,166 @@ function externalUrlTitle(url: URL): string {
 function previewKindFromMetadata(name: string, mimeType: string): ScanPreviewKind {
   const normalizedMime = mimeType.toLocaleLowerCase();
   const extension = name.split(".").pop()?.toLocaleLowerCase() ?? "";
+  if (normalizedMime === "text/html" || normalizedMime === "application/xhtml+xml") return "web";
   if (normalizedMime === "application/pdf" || extension === "pdf") return "pdf";
   if (normalizedMime.startsWith("image/") || imageExtensions.has(extension)) return "image";
   return "web";
+}
+
+/**
+ * Decides whether an external reference is a directly previewable file or a
+ * source web page. The URL check intentionally precedes stale attachment MIME
+ * metadata: older Wikisource `File:...pdf` records were saved as PDFs even
+ * though their URL points to an HTML description page.
+ */
+export function getExternalScanPreviewStrategy(scan: ScanAttachment): ExternalScanPreviewStrategy {
+  const sourceUrl = sanitizeWebUrl(scan.webViewLink || scan.storagePath);
+  if (!sourceUrl) {
+    throw new Error("Зовнішнє посилання має некоректний або небезпечний формат.");
+  }
+
+  const url = new URL(sourceUrl);
+  assertExternalUrlHasNoCredentials(url);
+  if (isAuthenticatedSourceUrl(url)) {
+    return { mode: "source-page", sourceUrl, reason: "authenticated-source" };
+  }
+  const mediaWikiSource = parseMediaWikiDocumentUrl(url.href);
+  if (mediaWikiSource) {
+    return {
+      mode: "mediawiki-file",
+      sourceUrl: mediaWikiSource.sourceUrl,
+      pageTitle: mediaWikiSource.baseFileTitle,
+      ...(mediaWikiSource.initialPage !== undefined
+        ? { initialPage: mediaWikiSource.initialPage }
+        : {}),
+    };
+  }
+  if (isKnownWebPageUrl(url)) {
+    return { mode: "source-page", sourceUrl, reason: "web-page" };
+  }
+
+  const normalizedMime = (scan.mimeType || "").toLocaleLowerCase();
+  if (normalizedMime === "text/html" || normalizedMime === "application/xhtml+xml") {
+    return { mode: "source-page", sourceUrl, reason: "web-page" };
+  }
+  if (url.protocol !== "https:") {
+    return { mode: "source-page", sourceUrl, reason: "web-page" };
+  }
+  const extension = urlExtension(url)
+    || scan.name.split(".").pop()?.toLocaleLowerCase()
+    || "";
+  if (
+    normalizedMime === "application/pdf"
+    || normalizedMime.startsWith("image/")
+    || extension === "pdf"
+    || imageExtensions.has(extension)
+  ) {
+    return { mode: "embedded", sourceUrl };
+  }
+
+  return { mode: "source-page", sourceUrl, reason: "web-page" };
+}
+
+/**
+ * Resolve an official MediaWiki file-description page to the original file.
+ * Wikimedia deliberately exposes this through `imageinfo`; fetching or
+ * scraping the HTML page would otherwise return markup instead of PDF/image
+ * bytes and break the document workspace.
+ */
+export async function resolveMediaWikiFilePage(source: string): Promise<ResolvedMediaWikiFile> {
+  const parsed = parseMediaWikiDocumentUrl(source);
+  if (!parsed) {
+    throw new Error("Посилання не веде на File, Index або Page у Вікіджерелах чи Вікісховищі.");
+  }
+
+  let lastHttpStatus: number | null = null;
+  for (const apiUrl of mediaWikiImageInfoApiCandidates(parsed)) {
+    const controller = new AbortController();
+    const timeoutId = globalThis.setTimeout(() => controller.abort(), 15_000);
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, {
+        credentials: "omit",
+        mode: "cors",
+        referrerPolicy: "no-referrer",
+        signal: controller.signal,
+        headers: { Accept: "application/json" },
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error("Вікіджерела не відповіли за 15 секунд. Спробуйте відкрити документ ще раз.");
+      }
+      // A network failure on the language site can still be followed by the
+      // Commons fallback. Preserve the final failure as a user-facing error.
+      continue;
+    } finally {
+      globalThis.clearTimeout(timeoutId);
+    }
+
+    lastHttpStatus = response.status;
+    if (!response.ok) continue;
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      continue;
+    }
+
+    const file = parseMediaWikiImageInfoResponse(payload);
+    if (!file) continue;
+    return {
+      sourceUrl: parsed.sourceUrl,
+      sourcePageUrl: parsed.canonicalPageUrl,
+      fileUrl: file.fileUrl,
+      fileName: file.fileName,
+      mimeType: file.mimeType,
+      providerFileTitle: file.canonicalFileTitle,
+      ...(file.size !== undefined ? { size: file.size } : {}),
+      ...(file.pageCount !== undefined ? { pageCount: file.pageCount } : {}),
+      ...(parsed.initialPage !== undefined ? { initialPage: parsed.initialPage } : {}),
+      ...(file.sha1 ? { sha1: file.sha1 } : {}),
+      ...(file.timestamp ? { timestamp: file.timestamp } : {}),
+    };
+  }
+
+  if (lastHttpStatus && lastHttpStatus >= 400) {
+    throw new Error(`API Вікіджерел не повернув файл (${lastHttpStatus}).`);
+  }
+  throw new Error("На сторінці Вікіджерел не знайдено доступного PDF або зображення.");
+}
+
+function isMediaWikiHost(hostname: string): boolean {
+  const host = hostname.toLocaleLowerCase();
+  return host === "wikisource.org"
+    || host.endsWith(".wikisource.org")
+    || host === "wikipedia.org"
+    || host.endsWith(".wikipedia.org")
+    || host === "wikimedia.org"
+    || host.endsWith(".wikimedia.org");
+}
+
+function isAuthenticatedSourceUrl(url: URL): boolean {
+  const hostname = url.hostname.toLocaleLowerCase();
+  return hostname === "familysearch.org" || hostname.endsWith(".familysearch.org");
+}
+
+function isKnownWebPageUrl(url: URL): boolean {
+  const pathname = url.pathname.toLocaleLowerCase();
+
+  if (isMediaWikiHost(url.hostname) && (pathname.startsWith("/wiki/") || pathname.endsWith("/w/index.php"))) {
+    return true;
+  }
+
+  const extension = urlExtension(url);
+  return extension === "html" || extension === "htm";
+}
+
+function assertExternalUrlHasNoCredentials(url: URL): void {
+  if (!url.username && !url.password) return;
+  throw new Error(
+    "Не вставляйте логін або пароль у посилання. Відкрийте захищене джерело окремо та увійдіть на його сайті.",
+  );
 }
 
 function mimeTypeFromExtension(extension: string): string {
@@ -703,11 +995,12 @@ function urlExtension(url: URL): string {
 }
 
 function openExternalWindow(target: string): void {
-  const opened = window.open(target, "_blank");
-  if (!opened) {
-    throw new Error("Браузер заблокував відкриття джерела. Дозвольте спливні вікна для цього сайту.");
-  }
-  opened.opener = null;
+  const anchor = document.createElement("a");
+  anchor.href = target;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.referrerPolicy = "no-referrer";
+  anchor.click();
 }
 
 function externalPreviewHtml(target: string, title: string): string {
@@ -726,20 +1019,36 @@ function externalPreviewHtml(target: string, title: string): string {
         height: 100%;
         margin: 0;
         background: #102f29;
+        color: #f7f4e9;
+        font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        overflow: hidden;
       }
 
-      iframe {
+      .source-frame {
         width: 100%;
         height: 100%;
         border: 0;
         background: #fff;
       }
 
-      .source-fallback {
-        position: absolute;
+      .source-toolbar {
+        position: fixed;
         right: 16px;
         bottom: 16px;
         z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        max-width: calc(100% - 32px);
+        padding: 8px 10px;
+        border: 1px solid rgba(247, 244, 233, 0.25);
+        border-radius: 10px;
+        background: rgba(16, 47, 41, 0.94);
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+      }
+
+      .source-fallback {
+        display: inline-block;
         border-radius: 8px;
         background: #fff;
         color: #0c332d;
@@ -751,8 +1060,17 @@ function externalPreviewHtml(target: string, title: string): string {
     </style>
   </head>
   <body>
-    <iframe title="${safeTitle}" src="${safeTarget}" sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts" referrerpolicy="no-referrer-when-downgrade"></iframe>
-    <a class="source-fallback" href="${safeTarget}" target="_blank" rel="noopener noreferrer">Відкрити джерело</a>
+    <iframe
+      class="source-frame"
+      src="${safeTarget}"
+      title="${safeTitle}"
+      sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts"
+      referrerpolicy="no-referrer"
+    ></iframe>
+    <div class="source-toolbar">
+      <span>Якщо ресурс забороняє вбудований перегляд:</span>
+      <a class="source-fallback" href="${safeTarget}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Відкрити джерело</a>
+    </div>
   </body>
 </html>`;
 }

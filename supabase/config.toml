@@ -44,6 +44,11 @@ verify_jwt = true
 [functions.fetch-gedcom-photo]
 verify_jwt = true
 
+# Authenticated open-session and Range/HEAD stream endpoint. A valid user JWT
+# is required in addition to the short-lived opaque gateway token.
+[functions.pdf-gateway]
+verify_jwt = true
+
 # Receives only an anonymous per-document client/session identifier and a
 # bounded active-second count. The function also validates the caller's JWT in
 # code before relaying the aggregate to Google Analytics.

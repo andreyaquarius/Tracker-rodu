@@ -5,6 +5,7 @@ dist/
 .tools/
 .claude/
 .vite-dev*.log
+.codex-*.log
 supabase/.branches/
 supabase/.temp/
 .env

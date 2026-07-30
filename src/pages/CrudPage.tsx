@@ -22,6 +22,8 @@ import type {
   TaskRecord,
 } from "../types";
 import { createId } from "../utils/id";
+import type { CreateFindingDocumentReferenceInput } from "../services/findingDocumentReferences.ts";
+import { settleEntitySave } from "../services/entitySaveWorkflow.ts";
 import {
   formatDateForDisplay,
   formatDateTimeForDisplay,
@@ -41,6 +43,7 @@ import { PersonFormModal, type PersonInitialDraft } from "../components/PersonFo
 import {
   ScanAttachmentsEditor,
   ScanAttachmentsView,
+  type ExternalPdfSourceAddContext,
 } from "../components/ScanAttachments";
 import type { DocumentScanViewerContext } from "../components/DocumentWorkspaceViewer";
 import type { PageKey } from "../components/Sidebar";
@@ -96,6 +99,7 @@ interface CrudPageProps {
     context?: DocumentScanViewerContext,
     scans?: ScanAttachment[],
   ) => void;
+  onOpenFindingDocumentReference?: (findingId: string) => void | Promise<void>;
   onSavePerson?: (person: Person) => void | Promise<Person | null | void>;
   onSaveRelation?: (relation: PersonRelation) => void | Promise<PersonRelation | null | void>;
   onSave: (entity: AppEntity) => void | AppEntity | null | Promise<AppEntity | null | void>;
@@ -108,6 +112,7 @@ interface CrudPageProps {
   canCreate?: boolean;
   projectName?: string;
   researchRequired?: boolean;
+  externalPdfSourceAdd?: ExternalPdfSourceAddContext;
 }
 
 type FormValue =
@@ -117,6 +122,7 @@ type FormValue =
   | FindingParticipant[]
   | ScanAttachment[]
   | DocumentFragmentSelection
+  | Omit<CreateFindingDocumentReferenceInput, "findingId">
   | GeoPoint
   | null;
 type FormRecord = Record<string, FormValue>;
@@ -166,6 +172,7 @@ export function CrudPage({
   initialCreateRequest,
   onOpenRelated,
   onOpenScanViewer,
+  onOpenFindingDocumentReference,
   onSavePerson,
   onSaveRelation,
   onSave,
@@ -178,6 +185,7 @@ export function CrudPage({
   canCreate = true,
   researchRequired = false,
   projectName = "Трекер Роду",
+  externalPdfSourceAdd,
 }: CrudPageProps) {
   const canCreateRecords = !readOnly && canCreate;
   const canAttemptCreate = !readOnly;
@@ -238,6 +246,7 @@ export function CrudPage({
           customFieldDefinitions={customFieldDefinitions}
           onOpenRelated={onOpenRelated}
           onOpenScanViewer={onOpenScanViewer}
+          onOpenFindingDocumentReference={onOpenFindingDocumentReference}
           projectId={projectId}
           canCreateTasks={canCreateRecords}
           onCreateTask={onCreateTask}
@@ -272,12 +281,10 @@ export function CrudPage({
           onSaveRelation={onSaveRelation}
           onPersist={onSave}
           onOpenScanViewer={onOpenScanViewer}
+          externalPdfSourceAdd={externalPdfSourceAdd}
           researchRequired={researchRequired}
           onClose={close}
-          onSave={(savedEntity) => {
-            onSave(savedEntity);
-            close();
-          }}
+          onSave={onSave}
           stackIndex={stackIndex}
           dockIndex={dockIndex}
           onFocus={onFocus}
@@ -309,12 +316,10 @@ export function CrudPage({
           onSaveRelation={onSaveRelation}
           onPersist={onSave}
           onOpenScanViewer={onOpenScanViewer}
+          externalPdfSourceAdd={externalPdfSourceAdd}
           researchRequired={researchRequired}
           onClose={close}
-          onSave={(savedEntity) => {
-            onSave(savedEntity);
-            close();
-          }}
+          onSave={onSave}
           stackIndex={stackIndex}
           dockIndex={dockIndex}
           onFocus={onFocus}
@@ -880,6 +885,7 @@ export function EntityDetailsModal({
   customFieldDefinitions,
   onOpenRelated,
   onOpenScanViewer,
+  onOpenFindingDocumentReference,
   projectId,
   canCreateTasks,
   onCreateTask,
@@ -903,6 +909,7 @@ export function EntityDetailsModal({
     context?: DocumentScanViewerContext,
     scans?: ScanAttachment[],
   ) => void;
+  onOpenFindingDocumentReference?: (findingId: string) => void | Promise<void>;
   projectId: string;
   canCreateTasks: boolean;
   onCreateTask?: (task: TaskRecord) => void;
@@ -914,6 +921,7 @@ export function EntityDetailsModal({
 }) {
   const record = entity as unknown as Record<string, unknown>;
   const [geneHelpRequest, setGeneHelpRequest] = useState<GeneHelpInitialRequest | null>(null);
+  const [openingFindingDocument, setOpeningFindingDocument] = useState(false);
   const customDefinitions = definitionsForModule(customFieldDefinitions, config.collection);
   const geo = config.collection === "findings" ? record.geo as GeoPoint | null | undefined : null;
   const visibleFields = config.fields.filter((field) => {
@@ -978,6 +986,25 @@ export function EntityDetailsModal({
           <span>Оновлено: {formatEntityDate(entity.updatedAt)}</span>
         </div>
         <div className="details-actions">
+          {config.collection === "findings" && projectId && onOpenFindingDocumentReference ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={openingFindingDocument}
+              onClick={() => {
+                setOpeningFindingDocument(true);
+                void (async () => {
+                  try {
+                    await onOpenFindingDocumentReference(entity.id);
+                  } finally {
+                    setOpeningFindingDocument(false);
+                  }
+                })();
+              }}
+            >
+              {openingFindingDocument ? "Відкриваємо PDF…" : "Відкрити сторінку PDF"}
+            </button>
+          ) : null}
           {config.collection === "hypotheses" && projectId ? (
             <HypothesisAiAgent
               hypothesis={entity as Hypothesis}
@@ -1279,6 +1306,7 @@ export function EntityModal({
   onSaveRelation,
   onPersist,
   onOpenScanViewer,
+  externalPdfSourceAdd,
   researchRequired,
   onClose,
   onSave,
@@ -1307,6 +1335,7 @@ export function EntityModal({
     context?: DocumentScanViewerContext,
     scans?: ScanAttachment[],
   ) => void;
+  externalPdfSourceAdd?: ExternalPdfSourceAddContext;
   researchRequired: boolean;
   onClose: () => void;
   onSave: (entity: AppEntity) => void | AppEntity | null | Promise<AppEntity | null | void>;
@@ -1328,6 +1357,12 @@ export function EntityModal({
       if (initial.fragmentSelection) {
         defaults.fragmentSelection = initial.fragmentSelection as DocumentFragmentSelection;
       }
+      if (initial.documentReferenceDraft) {
+        defaults.documentReferenceDraft = initial.documentReferenceDraft as Omit<
+          CreateFindingDocumentReferenceInput,
+          "findingId"
+        >;
+      }
     }
     return defaults;
   });
@@ -1337,6 +1372,9 @@ export function EntityModal({
   const [createdFindingPersons, setCreatedFindingPersons] = useState<CreatedFindingPerson[]>([]);
   const [locallyCreatedRelations, setLocallyCreatedRelations] = useState<PersonRelation[]>([]);
   const [geneHelpRequest, setGeneHelpRequest] = useState<GeneHelpInitialRequest | null>(null);
+  const [savePending, setSavePending] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const savePendingRef = useRef(false);
   const persistedBaseUpdatedAtRef = useRef<string>(entity?.updatedAt ?? "");
   const availablePersons = useMemo(
     () => mergePersonsById(persons, locallyCreatedPersons),
@@ -1406,8 +1444,9 @@ export function EntityModal({
     return Boolean(field.required || (field.type === "research" && researchRequired));
   };
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (savePendingRef.current) return;
     const timestamp = nowIso();
     const participants = Array.isArray(form.participants)
       ? form.participants as FindingParticipant[]
@@ -1446,7 +1485,20 @@ export function EntityModal({
       window.alert(`Заповніть обов’язкове поле «${missingRequiredField.label}».`);
       return;
     }
-    onSave(buildEntityForSave(form, timestamp));
+    savePendingRef.current = true;
+    setSavePending(true);
+    setSaveError("");
+    try {
+      const outcome = await settleEntitySave(() => onSave(buildEntityForSave(form, timestamp)));
+      if (outcome.status === "failed") {
+        setSaveError(outcome.message);
+        return;
+      }
+      onClose();
+    } finally {
+      savePendingRef.current = false;
+      setSavePending(false);
+    }
   };
 
   return (
@@ -1458,7 +1510,7 @@ export function EntityModal({
       dockIndex={dockIndex}
       onFocus={onFocus}
     >
-      <form onSubmit={submit}>
+      <form onSubmit={submit} aria-busy={savePending}>
         <div className="form-grid">
           {config.fields.map((field) => (
             <FormField
@@ -1478,6 +1530,14 @@ export function EntityModal({
               }
               findingType={config.collection === "findings" ? String(form.findingType ?? "") : ""}
               scanViewerContext={documentScanViewerContext(config.collection, form)}
+              externalPdfSourceAdd={
+                config.collection === "documents" && externalPdfSourceAdd?.enabled
+                  ? {
+                      ...externalPdfSourceAdd,
+                      ...(entity?.id ? { documentId: entity.id } : {}),
+                    }
+                  : undefined
+              }
               scanDriveFolderPath={scanDriveFolderPath(config.collection, field, form, availablePersons)}
               scanUploadBlockedMessage={
                 field.type === "scans" && archiveReferenceMissingLabels.length
@@ -1547,6 +1607,7 @@ export function EntityModal({
             }}
           />
         ) : null}
+        {saveError ? <div className="form-error" role="alert">{saveError}</div> : null}
         <div className="modal-actions">
           {config.collection === "tasks" ? (
             <button
@@ -1561,8 +1622,10 @@ export function EntityModal({
               Попросити допомоги в GeneHelp
             </button>
           ) : null}
-          <button type="button" className="button button-ghost" onClick={onClose}>Скасувати</button>
-          <button type="submit" className="button button-primary">Зберегти</button>
+          <button type="button" className="button button-ghost" onClick={onClose} disabled={savePending}>Скасувати</button>
+          <button type="submit" className="button button-primary" disabled={savePending}>
+            {savePending ? "Збереження…" : "Зберегти"}
+          </button>
         </div>
       </form>
       {geneHelpRequest ? (
@@ -2779,6 +2842,7 @@ function FormField({
   matrixDocumentType,
   findingType,
   scanViewerContext,
+  externalPdfSourceAdd,
   scanDriveFolderPath,
   scanUploadBlockedMessage,
   onCreatePerson,
@@ -2798,6 +2862,7 @@ function FormField({
   matrixDocumentType: string;
   findingType: string;
   scanViewerContext?: DocumentScanViewerContext;
+  externalPdfSourceAdd?: ExternalPdfSourceAddContext;
   scanDriveFolderPath?: string[];
   scanUploadBlockedMessage?: string;
   onCreatePerson: () => void;
@@ -2841,6 +2906,7 @@ function FormField({
         policy={field.attachmentPolicy}
         driveFolderPath={scanDriveFolderPath}
         uploadBlockedMessage={scanUploadBlockedMessage}
+        externalPdfSourceAdd={externalPdfSourceAdd}
         scans={scans}
         onChange={onChange}
         onPreview={onOpenScanViewer ? (scan, scans) => onOpenScanViewer(scan, scanViewerContext, scans) : undefined}

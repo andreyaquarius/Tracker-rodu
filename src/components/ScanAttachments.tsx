@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from "react";
 import { createPortal } from "react-dom";
 import type { ScanAttachment } from "../types";
+import type { ResolvedPdfSource } from "../services/document-sources/contracts.ts";
+import {
+  attachmentFromResolvedDocumentSource,
+  resolveDocumentSourceForAdd,
+  type DocumentSourceAddContext,
+  type DocumentSourceAddResolution,
+} from "../services/documentSourceAddFlow.ts";
 import {
   attachAttachmentReference,
   attachPickedGoogleDriveFiles,
@@ -9,6 +16,7 @@ import {
   type DriveAttachRange,
   type AttachmentPolicy,
   downloadScan,
+  getExternalScanPreviewStrategy,
   getScanBlob,
   inspectAttachmentReference,
   isGoogleWorkspaceDriveFile,
@@ -34,6 +42,10 @@ type UploadProgressState = {
   percent: number;
 };
 
+export type ExternalPdfSourceAddContext = DocumentSourceAddContext & {
+  enabled: true;
+};
+
 export function ScanAttachmentsEditor({
   title = "Файли та вкладення",
   description = `Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB. Максимальний розмір одного файлу — ${MAX_ATTACHMENT_SIZE_MB} МБ. Файли зберігаються у папці активного проєкту в хмарному сховищі.`,
@@ -43,6 +55,7 @@ export function ScanAttachmentsEditor({
   policy = "all",
   driveFolderPath,
   uploadBlockedMessage,
+  externalPdfSourceAdd,
   scans,
   onChange,
   onPreview,
@@ -55,6 +68,7 @@ export function ScanAttachmentsEditor({
   policy?: AttachmentPolicy;
   driveFolderPath?: string[];
   uploadBlockedMessage?: string;
+  externalPdfSourceAdd?: ExternalPdfSourceAddContext;
   scans: ScanAttachment[];
   onChange: (scans: ScanAttachment[]) => void;
   onPreview?: (scan: ScanAttachment, scans?: ScanAttachment[]) => void;
@@ -207,6 +221,21 @@ export function ScanAttachmentsEditor({
     } finally {
       setAttachingDriveFile(false);
     }
+  };
+
+  const attachResolvedSource = async (source: ResolvedPdfSource) => {
+    const attached = attachmentFromResolvedDocumentSource(source);
+    if (maxFiles && scans.length + 1 > maxFiles) {
+      throw new Error(limitMessage || "Вибрано більше файлів, ніж дозволено для цього поля.");
+    }
+    const duplicate = scans.some((scan) => (
+      scan.sourceProvider === attached.sourceProvider
+      && (scan.canonicalSourceUrl || scan.storagePath)
+        === (attached.canonicalSourceUrl || attached.storagePath)
+    ));
+    if (duplicate) throw new Error("Цей PDF уже прикріплено до документа.");
+    onChange([...scans, attached]);
+    setDriveAttachOpen(false);
   };
 
   const pickFromDrive = async () => {
@@ -452,6 +481,18 @@ export function ScanAttachmentsEditor({
           onInspect={inspectDriveReference}
           onClose={() => setDriveAttachOpen(false)}
           onAttach={attachFromDrive}
+          sourceAddContext={
+            policy === "document" && externalPdfSourceAdd?.enabled
+              ? externalPdfSourceAdd
+              : undefined
+          }
+          onAttachResolved={attachResolvedSource}
+          onPreviewResolved={onPreview
+            ? (source) => {
+                const previewScan = attachmentFromResolvedDocumentSource(source);
+                onPreview(previewScan, [previewScan]);
+              }
+            : undefined}
         />
       ) : null}
     </fieldset>
@@ -566,22 +607,90 @@ function GoogleDriveAttachModal({
   onInspect,
   onClose,
   onAttach,
+  sourceAddContext,
+  onAttachResolved,
+  onPreviewResolved,
 }: {
   loading: boolean;
   onInspect: (fileReference: string) => Promise<DriveAttachmentPreview>;
   onClose: () => void;
   onAttach: (fileReference: string, range: DriveAttachRange) => Promise<void>;
+  sourceAddContext?: ExternalPdfSourceAddContext;
+  onAttachResolved: (source: ResolvedPdfSource) => Promise<void>;
+  onPreviewResolved?: (source: ResolvedPdfSource) => void;
 }) {
   const [fileReference, setFileReference] = useState("");
   const [preview, setPreview] = useState<DriveAttachmentPreview | null>(null);
+  const [resolution, setResolution] = useState<DocumentSourceAddResolution | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState("");
   const [checking, setChecking] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
   const [rangeStart, setRangeStart] = useState("1");
   const [rangeEnd, setRangeEnd] = useState("");
+  const [validationNonce, setValidationNonce] = useState(0);
+  const sourceAddEnabled = sourceAddContext?.enabled === true;
+  const selectedSource = resolution?.candidates.find(
+    (candidate) => candidate.id === selectedCandidateId,
+  )?.source ?? null;
+
+  useEffect(() => {
+    if (!sourceAddContext?.enabled) return undefined;
+    const reference = fileReference.trim();
+    setPreview(null);
+    setResolution(null);
+    setSelectedCandidateId("");
+    if (!reference) {
+      setChecking(false);
+      setModalError("");
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    let active = true;
+    const timeoutId = globalThis.setTimeout(() => {
+      setChecking(true);
+      setModalError("");
+      void resolveDocumentSourceForAdd(reference, {
+        userId: sourceAddContext.userId,
+        projectId: sourceAddContext.projectId,
+        ...(sourceAddContext.documentId ? { documentId: sourceAddContext.documentId } : {}),
+        signal: controller.signal,
+      }).then((nextResolution) => {
+        if (!active || controller.signal.aborted) return;
+        setResolution(nextResolution);
+        setSelectedCandidateId(
+          nextResolution.candidates.length === 1 ? nextResolution.candidates[0]!.id : "",
+        );
+      }).catch((error) => {
+        if (!active || controller.signal.aborted) return;
+        setModalError(error instanceof Error ? error.message : "Не вдалося перевірити посилання.");
+      }).finally(() => {
+        if (active && !controller.signal.aborted) setChecking(false);
+      });
+    }, 450);
+
+    return () => {
+      active = false;
+      globalThis.clearTimeout(timeoutId);
+      controller.abort("source input changed");
+    };
+  }, [
+    fileReference,
+    sourceAddContext?.documentId,
+    sourceAddContext?.enabled,
+    sourceAddContext?.projectId,
+    sourceAddContext?.userId,
+    validationNonce,
+  ]);
 
   const inspect = async () => {
     const reference = fileReference.trim();
     if (!reference) return;
+    if (sourceAddEnabled) {
+      setValidationNonce((value) => value + 1);
+      return;
+    }
     setChecking(true);
     setModalError("");
     try {
@@ -600,6 +709,30 @@ function GoogleDriveAttachModal({
   const attach = async () => {
     const reference = fileReference.trim();
     if (!reference) return;
+    if (sourceAddEnabled) {
+      if (!selectedSource) {
+        setModalError(
+          resolution?.candidates.length
+            ? "Оберіть один PDF зі списку."
+            : "Дочекайтеся успішної перевірки посилання.",
+        );
+        return;
+      }
+      setSubmitting(true);
+      setModalError("");
+      try {
+        await onAttachResolved(selectedSource);
+      } catch (error) {
+        setModalError(error instanceof Error ? error.message : "Не вдалося додати PDF.");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+    if (!preview) {
+      setModalError("Спочатку перевірте посилання та переконайтеся, що джерело доступне.");
+      return;
+    }
     setModalError("");
     try {
       await onAttach(reference, preview?.kind === "folder"
@@ -627,7 +760,9 @@ function GoogleDriveAttachModal({
         <div className="scan-preview-header">
           <div>
             <span className="eyebrow">Джерело</span>
-            <h2 id="drive-attach-title">Прикріпити за посиланням</h2>
+            <h2 id="drive-attach-title">
+              {sourceAddEnabled ? "Додати зовнішній PDF" : "Прикріпити за посиланням"}
+            </h2>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Закрити">
             ×
@@ -635,15 +770,21 @@ function GoogleDriveAttachModal({
         </div>
         <div className="drive-attach-body">
           <label>
-            <span>Посилання на зовнішній документ або сторінку джерела</span>
+            <span>
+              {sourceAddEnabled
+                ? "Посилання на PDF, Вікіджерела, Вікісховище або Google Drive"
+                : "Посилання на зовнішній документ або сторінку джерела"}
+            </span>
             <input
               value={fileReference}
               onChange={(event) => {
                 setFileReference(event.target.value);
                 setPreview(null);
+                setResolution(null);
+                setSelectedCandidateId("");
                 setModalError("");
               }}
-              placeholder="https://uk.wikisource.org/wiki/... або https://archive.org/..."
+              placeholder="https://uk.wikisource.org/wiki/... або https://drive.google.com/..."
               autoFocus
             />
           </label>
@@ -651,15 +792,72 @@ function GoogleDriveAttachModal({
             Приватний файл Google Drive додавайте кнопкою «Обрати з Google Drive» — так Google
             надає застосунку доступ саме до вибраного файла.
           </p>
+          {sourceAddEnabled ? (
+            <p className="form-help">
+              Провайдер визначиться автоматично. Для статті Вікіджерел із кількома PDF
+              потрібно буде вибрати один файл. Під час перевірки весь PDF не завантажується.
+            </p>
+          ) : (
+            <p className="form-help">
+              Прямі публічні PDF, зображення та сторінки файлів Wikisource відкриваються у
+              Переглядачі Трекера Роду. Для інших сторінок Переглядач спробує захищений вбудований
+              режим; якщо ресурс його забороняє або вимагає авторизації, залишиться кнопка переходу
+              до оригінального джерела.
+            </p>
+          )}
           <button
             type="button"
             className="button button-secondary"
             disabled={checking || loading || !fileReference.trim()}
             onClick={() => void inspect()}
           >
-            {checking ? "Перевіряємо…" : "Перевірити"}
+            {checking
+              ? "Перевіряємо посилання…"
+              : sourceAddEnabled
+                ? "Перевірити ще раз"
+                : "Перевірити"}
           </button>
           {modalError ? <div className="alert alert-error">{modalError}</div> : null}
+          {sourceAddEnabled && checking ? (
+            <div className="source-add-checking" role="status">Перевіряємо посилання…</div>
+          ) : null}
+          {sourceAddEnabled && resolution?.candidates.length && resolution.candidates.length > 1 ? (
+            <fieldset className="source-add-candidates">
+              <legend>Знайдено кілька PDF — оберіть один</legend>
+              {resolution.candidates.map((candidate) => (
+                <label key={candidate.id} className="source-add-candidate">
+                  <input
+                    type="radio"
+                    name="document-source-candidate"
+                    value={candidate.id}
+                    checked={selectedCandidateId === candidate.id}
+                    onChange={() => setSelectedCandidateId(candidate.id)}
+                  />
+                  <span>
+                    <strong>{candidate.source.displayName ?? candidate.source.providerFileTitle ?? "PDF"}</strong>
+                    <small>
+                      {[
+                        candidate.source.fileSizeBytes !== undefined
+                          ? formatFileSize(candidate.source.fileSizeBytes)
+                          : "розмір не визначено",
+                        candidate.source.pageCount ? `${candidate.source.pageCount} стор.` : "",
+                      ].filter(Boolean).join(" · ")}
+                    </small>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          ) : null}
+          {sourceAddEnabled && selectedSource ? (
+            <ResolvedDocumentSourcePreview
+              source={selectedSource}
+              onPreview={
+                onPreviewResolved && selectedSource.accessMode !== "secure_proxy"
+                  ? () => onPreviewResolved(selectedSource)
+                  : undefined
+              }
+            />
+          ) : null}
           {preview ? (
             <div className="drive-attach-preview">
               <strong>
@@ -673,8 +871,15 @@ function GoogleDriveAttachModal({
                 {preview.kind === "folder"
                   ? `Знайдено файлів: ${preview.totalFiles}`
                   : preview.source === "external-url"
-                    ? "Зовнішнє посилання"
-                  : formatFileSize(preview.attachableFiles[0]?.size ?? 0)}
+                    ? [
+                        preview.provider === "wikimedia" ? "Wikimedia / Wikisource" : "Зовнішній PDF",
+                        preview.attachableFiles[0]?.size
+                          ? formatFileSize(preview.attachableFiles[0].size)
+                          : "розмір не визначено",
+                        preview.pageCount ? `${preview.pageCount} стор.` : "",
+                        preview.initialPage ? `відкрити зі стор. ${preview.initialPage}` : "",
+                      ].filter(Boolean).join(" · ")
+                    : formatFileSize(preview.attachableFiles[0]?.size ?? 0)}
               </small>
               {preview.kind === "folder" ? (
                 <>
@@ -721,16 +926,72 @@ function GoogleDriveAttachModal({
           <button
             type="button"
             className="button button-primary"
-            disabled={loading || checking || !fileReference.trim()}
+            disabled={
+              loading
+              || submitting
+              || checking
+              || !fileReference.trim()
+              || (sourceAddEnabled ? !selectedSource : !preview)
+            }
             onClick={() => void attach()}
           >
-            {loading ? "Прикріплення…" : "Прикріпити"}
+            {loading || submitting
+              ? sourceAddEnabled ? "Додавання…" : "Прикріплення…"
+              : sourceAddEnabled ? "Додати документ" : "Прикріпити"}
           </button>
         </div>
       </section>
     </div>,
     document.body,
   );
+}
+
+function ResolvedDocumentSourcePreview({
+  source,
+  onPreview,
+}: {
+  source: ResolvedPdfSource;
+  onPreview?: () => void;
+}) {
+  return (
+    <div className="drive-attach-preview source-add-preview-card">
+      <strong>{source.displayName ?? source.providerFileTitle ?? "PDF-документ"}</strong>
+      <dl>
+        <div><dt>Джерело</dt><dd>{documentSourceProviderLabel(source.provider)}</dd></div>
+        <div><dt>Тип</dt><dd>{source.mimeType}</dd></div>
+        <div>
+          <dt>Розмір</dt>
+          <dd>{source.fileSizeBytes !== undefined ? formatFileSize(source.fileSizeBytes) : "Не визначено"}</dd>
+        </div>
+        <div><dt>Сторінок</dt><dd>{source.pageCount ?? "Не визначено"}</dd></div>
+        <div><dt>Доступ</dt><dd>Доступний</dd></div>
+        <div><dt>Режим</dt><dd>{documentSourceAccessLabel(source.accessMode)}</dd></div>
+        {source.initialPage ? <div><dt>Початкова сторінка</dt><dd>{source.initialPage}</dd></div> : null}
+      </dl>
+      {source.warnings.length ? (
+        <ul className="source-add-warnings">
+          {source.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : null}
+      {onPreview ? (
+        <button type="button" className="button button-secondary" onClick={onPreview}>
+          Переглянути першу сторінку
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function documentSourceProviderLabel(provider: ResolvedPdfSource["provider"]): string {
+  if (provider === "wikimedia") return "Вікіджерела / Вікісховище";
+  if (provider === "google_drive") return "Google Drive";
+  return "Прямий зовнішній PDF";
+}
+
+function documentSourceAccessLabel(mode: ResolvedPdfSource["accessMode"]): string {
+  if (mode === "direct_cors") return "Прямий захищений доступ";
+  if (mode === "google_drive_api") return "Google Drive API";
+  return "Захищений PDF Gateway";
 }
 
 function ScanRow({
@@ -753,6 +1014,9 @@ function ScanRow({
   const [previewLoading, setPreviewLoading] = useState(false);
   const unavailable = scan.availability === "missing-local";
   const googleWorkspaceFile = isGoogleWorkspaceDriveFile(scan.mimeType);
+  const opensOnSourceSite = scan.storage === "external-url"
+    ? externalPreviewOpensOnSourceSite(scan)
+    : false;
 
   useEffect(() => {
     return () => {
@@ -783,6 +1047,10 @@ function ScanRow({
       onPreview(scan, scanGroup);
       return;
     }
+    if (opensOnSourceSite) {
+      await run(() => openScan(scan));
+      return;
+    }
     setError("");
     setPreviewLoading(true);
     try {
@@ -796,6 +1064,7 @@ function ScanRow({
         kind,
         name: scan.name,
         url: URL.createObjectURL(blob),
+        external: scan.storage === "external-url",
       });
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : "Не вдалося відкрити попередній перегляд.");
@@ -830,9 +1099,11 @@ function ScanRow({
                   ? "Відкриття…"
                   : googleWorkspaceFile
                     ? "Відкрити у Google"
-                    : "Переглянути"}
+                    : opensOnSourceSite && !onPreview
+                      ? "Відкрити на сайті"
+                      : "Переглянути"}
               </button>
-              {!googleWorkspaceFile ? (
+              {!googleWorkspaceFile && (!opensOnSourceSite || Boolean(onPreview)) ? (
                 <button type="button" className="text-button" onClick={() => void run(() => openScan(scan))}>
                   {scan.storage === "external-url" ? "Відкрити джерело" : "Google Drive"}
                 </button>
@@ -882,6 +1153,7 @@ type ScanPreview = {
   kind: "image" | "pdf" | "web";
   name: string;
   url: string;
+  external: boolean;
 };
 
 type ScanPreviewSize = { width: number; height: number };
@@ -1115,7 +1387,7 @@ function ScanPreviewModal({
           <span>Перегляд відкрито у вашому браузері.</span>
           {preview.kind !== "web" ? (
             <button type="button" className="button button-secondary" onClick={onDownload}>
-              Завантажити
+              {preview.external ? "Відкрити джерело" : "Завантажити"}
             </button>
           ) : null}
         </div>
@@ -1145,17 +1417,26 @@ function normalizeScanPreviewDegrees(value: number): number {
 function previewKind(scan: ScanAttachment, blob: Blob): ScanPreview["kind"] | null {
   const mimeType = (blob.type || scan.mimeType || "").toLocaleLowerCase();
   const extension = scan.name.split(".").pop()?.toLocaleLowerCase() ?? "";
+  if (mimeType === "text/html" || mimeType === "application/xhtml+xml") return "web";
   if (mimeType === "application/pdf" || extension === "pdf") return "pdf";
-  if (mimeType === "text/html" || ["html", "htm"].includes(extension) || scan.storage === "external-url") {
-    return "web";
-  }
   if (
     mimeType.startsWith("image/") ||
     ["jpg", "jpeg", "png", "webp", "gif", "bmp", "svg"].includes(extension)
   ) {
     return "image";
   }
+  if (["html", "htm"].includes(extension) || scan.storage === "external-url") {
+    return "web";
+  }
   return null;
+}
+
+function externalPreviewOpensOnSourceSite(scan: ScanAttachment): boolean {
+  try {
+    return getExternalScanPreviewStrategy(scan).mode === "source-page";
+  } catch {
+    return false;
+  }
 }
 
 function isPreviewableAttachment(scan: ScanAttachment): boolean {

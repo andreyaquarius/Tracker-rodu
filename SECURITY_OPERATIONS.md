@@ -18,11 +18,11 @@
 - 🟢 Перевірити тривалість JWT / refresh-token rotation (увімкнено за замовчуванням).
 
 ### 1.2 Секрети Edge Functions (Project Settings → Edge Functions → Secrets)
-- 🔴 `ENCRYPTION_KEY` — довгий випадковий рядок (≥ 32 байти), **інший** для production. Ним шифруються ключі Gemini (AES-GCM).
+- 🔴 `ENCRYPTION_KEY` — довгий випадковий рядок (≥ 32 байти), **інший** для production. Ним шифруються ключі Gemini та короткочасні Google Drive credentials gateway-сесій (AES-GCM).
 - 🔴 `SUPABASE_SERVICE_ROLE_KEY` — **тільки** у секретах функцій; ніколи у фронтенді/репозиторії. (Підтверджено: у `dist/` немає.)
-- 🔴 `APP_URL` = `https://trekerrodu.com.ua` і **`ALLOWED_ORIGIN`** = `https://trekerrodu.com.ua` — без них CORS падає у фолбек `*` (F-06).
+- 🔴 `APP_URL` = `https://trekerrodu.com.ua` і **`ALLOWED_ORIGIN`** = `https://trekerrodu.com.ua` — без них новий `pdf-gateway` працює fail-closed і відхиляє production-origin; інші Edge Functions також мають використовувати точний allowlist, а не `*` (F-06).
 - 🟠 `RESEND_API_KEY`, `INVITATION_EMAIL_FROM` (адреса на верифікованому домені Resend).
-- 🟢 Після зміни `ENCRYPTION_KEY` наявні збережені ключі Gemini стануть нечитабельними — користувачі мають зберегти ключ повторно (очікувано).
+- 🟢 Після зміни `ENCRYPTION_KEY` наявні збережені ключі Gemini стануть нечитабельними, а відкриті Google Drive PDF-сесії треба буде створити повторно (очікувано).
 
 ### 1.3 Storage (Storage → Buckets) — F-14
 - 🔴 Підтвердити, що `project-attachments` і `project-backups` — **private** (не public).

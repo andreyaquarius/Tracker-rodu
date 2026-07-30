@@ -7,16 +7,79 @@ import {
   type WheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import type { DocumentFragmentSelection, ScanAttachment } from "../types";
+import type { StoredDocumentSource } from "../services/document-sources/contracts.ts";
 import {
   downloadScan,
+  getExternalScanPreviewStrategy,
   getScanBlob,
+  getScanPreviewSource,
   normalizeScanPreviewBlob,
   openScan,
   saveScan,
 } from "../services/scanStorage";
-import { authorizeGoogleDrive, reconnectGoogleDrive } from "../services/googleDriveStorage";
+import {
+  authorizeGoogleDrive,
+  pickGoogleDriveFolder,
+  reconnectGoogleDrive,
+  uploadFileToGoogleDrive,
+  type GoogleDrivePickerFolder,
+} from "../services/googleDriveStorage";
+import { createDocumentSourceViewerSession } from "../services/documentSourceViewerAccess.ts";
+import { confirmDocumentSourceVersion } from "../services/documentSourceRevalidation.ts";
+import type {
+  CreateFindingDocumentReferenceInput,
+  NormalizedPageSelectionInput,
+} from "../services/findingDocumentReferences.ts";
+import {
+  createPageImagesZip,
+  createPdfSubsetBlob,
+  downloadGeneratedFile,
+  firstKnownPositiveSize,
+  parsePageRange,
+  pdfClientExportLimits,
+  pdfExportDeduplicationKey,
+  pdfExportFileName,
+  renderPdfPageImage,
+  validateKnownClientExportSize,
+  type PdfExportFormat,
+} from "../services/pdfPageExport.ts";
+import {
+  BoundedResourceCache,
+  BoundedThumbnailRenderQueue,
+  createVirtualizedThumbnailPlan,
+  LatestPdfRenderController,
+} from "../services/pdfViewerVirtualization.ts";
+import {
+  boundPdfViewportScale,
+  PdfCanvasBudgetError,
+} from "../services/pdfCanvasBudget.ts";
+import {
+  CROP_RESIZE_HANDLES,
+  createCropRect,
+  moveCropRect,
+  normalizeQuarterRotation,
+  resizeCropRect,
+  screenPointToPagePoint,
+  viewportRectToNormalizedCrop,
+  type CropPoint,
+  type CropRect,
+  type CropResizeHandle,
+  type CropSize,
+} from "../services/pdfViewerCropGeometry.ts";
+import { renderPdfFragmentSnapshot } from "../services/pdfFragmentSnapshot.ts";
+import {
+  findingDocumentSelectionViewportRect,
+  type FindingDocumentRestoreState,
+  type FindingDocumentSourceVersionStatus,
+} from "../services/findingDocumentReopen.ts";
+import {
+  createPdfOperationalRequestId,
+  emitPdfOperationalEvent,
+  pdfFileSizeBucket,
+  safePdfOperationalErrorCode,
+} from "../services/pdfOperationalTelemetry.ts";
 
 export type DocumentScanViewerContext = {
   source: "documents";
@@ -38,6 +101,9 @@ export type ActiveDocumentScanViewer = {
   scans?: ScanAttachment[];
   pageIndex?: number;
   context?: DocumentScanViewerContext;
+  /** Persisted physical PDF page/crop restored when a finding is reopened. */
+  restore?: FindingDocumentRestoreState;
+  sourceVersionStatus?: FindingDocumentSourceVersionStatus;
   openedAt: number;
 };
 
@@ -46,11 +112,89 @@ type ViewerMode = "window" | "minimized" | "fullscreen";
 type ViewerPosition = { left: number; top: number };
 type ViewerSize = { width: number; height: number };
 type ImagePan = { x: number; y: number };
-type CropRect = { x: number; y: number; width: number; height: number };
-type CachedPreview = { kind: PreviewKind; url: string; revokeOnClose: boolean; blob?: Blob };
+type CropInteraction =
+  | { mode: "create"; anchor: CropPoint }
+  | { mode: "move"; anchor: CropPoint; initial: CropRect }
+  | { mode: "resize"; anchor: CropPoint; initial: CropRect; handle: CropResizeHandle };
+type ExternalSourceReason = "web-page" | "authenticated-source" | "embedded-blocked";
+type CachedPreview = {
+  kind: PreviewKind;
+  url: string;
+  revokeOnClose: boolean;
+  blob?: Blob;
+  /** Ephemeral gateway auth only. Never persisted in attachment metadata. */
+  httpHeaders?: Readonly<Record<string, string>>;
+  /** Stable source metadata only; never includes an access URL or OAuth token. */
+  documentSource?: StoredDocumentSource;
+  /** Ephemeral access metadata used only to renew an expiring gateway session. */
+  accessMode?: "direct_cors" | "secure_proxy" | "google_drive_api";
+  expiresAt?: string | null;
+  sourceVersionStatus?: FindingDocumentSourceVersionStatus;
+  canConfirmSourceVersion?: boolean;
+};
 type PdfDocumentCache = {
   document: PDFDocumentProxy;
+  loadingTask: PDFDocumentLoadingTask;
+  pageLabels: Promise<readonly string[] | null>;
 };
+
+export type ExternalPdfViewerV2Context = {
+  enabled: boolean;
+  projectId: string;
+  projectName: string;
+  userId: string;
+  documentId: string;
+  canEdit: boolean;
+};
+
+async function resolveStreamablePdfPreview(
+  scan: ScanAttachment,
+  sourceContext?: ExternalPdfViewerV2Context,
+  signal?: AbortSignal,
+): Promise<CachedPreview | null> {
+  if (!sourceContext?.enabled) return null;
+
+  const session = await createDocumentSourceViewerSession({
+    projectId: sourceContext.projectId,
+    documentId: sourceContext.documentId,
+    userId: sourceContext.userId,
+    attachment: scan,
+    canEdit: sourceContext.canEdit,
+    ...(signal ? { signal } : {}),
+  });
+  if (session) {
+    const descriptor = session.access;
+    return {
+      kind: "pdf",
+      url: descriptor.url,
+      revokeOnClose: false,
+      documentSource: session.source,
+      accessMode: descriptor.accessMode,
+      expiresAt: descriptor.expiresAt,
+      sourceVersionStatus: session.sourceVersionStatus,
+      canConfirmSourceVersion: session.canConfirmSourceVersion,
+      ...("httpHeaders" in descriptor && descriptor.httpHeaders
+        ? { httpHeaders: descriptor.httpHeaders }
+        : {}),
+    };
+  }
+
+  if (scan.storage !== "external-url") return null;
+
+  const strategy = getExternalScanPreviewStrategy(scan);
+  // Keep the established bounded Blob path for ordinary external files.
+  // MediaWiki file pages are the special case: archival PDFs can be hundreds
+  // of megabytes, while Wikimedia explicitly supports CORS byte ranges.
+  if (strategy.mode !== "mediawiki-file") return null;
+
+  const source = await getScanPreviewSource(scan);
+  if (source.kind !== "pdf") return null;
+  return {
+    kind: "pdf",
+    url: source.url,
+    revokeOnClose: source.revokeOnClose,
+  };
+}
 type PdfJsModule = typeof import("pdfjs-dist");
 
 const MIN_VIEWER_WIDTH = 420;
@@ -59,11 +203,46 @@ const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.01;
 const PDF_RENDER_SCALE = 2;
+const PDF_THUMBNAIL_WIDTH = 104;
+const PDF_THUMBNAIL_WINDOW_RADIUS = 3;
+const PDF_VIEWER_RANGE_CHUNK_SIZE = positiveViewerSetting(
+  import.meta.env.VITE_PDF_VIEWER_RANGE_CHUNK_SIZE,
+  1024 * 1024,
+);
+const PDF_VIEWER_MAX_DEVICE_PIXEL_RATIO = Math.max(1, positiveViewerSetting(
+  import.meta.env.VITE_PDF_VIEWER_MAX_DEVICE_PIXEL_RATIO,
+  2,
+));
+const PDF_VIEWER_MAX_RENDER_SCALE = Math.max(PDF_RENDER_SCALE, positiveViewerSetting(
+  import.meta.env.VITE_PDF_VIEWER_MAX_RENDER_SCALE,
+  4,
+));
+const PDF_VIEWER_MAX_CONCURRENT_RENDERS = Math.max(1, Math.floor(positiveViewerSetting(
+  import.meta.env.VITE_PDF_VIEWER_MAX_CONCURRENT_RENDERS,
+  2,
+)));
+const PDF_VIEWER_MAX_CANVAS_PIXELS = Math.max(1, Math.floor(positiveViewerSetting(
+  import.meta.env.VITE_PDF_VIEWER_MAX_CANVAS_PIXELS,
+  16_777_216,
+)));
+const PDF_VIEWER_MAX_CANVAS_SIDE = Math.max(1, Math.floor(positiveViewerSetting(
+  import.meta.env.VITE_PDF_VIEWER_MAX_CANVAS_SIDE,
+  8_192,
+)));
+const PDF_CANVAS_RESOURCE_LIMIT_MESSAGE =
+  "Не вдалося безпечно відобразити PDF-сторінку: її розміри перевищують ресурсний ліміт переглядача.";
+
+type PdfExportDestination = "download" | "google-drive";
+type PdfExportImageScale = 1 | 1.5 | 2;
+type PdfExportJpegQuality = 70 | 85 | 95;
+type CropSnapshotDestination = "google-drive" | "download" | "none";
+export type FindingDocumentReferenceDraft = Omit<CreateFindingDocumentReferenceInput, "findingId">;
 
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
 
 interface DocumentWorkspaceViewerProps {
   viewer: ActiveDocumentScanViewer | null;
+  externalPdfViewerV2?: Omit<ExternalPdfViewerV2Context, "documentId">;
   onClose: () => void;
   onOpenDocument: (documentId: string) => void;
   onCreateFinding: (initialValues: Record<string, unknown>) => void;
@@ -71,6 +250,7 @@ interface DocumentWorkspaceViewerProps {
 
 export function DocumentWorkspaceViewer({
   viewer,
+  externalPdfViewerV2,
   onClose,
   onOpenDocument,
   onCreateFinding,
@@ -78,12 +258,39 @@ export function DocumentWorkspaceViewer({
   const viewerRef = useRef<HTMLElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const cropStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pdfPageViewportRef = useRef<HTMLDivElement | null>(null);
+  const selectionStageRef = useRef<HTMLDivElement | null>(null);
+  const cropInteractionRef = useRef<CropInteraction | null>(null);
   const panStartRef = useRef<{ clientX: number; clientY: number; panX: number; panY: number } | null>(null);
   const previewCacheRef = useRef(new Map<string, CachedPreview>());
   const previewPromisesRef = useRef(new Map<string, Promise<CachedPreview>>());
   const pdfCacheRef = useRef(new Map<string, PdfDocumentCache>());
   const pdfPromisesRef = useRef(new Map<string, Promise<PdfDocumentCache>>());
+  const pdfLoadControllersRef = useRef(new Map<string, AbortController>());
+  const pdfLoadingTasksRef = useRef(new Map<string, PDFDocumentLoadingTask>());
+  const mainPdfRenderRef = useRef<LatestPdfRenderController | null>(null);
+  const restoredFindingSelectionRef = useRef("");
+  const cropOperationAbortRef = useRef<AbortController | null>(null);
+  const exportOperationAbortRef = useRef<AbortController | null>(null);
+  const pdfTelemetryRequestIdRef = useRef("");
+  const pdfTelemetryStartedAtRef = useRef(0);
+  const pdfTelemetryEventKeysRef = useRef(new Set<string>());
+  const thumbnailQueueRef = useRef<BoundedThumbnailRenderQueue<string, string> | null>(null);
+  const thumbnailCacheRef = useRef<BoundedResourceCache<string, string> | null>(null);
+  if (!mainPdfRenderRef.current) mainPdfRenderRef.current = new LatestPdfRenderController();
+  if (!thumbnailCacheRef.current) {
+    thumbnailCacheRef.current = new BoundedResourceCache<string, string>({
+      capacity: 18,
+      dispose: (url) => URL.revokeObjectURL(url),
+    });
+  }
+  if (!thumbnailQueueRef.current) {
+    thumbnailQueueRef.current = new BoundedThumbnailRenderQueue<string, string>({
+      maxConcurrency: PDF_VIEWER_MAX_CONCURRENT_RENDERS,
+      maxPending: 18,
+      disposeResult: (url) => URL.revokeObjectURL(url),
+    });
+  }
   const [mode, setMode] = useState<ViewerMode>("window");
   const [position, setPosition] = useState<ViewerPosition | null>(null);
   const [viewerSize, setViewerSize] = useState<ViewerSize | null>(null);
@@ -92,36 +299,114 @@ export function DocumentWorkspaceViewer({
   const [kind, setKind] = useState<PreviewKind | null>(null);
   const [pdfPageNumber, setPdfPageNumber] = useState(1);
   const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [pdfPageLabel, setPdfPageLabel] = useState("");
   const [pdfRendering, setPdfRendering] = useState(false);
   const [pdfNativeFallback, setPdfNativeFallback] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
+  const [pdfRenderZoom, setPdfRenderZoom] = useState(1);
   const [pan, setPan] = useState<ImagePan>({ x: 0, y: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [externalSourceReason, setExternalSourceReason] = useState<ExternalSourceReason | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [creatingCrop, setCreatingCrop] = useState(false);
+  const [cropDialogOpen, setCropDialogOpen] = useState(false);
+  const [cropSnapshotDestination, setCropSnapshotDestination] = useState<CropSnapshotDestination>("google-drive");
   const [fullscreenError, setFullscreenError] = useState("");
   const [previewReloadKey, setPreviewReloadKey] = useState(0);
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<number, string>>({});
+  const [markedExportPages, setMarkedExportPages] = useState<Set<number>>(() => new Set());
+  const [pageNumberInput, setPageNumberInput] = useState("1");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportRange, setExportRange] = useState("1");
+  const [exportFormat, setExportFormat] = useState<PdfExportFormat>("pdf");
+  const [exportDestination, setExportDestination] = useState<PdfExportDestination>("download");
+  const [exportDriveFolder, setExportDriveFolder] = useState<GoogleDrivePickerFolder | null>(null);
+  const [exportImageScale, setExportImageScale] = useState<PdfExportImageScale>(2);
+  const [exportJpegQuality, setExportJpegQuality] = useState<PdfExportJpegQuality>(85);
+  const [exporting, setExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState("");
+  const [exportResultUrl, setExportResultUrl] = useState("");
+  const [sourceVersionMessage, setSourceVersionMessage] = useState("");
+  const [confirmingSourceVersion, setConfirmingSourceVersion] = useState(false);
 
   const pages = viewer?.scans?.length ? viewer.scans : viewer ? [viewer.scan] : [];
   const currentScan = pages[currentIndex] ?? viewer?.scan ?? null;
+  const currentPreview = currentScan
+    ? previewCacheRef.current.get(currentScan.id)
+    : undefined;
+  const effectiveSourceVersionStatus = viewer?.sourceVersionStatus === "changed"
+    || currentPreview?.sourceVersionStatus === "changed"
+    ? "changed"
+    : viewer?.sourceVersionStatus ?? currentPreview?.sourceVersionStatus ?? "unknown";
   const pageCount = pages.length;
   const isInteractivePdf = kind === "pdf" && !pdfNativeFallback;
   const navigationPageCount = isInteractivePdf ? pdfPageCount : pageCount;
   const navigationPageNumber = isInteractivePdf ? pdfPageNumber : Math.min(currentIndex + 1, Math.max(1, pageCount));
+  const sourceContext = viewer?.context && externalPdfViewerV2
+    && externalPdfViewerV2.enabled
+    ? {
+        ...externalPdfViewerV2,
+        documentId: viewer.context.document.id,
+      }
+    : undefined;
+  const viewerV2Enabled = sourceContext?.enabled === true;
+  const effectivePdfRotation = viewerV2Enabled ? rotation : 0;
 
-  const loadPreview = (scan: ScanAttachment): Promise<CachedPreview> => {
+  if (!pdfTelemetryRequestIdRef.current) {
+    pdfTelemetryRequestIdRef.current = createPdfOperationalRequestId();
+    pdfTelemetryStartedAtRef.current = performance.now();
+  }
+
+  const emitViewerTelemetryOnce = (
+    key: string,
+    input: Omit<Parameters<typeof emitPdfOperationalEvent>[1], "requestId">,
+  ) => {
+    if (!sourceContext || pdfTelemetryEventKeysRef.current.has(key)) return;
+    pdfTelemetryEventKeysRef.current.add(key);
+    void emitPdfOperationalEvent(sourceContext.projectId, {
+      ...input,
+      requestId: pdfTelemetryRequestIdRef.current,
+    });
+  };
+
+  const disposePreviewForScan = (scanId: string) => {
+    const preview = previewCacheRef.current.get(scanId);
+    if (preview?.revokeOnClose) URL.revokeObjectURL(preview.url);
+    previewCacheRef.current.delete(scanId);
+    previewPromisesRef.current.delete(scanId);
+    const pdf = pdfCacheRef.current.get(scanId);
+    if (pdf) void pdf.loadingTask.destroy().catch(() => undefined);
+    pdfLoadControllersRef.current.get(scanId)?.abort();
+    const loadingTask = pdfLoadingTasksRef.current.get(scanId);
+    if (loadingTask && loadingTask !== pdf?.loadingTask) {
+      void loadingTask.destroy().catch(() => undefined);
+    }
+    pdfCacheRef.current.delete(scanId);
+    pdfPromisesRef.current.delete(scanId);
+    pdfLoadControllersRef.current.delete(scanId);
+    pdfLoadingTasksRef.current.delete(scanId);
+  };
+
+  const loadPreview = (scan: ScanAttachment, signal?: AbortSignal): Promise<CachedPreview> => {
     const cached = previewCacheRef.current.get(scan.id);
-    if (cached) return Promise.resolve(cached);
+    if (cached && !cachedPreviewNeedsRefresh(cached)) return Promise.resolve(cached);
+    if (cached) disposePreviewForScan(scan.id);
     const pending = previewPromisesRef.current.get(scan.id);
     if (pending) return pending;
 
-    const promise = getScanBlob(scan)
-      .then((blob) => {
+    const promise = resolveStreamablePdfPreview(scan, sourceContext, signal)
+      .then(async (streamingPreview) => {
+        if (streamingPreview) {
+          previewCacheRef.current.set(scan.id, streamingPreview);
+          return streamingPreview;
+        }
+
+        const blob = await getScanBlob(scan);
         const previewBlob = normalizeScanPreviewBlob(scan, blob);
         const nextKind = previewKind(scan, previewBlob);
         if (!nextKind) {
@@ -144,35 +429,91 @@ export function DocumentWorkspaceViewer({
     return promise;
   };
 
-  const loadPdfDocument = (scan: ScanAttachment): Promise<PdfDocumentCache> => {
+  const loadPdfDocument = (
+    scan: ScanAttachment,
+    signal?: AbortSignal,
+  ): Promise<PdfDocumentCache> => {
     const cached = pdfCacheRef.current.get(scan.id);
-    if (cached) return Promise.resolve(cached);
+    if (cached) return waitForViewerPromise(Promise.resolve(cached), signal);
     const pending = pdfPromisesRef.current.get(scan.id);
-    if (pending) return pending;
+    if (pending) return waitForViewerPromise(pending, signal);
 
-    const promise = Promise.resolve(previewCacheRef.current.get(scan.id)?.blob)
-      .then((cachedBlob) => cachedBlob ?? getScanBlob(scan))
-      .then(async (blob) => {
-        const data = new Uint8Array(await blob.arrayBuffer());
+    const loadController = new AbortController();
+    pdfLoadControllersRef.current.set(scan.id, loadController);
+
+    const promise = Promise.resolve(
+      previewCacheRef.current.get(scan.id) ?? loadPreview(scan, loadController.signal),
+    )
+      .then(async (preview) => {
+        throwIfViewerOperationAborted(loadController.signal);
         const pdfJs = await loadPdfJs();
-        const document = await pdfJs.getDocument({
-          data,
-          // Some scanned archival PDFs use image codecs that PDF.js tries to
-          // load through external WASM assets. In the app bundle those assets
-          // are not served from a stable folder, so the JS decoder path is the
-          // safer default for in-app previews.
-          useWasm: false,
-        }).promise;
-        const cache = { document };
-        pdfCacheRef.current.set(scan.id, cache);
-        return cache;
+        throwIfViewerOperationAborted(loadController.signal);
+        const loadingTask = preview.blob
+          ? pdfJs.getDocument({
+              data: new Uint8Array(await waitForViewerPromise(
+                preview.blob.arrayBuffer(),
+                loadController.signal,
+              )),
+              // Some scanned archival PDFs use image codecs that PDF.js tries to
+              // load through external WASM assets. In the app bundle those assets
+              // are not served from a stable folder, so the JS decoder path is the
+              // safer default for in-app previews.
+              useWasm: false,
+            })
+          : pdfJs.getDocument({
+              url: preview.url,
+              ...(preview.httpHeaders ? { httpHeaders: preview.httpHeaders } : {}),
+              withCredentials: false,
+              disableRange: false,
+              // Do not stream or prefetch a 500+ MB archival file in the
+              // background. PDF.js requests only the byte ranges required for
+              // the current page and keeps the canvas/finding tools available.
+              disableStream: true,
+              disableAutoFetch: true,
+              rangeChunkSize: PDF_VIEWER_RANGE_CHUNK_SIZE,
+              useWasm: false,
+            });
+        pdfLoadingTasksRef.current.set(scan.id, loadingTask);
+        const destroyOnAbort = () => {
+          void loadingTask.destroy().catch(() => undefined);
+        };
+        loadController.signal.addEventListener("abort", destroyOnAbort, { once: true });
+        try {
+          const document = await loadingTask.promise;
+          throwIfViewerOperationAborted(loadController.signal);
+          const pageLabels = document.getPageLabels().catch(() => null);
+          const cache = { document, loadingTask, pageLabels };
+          pdfCacheRef.current.set(scan.id, cache);
+          emitViewerTelemetryOnce(`opened:${viewer?.openedAt ?? 0}:${scan.id}`, {
+            event: "pdf_viewer_opened",
+            provider: preview.documentSource?.provider ?? "unknown",
+            ...(preview.accessMode ? { accessMode: preview.accessMode } : {}),
+            statusCode: 200,
+            durationMs: Math.max(0, Math.round(performance.now() - pdfTelemetryStartedAtRef.current)),
+            pageCount: document.numPages,
+            fileSizeBucket: pdfFileSizeBucket(
+              preview.documentSource?.fileSizeBytes ?? scan.size,
+            ),
+          });
+          return cache;
+        } finally {
+          loadController.signal.removeEventListener("abort", destroyOnAbort);
+          if (pdfLoadingTasksRef.current.get(scan.id) === loadingTask) {
+            pdfLoadingTasksRef.current.delete(scan.id);
+          }
+        }
       })
       .finally(() => {
-        pdfPromisesRef.current.delete(scan.id);
+        if (pdfPromisesRef.current.get(scan.id) === promise) {
+          pdfPromisesRef.current.delete(scan.id);
+        }
+        if (pdfLoadControllersRef.current.get(scan.id) === loadController) {
+          pdfLoadControllersRef.current.delete(scan.id);
+        }
       });
 
     pdfPromisesRef.current.set(scan.id, promise);
-    return promise;
+    return waitForViewerPromise(promise, signal);
   };
 
   const preloadPage = (index: number) => {
@@ -183,6 +524,10 @@ export function DocumentWorkspaceViewer({
 
   useEffect(() => {
     return () => {
+      cropOperationAbortRef.current?.abort();
+      cropOperationAbortRef.current = null;
+      exportOperationAbortRef.current?.abort();
+      exportOperationAbortRef.current = null;
       for (const preview of previewCacheRef.current.values()) {
         if (preview.revokeOnClose) {
           URL.revokeObjectURL(preview.url);
@@ -190,16 +535,32 @@ export function DocumentWorkspaceViewer({
       }
       previewCacheRef.current.clear();
       previewPromisesRef.current.clear();
-      for (const pdf of pdfCacheRef.current.values()) {
-        void pdf.document.cleanup();
+      for (const controller of pdfLoadControllersRef.current.values()) controller.abort();
+      pdfLoadControllersRef.current.clear();
+      for (const loadingTask of pdfLoadingTasksRef.current.values()) {
+        void loadingTask.destroy().catch(() => undefined);
       }
+      pdfLoadingTasksRef.current.clear();
+      for (const pdf of pdfCacheRef.current.values()) void pdf.loadingTask.destroy().catch(() => undefined);
       pdfCacheRef.current.clear();
       pdfPromisesRef.current.clear();
     };
   }, [viewer?.openedAt]);
 
+  useEffect(() => () => {
+    mainPdfRenderRef.current?.dispose();
+    thumbnailQueueRef.current?.dispose();
+    thumbnailCacheRef.current?.clear();
+  }, []);
+
   useEffect(() => {
+    pdfTelemetryRequestIdRef.current = createPdfOperationalRequestId();
+    pdfTelemetryStartedAtRef.current = performance.now();
+    pdfTelemetryEventKeysRef.current.clear();
     if (!viewer) return;
+    mainPdfRenderRef.current?.cancel();
+    thumbnailQueueRef.current?.cancelAll();
+    thumbnailCacheRef.current?.clear();
     const requestedIndex = typeof viewer.pageIndex === "number"
       ? viewer.pageIndex
       : pages.findIndex((scan) => scan.id === viewer.scan.id);
@@ -209,30 +570,83 @@ export function DocumentWorkspaceViewer({
     setViewerSize(null);
     setBlobUrl("");
     setKind(null);
-    setPdfPageNumber(1);
+    const restoredPage = Math.max(
+      1,
+      (viewerV2Enabled ? viewer.restore?.pageIndex : undefined) ?? viewer.scan.initialPage ?? 1,
+    );
+    setPdfPageNumber(restoredPage);
     setPdfPageCount(0);
+    setPdfPageLabel("");
     setPdfRendering(false);
     setPdfNativeFallback(false);
     setZoom(1);
-    setRotation(0);
+    setRotation(viewerV2Enabled
+      ? normalizeQuarterRotation(viewer.restore?.selection?.rotation ?? 0)
+      : 0);
+    setPdfRenderZoom(1);
     setPan({ x: 0, y: 0 });
     setError("");
-  }, [viewer?.openedAt]);
+    setExternalSourceReason(null);
+    setThumbnailUrls({});
+    setMarkedExportPages(new Set());
+    setPageNumberInput(String(restoredPage));
+    setExportOpen(false);
+    setExportRange(String(restoredPage));
+    setExportFormat("pdf");
+    setExportDestination("download");
+    setExportDriveFolder(null);
+    setExportImageScale(2);
+    setExportJpegQuality(85);
+    setExportMessage("");
+    setExportResultUrl("");
+    setSourceVersionMessage("");
+    setConfirmingSourceVersion(false);
+    setCropDialogOpen(false);
+    setCropSnapshotDestination("google-drive");
+    restoredFindingSelectionRef.current = "";
+  }, [viewer?.openedAt, viewerV2Enabled]);
 
   useEffect(() => {
     let active = true;
+    const abortController = new AbortController();
 
     setError("");
     setSelectionMode(false);
     setCropRect(null);
-    setPdfPageNumber(1);
+    const restoredPage = viewerV2Enabled && currentScan?.id === viewer?.scan.id
+      ? viewer.restore?.pageIndex
+      : undefined;
+    setPdfPageNumber(Math.max(1, restoredPage ?? currentScan?.initialPage ?? 1));
     setPdfPageCount(0);
+    setPdfPageLabel("");
     setPdfRendering(false);
     setPdfNativeFallback(false);
-    cropStartRef.current = null;
+    setExternalSourceReason(null);
+    cropInteractionRef.current = null;
     panStartRef.current = null;
 
     if (!currentScan) return undefined;
+
+    if (currentScan.storage === "external-url") {
+      try {
+        const strategy = getExternalScanPreviewStrategy(currentScan);
+        if (strategy.mode === "source-page" && strategy.reason === "authenticated-source") {
+          setKind("web");
+          setBlobUrl("");
+          setLoading(false);
+          setExternalSourceReason(strategy.reason);
+          return undefined;
+        }
+      } catch (strategyError) {
+        setLoading(false);
+        setError(
+          strategyError instanceof Error
+            ? strategyError.message
+            : "Зовнішнє посилання має некоректний формат.",
+        );
+        return undefined;
+      }
+    }
 
     const cached = previewCacheRef.current.get(currentScan.id);
     if (cached) {
@@ -245,7 +659,7 @@ export function DocumentWorkspaceViewer({
     }
 
     setLoading(true);
-    void loadPreview(currentScan)
+    void loadPreview(currentScan, abortController.signal)
       .then((preview) => {
         if (!active) return;
         setKind(preview.kind);
@@ -255,6 +669,17 @@ export function DocumentWorkspaceViewer({
       })
       .catch((loadError) => {
         if (!active) return;
+        if (currentScan.storage === "external-url") {
+          setKind(null);
+          setBlobUrl("");
+          setExternalSourceReason(null);
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Не вдалося відкрити зовнішній документ у Переглядачі.",
+          );
+          return;
+        }
         setError(
           loadError instanceof Error
             ? loadError.message
@@ -267,21 +692,64 @@ export function DocumentWorkspaceViewer({
 
     return () => {
       active = false;
+      abortController.abort();
     };
-  }, [currentScan?.id, currentIndex, previewReloadKey]);
+  }, [currentScan?.id, currentIndex, previewReloadKey, viewerV2Enabled]);
 
   useEffect(() => {
-    let active = true;
-    const canvas = pdfCanvasRef.current;
+    if (!currentScan || !blobUrl) return undefined;
+    const preview = previewCacheRef.current.get(currentScan.id);
+    if (!preview?.expiresAt) return undefined;
+    const expiresAt = Date.parse(preview.expiresAt);
+    if (!Number.isFinite(expiresAt)) return undefined;
+    const refreshIn = Math.max(0, expiresAt - Date.now() - 30_000);
+    const timeout = window.setTimeout(() => {
+      mainPdfRenderRef.current?.cancel();
+      thumbnailQueueRef.current?.cancelAll();
+      disposePreviewForScan(currentScan.id);
+      setBlobUrl("");
+      setKind(null);
+      setPreviewReloadKey((value) => value + 1);
+    }, Math.min(refreshIn, 2_147_000_000));
+    return () => window.clearTimeout(timeout);
+  }, [currentScan?.id, blobUrl]);
 
-    if (!currentScan || kind !== "pdf" || pdfNativeFallback || !canvas) return undefined;
+  useEffect(() => {
+    setPageNumberInput(String(pdfPageNumber));
+    if (!exportOpen) setExportRange(String(pdfPageNumber));
+  }, [pdfPageNumber, exportOpen]);
+
+  useEffect(() => {
+    if (kind !== "pdf" || !viewerV2Enabled) {
+      setPdfRenderZoom(1);
+      return undefined;
+    }
+    const timeout = window.setTimeout(() => setPdfRenderZoom(zoom), 180);
+    return () => window.clearTimeout(timeout);
+  }, [kind, zoom, viewerV2Enabled]);
+
+  useEffect(() => {
+    // Returning to the provenance page/rotation must restore the canonical
+    // overlay again. Zoom alone deliberately does not invalidate it because
+    // the whole page stage scales as one unit.
+    restoredFindingSelectionRef.current = "";
+  }, [viewer?.openedAt, pdfPageNumber, rotation]);
+
+  useEffect(() => {
+    const canvas = pdfCanvasRef.current;
+    const renderController = mainPdfRenderRef.current;
+
+    if (!currentScan || kind !== "pdf" || pdfNativeFallback || !canvas || !renderController) {
+      return undefined;
+    }
+    const lease = renderController.begin();
 
     setPdfRendering(true);
     setError("");
 
     void loadPdfDocument(currentScan)
-      .then(async ({ document }) => {
-        if (!active) return;
+      .then(async ({ document, pageLabels }) => {
+        if (!lease.isCurrent()) return;
         const nextPageCount = document.numPages;
         const safePageNumber = Math.min(Math.max(1, pdfPageNumber), nextPageCount);
         if (safePageNumber !== pdfPageNumber) {
@@ -289,47 +757,204 @@ export function DocumentWorkspaceViewer({
           return;
         }
         setPdfPageCount(nextPageCount);
+        void pageLabels.then((labels) => {
+          if (lease.isCurrent()) setPdfPageLabel(labels?.[safePageNumber - 1] ?? String(safePageNumber));
+        });
 
         const page = await document.getPage(safePageNumber);
-        if (!active) return;
+        if (!lease.isCurrent()) return;
 
-        const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
+        const cappedDevicePixelRatio = Math.min(
+          PDF_VIEWER_MAX_DEVICE_PIXEL_RATIO,
+          Math.max(1, window.devicePixelRatio || 1),
+        );
+        const renderScale = viewerV2Enabled
+          ? Math.min(
+              PDF_VIEWER_MAX_RENDER_SCALE,
+              Math.max(PDF_RENDER_SCALE, cappedDevicePixelRatio * Math.max(1, pdfRenderZoom)),
+            )
+          : PDF_RENDER_SCALE;
+        const baseViewport = page.getViewport({ scale: 1, rotation: effectivePdfRotation });
+        let canvasBudget: ReturnType<typeof boundPdfViewportScale>;
+        try {
+          canvasBudget = boundPdfViewportScale({
+            baseWidth: baseViewport.width,
+            baseHeight: baseViewport.height,
+            requestedScale: renderScale,
+            maxPixels: PDF_VIEWER_MAX_CANVAS_PIXELS,
+            maxSide: PDF_VIEWER_MAX_CANVAS_SIDE,
+          });
+        } catch (budgetError) {
+          page.cleanup();
+          throw budgetError;
+        }
+        const viewport = page.getViewport({
+          scale: canvasBudget.scale,
+          rotation: effectivePdfRotation,
+        });
         const context = canvas.getContext("2d");
-        if (!context) throw new Error("Браузер не зміг підготувати PDF-сторінку.");
+        if (!context) {
+          page.cleanup();
+          throw new Error("Браузер не зміг підготувати PDF-сторінку.");
+        }
 
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        canvas.style.width = `${Math.floor(viewport.width / PDF_RENDER_SCALE)}px`;
-        canvas.style.height = `${Math.floor(viewport.height / PDF_RENDER_SCALE)}px`;
+        canvas.width = canvasBudget.pixelWidth;
+        canvas.height = canvasBudget.pixelHeight;
+        canvas.style.width = `${Math.floor(viewport.width / canvasBudget.scale)}px`;
+        canvas.style.height = `${Math.floor(viewport.height / canvasBudget.scale)}px`;
         context.clearRect(0, 0, canvas.width, canvas.height);
 
-        await page.render({
-          canvasContext: context,
-          viewport,
-          canvas,
-          background: "rgb(255,255,255)",
-        }).promise;
-        if (active && isCanvasEffectivelyBlank(canvas)) {
-          setPdfNativeFallback(true);
-          setSelectionMode(false);
-          setCropRect(null);
+        try {
+          const result = await lease.track(page.render({
+            canvasContext: context,
+            viewport,
+            canvas,
+            background: "rgb(255,255,255)",
+          }));
+          if (result.status === "completed" && lease.isCurrent()) {
+            if (isCanvasEffectivelyBlank(canvas)) {
+              setPdfNativeFallback(true);
+              setSelectionMode(false);
+              setCropRect(null);
+            } else {
+              const preview = previewCacheRef.current.get(currentScan.id);
+              emitViewerTelemetryOnce(
+                `first-render:${viewer?.openedAt ?? 0}:${currentScan.id}`,
+                {
+                  event: "pdf_first_page_rendered",
+                  provider: preview?.documentSource?.provider ?? "unknown",
+                  ...(preview?.accessMode ? { accessMode: preview.accessMode } : {}),
+                  statusCode: 200,
+                  durationMs: Math.max(
+                    0,
+                    Math.round(performance.now() - pdfTelemetryStartedAtRef.current),
+                  ),
+                  pageCount: document.numPages,
+                  fileSizeBucket: pdfFileSizeBucket(
+                    preview?.documentSource?.fileSizeBytes ?? currentScan.size,
+                  ),
+                },
+              );
+              const restore = viewerV2Enabled ? viewer?.restore : undefined;
+              const restoreRotation = restore?.selection?.rotation;
+              const restoreKey = restore?.selection && restore.pageIndex === safePageNumber
+                ? `${viewer?.openedAt ?? 0}:${currentScan.id}:${safePageNumber}:${effectivePdfRotation}`
+                : "";
+              if (
+                restore?.selection &&
+                restoreKey &&
+                restoredFindingSelectionRef.current !== restoreKey &&
+                normalizeQuarterRotation(effectivePdfRotation) === normalizeQuarterRotation(restoreRotation ?? 0)
+              ) {
+                const restoredRect = findingDocumentSelectionViewportRect(
+                  { restore },
+                  {
+                    width: viewport.width / canvasBudget.scale,
+                    height: viewport.height / canvasBudget.scale,
+                  },
+                );
+                if (restoredRect) {
+                  setSelectionMode(false);
+                  setCropRect(restoredRect);
+                  restoredFindingSelectionRef.current = restoreKey;
+                }
+              }
+            }
+          }
+        } finally {
+          page.cleanup();
         }
       })
-      .catch(() => {
-        if (!active) return;
+      .catch((renderError: unknown) => {
+        if (!lease.isCurrent()) return;
+        if (renderError instanceof PdfCanvasBudgetError) {
+          setPdfNativeFallback(false);
+          setError(PDF_CANVAS_RESOURCE_LIMIT_MESSAGE);
+          setSelectionMode(false);
+          setCropRect(null);
+          return;
+        }
         setPdfNativeFallback(true);
         setPdfPageCount(0);
         setSelectionMode(false);
         setCropRect(null);
       })
       .finally(() => {
-        if (active) setPdfRendering(false);
+        if (lease.isCurrent()) setPdfRendering(false);
       });
+
+    return () => renderController.cancel();
+  }, [
+    viewerV2Enabled,
+    currentScan?.id,
+    kind,
+    pdfPageNumber,
+    pdfNativeFallback,
+    effectivePdfRotation,
+    pdfRenderZoom,
+    viewer?.openedAt,
+  ]);
+
+  useEffect(() => {
+    const queue = thumbnailQueueRef.current;
+    const cache = thumbnailCacheRef.current;
+    if (
+      !viewerV2Enabled
+      || !currentScan
+      || kind !== "pdf"
+      || pdfNativeFallback
+      || pdfPageCount < 1
+      || !queue
+      || !cache
+    ) {
+      queue?.cancelAll();
+      cache?.clear();
+      setThumbnailUrls({});
+      return undefined;
+    }
+
+    let active = true;
+    const plan = createVirtualizedThumbnailPlan({
+      totalPages: pdfPageCount,
+      firstVisiblePage: Math.max(1, pdfPageNumber - PDF_THUMBNAIL_WINDOW_RADIUS),
+      lastVisiblePage: Math.min(pdfPageCount, pdfPageNumber + PDF_THUMBNAIL_WINDOW_RADIUS),
+      currentPage: pdfPageNumber,
+      overscan: 1,
+      currentPageRadius: 1,
+    });
+    const keys = new Set(plan.mountedPages.map((page) => `${currentScan.id}:${page}`));
+    queue.retain(keys);
+    cache.retain(keys);
+    setThumbnailUrls(Object.fromEntries(plan.mountedPages.flatMap((page) => {
+      const url = cache.peek(`${currentScan.id}:${page}`);
+      return url ? [[page, url]] : [];
+    })));
+
+    void loadPdfDocument(currentScan).then(({ document }) => {
+      for (const [priority, pageNumber] of plan.renderQueue.entries()) {
+        const key = `${currentScan.id}:${pageNumber}`;
+        const cached = cache.get(key);
+        if (cached) {
+          if (active) setThumbnailUrls((current) => ({ ...current, [pageNumber]: cached }));
+          continue;
+        }
+        void queue.schedule({
+          key,
+          priority,
+          run: (signal) => renderPdfThumbnail(document, pageNumber, signal),
+        }).then((result) => {
+          if (result.status !== "completed") return;
+          if (!active || !keys.has(key)) return;
+          cache.set(key, result.value);
+          setThumbnailUrls((current) => ({ ...current, [pageNumber]: result.value }));
+        }).catch(() => undefined);
+      }
+    }).catch(() => undefined);
 
     return () => {
       active = false;
     };
-  }, [currentScan?.id, kind, pdfPageNumber, pdfNativeFallback]);
+  }, [viewerV2Enabled, currentScan?.id, kind, pdfNativeFallback, pdfPageCount, pdfPageNumber]);
 
   useEffect(() => {
     if (!viewer || navigationPageCount < 2 || mode === "minimized" || selectionMode) return undefined;
@@ -401,8 +1026,25 @@ export function DocumentWorkspaceViewer({
     setMode("minimized");
   };
 
+  const findingReferenceDraft = (
+    selection?: NormalizedPageSelectionInput,
+  ): FindingDocumentReferenceDraft | undefined => {
+    if (!sourceDocument || !sourceContext?.enabled) return undefined;
+    const source = previewCacheRef.current.get(activeScan.id)?.documentSource;
+    if (!source) return undefined;
+    return {
+      documentId: sourceDocument.id,
+      documentSourceId: source.id,
+      pageIndex: navigationPageNumber,
+      pageLabel: isInteractivePdf ? (pdfPageLabel || String(navigationPageNumber)) : String(navigationPageNumber),
+      ...(selection ? { selection } : {}),
+      sourceFingerprint: { ...source.fingerprint },
+    };
+  };
+
   const createFinding = async () => {
     if (!sourceDocument) return;
+    const documentReferenceDraft = findingReferenceDraft();
     await minimizeViewerForRecordAction();
     onCreateFinding({
       researchId: sourceDocument.researchId,
@@ -413,38 +1055,110 @@ export function DocumentWorkspaceViewer({
       file: sourceDocument.file,
       place: sourceDocument.place,
       page: navigationPageCount > 1 ? String(navigationPageNumber) : "",
+      ...(documentReferenceDraft ? { documentReferenceDraft } : {}),
       notes: `Створено під час перегляду документа «${sourceDocument.title}». Скан: ${activeScan.name}.`,
     });
   };
 
-  const createFindingFromCrop = async () => {
+  const createFindingFromCrop = async (destination: CropSnapshotDestination) => {
     if (!sourceDocument || !cropRect) return;
+    cropOperationAbortRef.current?.abort();
+    const abortController = new AbortController();
+    cropOperationAbortRef.current = abortController;
     setError("");
     setCreatingCrop(true);
     try {
-      await authorizeGoogleDrive();
       const sourceName = `${sourceDocument.title || activeScan.name}-сторінка-${navigationPageNumber}-фрагмент.png`;
-      const croppedFile = kind === "pdf" && pdfCanvasRef.current
-        ? await cropCanvasToFile(pdfCanvasRef.current, cropRect, sourceName, zoom)
-        : imageRef.current
-          ? await cropImageToFile(imageRef.current, cropRect, sourceName, zoom)
-          : null;
-      if (!croppedFile) {
-        throw new Error("Не вдалося підготувати фрагмент для збереження.");
-      }
       const fragmentSelection = documentFragmentSelectionFromCrop(
         sourceDocument.id,
         activeScan,
         navigationPageNumber,
-        rotation,
+        kind === "pdf" ? effectivePdfRotation : rotation,
         cropRect,
         kind === "pdf" ? pdfCanvasRef.current : imageRef.current,
         zoom,
       );
-      const fragmentScan = await saveScan(croppedFile, "finding");
+      if (!fragmentSelection) {
+        throw new Error("Не вдалося визначити координати виділеного фрагмента.");
+      }
+      let sourcePageDimensions: Pick<NormalizedPageSelectionInput, "sourcePageWidthPt" | "sourcePageHeightPt"> = {};
+      let croppedFile: File | null = null;
+      if (kind === "pdf") {
+        const { document: pdfDocument } = await loadPdfDocument(activeScan, abortController.signal);
+        throwIfViewerOperationAborted(abortController.signal);
+        const sourcePage = await pdfDocument.getPage(navigationPageNumber);
+        throwIfViewerOperationAborted(abortController.signal);
+        try {
+          const sourceViewport = sourcePage.getViewport({ scale: 1, rotation: 0 });
+          sourcePageDimensions = {
+            sourcePageWidthPt: sourceViewport.width,
+            sourcePageHeightPt: sourceViewport.height,
+          };
+          if (destination !== "none") {
+            const limits = pdfClientExportLimits();
+            const snapshot = await renderPdfFragmentSnapshot({
+              page: sourcePage,
+              crop: fragmentSelection.rect,
+              rotation: normalizeQuarterRotation(fragmentSelection.rotation),
+              scale: limits.imageScale,
+              maxSide: limits.maxImageSide,
+              mimeType: "image/png",
+              signal: abortController.signal,
+            });
+            croppedFile = timestampedFile(snapshot, sourceName, "image/png");
+          }
+        } finally {
+          sourcePage.cleanup();
+        }
+      } else if (destination !== "none" && imageRef.current) {
+        croppedFile = await cropImageToFile(imageRef.current, cropRect, sourceName, zoom);
+        throwIfViewerOperationAborted(abortController.signal);
+      }
+      if (destination !== "none" && !croppedFile) {
+        throw new Error("Не вдалося підготувати фрагмент для збереження.");
+      }
+      throwIfViewerOperationAborted(abortController.signal);
+      const documentReferenceBase = fragmentSelection
+        ? findingReferenceDraft({
+            pageIndex: fragmentSelection.pageNumber,
+            ...fragmentSelection.rect,
+            rotation: fragmentSelection.rotation,
+            ...sourcePageDimensions,
+          })
+        : undefined;
+      let fragmentScan: ScanAttachment | undefined;
+      if (destination === "google-drive" && croppedFile) {
+        await authorizeGoogleDrive();
+        throwIfViewerOperationAborted(abortController.signal);
+        fragmentScan = await saveScan(croppedFile, "finding", {
+          driveFolderPath: ["Знахідки"],
+          signal: abortController.signal,
+        });
+        throwIfViewerOperationAborted(abortController.signal);
+      } else if (destination === "download" && croppedFile) {
+        throwIfViewerOperationAborted(abortController.signal);
+        downloadGeneratedFile(croppedFile, croppedFile.name);
+      }
+      const documentReferenceDraft = documentReferenceBase
+        ? {
+            ...documentReferenceBase,
+            ...(fragmentScan?.storage === "google-drive" && fragmentScan.storagePath
+              ? {
+                  snapshot: {
+                    provider: "google_drive" as const,
+                    fileId: fragmentScan.storagePath,
+                    ...(fragmentScan.webViewLink ? { url: fragmentScan.webViewLink } : {}),
+                    mimeType: "image/png" as const,
+                  },
+                }
+              : {}),
+          }
+        : undefined;
       setSelectionMode(false);
       setCropRect(null);
+      setCropDialogOpen(false);
       await minimizeViewerForRecordAction();
+      throwIfViewerOperationAborted(abortController.signal);
       onCreateFinding({
         researchId: sourceDocument.researchId,
         documentId: sourceDocument.id,
@@ -454,14 +1168,20 @@ export function DocumentWorkspaceViewer({
         file: sourceDocument.file,
         place: sourceDocument.place,
         page: navigationPageCount > 1 ? String(navigationPageNumber) : "",
-        scans: [fragmentScan],
+        ...(fragmentScan ? { scans: [fragmentScan] } : {}),
         fragmentSelection,
+        ...(documentReferenceDraft ? { documentReferenceDraft } : {}),
         notes: `Створено з виділеного фрагмента документа «${sourceDocument.title}». Джерело: ${activeScan.name}.`,
       });
     } catch (cropError) {
-      setError(cropError instanceof Error ? cropError.message : "Не вдалося створити знахідку з фрагмента.");
+      if (!isViewerOperationAbort(cropError)) {
+        setError(cropError instanceof Error ? cropError.message : "Не вдалося створити знахідку з фрагмента.");
+      }
     } finally {
-      setCreatingCrop(false);
+      if (cropOperationAbortRef.current === abortController) {
+        cropOperationAbortRef.current = null;
+        setCreatingCrop(false);
+      }
     }
   };
 
@@ -480,16 +1200,51 @@ export function DocumentWorkspaceViewer({
     }
   };
 
+  const confirmCurrentSourceVersion = async () => {
+    const preview = currentScan
+      ? previewCacheRef.current.get(currentScan.id)
+      : undefined;
+    const source = preview?.documentSource;
+    if (
+      !sourceContext
+      || !currentScan
+      || !source
+      || !preview?.canConfirmSourceVersion
+      || !source.pendingFingerprint
+      || !source.pendingResolvedMetadata
+    ) return;
+
+    setConfirmingSourceVersion(true);
+    setSourceVersionMessage("");
+    try {
+      const confirmed = await confirmDocumentSourceVersion(
+        sourceContext.projectId,
+        source.id,
+        source.pendingFingerprint,
+        source.pendingResolvedMetadata,
+      );
+      previewCacheRef.current.set(currentScan.id, {
+        ...preview,
+        documentSource: confirmed,
+        sourceVersionStatus: "unchanged",
+        canConfirmSourceVersion: false,
+      });
+      setSourceVersionMessage(
+        "Нову версію PDF підтверджено. Раніше створені знахідки зберегли попередню версію джерела.",
+      );
+    } catch {
+      setSourceVersionMessage(
+        "Не вдалося підтвердити нову версію PDF. Оновіть сторінку та спробуйте ще раз.",
+      );
+    } finally {
+      setConfirmingSourceVersion(false);
+    }
+  };
+
   const reconnectDriveAndRetry = async () => {
     setError("");
-    previewPromisesRef.current.delete(activeScan.id);
-    const cached = previewCacheRef.current.get(activeScan.id);
-    if (cached?.revokeOnClose) {
-      URL.revokeObjectURL(cached.url);
-    }
-    previewCacheRef.current.delete(activeScan.id);
-    pdfCacheRef.current.delete(activeScan.id);
-    pdfPromisesRef.current.delete(activeScan.id);
+    setExternalSourceReason(null);
+    disposePreviewForScan(activeScan.id);
     await reconnectGoogleDrive();
     setBlobUrl("");
     setKind(null);
@@ -525,6 +1280,7 @@ export function DocumentWorkspaceViewer({
       return;
     }
     setError("");
+    setExternalSourceReason(null);
     setSelectionMode(false);
     setCropRect(null);
     setKind("web");
@@ -551,9 +1307,23 @@ export function DocumentWorkspaceViewer({
     setCurrentIndex((index) => Math.min(pageCount - 1, index + 1));
   };
 
+  const applyPageNumberInput = () => {
+    if (!isInteractivePdf || pdfPageCount < 1) return;
+    const requested = Number(pageNumberInput);
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested > pdfPageCount) {
+      setPageNumberInput(String(pdfPageNumber));
+      setError(`Введіть номер сторінки від 1 до ${pdfPageCount}.`);
+      return;
+    }
+    setError("");
+    setMarkedExportPages(new Set());
+    setSelectionMode(false);
+    setCropRect(null);
+    setPdfPageNumber(requested);
+  };
+
   const changeZoom = (delta: number) => {
     setZoom((value) => clampZoom(value + delta));
-    setCropRect(null);
   };
 
   const resetImageView = () => {
@@ -564,6 +1334,19 @@ export function DocumentWorkspaceViewer({
     setCropRect(null);
   };
 
+  const fitPdfView = (fit: "width" | "page") => {
+    const canvas = pdfCanvasRef.current;
+    const viewport = pdfPageViewportRef.current;
+    if (!canvas || !viewport) return;
+    const naturalWidth = Number.parseFloat(canvas.style.width) || canvas.width / PDF_RENDER_SCALE;
+    const naturalHeight = Number.parseFloat(canvas.style.height) || canvas.height / PDF_RENDER_SCALE;
+    if (!(naturalWidth > 0) || !(naturalHeight > 0)) return;
+    const widthScale = Math.max(MIN_ZOOM, (viewport.clientWidth - 28) / naturalWidth);
+    const heightScale = Math.max(MIN_ZOOM, (viewport.clientHeight - 28) / naturalHeight);
+    setZoom(clampZoom(fit === "width" ? widthScale : Math.min(widthScale, heightScale)));
+    setPan({ x: 0, y: 0 });
+  };
+
   const rotateImage = (degrees: number) => {
     setRotation((value) => normalizeDegrees(value + degrees));
     setPan({ x: 0, y: 0 });
@@ -571,8 +1354,240 @@ export function DocumentWorkspaceViewer({
     setCropRect(null);
   };
 
+  const openPdfExport = () => {
+    setExportRange(
+      markedExportPages.size > 0
+        ? [...markedExportPages].sort((left, right) => left - right).join(", ")
+        : String(pdfPageNumber),
+    );
+    setExportFormat("pdf");
+    setExportMessage("");
+    setExportResultUrl("");
+    setExportOpen(true);
+  };
+
+  const toggleMarkedExportPage = (pageNumber: number) => {
+    setMarkedExportPages((current) => {
+      const next = new Set(current);
+      if (next.has(pageNumber)) next.delete(pageNumber);
+      else next.add(pageNumber);
+      return next;
+    });
+  };
+
+  const closePdfExport = () => {
+    exportOperationAbortRef.current?.abort();
+    setExportOpen(false);
+  };
+
+  const closeCropDialog = () => {
+    cropOperationAbortRef.current?.abort();
+    setCropDialogOpen(false);
+  };
+
+  const chooseExportDriveFolder = async () => {
+    if (exporting) return;
+    setExportMessage("");
+    try {
+      const folder = await pickGoogleDriveFolder("Оберіть папку для експорту документа");
+      if (!folder) return;
+      setExportDriveFolder(folder);
+      setExportDestination("google-drive");
+      setExportMessage(`Папку «${folder.name}» вибрано для експорту.`);
+    } catch (folderError) {
+      setExportMessage(folderError instanceof Error
+        ? folderError.message
+        : "Не вдалося вибрати папку Google Drive.");
+    }
+  };
+
+  const exportPdfPages = async () => {
+    if (!currentScan || !sourceDocument || !isInteractivePdf || pdfPageCount < 1) return;
+    const telemetryRequestId = createPdfOperationalRequestId();
+    const telemetryStartedAt = performance.now();
+    let exportedPageCount: number | undefined;
+    let exportedBytes: number | undefined;
+    exportOperationAbortRef.current?.abort();
+    const abortController = new AbortController();
+    exportOperationAbortRef.current = abortController;
+    setExporting(true);
+    setExportMessage("");
+    setExportResultUrl("");
+    try {
+      const limits = pdfClientExportLimits();
+      const imageExportOptions = {
+        scale: exportImageScale,
+        jpegQuality: exportJpegQuality / 100,
+      };
+      const selectedPages = parsePageRange(exportRange, pdfPageCount, limits.maxPages);
+      exportedPageCount = selectedPages.length;
+      const { document: pdfDocument } = await loadPdfDocument(currentScan, abortController.signal);
+      throwIfViewerOperationAborted(abortController.signal);
+      let result: Blob;
+      let fileName: string;
+      if (exportFormat === "pdf") {
+        const persistedSource = previewCacheRef.current.get(currentScan.id)?.documentSource;
+        const knownSize = firstKnownPositiveSize(
+          persistedSource?.fileSizeBytes,
+          currentScan.size,
+        );
+        validateKnownClientExportSize(knownSize, selectedPages.length, limits);
+        const sourceBytes = await pdfDocument.getData();
+        throwIfViewerOperationAborted(abortController.signal);
+        result = await createPdfSubsetBlob(sourceBytes, selectedPages, limits, abortController.signal);
+        fileName = pdfExportFileName(sourceDocument.title, selectedPages, "pdf");
+      } else if (exportFormat === "png" || exportFormat === "jpeg") {
+        if (selectedPages.length !== 1) {
+          throw new Error("Для кількох зображень оберіть ZIP (PNG) або ZIP (JPEG).");
+        }
+        result = await renderPdfPageImage(
+          pdfDocument,
+          selectedPages[0]!,
+          exportFormat,
+          limits,
+          abortController.signal,
+          imageExportOptions,
+        );
+        fileName = pdfExportFileName(
+          sourceDocument.title,
+          selectedPages,
+          exportFormat === "jpeg" ? "jpg" : "png",
+        );
+      } else {
+        const imageFormat = exportFormat === "zip-jpeg" ? "jpeg" : "png";
+        result = await createPageImagesZip(
+          pdfDocument,
+          selectedPages,
+          imageFormat,
+          sourceDocument.title,
+          limits,
+          abortController.signal,
+          imageExportOptions,
+        );
+        fileName = pdfExportFileName(sourceDocument.title, selectedPages, "zip");
+      }
+      throwIfViewerOperationAborted(abortController.signal);
+      exportedBytes = result.size;
+
+      if (exportDestination === "download") {
+        downloadGeneratedFile(result, fileName);
+        setExportMessage(`Файл «${fileName}» сформовано та передано браузеру для завантаження.`);
+      } else {
+        if (!sourceContext) throw new Error("Для збереження в Google Drive потрібен активний проєкт.");
+        await authorizeGoogleDrive();
+        throwIfViewerOperationAborted(abortController.signal);
+        const file = new File([result], fileName, { type: result.type || "application/octet-stream" });
+        const persistedSource = previewCacheRef.current.get(currentScan.id)?.documentSource;
+        const knownSize = firstKnownPositiveSize(
+          persistedSource?.fileSizeBytes,
+          currentScan.size,
+        );
+        const destinationPath = ["Експорт документів"];
+        const destinationIdentity = exportDriveFolder
+          ? [
+              `google-drive-folder:${exportDriveFolder.id}`,
+              ...(exportDriveFolder.resourceKey
+                ? [`resource-key:${exportDriveFolder.resourceKey}`]
+                : []),
+            ]
+          : destinationPath;
+        const deduplicationKey = pdfExportDeduplicationKey({
+          documentId: sourceDocument.id,
+          sourceIdentity: persistedSource?.id
+            ?? currentScan.documentSourceId
+            ?? currentScan.storagePath
+            ?? currentScan.id,
+          sourceVersion: JSON.stringify(
+            persistedSource?.fingerprint
+              ?? currentScan.sourceFingerprint
+              ?? {
+                revisionId: currentScan.driveRevisionId ?? "",
+                modifiedTime: currentScan.driveModifiedTime ?? "",
+                size: knownSize ?? 0,
+              },
+          ),
+          pages: selectedPages,
+          format: exportFormat,
+          destinationPath: destinationIdentity,
+          ...(exportFormat === "pdf" ? {} : {
+            imageScale: exportImageScale,
+            ...(exportFormat === "jpeg" || exportFormat === "zip-jpeg"
+              ? { jpegQuality: exportJpegQuality / 100 }
+              : {}),
+          }),
+        });
+        const uploaded = await uploadFileToGoogleDrive(
+          { projectId: sourceContext.projectId, projectName: sourceContext.projectName },
+          file,
+          createClientOperationId("pdf-export"),
+          exportDriveFolder
+            ? {
+                destinationFolderId: exportDriveFolder.id,
+                destinationFolderName: exportDriveFolder.name,
+                destinationFolderResourceKey: exportDriveFolder.resourceKey,
+                deduplicationKey,
+                signal: abortController.signal,
+              }
+            : {
+                folderPath: destinationPath,
+                deduplicationKey,
+                signal: abortController.signal,
+              },
+        );
+        throwIfViewerOperationAborted(abortController.signal);
+        setExportResultUrl(uploaded.webViewLink);
+        setExportMessage(
+          exportDriveFolder
+            ? `Файл «${fileName}» збережено у папці «${exportDriveFolder.name}».`
+            : `Файл «${fileName}» збережено у Google Drive.`,
+        );
+      }
+      if (sourceContext) {
+        const preview = previewCacheRef.current.get(currentScan.id);
+        void emitPdfOperationalEvent(sourceContext.projectId, {
+          event: "pdf_page_export_succeeded",
+          requestId: telemetryRequestId,
+          provider: preview?.documentSource?.provider ?? "unknown",
+          ...(preview?.accessMode ? { accessMode: preview.accessMode } : {}),
+          statusCode: 200,
+          durationMs: Math.max(0, Math.round(performance.now() - telemetryStartedAt)),
+          ...(exportedPageCount ? { pageCount: exportedPageCount } : {}),
+          fileSizeBucket: pdfFileSizeBucket(exportedBytes),
+          ...(exportedBytes === undefined ? {} : { transferredBytes: exportedBytes }),
+        });
+      }
+    } catch (exportError) {
+      if (!isViewerOperationAbort(exportError)) {
+        if (sourceContext) {
+          const preview = previewCacheRef.current.get(currentScan.id);
+          void emitPdfOperationalEvent(sourceContext.projectId, {
+            event: "pdf_page_export_failed",
+            requestId: telemetryRequestId,
+            provider: preview?.documentSource?.provider ?? "unknown",
+            ...(preview?.accessMode ? { accessMode: preview.accessMode } : {}),
+            errorCode: safePdfOperationalErrorCode(
+              exportError,
+              exportDestination === "google-drive" ? "DRIVE_ERROR" : "EXPORT_FAILED",
+            ),
+            durationMs: Math.max(0, Math.round(performance.now() - telemetryStartedAt)),
+            ...(exportedPageCount ? { pageCount: exportedPageCount } : {}),
+            fileSizeBucket: pdfFileSizeBucket(exportedBytes),
+            ...(exportedBytes === undefined ? {} : { transferredBytes: exportedBytes }),
+          });
+        }
+        setExportMessage(exportError instanceof Error ? exportError.message : "Не вдалося експортувати сторінки.");
+      }
+    } finally {
+      if (exportOperationAbortRef.current === abortController) {
+        exportOperationAbortRef.current = null;
+        setExporting(false);
+      }
+    }
+  };
+
   const handlePreviewWheel = (event: WheelEvent<HTMLDivElement>) => {
     if (!(kind === "image" || isInteractivePdf) || !blobUrl) return;
+    if ((event.target as HTMLElement).closest(".workspace-pdf-thumbnails, .workspace-export-dialog")) return;
     event.preventDefault();
     event.stopPropagation();
     if (isSelecting || Math.abs(event.deltaY) < 4) return;
@@ -651,13 +1666,38 @@ export function DocumentWorkspaceViewer({
     window.addEventListener("pointercancel", stop);
   };
 
-  const imagePoint = (event: PointerEvent<HTMLDivElement>): { x: number; y: number } => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const scale = zoom || 1;
+  const cropPageGeometry = (): { pointBounds: CropRect; pageSize: CropSize } | null => {
+    const stage = selectionStageRef.current;
+    if (!stage || !(stage.offsetWidth > 0) || !(stage.offsetHeight > 0)) return null;
+    const bounds = stage.getBoundingClientRect();
+    if (!(bounds.width > 0) || !(bounds.height > 0)) return null;
     return {
-      x: Math.min(Math.max(0, (event.clientX - rect.left) / scale), rect.width / scale),
-      y: Math.min(Math.max(0, (event.clientY - rect.top) / scale), rect.height / scale),
+      pointBounds: {
+        x: bounds.left,
+        y: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      },
+      pageSize: { width: stage.offsetWidth, height: stage.offsetHeight },
     };
+  };
+
+  const cropPoint = (clientX: number, clientY: number): CropPoint | null => {
+    const geometry = cropPageGeometry();
+    if (!geometry) return null;
+    return screenPointToPagePoint(
+      { x: clientX, y: clientY },
+      geometry.pointBounds,
+      geometry.pageSize,
+    );
+  };
+
+  const captureCropPointer = (pointerId: number) => {
+    try {
+      selectionStageRef.current?.setPointerCapture(pointerId);
+    } catch {
+      // The browser can reject capture if the pointer has already ended.
+    }
   };
 
   const beginImagePan = (event: PointerEvent<HTMLDivElement>) => {
@@ -696,31 +1736,61 @@ export function DocumentWorkspaceViewer({
   const beginCropSelection = (event: PointerEvent<HTMLDivElement>) => {
     if (!selectionMode || !(kind === "image" || isInteractivePdf) || event.button !== 0) return;
     event.preventDefault();
-    const start = imagePoint(event);
-    cropStartRef.current = start;
+    const start = cropPoint(event.clientX, event.clientY);
+    if (!start) return;
+    cropInteractionRef.current = { mode: "create", anchor: start };
     setIsSelecting(true);
     setCropRect({ x: start.x, y: start.y, width: 0, height: 0 });
-    event.currentTarget.setPointerCapture(event.pointerId);
+    captureCropPointer(event.pointerId);
+  };
+
+  const beginCropMove = (event: PointerEvent<HTMLSpanElement>) => {
+    if (!selectionMode || !cropRect || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const start = cropPoint(event.clientX, event.clientY);
+    if (!start) return;
+    cropInteractionRef.current = { mode: "move", anchor: start, initial: { ...cropRect } };
+    setIsSelecting(true);
+    captureCropPointer(event.pointerId);
+  };
+
+  const beginCropResize = (handle: CropResizeHandle, event: PointerEvent<HTMLSpanElement>) => {
+    if (!selectionMode || !cropRect || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const start = cropPoint(event.clientX, event.clientY);
+    if (!start) return;
+    cropInteractionRef.current = { mode: "resize", anchor: start, initial: { ...cropRect }, handle };
+    setIsSelecting(true);
+    captureCropPointer(event.pointerId);
   };
 
   const updateCropSelection = (event: PointerEvent<HTMLDivElement>) => {
-    if (!isSelecting || !cropStartRef.current) return;
-    const end = imagePoint(event);
-    const start = cropStartRef.current;
-    setCropRect({
-      x: Math.min(start.x, end.x),
-      y: Math.min(start.y, end.y),
-      width: Math.abs(end.x - start.x),
-      height: Math.abs(end.y - start.y),
-    });
+    const interaction = cropInteractionRef.current;
+    if (!interaction) return;
+    const point = cropPoint(event.clientX, event.clientY);
+    const geometry = cropPageGeometry();
+    if (!point || !geometry) return;
+    if (interaction.mode === "create") {
+      setCropRect(createCropRect(interaction.anchor, point, geometry.pageSize));
+      return;
+    }
+    const delta = {
+      x: point.x - interaction.anchor.x,
+      y: point.y - interaction.anchor.y,
+    };
+    setCropRect(interaction.mode === "move"
+      ? moveCropRect(interaction.initial, delta, geometry.pageSize)
+      : resizeCropRect(interaction.initial, interaction.handle, delta, geometry.pageSize));
   };
 
   const finishCropSelection = (event: PointerEvent<HTMLDivElement>) => {
-    if (!isSelecting) return;
+    if (!cropInteractionRef.current) return;
     setIsSelecting(false);
-    cropStartRef.current = null;
+    cropInteractionRef.current = null;
     try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      selectionStageRef.current?.releasePointerCapture(event.pointerId);
     } catch {
       // Pointer capture can already be released by the browser.
     }
@@ -782,15 +1852,23 @@ export function DocumentWorkspaceViewer({
           ...(viewerSize ? { width: viewerSize.width, height: viewerSize.height } : {}),
         }
       : undefined;
-  const imageTransform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) rotate(${rotation}deg)`;
+  const imageTransform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) rotate(${kind === "pdf" ? 0 : rotation}deg)`;
   const canSelectFragment =
     (kind === "image" || isInteractivePdf) &&
     Boolean(blobUrl) &&
     !loading &&
     !error &&
     !pdfRendering &&
-    rotation === 0;
+    (kind === "pdf" || rotation === 0);
   const hasValidCrop = Boolean(cropRect && cropRect.width >= 12 && cropRect.height >= 12);
+  const thumbnailPlan = createVirtualizedThumbnailPlan({
+    totalPages: viewerV2Enabled && isInteractivePdf ? pdfPageCount : 0,
+    firstVisiblePage: Math.max(1, pdfPageNumber - PDF_THUMBNAIL_WINDOW_RADIUS),
+    lastVisiblePage: Math.min(pdfPageCount, pdfPageNumber + PDF_THUMBNAIL_WINDOW_RADIUS),
+    currentPage: pdfPageNumber,
+    overscan: 1,
+    currentPageRadius: 1,
+  });
 
   const viewerContent = (
     <>
@@ -846,7 +1924,7 @@ export function DocumentWorkspaceViewer({
               >
                 +
               </button>
-              {kind === "image" ? (
+              {kind === "image" || (viewerV2Enabled && isInteractivePdf) ? (
                 <>
                   <button
                     type="button"
@@ -865,6 +1943,16 @@ export function DocumentWorkspaceViewer({
                     title="Повернути праворуч"
                   >
                     ↻
+                  </button>
+                </>
+              ) : null}
+              {viewerV2Enabled && isInteractivePdf ? (
+                <>
+                  <button type="button" className="button button-secondary" onClick={() => fitPdfView("width")}>
+                    За шириною
+                  </button>
+                  <button type="button" className="button button-secondary" onClick={() => fitPdfView("page")}>
+                    Умістити
                   </button>
                 </>
               ) : null}
@@ -890,10 +1978,73 @@ export function DocumentWorkspaceViewer({
       </div>
 
       <div className="workspace-viewer-body" onWheelCapture={handlePreviewWheel}>
+        {effectiveSourceVersionStatus === "changed" ? (
+          <div className="workspace-viewer-notice" role="status">
+            Зовнішній PDF було оновлено. Номер сторінки або виділений фрагмент може не відповідати новій версії.
+          </div>
+        ) : null}
+        {effectiveSourceVersionStatus === "changed" && currentPreview?.canConfirmSourceVersion ? (
+          <div className="workspace-viewer-notice" role="status">
+            <span>Поточний файл є новою версією зовнішнього PDF.</span>
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={confirmingSourceVersion}
+              onClick={() => void confirmCurrentSourceVersion()}
+            >
+              {confirmingSourceVersion ? "Підтверджуємо…" : "Підтвердити нову версію"}
+            </button>
+          </div>
+        ) : null}
+        {sourceVersionMessage ? (
+          <div className="workspace-viewer-notice" role="status">{sourceVersionMessage}</div>
+        ) : null}
         {fullscreenError ? (
           <div className="workspace-viewer-notice">{fullscreenError}</div>
         ) : null}
-        {loading && !blobUrl ? (
+        {externalSourceReason ? (
+          <div className="workspace-viewer-state workspace-viewer-external-source">
+            <strong>
+              {externalSourceReason === "authenticated-source"
+                ? "Історичний запис FamilySearch захищений правилами доступу"
+                : externalSourceReason === "embedded-blocked"
+                  ? "Внутрішній перегляд недоступний"
+                  : "Документ відкривається на сайті джерела"}
+            </strong>
+            <p>
+              {externalSourceReason === "authenticated-source"
+                ? "FamilySearch не дозволяє стороннім застосункам вбудовувати історичні записи. Трекер Роду не запитує ваш пароль і не копіює файли cookie FamilySearch."
+                : externalSourceReason === "embedded-blocked"
+                  ? "Посилання збережене. Файл міг потребувати входу, бути видаленим, перевищувати допустимий розмір або мати обмеження браузера на вбудований перегляд."
+                  : "Посилання веде на вебсторінку, а не безпосередньо на PDF чи зображення. Такі сторінки надійніше переглядати на самому ресурсі."}
+            </p>
+            <p className="workspace-viewer-external-note">
+              {externalSourceReason === "authenticated-source"
+                ? "Щоб працювати з дозволеною копією у цьому переглядачі, завантажте її з FamilySearch і додайте до документа або у Google Drive. Офіційне OAuth-підключення саме по собі не надає права показувати історичні зображення поза FamilySearch."
+                : "Якщо ресурс вимагає авторизації, виконайте вхід у відкритій вкладці — чинна сесія браузера залишиться на сайті джерела."}
+            </p>
+            <div className="workspace-viewer-state-actions">
+              {externalSourceReason === "authenticated-source" && sourceDocument ? (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void openSourceDocument()}
+                >
+                  Додати копію до документа
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => void run(() => openScan(activeScan))}
+              >
+                {externalSourceReason === "authenticated-source"
+                  ? "Увійти на FamilySearch"
+                  : "Відкрити на сайті джерела"}
+              </button>
+            </div>
+          </div>
+        ) : loading && !blobUrl ? (
           <div className="workspace-viewer-state">Завантажуємо джерело…</div>
         ) : error ? (
           <div className="workspace-viewer-state error">
@@ -915,6 +2066,7 @@ export function DocumentWorkspaceViewer({
           </div>
         ) : kind === "image" && blobUrl ? (
           <div
+            ref={selectionStageRef}
             className={`workspace-image-selection-stage ${selectionMode ? "selecting" : ""} ${
               isPanning ? "panning" : ""
             }`}
@@ -933,14 +2085,24 @@ export function DocumentWorkspaceViewer({
             />
             {cropRect ? (
               <span
-                className="workspace-selection-rect"
+                className={`workspace-selection-rect ${selectionMode ? "editable" : ""}`}
                 style={{
                   left: cropRect.x,
                   top: cropRect.y,
                   width: cropRect.width,
                   height: cropRect.height,
                 }}
-              />
+                onPointerDown={selectionMode && viewerV2Enabled ? beginCropMove : undefined}
+              >
+                {selectionMode && viewerV2Enabled ? CROP_RESIZE_HANDLES.map((handle) => (
+                  <span
+                    key={handle}
+                    className="workspace-selection-handle"
+                    data-handle={handle}
+                    onPointerDown={(event) => beginCropResize(handle, event)}
+                  />
+                )) : null}
+              </span>
             ) : null}
             {selectionMode ? (
               <span className="workspace-selection-hint">
@@ -951,33 +2113,105 @@ export function DocumentWorkspaceViewer({
         ) : kind === "pdf" && blobUrl && pdfNativeFallback ? (
           <iframe title={activeScan.name} src={blobUrl} />
         ) : kind === "pdf" && blobUrl ? (
-          <div
-            className={`workspace-image-selection-stage workspace-pdf-selection-stage ${selectionMode ? "selecting" : ""} ${
-              isPanning ? "panning" : ""
-            }`}
-            style={{ transform: imageTransform }}
-            onPointerDown={beginImageInteraction}
-            onPointerMove={updateImageInteraction}
-            onPointerUp={finishImageInteraction}
-            onPointerCancel={finishImageInteraction}
-          >
-            <canvas ref={pdfCanvasRef} aria-label={activeScan.name} />
-            {cropRect ? (
-              <span
-                className="workspace-selection-rect"
-                style={{
-                  left: cropRect.x,
-                  top: cropRect.y,
-                  width: cropRect.width,
-                  height: cropRect.height,
-                }}
-              />
+          <div className={`workspace-pdf-layout ${viewerV2Enabled ? "" : "without-thumbnails"}`}>
+            {viewerV2Enabled ? (
+              <nav className="workspace-pdf-thumbnails" aria-label="Мініатюри сторінок PDF">
+              {thumbnailPlan.mountedPages[0] && thumbnailPlan.mountedPages[0] > 1 ? (
+                <button
+                  type="button"
+                  className="workspace-thumbnail-jump"
+                  onClick={() => setPdfPageNumber(1)}
+                >
+                  1…
+                </button>
+              ) : null}
+              {thumbnailPlan.mountedPages.map((pageNumber) => (
+                <div
+                  key={pageNumber}
+                  className={`workspace-pdf-thumbnail ${pageNumber === pdfPageNumber ? "active" : ""} ${
+                    markedExportPages.has(pageNumber) ? "marked" : ""
+                  }`}
+                >
+                  <button
+                    type="button"
+                    className="workspace-pdf-thumbnail-preview"
+                    aria-current={pageNumber === pdfPageNumber ? "page" : undefined}
+                    aria-label={`Відкрити сторінку ${pageNumber}`}
+                    onClick={() => {
+                      setSelectionMode(false);
+                      setCropRect(null);
+                      setPdfPageNumber(pageNumber);
+                    }}
+                  >
+                    {thumbnailUrls[pageNumber] ? (
+                      <img src={thumbnailUrls[pageNumber]} alt="" />
+                    ) : (
+                      <span className="workspace-thumbnail-placeholder">Завантаження…</span>
+                    )}
+                    <strong>{pageNumber}</strong>
+                  </button>
+                  <label className="workspace-thumbnail-export-mark" title="Позначити сторінку для експорту">
+                    <input
+                      type="checkbox"
+                      checked={markedExportPages.has(pageNumber)}
+                      onChange={() => toggleMarkedExportPage(pageNumber)}
+                    />
+                    <span className="visually-hidden">Позначити сторінку {pageNumber} для експорту</span>
+                  </label>
+                </div>
+              ))}
+              {thumbnailPlan.mountedPages.at(-1) && thumbnailPlan.mountedPages.at(-1)! < pdfPageCount ? (
+                <button
+                  type="button"
+                  className="workspace-thumbnail-jump"
+                  onClick={() => setPdfPageNumber(pdfPageCount)}
+                >
+                  …{pdfPageCount}
+                </button>
+              ) : null}
+              </nav>
             ) : null}
-            {selectionMode ? (
-              <span className="workspace-selection-hint">
-                Протягніть рамку по фрагменту PDF-сторінки
-              </span>
-            ) : null}
+            <div ref={pdfPageViewportRef} className="workspace-pdf-page-viewport">
+              <div
+                ref={selectionStageRef}
+                className={`workspace-image-selection-stage workspace-pdf-selection-stage ${selectionMode ? "selecting" : ""} ${
+                  isPanning ? "panning" : ""
+                }`}
+                style={{ transform: imageTransform }}
+                onPointerDown={beginImageInteraction}
+                onPointerMove={updateImageInteraction}
+                onPointerUp={finishImageInteraction}
+                onPointerCancel={finishImageInteraction}
+              >
+                <canvas ref={pdfCanvasRef} aria-label={activeScan.name} />
+                {cropRect ? (
+                  <span
+                    className={`workspace-selection-rect ${selectionMode ? "editable" : ""}`}
+                    style={{
+                      left: cropRect.x,
+                      top: cropRect.y,
+                      width: cropRect.width,
+                      height: cropRect.height,
+                    }}
+                    onPointerDown={selectionMode && viewerV2Enabled ? beginCropMove : undefined}
+                  >
+                    {selectionMode && viewerV2Enabled ? CROP_RESIZE_HANDLES.map((handle) => (
+                      <span
+                        key={handle}
+                        className="workspace-selection-handle"
+                        data-handle={handle}
+                        onPointerDown={(event) => beginCropResize(handle, event)}
+                      />
+                    )) : null}
+                  </span>
+                ) : null}
+                {selectionMode ? (
+                  <span className="workspace-selection-hint">
+                    Протягніть рамку по фрагменту PDF-сторінки
+                  </span>
+                ) : null}
+              </div>
+            </div>
           </div>
         ) : kind === "web" && blobUrl ? (
           <iframe title={activeScan.name} src={blobUrl} />
@@ -1007,7 +2241,25 @@ export function DocumentWorkspaceViewer({
                 >
                   ←
                 </button>
-                <span>{navigationPageNumber} / {navigationPageCount}</span>
+                {viewerV2Enabled && isInteractivePdf ? (
+                  <label className="workspace-page-input">
+                    <span className="visually-hidden">Перейти до сторінки</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={pdfPageCount}
+                      value={pageNumberInput}
+                      onChange={(event) => setPageNumberInput(event.target.value)}
+                      onBlur={applyPageNumberInput}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") applyPageNumberInput();
+                      }}
+                    />
+                    <span>/ {navigationPageCount}</span>
+                  </label>
+                ) : (
+                  <span>{navigationPageNumber} / {navigationPageCount}</span>
+                )}
                 <button
                   type="button"
                   className="button button-secondary"
@@ -1034,7 +2286,10 @@ export function DocumentWorkspaceViewer({
                   type="button"
                   className="button button-primary"
                   disabled={!hasValidCrop || creatingCrop}
-                  onClick={() => void createFindingFromCrop()}
+                  onClick={() => {
+                    if (viewerV2Enabled) setCropDialogOpen(true);
+                    else void createFindingFromCrop("google-drive");
+                  }}
                 >
                   {creatingCrop ? "Створення…" : "Знахідка з фрагмента"}
                 </button>
@@ -1046,12 +2301,286 @@ export function DocumentWorkspaceViewer({
             <button type="button" className="button button-primary" onClick={() => void createFinding()}>
               Створити знахідку
             </button>
+            {viewerV2Enabled && isInteractivePdf ? (
+              <button type="button" className="button button-secondary" onClick={openPdfExport}>
+                Експорт сторінок
+              </button>
+            ) : null}
           </>
         ) : null}
-        <button type="button" className="button button-secondary" onClick={() => void run(() => downloadScan(activeScan))}>
-          Завантажити
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={() => void run(() => activeScan.storage === "external-url" ? openScan(activeScan) : downloadScan(activeScan))}
+        >
+          {activeScan.storage === "external-url" ? "Відкрити джерело" : "Завантажити"}
         </button>
       </div>
+      {viewerV2Enabled && exportOpen ? (
+        <div className="workspace-export-backdrop" role="presentation" onMouseDown={closePdfExport}>
+          <section
+            className="workspace-export-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="workspace-export-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="workspace-export-header">
+              <div>
+                <span className="eyebrow">PDF-експорт</span>
+                <h3 id="workspace-export-title">Зберегти сторінки</h3>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={closePdfExport}
+                aria-label="Закрити експорт"
+              >
+                ×
+              </button>
+            </div>
+            <label>
+              <span>Сторінки</span>
+              <input
+                value={exportRange}
+                onChange={(event) => setExportRange(event.target.value)}
+                placeholder="Наприклад: 1-5, 8, 12-15"
+                disabled={exporting}
+              />
+              <small>Поточна сторінка: {pdfPageNumber}. У документі: {pdfPageCount}.</small>
+            </label>
+            <div className="workspace-export-range-shortcuts" aria-label="Швидкий вибір сторінок">
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={exporting}
+                onClick={() => setExportRange(String(pdfPageNumber))}
+              >
+                Поточна
+              </button>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={exporting || markedExportPages.size === 0}
+                onClick={() => setExportRange([...markedExportPages].sort((left, right) => left - right).join(", "))}
+              >
+                Позначені ({markedExportPages.size})
+              </button>
+              {markedExportPages.size > 0 ? (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={exporting}
+                  onClick={() => setMarkedExportPages(new Set())}
+                >
+                  Очистити позначення
+                </button>
+              ) : null}
+            </div>
+            <label>
+              <span>Формат</span>
+              <select
+                value={exportFormat}
+                onChange={(event) => setExportFormat(event.target.value as PdfExportFormat)}
+                disabled={exporting}
+              >
+                <option value="pdf">Один PDF без растеризації</option>
+                <option value="png">PNG (одна сторінка)</option>
+                <option value="jpeg">JPEG (одна сторінка)</option>
+                <option value="zip-png">ZIP із PNG</option>
+                <option value="zip-jpeg">ZIP із JPEG</option>
+              </select>
+            </label>
+            {exportFormat !== "pdf" ? (
+              <div className="workspace-export-image-options">
+                <label>
+                  <span>Масштаб зображення</span>
+                  <select
+                    value={exportImageScale}
+                    onChange={(event) => setExportImageScale(Number(event.target.value) as PdfExportImageScale)}
+                    disabled={exporting}
+                  >
+                    <option value={1}>1× — компактний</option>
+                    <option value={1.5}>1,5× — збалансований</option>
+                    <option value={2}>2× — деталізований</option>
+                  </select>
+                </label>
+                {exportFormat === "jpeg" || exportFormat === "zip-jpeg" ? (
+                  <label>
+                    <span>Якість JPEG</span>
+                    <select
+                      value={exportJpegQuality}
+                      onChange={(event) => setExportJpegQuality(Number(event.target.value) as PdfExportJpegQuality)}
+                      disabled={exporting}
+                    >
+                      <option value={70}>70% — менший файл</option>
+                      <option value={85}>85% — рекомендовано</option>
+                      <option value={95}>95% — найвища якість</option>
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+            <fieldset>
+              <legend>Місце збереження</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="pdf-export-destination"
+                  checked={exportDestination === "download"}
+                  onChange={() => setExportDestination("download")}
+                  disabled={exporting}
+                />
+                На комп’ютер
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="pdf-export-destination"
+                  checked={exportDestination === "google-drive"}
+                  onChange={() => setExportDestination("google-drive")}
+                  disabled={exporting || !sourceContext}
+                />
+                У Google Drive
+              </label>
+            </fieldset>
+            {exportDestination === "google-drive" ? (
+              <div className="workspace-export-drive-folder">
+                <div>
+                  <strong>Папка Google Drive</strong>
+                  <span>
+                    {exportDriveFolder
+                      ? exportDriveFolder.name
+                      : "За замовчуванням: «Експорт документів» у папці проєкту"}
+                  </span>
+                </div>
+                <div className="workspace-export-drive-folder-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={exporting || !sourceContext}
+                    onClick={() => void chooseExportDriveFolder()}
+                  >
+                    {exportDriveFolder ? "Змінити папку" : "Обрати папку"}
+                  </button>
+                  {exportDriveFolder ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={exporting}
+                      onClick={() => setExportDriveFolder(null)}
+                    >
+                      Використати типову
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {exportMessage ? (
+              <div className="workspace-export-message" aria-live="polite">
+                <span>{exportMessage}</span>
+                {exportResultUrl ? (
+                  <a href={exportResultUrl} target="_blank" rel="noreferrer">Відкрити в Google Drive</a>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="workspace-export-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={closePdfExport}
+              >
+                {exporting ? "Скасувати" : "Закрити"}
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={exporting}
+                onClick={() => void exportPdfPages()}
+              >
+                {exporting ? "Формування…" : "Зберегти"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {viewerV2Enabled && cropDialogOpen ? (
+        <div className="workspace-export-backdrop" role="presentation" onMouseDown={closeCropDialog}>
+          <section
+            className="workspace-export-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="workspace-crop-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="workspace-export-header">
+              <div>
+                <span className="eyebrow">Фрагмент PDF</span>
+                <h3 id="workspace-crop-title">Створити знахідку</h3>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={closeCropDialog}
+                aria-label="Закрити"
+              >
+                ×
+              </button>
+            </div>
+            <p>Координати та джерело будуть збережені у знахідці незалежно від вибраного варіанта.</p>
+            <fieldset>
+              <legend>Копія фрагмента</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="crop-snapshot-destination"
+                  checked={cropSnapshotDestination === "google-drive"}
+                  onChange={() => setCropSnapshotDestination("google-drive")}
+                  disabled={creatingCrop}
+                />
+                Зберегти копію у Google Drive
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="crop-snapshot-destination"
+                  checked={cropSnapshotDestination === "download"}
+                  onChange={() => setCropSnapshotDestination("download")}
+                  disabled={creatingCrop}
+                />
+                Завантажити копію на комп’ютер
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="crop-snapshot-destination"
+                  checked={cropSnapshotDestination === "none"}
+                  onChange={() => setCropSnapshotDestination("none")}
+                  disabled={creatingCrop}
+                />
+                Без копії — лише джерело та координати
+              </label>
+            </fieldset>
+            <div className="workspace-export-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={closeCropDialog}
+              >
+                Скасувати
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={creatingCrop}
+                onClick={() => void createFindingFromCrop(cropSnapshotDestination)}
+              >
+                {creatingCrop ? "Створення…" : "Продовжити"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {mode === "window" ? (
         <button
           type="button"
@@ -1073,10 +2602,11 @@ export function DocumentWorkspaceViewer({
 function previewKind(scan: ScanAttachment, blob: Blob): PreviewKind | null {
   const mimeType = (blob.type || scan.mimeType || "").toLocaleLowerCase();
   const extension = scan.name.split(".").pop()?.toLocaleLowerCase() ?? "";
-  if (mimeType === "application/pdf" || extension === "pdf") return "pdf";
-  if (mimeType === "text/html" || ["html", "htm"].includes(extension)) {
+  if (mimeType === "text/html" || mimeType === "application/xhtml+xml") {
     return "web";
   }
+  if (mimeType === "application/pdf" || extension === "pdf") return "pdf";
+  if (["html", "htm"].includes(extension)) return "web";
   if (
     mimeType.startsWith("image/") ||
     ["jpg", "jpeg", "png", "webp", "gif", "bmp", "svg"].includes(extension)
@@ -1145,17 +2675,25 @@ function documentFragmentSelectionFromCrop(
   const renderedHeight = rendered.height / Math.max(zoom, MIN_ZOOM);
   if (!renderedWidth || !renderedHeight) return undefined;
 
+  const normalizedRect = sourceElement instanceof HTMLCanvasElement
+    ? viewportRectToNormalizedCrop(
+        rect,
+        { width: renderedWidth, height: renderedHeight },
+        normalizeQuarterRotation(rotation),
+      )
+    : {
+        x: clampUnit(rect.x / renderedWidth),
+        y: clampUnit(rect.y / renderedHeight),
+        width: clampUnit(rect.width / renderedWidth),
+        height: clampUnit(rect.height / renderedHeight),
+      };
+
   return {
     documentId,
     sourceFileId: scan.storagePath || scan.id,
     pageNumber,
     rotation,
-    rect: {
-      x: clampUnit(rect.x / renderedWidth),
-      y: clampUnit(rect.y / renderedHeight),
-      width: clampUnit(rect.width / renderedWidth),
-      height: clampUnit(rect.height / renderedHeight),
-    },
+    rect: normalizedRect,
     createdAt: new Date().toISOString(),
   };
 }
@@ -1216,58 +2754,10 @@ async function cropImageToFile(
   });
 }
 
-async function cropCanvasToFile(
-  sourceCanvas: HTMLCanvasElement,
-  rect: CropRect,
-  sourceName: string,
-  zoom: number,
-): Promise<File> {
-  const rendered = sourceCanvas.getBoundingClientRect();
-  if (!sourceCanvas.width || !sourceCanvas.height || !rendered.width || !rendered.height) {
-    throw new Error("Не вдалося визначити розмір PDF-сторінки для вирізання фрагмента.");
-  }
-
-  const renderedWidth = rendered.width / Math.max(zoom, MIN_ZOOM);
-  const renderedHeight = rendered.height / Math.max(zoom, MIN_ZOOM);
-  const scaleX = sourceCanvas.width / renderedWidth;
-  const scaleY = sourceCanvas.height / renderedHeight;
-  const sourceX = Math.max(0, Math.round(rect.x * scaleX));
-  const sourceY = Math.max(0, Math.round(rect.y * scaleY));
-  const sourceWidth = Math.min(
-    sourceCanvas.width - sourceX,
-    Math.max(1, Math.round(rect.width * scaleX)),
-  );
-  const sourceHeight = Math.min(
-    sourceCanvas.height - sourceY,
-    Math.max(1, Math.round(rect.height * scaleY)),
-  );
-
-  if (sourceWidth < 8 || sourceHeight < 8) {
-    throw new Error("Виділений фрагмент занадто малий.");
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = sourceWidth;
-  canvas.height = sourceHeight;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Браузер не зміг підготувати фрагмент PDF.");
-
-  context.drawImage(
-    sourceCanvas,
-    sourceX,
-    sourceY,
-    sourceWidth,
-    sourceHeight,
-    0,
-    0,
-    sourceWidth,
-    sourceHeight,
-  );
-
-  const blob = await canvasToBlob(canvas, "image/png");
+function timestampedFile(blob: Blob, sourceName: string, mimeType: string): File {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-  return new File([blob], `${safeFilePart(sourceName.replace(/\.[^.]+$/, "")) || "pdf-fragment"}-${stamp}.png`, {
-    type: "image/png",
+  return new File([blob], `${safeFilePart(sourceName.replace(/\.[^.]+$/, "")) || "fragment"}-${stamp}.png`, {
+    type: mimeType,
   });
 }
 
@@ -1281,6 +2771,69 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string): Promise<Blob> {
       }
     }, type);
   });
+}
+
+async function renderPdfThumbnail(
+  pdf: PDFDocumentProxy,
+  pageNumber: number,
+  signal: AbortSignal,
+): Promise<string> {
+  if (signal.aborted) throw new DOMException("Thumbnail render cancelled", "AbortError");
+  const page = await pdf.getPage(pageNumber);
+  if (signal.aborted) {
+    page.cleanup();
+    throw new DOMException("Thumbnail render cancelled", "AbortError");
+  }
+  const baseViewport = page.getViewport({ scale: 1 });
+  let canvasBudget: ReturnType<typeof boundPdfViewportScale>;
+  try {
+    canvasBudget = boundPdfViewportScale({
+      baseWidth: baseViewport.width,
+      baseHeight: baseViewport.height,
+      requestedScale: PDF_THUMBNAIL_WIDTH / Math.max(1, baseViewport.width),
+      maxPixels: PDF_VIEWER_MAX_CANVAS_PIXELS,
+      maxSide: PDF_VIEWER_MAX_CANVAS_SIDE,
+    });
+  } catch (budgetError) {
+    page.cleanup();
+    throw budgetError;
+  }
+  const viewport = page.getViewport({ scale: canvasBudget.scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasBudget.pixelWidth;
+  canvas.height = canvasBudget.pixelHeight;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    page.cleanup();
+    throw new Error("Браузер не зміг підготувати мініатюру PDF.");
+  }
+  const task = page.render({ canvasContext: context, viewport, canvas, background: "rgb(255,255,255)" });
+  const cancel = () => task.cancel();
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    await task.promise;
+    if (signal.aborted) throw new DOMException("Thumbnail render cancelled", "AbortError");
+    const blob = await canvasToBlob(canvas, "image/jpeg");
+    return URL.createObjectURL(blob);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    canvas.width = 0;
+    canvas.height = 0;
+    page.cleanup();
+  }
+}
+
+function createClientOperationId(prefix: string): string {
+  const id = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${id}`;
+}
+
+function cachedPreviewNeedsRefresh(preview: CachedPreview, safetyWindowMs = 30_000): boolean {
+  if (!preview.expiresAt) return false;
+  const expiresAt = Date.parse(preview.expiresAt);
+  return !Number.isFinite(expiresAt) || expiresAt <= Date.now() + safetyWindowMs;
 }
 
 function isCanvasEffectivelyBlank(canvas: HTMLCanvasElement): boolean {
@@ -1333,4 +2886,45 @@ function safeFilePart(value: string): string {
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, "-")
     .slice(0, 80);
+}
+
+function positiveViewerSetting(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function waitForViewerPromise<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Viewer operation cancelled", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      action();
+    };
+    const onAbort = () => finish(() => {
+      reject(new DOMException("Viewer operation cancelled", "AbortError"));
+    });
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
+function throwIfViewerOperationAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw new DOMException("Viewer operation cancelled", "AbortError");
+  }
+}
+
+function isViewerOperationAbort(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
 }
