@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -28,6 +29,10 @@ import {
 } from "../services/googleDriveStorage";
 import { createDocumentSourceViewerSession } from "../services/documentSourceViewerAccess.ts";
 import { confirmDocumentSourceVersion } from "../services/documentSourceRevalidation.ts";
+import {
+  resolveMediaWikiPdfPagePreview,
+  type MediaWikiPdfPagePreview,
+} from "../services/mediaWikiPdfSource.ts";
 import type {
   CreateFindingDocumentReferenceInput,
   NormalizedPageSelectionInput,
@@ -80,6 +85,18 @@ import {
   pdfFileSizeBucket,
   safePdfOperationalErrorCode,
 } from "../services/pdfOperationalTelemetry.ts";
+import {
+  DEFAULT_DOCUMENT_IMAGE_ADJUSTMENTS,
+  DOCUMENT_IMAGE_PRESETS,
+  documentImageCssFilter,
+  documentSharpenKernel,
+  normalizeDocumentImageAdjustments,
+  normalizeSignedRotation,
+  rotatedDocumentBounds,
+  splitPdfRotation,
+  type DocumentImageAdjustments,
+  type DocumentImagePresetId,
+} from "../services/documentImageTools.ts";
 
 export type DocumentScanViewerContext = {
   source: "documents";
@@ -112,6 +129,15 @@ type ViewerMode = "window" | "minimized" | "fullscreen";
 type ViewerPosition = { left: number; top: number };
 type ViewerSize = { width: number; height: number };
 type ImagePan = { x: number; y: number };
+type DocumentFitMode = "page" | "width";
+type RotationInteraction = {
+  pointerId: number;
+  centerX: number;
+  centerY: number;
+  startPointerAngle: number;
+  startRotation: number;
+  latestRotation: number;
+};
 type CropInteraction =
   | { mode: "create"; anchor: CropPoint }
   | { mode: "move"; anchor: CropPoint; initial: CropRect }
@@ -202,7 +228,11 @@ const MIN_VIEWER_HEIGHT = 360;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.01;
-const PDF_RENDER_SCALE = 2;
+// Render the first visible page at the browser's effective pixel density.
+// A fixed 2x minimum made large archival scans decode and paint four times as
+// many pixels before the user could see anything. Zooming still raises the
+// render scale on demand, while HiDPI screens continue to use their capped DPR.
+const PDF_RENDER_SCALE = 1;
 const PDF_THUMBNAIL_WIDTH = 104;
 const PDF_THUMBNAIL_WINDOW_RADIUS = 3;
 const PDF_VIEWER_RANGE_CHUNK_SIZE = positiveViewerSetting(
@@ -219,7 +249,7 @@ const PDF_VIEWER_MAX_RENDER_SCALE = Math.max(PDF_RENDER_SCALE, positiveViewerSet
 ));
 const PDF_VIEWER_MAX_CONCURRENT_RENDERS = Math.max(1, Math.floor(positiveViewerSetting(
   import.meta.env.VITE_PDF_VIEWER_MAX_CONCURRENT_RENDERS,
-  2,
+  1,
 )));
 const PDF_VIEWER_MAX_CANVAS_PIXELS = Math.max(1, Math.floor(positiveViewerSetting(
   import.meta.env.VITE_PDF_VIEWER_MAX_CANVAS_PIXELS,
@@ -229,8 +259,36 @@ const PDF_VIEWER_MAX_CANVAS_SIDE = Math.max(1, Math.floor(positiveViewerSetting(
   import.meta.env.VITE_PDF_VIEWER_MAX_CANVAS_SIDE,
   8_192,
 )));
+const PDFJS_WASM_URL = `${import.meta.env.BASE_URL}pdfjs-wasm/`;
 const PDF_CANVAS_RESOURCE_LIMIT_MESSAGE =
   "Не вдалося безпечно відобразити PDF-сторінку: її розміри перевищують ресурсний ліміт переглядача.";
+
+const MANUSCRIPT_PRESET_BUTTONS: ReadonlyArray<{
+  id: DocumentImagePresetId;
+  label: string;
+  title: string;
+}> = [
+  { id: "original", label: "Оригінал", title: "Прибрати всі візуальні фільтри" },
+  { id: "grayscale", label: "Ч/б", title: "Перевести сторінку у відтінки сірого" },
+  { id: "faded-text", label: "Слабкий текст", title: "Підсилити вицвіле чорнило" },
+  { id: "high-contrast", label: "Чіткий текст", title: "Максимально відокремити текст від фону" },
+  { id: "negative", label: "Негатив", title: "Інвертувати світлі й темні ділянки" },
+  { id: "sepia", label: "Сепія", title: "Пом’якшити надто холодний або синюватий скан" },
+];
+
+const MANUSCRIPT_ADJUSTMENT_CONTROLS: ReadonlyArray<{
+  key: Exclude<keyof DocumentImageAdjustments, "invert">;
+  label: string;
+  minimum: number;
+  maximum: number;
+}> = [
+  { key: "brightness", label: "Яскравість", minimum: 40, maximum: 200 },
+  { key: "contrast", label: "Контраст", minimum: 40, maximum: 300 },
+  { key: "grayscale", label: "Чорно-біле", minimum: 0, maximum: 100 },
+  { key: "sepia", label: "Сепія", minimum: 0, maximum: 100 },
+  { key: "saturation", label: "Насиченість", minimum: 0, maximum: 200 },
+  { key: "sharpness", label: "Чіткість", minimum: 0, maximum: 100 },
+];
 
 type PdfExportDestination = "download" | "google-drive";
 type PdfExportImageScale = 1 | 1.5 | 2;
@@ -255,13 +313,24 @@ export function DocumentWorkspaceViewer({
   onOpenDocument,
   onCreateFinding,
 }: DocumentWorkspaceViewerProps) {
+  const componentId = useId().replace(/[^a-zA-Z0-9_-]/gu, "");
+  const imageToolsPanelId = `workspace-image-tools-${componentId}`;
+  const sharpenFilterId = `workspace-document-sharpen-${componentId}`;
   const viewerRef = useRef<HTMLElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const previewViewportRef = useRef<HTMLDivElement | null>(null);
   const pdfPageViewportRef = useRef<HTMLDivElement | null>(null);
   const selectionStageRef = useRef<HTMLDivElement | null>(null);
   const cropInteractionRef = useRef<CropInteraction | null>(null);
   const panStartRef = useRef<{ clientX: number; clientY: number; panX: number; panY: number } | null>(null);
+  const rotationInteractionRef = useRef<RotationInteraction | null>(null);
+  const rotationValueRef = useRef(0);
+  const fitModeRef = useRef<DocumentFitMode | null>("page");
+  const fitPendingRef = useRef(true);
+  const fitFrameRef = useRef<number | null>(null);
+  const fittedPdfKeyRef = useRef("");
+  const presentedPdfPageKeyRef = useRef("");
   const previewCacheRef = useRef(new Map<string, CachedPreview>());
   const previewPromisesRef = useRef(new Map<string, Promise<CachedPreview>>());
   const pdfCacheRef = useRef(new Map<string, PdfDocumentCache>());
@@ -277,6 +346,7 @@ export function DocumentWorkspaceViewer({
   const pdfTelemetryEventKeysRef = useRef(new Set<string>());
   const thumbnailQueueRef = useRef<BoundedThumbnailRenderQueue<string, string> | null>(null);
   const thumbnailCacheRef = useRef<BoundedResourceCache<string, string> | null>(null);
+  const fastPagePreviewCacheRef = useRef(new Map<string, MediaWikiPdfPagePreview>());
   if (!mainPdfRenderRef.current) mainPdfRenderRef.current = new LatestPdfRenderController();
   if (!thumbnailCacheRef.current) {
     thumbnailCacheRef.current = new BoundedResourceCache<string, string>({
@@ -301,9 +371,17 @@ export function DocumentWorkspaceViewer({
   const [pdfPageCount, setPdfPageCount] = useState(0);
   const [pdfPageLabel, setPdfPageLabel] = useState("");
   const [pdfRendering, setPdfRendering] = useState(false);
+  const [pdfPageReady, setPdfPageReady] = useState(false);
+  const [fastPagePreview, setFastPagePreview] = useState<MediaWikiPdfPagePreview | null>(null);
   const [pdfNativeFallback, setPdfNativeFallback] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
   const [rotation, setRotation] = useState(0);
+  const [rotationInput, setRotationInput] = useState("0");
+  const [imageToolsOpen, setImageToolsOpen] = useState(false);
+  const [imageAdjustments, setImageAdjustments] = useState<DocumentImageAdjustments>(() => ({
+    ...DEFAULT_DOCUMENT_IMAGE_ADJUSTMENTS,
+  }));
   const [pdfRenderZoom, setPdfRenderZoom] = useState(1);
   const [pan, setPan] = useState<ImagePan>({ x: 0, y: 0 });
   const [loading, setLoading] = useState(false);
@@ -313,6 +391,7 @@ export function DocumentWorkspaceViewer({
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [isRotating, setIsRotating] = useState(false);
   const [creatingCrop, setCreatingCrop] = useState(false);
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [cropSnapshotDestination, setCropSnapshotDestination] = useState<CropSnapshotDestination>("google-drive");
@@ -333,6 +412,8 @@ export function DocumentWorkspaceViewer({
   const [exportResultUrl, setExportResultUrl] = useState("");
   const [sourceVersionMessage, setSourceVersionMessage] = useState("");
   const [confirmingSourceVersion, setConfirmingSourceVersion] = useState(false);
+
+  rotationValueRef.current = rotation;
 
   const pages = viewer?.scans?.length ? viewer.scans : viewer ? [viewer.scan] : [];
   const currentScan = pages[currentIndex] ?? viewer?.scan ?? null;
@@ -355,7 +436,9 @@ export function DocumentWorkspaceViewer({
       }
     : undefined;
   const viewerV2Enabled = sourceContext?.enabled === true;
-  const effectivePdfRotation = viewerV2Enabled ? rotation : 0;
+  const pdfRotationLayers = splitPdfRotation(viewerV2Enabled ? rotation : 0);
+  const effectivePdfRotation = pdfRotationLayers.renderRotation;
+  const finePdfRotation = pdfRotationLayers.cssRotation;
 
   if (!pdfTelemetryRequestIdRef.current) {
     pdfTelemetryRequestIdRef.current = createPdfOperationalRequestId();
@@ -454,11 +537,13 @@ export function DocumentWorkspaceViewer({
                 preview.blob.arrayBuffer(),
                 loadController.signal,
               )),
-              // Some scanned archival PDFs use image codecs that PDF.js tries to
-              // load through external WASM assets. In the app bundle those assets
-              // are not served from a stable folder, so the JS decoder path is the
-              // safer default for in-app previews.
-              useWasm: false,
+              // Large archival scans commonly use JPEG2000/JBIG2. Serve PDF.js'
+              // local WASM decoders from the application origin so decoding stays
+              // fast without a CDN dependency or relaxing the CSP.
+              wasmUrl: PDFJS_WASM_URL,
+              useWorkerFetch: true,
+              useWasm: true,
+              canvasMaxAreaInBytes: PDF_VIEWER_MAX_CANVAS_PIXELS * 4,
             })
           : pdfJs.getDocument({
               url: preview.url,
@@ -471,7 +556,10 @@ export function DocumentWorkspaceViewer({
               disableStream: true,
               disableAutoFetch: true,
               rangeChunkSize: PDF_VIEWER_RANGE_CHUNK_SIZE,
-              useWasm: false,
+              wasmUrl: PDFJS_WASM_URL,
+              useWorkerFetch: true,
+              useWasm: true,
+              canvasMaxAreaInBytes: PDF_VIEWER_MAX_CANVAS_PIXELS * 4,
             });
         pdfLoadingTasksRef.current.set(scan.id, loadingTask);
         const destroyOnAbort = () => {
@@ -551,6 +639,7 @@ export function DocumentWorkspaceViewer({
     mainPdfRenderRef.current?.dispose();
     thumbnailQueueRef.current?.dispose();
     thumbnailCacheRef.current?.clear();
+    if (fitFrameRef.current !== null) window.cancelAnimationFrame(fitFrameRef.current);
   }, []);
 
   useEffect(() => {
@@ -575,14 +664,27 @@ export function DocumentWorkspaceViewer({
       (viewerV2Enabled ? viewer.restore?.pageIndex : undefined) ?? viewer.scan.initialPage ?? 1,
     );
     setPdfPageNumber(restoredPage);
-    setPdfPageCount(0);
+    setPdfPageCount(knownPdfPageCount(viewer?.scan));
+    setPdfPageReady(false);
+    setFastPagePreview(null);
     setPdfPageLabel("");
     setPdfRendering(false);
     setPdfNativeFallback(false);
     setZoom(1);
-    setRotation(viewerV2Enabled
+    setFitScale(1);
+    fitModeRef.current = "page";
+    fitPendingRef.current = true;
+    fittedPdfKeyRef.current = "";
+    presentedPdfPageKeyRef.current = "";
+    rotationInteractionRef.current = null;
+    setIsRotating(false);
+    const restoredRotation = viewerV2Enabled
       ? normalizeQuarterRotation(viewer.restore?.selection?.rotation ?? 0)
-      : 0);
+      : 0;
+    setRotation(restoredRotation);
+    setRotationInput(String(normalizeSignedRotation(restoredRotation)));
+    setImageToolsOpen(false);
+    setImageAdjustments({ ...DEFAULT_DOCUMENT_IMAGE_ADJUSTMENTS });
     setPdfRenderZoom(1);
     setPan({ x: 0, y: 0 });
     setError("");
@@ -607,6 +709,71 @@ export function DocumentWorkspaceViewer({
   }, [viewer?.openedAt, viewerV2Enabled]);
 
   useEffect(() => {
+    if (!currentScan || !scanLooksLikePdf(currentScan)) return;
+    // Source migration/revalidation and the PDF.js bundle are independent.
+    // Start loading the viewer runtime while the source session is being
+    // prepared instead of paying both costs sequentially on the first page.
+    void loadPdfJs().catch(() => undefined);
+  }, [currentScan?.id]);
+
+  useEffect(() => {
+    const pageKey = currentScan ? `${currentScan.id}:${pdfPageNumber}` : "";
+    if (presentedPdfPageKeyRef.current !== pageKey) {
+      presentedPdfPageKeyRef.current = pageKey;
+      setPdfPageReady(false);
+    }
+    setFastPagePreview(null);
+    if (
+      !viewerV2Enabled
+      || !currentScan
+      || currentScan.sourceProvider !== "wikimedia"
+      || !currentScan.providerFileTitle
+    ) {
+      return undefined;
+    }
+
+    const cacheKey = `${currentScan.providerFileTitle}:${pdfPageNumber}:1600`;
+    const cached = fastPagePreviewCacheRef.current.get(cacheKey);
+    if (cached) {
+      setFastPagePreview(cached);
+      return undefined;
+    }
+
+    let active = true;
+    const abortController = new AbortController();
+    void resolveMediaWikiPdfPagePreview({
+      providerFileTitle: currentScan.providerFileTitle,
+      pageNumber: pdfPageNumber,
+      sourcePageUrl: currentScan.sourcePageUrl,
+      width: 1_600,
+      signal: abortController.signal,
+    }).then(async (preview) => {
+      if (!preview) return;
+      await preloadRemoteImage(preview.url, abortController.signal);
+      if (!active) return;
+      const cache = fastPagePreviewCacheRef.current;
+      if (cache.size >= 24) {
+        const oldestKey = cache.keys().next().value;
+        if (typeof oldestKey === "string") cache.delete(oldestKey);
+      }
+      cache.set(cacheKey, preview);
+      setFastPagePreview(preview);
+    }).catch(() => undefined);
+
+    return () => {
+      active = false;
+      abortController.abort();
+    };
+  }, [
+    viewerV2Enabled,
+    currentScan?.id,
+    currentScan?.sourceProvider,
+    currentScan?.providerFileTitle,
+    currentScan?.sourcePageUrl,
+    pdfPageNumber,
+  ]);
+
+  useEffect(() => {
     let active = true;
     const abortController = new AbortController();
 
@@ -617,7 +784,8 @@ export function DocumentWorkspaceViewer({
       ? viewer.restore?.pageIndex
       : undefined;
     setPdfPageNumber(Math.max(1, restoredPage ?? currentScan?.initialPage ?? 1));
-    setPdfPageCount(0);
+    setPdfPageCount(knownPdfPageCount(currentScan));
+    setPdfPageReady(false);
     setPdfPageLabel("");
     setPdfRendering(false);
     setPdfNativeFallback(false);
@@ -720,6 +888,13 @@ export function DocumentWorkspaceViewer({
   }, [pdfPageNumber, exportOpen]);
 
   useEffect(() => {
+    fitModeRef.current = "page";
+    fitPendingRef.current = true;
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [currentScan?.id, pdfPageNumber]);
+
+  useEffect(() => {
     if (kind !== "pdf" || !viewerV2Enabled) {
       setPdfRenderZoom(1);
       return undefined;
@@ -817,6 +992,13 @@ export function DocumentWorkspaceViewer({
               setSelectionMode(false);
               setCropRect(null);
             } else {
+              setPdfPageReady(true);
+              const fitKey = `${currentScan.id}:${safePageNumber}:${normalizeDegrees(rotation)}`;
+              if (fittedPdfKeyRef.current !== fitKey || fitPendingRef.current) {
+                fittedPdfKeyRef.current = fitKey;
+                fitPendingRef.current = true;
+                requestFitDocumentView(fitModeRef.current ?? "page", rotation);
+              }
               const preview = previewCacheRef.current.get(currentScan.id);
               emitViewerTelemetryOnce(
                 `first-render:${viewer?.openedAt ?? 0}:${currentScan.id}`,
@@ -913,6 +1095,14 @@ export function DocumentWorkspaceViewer({
       return undefined;
     }
 
+    if (pdfRendering) {
+      // The main page always wins. Rendering even one thumbnail in parallel
+      // can trigger a second JPEG2000/JBIG2 decode of a large archival page and
+      // keep the visible canvas blank for a long time.
+      queue.cancelAll();
+      return undefined;
+    }
+
     let active = true;
     const plan = createVirtualizedThumbnailPlan({
       totalPages: pdfPageCount,
@@ -930,31 +1120,42 @@ export function DocumentWorkspaceViewer({
       return url ? [[page, url]] : [];
     })));
 
-    void loadPdfDocument(currentScan).then(({ document }) => {
-      for (const [priority, pageNumber] of plan.renderQueue.entries()) {
-        const key = `${currentScan.id}:${pageNumber}`;
-        const cached = cache.get(key);
-        if (cached) {
-          if (active) setThumbnailUrls((current) => ({ ...current, [pageNumber]: cached }));
-          continue;
+    const cancelIdleWork = scheduleViewerIdleWork(() => {
+      void loadPdfDocument(currentScan).then(({ document }) => {
+        for (const [priority, pageNumber] of plan.renderQueue.entries()) {
+          const key = `${currentScan.id}:${pageNumber}`;
+          const cached = cache.get(key);
+          if (cached) {
+            if (active) setThumbnailUrls((current) => ({ ...current, [pageNumber]: cached }));
+            continue;
+          }
+          void queue.schedule({
+            key,
+            priority,
+            run: (signal) => renderPdfThumbnail(document, pageNumber, signal),
+          }).then((result) => {
+            if (result.status !== "completed") return;
+            if (!active || !keys.has(key)) return;
+            cache.set(key, result.value);
+            setThumbnailUrls((current) => ({ ...current, [pageNumber]: result.value }));
+          }).catch(() => undefined);
         }
-        void queue.schedule({
-          key,
-          priority,
-          run: (signal) => renderPdfThumbnail(document, pageNumber, signal),
-        }).then((result) => {
-          if (result.status !== "completed") return;
-          if (!active || !keys.has(key)) return;
-          cache.set(key, result.value);
-          setThumbnailUrls((current) => ({ ...current, [pageNumber]: result.value }));
-        }).catch(() => undefined);
-      }
-    }).catch(() => undefined);
+      }).catch(() => undefined);
+    });
 
     return () => {
       active = false;
+      cancelIdleWork();
     };
-  }, [viewerV2Enabled, currentScan?.id, kind, pdfNativeFallback, pdfPageCount, pdfPageNumber]);
+  }, [
+    viewerV2Enabled,
+    currentScan?.id,
+    kind,
+    pdfNativeFallback,
+    pdfPageCount,
+    pdfPageNumber,
+    pdfRendering,
+  ]);
 
   useEffect(() => {
     if (!viewer || navigationPageCount < 2 || mode === "minimized" || selectionMode) return undefined;
@@ -1076,7 +1277,7 @@ export function DocumentWorkspaceViewer({
         kind === "pdf" ? effectivePdfRotation : rotation,
         cropRect,
         kind === "pdf" ? pdfCanvasRef.current : imageRef.current,
-        zoom,
+        fitScale * zoom,
       );
       if (!fragmentSelection) {
         throw new Error("Не вдалося визначити координати виділеного фрагмента.");
@@ -1111,7 +1312,7 @@ export function DocumentWorkspaceViewer({
           sourcePage.cleanup();
         }
       } else if (destination !== "none" && imageRef.current) {
-        croppedFile = await cropImageToFile(imageRef.current, cropRect, sourceName, zoom);
+        croppedFile = await cropImageToFile(imageRef.current, cropRect, sourceName, fitScale * zoom);
         throwIfViewerOperationAborted(abortController.signal);
       }
       if (destination !== "none" && !croppedFile) {
@@ -1323,36 +1524,121 @@ export function DocumentWorkspaceViewer({
   };
 
   const changeZoom = (delta: number) => {
+    fitModeRef.current = null;
     setZoom((value) => clampZoom(value + delta));
   };
 
-  const resetImageView = () => {
+  const fitDocumentView = (
+    fit: DocumentFitMode,
+    rotationOverride = rotation,
+  ): boolean => {
+    const stage = selectionStageRef.current;
+    const viewport = kind === "pdf" ? pdfPageViewportRef.current : previewViewportRef.current;
+    if (!stage || !viewport || !(stage.offsetWidth > 0) || !(stage.offsetHeight > 0)) return false;
+
+    const showingFastPreview = Boolean(stage.querySelector(".workspace-pdf-fast-preview"));
+    const visualAngle = kind === "pdf"
+      ? showingFastPreview
+        ? normalizeSignedRotation(rotationOverride)
+        : splitPdfRotation(rotationOverride).cssRotation
+      : normalizeSignedRotation(rotationOverride);
+    const bounds = rotatedDocumentBounds(stage.offsetWidth, stage.offsetHeight, visualAngle);
+    if (!(bounds.width > 0) || !(bounds.height > 0)) return false;
+
+    const availableWidth = Math.max(1, viewport.clientWidth - 28);
+    const availableHeight = Math.max(1, viewport.clientHeight - 28);
+    const widthScale = availableWidth / bounds.width;
+    const heightScale = availableHeight / bounds.height;
+    const targetScale = fit === "width" ? widthScale : Math.min(widthScale, heightScale);
+    const boundedScale = Math.min(MAX_ZOOM, Math.max(0.02, targetScale));
+
+    fitModeRef.current = fit;
+    setFitScale(Math.round(boundedScale * 10_000) / 10_000);
     setZoom(1);
-    setRotation(0);
     setPan({ x: 0, y: 0 });
     setSelectionMode(false);
     setCropRect(null);
+    return true;
   };
 
-  const fitPdfView = (fit: "width" | "page") => {
-    const canvas = pdfCanvasRef.current;
-    const viewport = pdfPageViewportRef.current;
-    if (!canvas || !viewport) return;
-    const naturalWidth = Number.parseFloat(canvas.style.width) || canvas.width / PDF_RENDER_SCALE;
-    const naturalHeight = Number.parseFloat(canvas.style.height) || canvas.height / PDF_RENDER_SCALE;
-    if (!(naturalWidth > 0) || !(naturalHeight > 0)) return;
-    const widthScale = Math.max(MIN_ZOOM, (viewport.clientWidth - 28) / naturalWidth);
-    const heightScale = Math.max(MIN_ZOOM, (viewport.clientHeight - 28) / naturalHeight);
-    setZoom(clampZoom(fit === "width" ? widthScale : Math.min(widthScale, heightScale)));
+  const requestFitDocumentView = (
+    fit: DocumentFitMode = "page",
+    rotationOverride = rotation,
+  ) => {
+    fitModeRef.current = fit;
+    fitPendingRef.current = true;
+    if (fitFrameRef.current !== null) window.cancelAnimationFrame(fitFrameRef.current);
+    fitFrameRef.current = window.requestAnimationFrame(() => {
+      fitFrameRef.current = null;
+      if (fitDocumentView(fit, rotationOverride)) fitPendingRef.current = false;
+    });
+  };
+
+  const resetImageView = () => {
+    requestFitDocumentView("page");
+  };
+
+  const applyRotation = (degrees: number) => {
+    const normalized = normalizeDegrees(degrees);
+    const previousPdfRotation = splitPdfRotation(rotation).renderRotation;
+    const nextPdfRotation = splitPdfRotation(normalized).renderRotation;
+    setRotation(normalized);
+    setRotationInput(String(normalizeSignedRotation(normalized)));
+    setZoom(1);
     setPan({ x: 0, y: 0 });
+    setSelectionMode(false);
+    setCropRect(null);
+    fitModeRef.current = "page";
+    fitPendingRef.current = true;
+    if (kind === "pdf" && previousPdfRotation !== nextPdfRotation) setPdfPageReady(false);
+    requestFitDocumentView("page", normalized);
+  };
+
+  const commitRotationInput = () => {
+    const nextRotation = Number(rotationInput.replace(",", "."));
+    if (!Number.isFinite(nextRotation)) {
+      setRotationInput(String(normalizeSignedRotation(rotation)));
+      return;
+    }
+    applyRotation(nextRotation);
+  };
+
+  const updateImageAdjustment = (
+    key: keyof DocumentImageAdjustments,
+    value: number,
+  ) => {
+    setImageAdjustments((current) => normalizeDocumentImageAdjustments({
+      ...current,
+      [key]: value,
+    }));
+  };
+
+  const applyManuscriptPreset = (preset: DocumentImagePresetId) => {
+    setImageAdjustments({ ...DOCUMENT_IMAGE_PRESETS[preset] });
+  };
+
+  const resetImageProcessing = () => {
+    setImageAdjustments({ ...DEFAULT_DOCUMENT_IMAGE_ADJUSTMENTS });
+  };
+
+  const fitPdfView = (fit: DocumentFitMode) => {
+    requestFitDocumentView(fit);
   };
 
   const rotateImage = (degrees: number) => {
-    setRotation((value) => normalizeDegrees(value + degrees));
-    setPan({ x: 0, y: 0 });
-    setSelectionMode(false);
-    setCropRect(null);
+    applyRotation(rotation + degrees);
   };
+
+  useEffect(() => {
+    const viewport = kind === "pdf" ? pdfPageViewportRef.current : previewViewportRef.current;
+    if (!viewport || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      const fit = fitModeRef.current;
+      if (fit) requestFitDocumentView(fit, rotationValueRef.current);
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [kind, isInteractivePdf, mode, viewerSize?.width, viewerSize?.height]);
 
   const openPdfExport = () => {
     setExportRange(
@@ -1587,7 +1873,9 @@ export function DocumentWorkspaceViewer({
 
   const handlePreviewWheel = (event: WheelEvent<HTMLDivElement>) => {
     if (!(kind === "image" || isInteractivePdf) || !blobUrl) return;
-    if ((event.target as HTMLElement).closest(".workspace-pdf-thumbnails, .workspace-export-dialog")) return;
+    if ((event.target as HTMLElement).closest(
+      ".workspace-pdf-thumbnails, .workspace-export-dialog, .workspace-image-tools-panel",
+    )) return;
     event.preventDefault();
     event.stopPropagation();
     if (isSelecting || Math.abs(event.deltaY) < 4) return;
@@ -1700,9 +1988,71 @@ export function DocumentWorkspaceViewer({
     }
   };
 
+  const beginRotationInteraction = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const stage = selectionStageRef.current;
+    if (!stage) return;
+    const bounds = stage.getBoundingClientRect();
+    const centerX = bounds.left + bounds.width / 2;
+    const centerY = bounds.top + bounds.height / 2;
+    const startPointerAngle = Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    rotationInteractionRef.current = {
+      pointerId: event.pointerId,
+      centerX,
+      centerY,
+      startPointerAngle,
+      startRotation: normalizeSignedRotation(rotation),
+      latestRotation: rotation,
+    };
+    fitModeRef.current = "page";
+    setPan({ x: 0, y: 0 });
+    setSelectionMode(false);
+    setCropRect(null);
+    setIsRotating(true);
+  };
+
+  const updateRotationInteraction = (event: PointerEvent<HTMLButtonElement>) => {
+    const interaction = rotationInteractionRef.current;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const pointerAngle = Math.atan2(
+      event.clientY - interaction.centerY,
+      event.clientX - interaction.centerX,
+    ) * 180 / Math.PI;
+    let delta = pointerAngle - interaction.startPointerAngle;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    const nextRotation = normalizeDegrees(interaction.startRotation + delta);
+    interaction.latestRotation = nextRotation;
+    rotationValueRef.current = nextRotation;
+    setRotation(nextRotation);
+    setRotationInput(String(normalizeSignedRotation(nextRotation)));
+  };
+
+  const finishRotationInteraction = (event: PointerEvent<HTMLButtonElement>) => {
+    const interaction = rotationInteractionRef.current;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can already be released by the browser.
+    }
+    rotationInteractionRef.current = null;
+    setIsRotating(false);
+    applyRotation(interaction.latestRotation);
+  };
+
   const beginImagePan = (event: PointerEvent<HTMLDivElement>) => {
     if (!(kind === "image" || isInteractivePdf) || event.button !== 0) return;
     event.preventDefault();
+    fitModeRef.current = null;
     panStartRef.current = {
       clientX: event.clientX,
       clientY: event.clientY,
@@ -1852,14 +2202,29 @@ export function DocumentWorkspaceViewer({
           ...(viewerSize ? { width: viewerSize.width, height: viewerSize.height } : {}),
         }
       : undefined;
-  const imageTransform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) rotate(${kind === "pdf" ? 0 : rotation}deg)`;
+  const visualRotation = kind === "pdf"
+    ? pdfPageReady
+      ? finePdfRotation
+      : normalizeSignedRotation(rotation)
+    : normalizeSignedRotation(rotation);
+  const viewScale = fitScale * zoom;
+  const imageTransform = `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${viewScale}) rotate(${visualRotation}deg)`;
+  const imageFilter = documentImageCssFilter(imageAdjustments, sharpenFilterId);
+  const imageFilterStyle: CSSProperties = { filter: imageFilter };
+  const sharpenKernel = documentSharpenKernel(imageAdjustments.sharpness);
+  const activeImagePreset = MANUSCRIPT_PRESET_BUTTONS.find(({ id }) => (
+    documentImageAdjustmentsEqual(imageAdjustments, DOCUMENT_IMAGE_PRESETS[id])
+  ))?.id;
+  const cropRotationSupported = kind === "pdf"
+    ? finePdfRotation === 0
+    : normalizeSignedRotation(rotation) === 0;
   const canSelectFragment =
     (kind === "image" || isInteractivePdf) &&
     Boolean(blobUrl) &&
     !loading &&
     !error &&
     !pdfRendering &&
-    (kind === "pdf" || rotation === 0);
+    cropRotationSupported;
   const hasValidCrop = Boolean(cropRect && cropRect.width >= 12 && cropRect.height >= 12);
   const thumbnailPlan = createVirtualizedThumbnailPlan({
     totalPages: viewerV2Enabled && isInteractivePdf ? pdfPageCount : 0,
@@ -1869,9 +2234,116 @@ export function DocumentWorkspaceViewer({
     overscan: 1,
     currentPageRadius: 1,
   });
+  const visibleFastPagePreview = fastPagePreview?.pageNumber === pdfPageNumber
+    ? fastPagePreview
+    : null;
+  const rotationControl = (kind === "image" || (viewerV2Enabled && isInteractivePdf)) && blobUrl ? (
+    <div
+      className="workspace-image-rotation-control"
+      aria-label="Поворот сторінки"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        className="icon-button"
+        onClick={() => rotateImage(-90)}
+        aria-label="Повернути ліворуч на 90 градусів"
+        title="Повернути ліворуч на 90°"
+      >
+        ↺
+      </button>
+      <button
+        type="button"
+        className={`workspace-image-rotation-handle ${isRotating ? "active" : ""}`}
+        onPointerDown={beginRotationInteraction}
+        onPointerMove={updateRotationInteraction}
+        onPointerUp={finishRotationInteraction}
+        onPointerCancel={finishRotationInteraction}
+        onKeyDown={(event) => {
+          const step = event.shiftKey ? 10 : 1;
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            event.stopPropagation();
+            rotateImage(-step);
+          }
+          if (event.key === "ArrowRight") {
+            event.preventDefault();
+            event.stopPropagation();
+            rotateImage(step);
+          }
+        }}
+        aria-label="Потягніть кругову стрілку, щоб повернути сторінку"
+        title="Потягніть стрілку навколо центра сторінки"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M19 8a8 8 0 1 0 1 7" />
+          <path d="M19 3v5h-5" />
+        </svg>
+      </button>
+      <label className="workspace-image-rotation-angle">
+        <span className="visually-hidden">Точний кут повороту</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={rotationInput}
+          onChange={(event) => setRotationInput(event.currentTarget.value)}
+          onBlur={commitRotationInput}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          aria-label="Точний кут повороту у градусах"
+        />
+        <span aria-hidden="true">°</span>
+      </label>
+      <button
+        type="button"
+        className="icon-button"
+        onClick={() => rotateImage(90)}
+        aria-label="Повернути праворуч на 90 градусів"
+        title="Повернути праворуч на 90°"
+      >
+        ↻
+      </button>
+      <button
+        type="button"
+        className="workspace-image-rotation-reset"
+        onClick={() => applyRotation(0)}
+        disabled={normalizeSignedRotation(rotation) === 0}
+        title="Вирівняти сторінку"
+      >
+        0°
+      </button>
+    </div>
+  ) : null;
+  const rotationCropNotice = !cropRotationSupported ? (
+    <p className="workspace-image-rotation-note">
+      Для точного виділення фрагмента вирівняйте сторінку до 0°, 90°, 180° або 270°.
+    </p>
+  ) : null;
 
   const viewerContent = (
     <>
+      <svg className="workspace-image-filter-definitions" aria-hidden="true" focusable="false">
+        <defs>
+          <filter
+            id={sharpenFilterId}
+            x="-5%"
+            y="-5%"
+            width="110%"
+            height="110%"
+            colorInterpolationFilters="sRGB"
+          >
+            <feConvolveMatrix
+              order="3"
+              kernelMatrix={sharpenKernel}
+              divisor="1"
+              bias="0"
+              edgeMode="duplicate"
+              preserveAlpha="true"
+            />
+          </filter>
+        </defs>
+      </svg>
       {mode === "minimized" ? (
         <aside className="workspace-viewer-minimized" aria-label="Згорнутий перегляд документа">
         <div>
@@ -1924,28 +2396,6 @@ export function DocumentWorkspaceViewer({
               >
                 +
               </button>
-              {kind === "image" || (viewerV2Enabled && isInteractivePdf) ? (
-                <>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={() => rotateImage(-90)}
-                    aria-label="Повернути ліворуч"
-                    title="Повернути ліворуч"
-                  >
-                    ↺
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={() => rotateImage(90)}
-                    aria-label="Повернути праворуч"
-                    title="Повернути праворуч"
-                  >
-                    ↻
-                  </button>
-                </>
-              ) : null}
               {viewerV2Enabled && isInteractivePdf ? (
                 <>
                   <button type="button" className="button button-secondary" onClick={() => fitPdfView("width")}>
@@ -1958,6 +2408,15 @@ export function DocumentWorkspaceViewer({
               ) : null}
               <button type="button" className="button button-secondary" onClick={resetImageView}>
                 100%
+              </button>
+              <button
+                type="button"
+                className={`button button-secondary ${imageToolsOpen ? "active" : ""}`}
+                onClick={() => setImageToolsOpen((open) => !open)}
+                aria-expanded={imageToolsOpen}
+                aria-controls={imageToolsPanelId}
+              >
+                Обробка
               </button>
             </div>
           ) : null}
@@ -1977,7 +2436,86 @@ export function DocumentWorkspaceViewer({
         </div>
       </div>
 
-      <div className="workspace-viewer-body" onWheelCapture={handlePreviewWheel}>
+      <div ref={previewViewportRef} className="workspace-viewer-body" onWheelCapture={handlePreviewWheel}>
+        {imageToolsOpen && (kind === "image" || isInteractivePdf) && blobUrl ? (
+          <section
+            id={imageToolsPanelId}
+            className="workspace-image-tools-panel"
+            aria-label="Інструменти обробки зображення"
+          >
+            <header className="workspace-image-tools-header">
+              <div>
+                <strong>Обробка рукописного документа</strong>
+                <small>Налаштування змінюють лише перегляд — оригінальний файл залишається незмінним.</small>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setImageToolsOpen(false)}
+                aria-label="Закрити інструменти обробки"
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="workspace-image-presets" aria-label="Швидкі режими обробки">
+              {MANUSCRIPT_PRESET_BUTTONS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`button button-secondary ${activeImagePreset === preset.id ? "active" : ""}`}
+                  onClick={() => applyManuscriptPreset(preset.id)}
+                  aria-pressed={activeImagePreset === preset.id}
+                  title={preset.title}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="workspace-image-adjustments">
+              {MANUSCRIPT_ADJUSTMENT_CONTROLS.map((control) => (
+                <label key={control.key} className="workspace-image-adjustment">
+                  <span>
+                    <strong>{control.label}</strong>
+                    <output>{imageAdjustments[control.key]}%</output>
+                  </span>
+                  <input
+                    type="range"
+                    min={control.minimum}
+                    max={control.maximum}
+                    step={1}
+                    value={imageAdjustments[control.key]}
+                    onChange={(event) => updateImageAdjustment(
+                      control.key,
+                      event.currentTarget.valueAsNumber,
+                    )}
+                    aria-label={control.label}
+                  />
+                </label>
+              ))}
+
+              <label className="workspace-image-invert-toggle">
+                <input
+                  type="checkbox"
+                  checked={imageAdjustments.invert === 100}
+                  onChange={(event) => updateImageAdjustment("invert", event.currentTarget.checked ? 100 : 0)}
+                />
+                <span>
+                  <strong>Інверсія кольорів</strong>
+                  <small>Корисно для негативів і дуже темного фону.</small>
+                </span>
+              </label>
+            </div>
+
+            <footer className="workspace-image-tools-footer">
+              <button type="button" className="button button-secondary" onClick={resetImageProcessing}>
+                Скинути обробку
+              </button>
+              <span>Поворот і масштаб сторінки зберігаються.</span>
+            </footer>
+          </section>
+        ) : null}
         {effectiveSourceVersionStatus === "changed" ? (
           <div className="workspace-viewer-notice" role="status">
             Зовнішній PDF було оновлено. Номер сторінки або виділений фрагмент може не відповідати новій версії.
@@ -2065,51 +2603,57 @@ export function DocumentWorkspaceViewer({
             </div>
           </div>
         ) : kind === "image" && blobUrl ? (
-          <div
-            ref={selectionStageRef}
-            className={`workspace-image-selection-stage ${selectionMode ? "selecting" : ""} ${
-              isPanning ? "panning" : ""
-            }`}
-            style={{ transform: imageTransform }}
-            onPointerDown={beginImageInteraction}
-            onPointerMove={updateImageInteraction}
-            onPointerUp={finishImageInteraction}
-            onPointerCancel={finishImageInteraction}
-          >
-            <img
-              ref={imageRef}
-              src={blobUrl}
-              alt={activeScan.name}
-              draggable={false}
-              onError={() => void retryImagePreview()}
-            />
-            {cropRect ? (
-              <span
-                className={`workspace-selection-rect ${selectionMode ? "editable" : ""}`}
-                style={{
-                  left: cropRect.x,
-                  top: cropRect.y,
-                  width: cropRect.width,
-                  height: cropRect.height,
-                }}
-                onPointerDown={selectionMode && viewerV2Enabled ? beginCropMove : undefined}
-              >
-                {selectionMode && viewerV2Enabled ? CROP_RESIZE_HANDLES.map((handle) => (
-                  <span
-                    key={handle}
-                    className="workspace-selection-handle"
-                    data-handle={handle}
-                    onPointerDown={(event) => beginCropResize(handle, event)}
-                  />
-                )) : null}
-              </span>
-            ) : null}
-            {selectionMode ? (
-              <span className="workspace-selection-hint">
-                Протягніть рамку по фрагменту скану
-              </span>
-            ) : null}
-          </div>
+          <>
+            {rotationControl}
+            {rotationCropNotice}
+            <div
+              ref={selectionStageRef}
+              className={`workspace-image-selection-stage ${selectionMode ? "selecting" : ""} ${
+                isPanning ? "panning" : ""
+              }`}
+              style={{ transform: imageTransform }}
+              onPointerDown={beginImageInteraction}
+              onPointerMove={updateImageInteraction}
+              onPointerUp={finishImageInteraction}
+              onPointerCancel={finishImageInteraction}
+            >
+              <img
+                ref={imageRef}
+                src={blobUrl}
+                alt={activeScan.name}
+                style={imageFilterStyle}
+                draggable={false}
+                onLoad={() => requestFitDocumentView("page", rotationValueRef.current)}
+                onError={() => void retryImagePreview()}
+              />
+              {cropRect ? (
+                <span
+                  className={`workspace-selection-rect ${selectionMode ? "editable" : ""}`}
+                  style={{
+                    left: cropRect.x,
+                    top: cropRect.y,
+                    width: cropRect.width,
+                    height: cropRect.height,
+                  }}
+                  onPointerDown={selectionMode && viewerV2Enabled ? beginCropMove : undefined}
+                >
+                  {selectionMode && viewerV2Enabled ? CROP_RESIZE_HANDLES.map((handle) => (
+                    <span
+                      key={handle}
+                      className="workspace-selection-handle"
+                      data-handle={handle}
+                      onPointerDown={(event) => beginCropResize(handle, event)}
+                    />
+                  )) : null}
+                </span>
+              ) : null}
+              {selectionMode ? (
+                <span className="workspace-selection-hint">
+                  Протягніть рамку по фрагменту скану
+                </span>
+              ) : null}
+            </div>
+          </>
         ) : kind === "pdf" && blobUrl && pdfNativeFallback ? (
           <iframe title={activeScan.name} src={blobUrl} />
         ) : kind === "pdf" && blobUrl ? (
@@ -2143,8 +2687,13 @@ export function DocumentWorkspaceViewer({
                       setPdfPageNumber(pageNumber);
                     }}
                   >
-                    {thumbnailUrls[pageNumber] ? (
-                      <img src={thumbnailUrls[pageNumber]} alt="" />
+                    {thumbnailUrls[pageNumber] || (
+                      pageNumber === pdfPageNumber && visibleFastPagePreview
+                    ) ? (
+                      <img
+                        src={thumbnailUrls[pageNumber] || visibleFastPagePreview?.url || ""}
+                        alt=""
+                      />
                     ) : (
                       <span className="workspace-thumbnail-placeholder">Завантаження…</span>
                     )}
@@ -2172,6 +2721,8 @@ export function DocumentWorkspaceViewer({
               </nav>
             ) : null}
             <div ref={pdfPageViewportRef} className="workspace-pdf-page-viewport">
+              {rotationControl}
+              {rotationCropNotice}
               <div
                 ref={selectionStageRef}
                 className={`workspace-image-selection-stage workspace-pdf-selection-stage ${selectionMode ? "selecting" : ""} ${
@@ -2183,7 +2734,24 @@ export function DocumentWorkspaceViewer({
                 onPointerUp={finishImageInteraction}
                 onPointerCancel={finishImageInteraction}
               >
-                <canvas ref={pdfCanvasRef} aria-label={activeScan.name} />
+                {visibleFastPagePreview && !pdfPageReady ? (
+                  <img
+                    className="workspace-pdf-fast-preview"
+                    src={visibleFastPagePreview.url}
+                    alt={`${activeScan.name}, сторінка ${pdfPageNumber}`}
+                    width={visibleFastPagePreview.width}
+                    height={visibleFastPagePreview.height}
+                    style={imageFilterStyle}
+                    draggable={false}
+                    onLoad={() => requestFitDocumentView("page", rotationValueRef.current)}
+                  />
+                ) : null}
+                <canvas
+                  ref={pdfCanvasRef}
+                  className={!pdfPageReady ? "workspace-pdf-canvas-pending" : undefined}
+                  aria-label={activeScan.name}
+                  style={imageFilterStyle}
+                />
                 {cropRect ? (
                   <span
                     className={`workspace-selection-rect ${selectionMode ? "editable" : ""}`}
@@ -2217,7 +2785,11 @@ export function DocumentWorkspaceViewer({
           <iframe title={activeScan.name} src={blobUrl} />
         ) : null}
         {(loading || pdfRendering) && blobUrl ? (
-          <div className="workspace-page-loading">Завантажуємо сторінку…</div>
+          <div className="workspace-page-loading">
+            {visibleFastPagePreview && !pdfPageReady
+              ? "Сторінку показано · готуємо інструменти PDF…"
+              : "Завантажуємо сторінку…"}
+          </div>
         ) : null}
       </div>
 
@@ -2654,10 +3226,87 @@ async function loadPdfJs(): Promise<PdfJsModule> {
       import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
     ]).then(([pdfJs, worker]) => {
       pdfJs.GlobalWorkerOptions.workerSrc = worker.default;
+      preloadPdfWorker(worker.default);
       return pdfJs;
+    }).catch((error: unknown) => {
+      // A transient chunk/network failure must not poison every later attempt
+      // to open a PDF during the lifetime of the page.
+      pdfJsModulePromise = null;
+      throw error;
     });
   }
   return pdfJsModulePromise;
+}
+
+function preloadPdfWorker(workerUrl: string): void {
+  if (typeof document === "undefined" || !workerUrl) return;
+  const alreadyPreloaded = [...document.head.querySelectorAll<HTMLLinkElement>(
+    "link[data-pdf-worker-preload]",
+  )].some((link) => link.dataset.pdfWorkerPreload === workerUrl);
+  if (alreadyPreloaded) return;
+  const link = document.createElement("link");
+  link.rel = "modulepreload";
+  link.href = workerUrl;
+  link.crossOrigin = "anonymous";
+  link.dataset.pdfWorkerPreload = workerUrl;
+  document.head.append(link);
+}
+
+function scanLooksLikePdf(scan: ScanAttachment): boolean {
+  const mimeType = scan.mimeType.split(";", 1)[0]?.trim().toLocaleLowerCase() ?? "";
+  return mimeType === "application/pdf" || /\.pdf$/iu.test(scan.name.trim());
+}
+
+function knownPdfPageCount(scan: ScanAttachment | null | undefined): number {
+  const count = scan?.sourcePageCount;
+  return Number.isSafeInteger(count) && (count ?? 0) > 0 ? count! : 0;
+}
+
+function preloadRemoteImage(url: string, signal: AbortSignal): Promise<void> {
+  if (typeof Image === "undefined") return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", abort);
+      image.onload = null;
+      image.onerror = null;
+      if (error) reject(error);
+      else resolve();
+    };
+    const abort = () => {
+      const error = new Error("Image preload aborted");
+      error.name = "AbortError";
+      finish(error);
+    };
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    image.decoding = "async";
+    image.setAttribute("fetchpriority", "high");
+    image.onload = () => finish();
+    image.onerror = () => finish(new Error("Wikimedia page preview could not be loaded."));
+    image.src = url;
+    if (image.complete && image.naturalWidth > 0) finish();
+  });
+}
+
+function scheduleViewerIdleWork(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (handler: () => void, options?: { timeout: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (idleWindow.requestIdleCallback && idleWindow.cancelIdleCallback) {
+    const handle = idleWindow.requestIdleCallback(callback, { timeout: 1_000 });
+    return () => idleWindow.cancelIdleCallback?.(handle);
+  }
+  const handle = window.setTimeout(callback, 160);
+  return () => window.clearTimeout(handle);
 }
 
 function documentFragmentSelectionFromCrop(
@@ -2878,6 +3527,21 @@ function clampUnit(value: number): number {
 
 function normalizeDegrees(value: number): number {
   return ((value % 360) + 360) % 360;
+}
+
+function documentImageAdjustmentsEqual(
+  left: DocumentImageAdjustments,
+  right: Readonly<DocumentImageAdjustments>,
+): boolean {
+  return (
+    left.brightness === right.brightness
+    && left.contrast === right.contrast
+    && left.grayscale === right.grayscale
+    && left.sepia === right.sepia
+    && left.invert === right.invert
+    && left.saturation === right.saturation
+    && left.sharpness === right.sharpness
+  );
 }
 
 function safeFilePart(value: string): string {

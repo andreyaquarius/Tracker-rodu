@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -33,6 +33,46 @@ const HOMEPAGE_JSON_LD = JSON.stringify({
 const JSON_LD_SCRIPT_HASH = `'sha256-${createHash("sha256")
   .update(HOMEPAGE_JSON_LD)
   .digest("base64")}'`;
+
+const PDFJS_WASM_DIRECTORY = new URL("./node_modules/pdfjs-dist/wasm/", import.meta.url);
+const PDFJS_WASM_PUBLIC_PATH = "pdfjs-wasm";
+
+function pdfJsWasmAssets() {
+  const files = readdirSync(PDFJS_WASM_DIRECTORY, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name);
+  const asset = (name) => readFileSync(new URL(name, PDFJS_WASM_DIRECTORY));
+
+  return {
+    name: "pdfjs-wasm-assets",
+    configureServer(server) {
+      server.middlewares.use(`/${PDFJS_WASM_PUBLIC_PATH}/`, (request, response, next) => {
+        const requestPath = decodeURIComponent((request.url ?? "").split("?", 1)[0] ?? "");
+        const name = requestPath.replace(/^\/+|\/+$/gu, "");
+        if (!files.includes(name)) {
+          next();
+          return;
+        }
+        response.statusCode = 200;
+        response.setHeader(
+          "Content-Type",
+          name.endsWith(".wasm") ? "application/wasm" : "text/javascript; charset=utf-8",
+        );
+        response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        response.end(asset(name));
+      });
+    },
+    generateBundle() {
+      for (const name of files) {
+        this.emitFile({
+          type: "asset",
+          fileName: `${PDFJS_WASM_PUBLIC_PATH}/${name}`,
+          source: asset(name),
+        });
+      }
+    },
+  };
+}
 
 // Content-Security-Policy for the production build. Injected as a <meta> tag
 // (GitHub Pages cannot set response headers). Inline scripts were removed from
@@ -104,6 +144,6 @@ function warnLegalConfigGaps() {
 }
 
 export default defineConfig({
-  plugins: [react(), injectSecurityMeta(), warnLegalConfigGaps()],
+  plugins: [react(), pdfJsWasmAssets(), injectSecurityMeta(), warnLegalConfigGaps()],
   base: "/",
 });

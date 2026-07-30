@@ -9,6 +9,7 @@ const viewer = readFileSync(
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const crud = readFileSync(new URL("../src/pages/CrudPage.tsx", import.meta.url), "utf8");
 const deployment = readFileSync(new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8");
+const viteConfig = readFileSync(new URL("../vite.config.mjs", import.meta.url), "utf8");
 
 test("Viewer v2 mounts a bounded thumbnail window and cancels stale main renders", () => {
   assert.match(viewer, /createVirtualizedThumbnailPlan\(\{/u);
@@ -21,6 +22,24 @@ test("Viewer v2 mounts a bounded thumbnail window and cancels stale main renders
   assert.doesNotMatch(viewer, /Array\.from\(\{\s*length:\s*pdfPageCount/u);
 });
 
+test("large PDF first-page rendering is prioritized over thumbnails", () => {
+  assert.match(viewer, /const PDF_RENDER_SCALE = 1/u);
+  assert.match(viewer, /const PDFJS_WASM_URL = `\$\{import\.meta\.env\.BASE_URL\}pdfjs-wasm\/`/u);
+  assert.match(viewer, /wasmUrl:\s*PDFJS_WASM_URL/u);
+  assert.match(viewer, /useWasm:\s*true/u);
+  assert.match(viewer, /useWorkerFetch:\s*true/u);
+  assert.match(viewer, /if \(pdfRendering\) \{[\s\S]*?queue\.cancelAll\(\)/u);
+  assert.match(viewer, /scheduleViewerIdleWork\(\(\) => \{/u);
+  assert.match(viewer, /if \(!currentScan \|\| !scanLooksLikePdf\(currentScan\)\) return/u);
+  assert.match(viewer, /void loadPdfJs\(\)\.catch/u);
+  assert.match(viewer, /preloadPdfWorker\(worker\.default\)/u);
+  assert.match(viewer, /resolveMediaWikiPdfPagePreview/u);
+  assert.match(viewer, /className="workspace-pdf-fast-preview"/u);
+  assert.match(viewer, /knownPdfPageCount\(currentScan\)/u);
+  assert.match(viteConfig, /pdfJsWasmAssets\(\)/u);
+  assert.match(viteConfig, /fileName:\s*`\$\{PDFJS_WASM_PUBLIC_PATH\}\/\$\{name\}`/u);
+});
+
 test("Viewer v2 UI and source sessions have a complete feature-flag rollback", () => {
   assert.match(app, /VITE_EXTERNAL_PDF_VIEWER_V2/u);
   assert.match(app, /externalPdfViewerV2Enabled && workspace && account/u);
@@ -29,7 +48,8 @@ test("Viewer v2 UI and source sessions have a complete feature-flag rollback", (
   assert.match(viewer, /viewerV2Enabled && exportOpen/u);
   assert.match(viewer, /viewerV2Enabled \? \([\s\S]*?workspace-pdf-thumbnails/u);
   assert.match(viewer, /kind !== "pdf" \|\| !viewerV2Enabled/u);
-  assert.match(viewer, /const effectivePdfRotation = viewerV2Enabled \? rotation : 0/u);
+  assert.match(viewer, /const pdfRotationLayers = splitPdfRotation\(viewerV2Enabled \? rotation : 0\)/u);
+  assert.match(viewer, /const effectivePdfRotation = pdfRotationLayers\.renderRotation/u);
   assert.match(viewer, /viewerV2Enabled \? viewer\.restore\?\.pageIndex : undefined/u);
   assert.match(viewer, /kind === "image" \|\| \(viewerV2Enabled && isInteractivePdf\)/u);
 });
@@ -97,6 +117,23 @@ test("Viewer v2 supports page jumps, fit, rotation and explicit exports", () => 
   assert.match(viewer, /createPageImagesZip\([\s\S]*?imageExportOptions/u);
   assert.match(viewer, /imageScale:\s*exportImageScale/u);
   assert.match(viewer, /jpegQuality:\s*exportJpegQuality \/ 100/u);
+});
+
+test("document image tools support manuscript filters and centered direct rotation without mutating the source", () => {
+  assert.match(viewer, /Обробка рукописного документа/u);
+  assert.match(viewer, /className="workspace-image-rotation-control"/u);
+  assert.match(viewer, /beginRotationInteraction/u);
+  assert.match(viewer, /Потягніть кругову стрілку/u);
+  assert.match(viewer, /rotatedDocumentBounds/u);
+  assert.match(viewer, /translate\(-50%, -50%\)/u);
+  assert.match(viewer, /Інверсія кольорів/u);
+  assert.match(viewer, /MANUSCRIPT_ADJUSTMENT_CONTROLS/u);
+  assert.match(viewer, /documentImageCssFilter\(imageAdjustments, sharpenFilterId\)/u);
+  assert.match(viewer, /documentSharpenKernel\(imageAdjustments\.sharpness\)/u);
+  assert.match(viewer, /style=\{imageFilterStyle\}/u);
+  assert.match(viewer, /const visualRotation = kind === "pdf"[\s\S]*?pdfPageReady[\s\S]*?finePdfRotation/u);
+  assert.match(viewer, /cropRotationSupported/u);
+  assert.match(viewer, /оригінальний файл залишається незмінним/u);
 });
 
 test("PDF provenance crosses the create form only as transient data and is inserted after finding save", () => {

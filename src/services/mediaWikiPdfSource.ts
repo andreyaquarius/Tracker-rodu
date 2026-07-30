@@ -50,6 +50,22 @@ export interface ResolvedMediaWikiPdfCandidate {
   initialPageLabel?: string;
 }
 
+export interface MediaWikiPdfPagePreview {
+  url: string;
+  pageNumber: number;
+  width?: number;
+  height?: number;
+}
+
+export interface ResolveMediaWikiPdfPagePreviewOptions {
+  providerFileTitle: string;
+  pageNumber: number;
+  sourcePageUrl?: string;
+  width?: number;
+  fetch?: typeof fetch;
+  signal?: AbortSignal;
+}
+
 const namespaceAliases: Readonly<Record<string, MediaWikiDocumentNamespace>> = {
   file: "file",
   "файл": "file",
@@ -234,6 +250,89 @@ export function mediaWikiImageInfoApiCandidates(source: ParsedMediaWikiDocumentU
     return [primary];
   }
   return [primary, buildMediaWikiImageInfoApiUrl(source, "https://commons.wikimedia.org")];
+}
+
+/**
+ * Resolves a lightweight server-rendered JPEG for one PDF page. This lets the
+ * document workspace show a useful first frame while PDF.js is still reading
+ * the cross-reference structure of a multi-gigabyte archival PDF.
+ */
+export async function resolveMediaWikiPdfPagePreview(
+  options: ResolveMediaWikiPdfPagePreviewOptions,
+): Promise<MediaWikiPdfPagePreview | null> {
+  const titleBody = mediaWikiFileTitleBody(options.providerFileTitle);
+  const pageNumber = Math.floor(options.pageNumber);
+  const width = Math.min(2_400, Math.max(640, Math.floor(options.width ?? 1_600)));
+  if (!titleBody || !Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > 1_000_000) {
+    return null;
+  }
+
+  const origins: string[] = [];
+  try {
+    const sourceUrl = options.sourcePageUrl ? new URL(options.sourcePageUrl) : null;
+    if (
+      sourceUrl
+      && sourceUrl.protocol === "https:"
+      && !sourceUrl.username
+      && !sourceUrl.password
+      && isSupportedMediaWikiHost(sourceUrl.hostname)
+    ) {
+      origins.push(sourceUrl.origin);
+    }
+  } catch {
+    // Commons remains the trusted fallback.
+  }
+  if (!origins.includes("https://commons.wikimedia.org")) {
+    origins.push("https://commons.wikimedia.org");
+  }
+
+  const fetchImplementation = options.fetch ?? globalThis.fetch;
+  for (const origin of origins) {
+    const apiUrl = new URL("/w/api.php", origin);
+    apiUrl.search = new URLSearchParams({
+      action: "query",
+      format: "json",
+      formatversion: "2",
+      origin: "*",
+      redirects: "1",
+      prop: "imageinfo",
+      titles: `File:${titleBody}`,
+      iiprop: "url|size",
+      iiurlwidth: String(width),
+      iiurlparam: `page${pageNumber}-${width}px`,
+    }).toString();
+
+    try {
+      const response = await fetchImplementation(apiUrl.href, {
+        method: "GET",
+        credentials: "omit",
+        mode: "cors",
+        redirect: "follow",
+        referrerPolicy: "no-referrer",
+        ...(options.signal ? { signal: options.signal } : {}),
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      const page = mediaWikiQueryPages(payload)[0];
+      const imageInfo = isRecord(page) && Array.isArray(page.imageinfo) && isRecord(page.imageinfo[0])
+        ? page.imageinfo[0]
+        : null;
+      const previewUrl = imageInfo ? safeMediaWikiAssetUrl(nonEmptyString(imageInfo.thumburl) ?? "") : null;
+      if (!previewUrl || new URL(previewUrl).hostname.toLocaleLowerCase() !== "upload.wikimedia.org") {
+        continue;
+      }
+      return {
+        url: previewUrl,
+        pageNumber,
+        ...(positiveInteger(imageInfo?.thumbwidth) ? { width: positiveInteger(imageInfo?.thumbwidth) } : {}),
+        ...(positiveInteger(imageInfo?.thumbheight) ? { height: positiveInteger(imageInfo?.thumbheight) } : {}),
+      };
+    } catch (error) {
+      if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+    }
+  }
+  return null;
 }
 
 export function buildMediaWikiArticlePdfCandidatesApiUrl(

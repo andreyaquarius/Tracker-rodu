@@ -11,7 +11,42 @@ import {
   parseMediaWikiImageInfoResponse,
   parseMediaWikiImageInfoResponses,
   resolveMediaWikiPdfCandidate,
+  resolveMediaWikiPdfPagePreview,
 } from "../src/services/mediaWikiPdfSource.ts";
+
+test("resolves a bounded Wikimedia JPEG while a large PDF is still opening", async () => {
+  let requestedUrl = "";
+  const preview = await resolveMediaWikiPdfPagePreview({
+    providerFileTitle: "File:Archive register.pdf",
+    pageNumber: 37,
+    sourcePageUrl: "https://uk.wikisource.org/wiki/Index:Archive_register.pdf",
+    width: 1600,
+    fetch: (async (input) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify({
+        query: {
+          pages: [{
+            imageinfo: [{
+              thumburl: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Archive.pdf/page37.jpg",
+              thumbwidth: 1600,
+              thumbheight: 2200,
+            }],
+          }],
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch,
+  });
+
+  const query = new URL(requestedUrl).searchParams;
+  assert.equal(query.get("titles"), "File:Archive register.pdf");
+  assert.equal(query.get("iiurlparam"), "page37-1600px");
+  assert.deepEqual(preview, {
+    url: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Archive.pdf/page37.jpg",
+    pageNumber: 37,
+    width: 1600,
+    height: 2200,
+  });
+});
 
 test("parses a Commons File URL and keeps File behavior compatible", () => {
   const parsed = parseMediaWikiDocumentUrl(

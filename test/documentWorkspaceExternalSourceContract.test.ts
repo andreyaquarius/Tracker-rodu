@@ -57,7 +57,8 @@ test("public external PDF bytes stay in the in-app PDF workspace", async () => {
   }
 
   assert.match(viewerSource, /getScanBlob\(scan\)[\s\S]*?normalizeScanPreviewBlob\(scan, blob\)[\s\S]*?previewKind\(scan, previewBlob\)/u);
-  assert.match(viewerSource, /kind === "pdf" && blobUrl[\s\S]*?<canvas ref=\{pdfCanvasRef\}/u);
+  assert.match(viewerSource, /kind === "pdf" && blobUrl[\s\S]*?workspace-pdf-fast-preview/u);
+  assert.match(viewerSource, /workspace-pdf-fast-preview[\s\S]*?<canvas[\s\S]*?ref=\{pdfCanvasRef\}/u);
 });
 
 test("a Wikisource file page resolves to original PDF bytes for the same workspace", async () => {
