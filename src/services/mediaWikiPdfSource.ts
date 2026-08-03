@@ -1,3 +1,5 @@
+import { fetchWithBoundedRetry } from "./document-sources/boundedFetchRetry.ts";
+
 export type MediaWikiDocumentNamespace = "file" | "index" | "page";
 
 export interface ParsedMediaWikiDocumentUrl {
@@ -303,7 +305,7 @@ export async function resolveMediaWikiPdfPagePreview(
     }).toString();
 
     try {
-      const response = await fetchImplementation(apiUrl.href, {
+      const response = await fetchWithBoundedRetry(fetchImplementation, apiUrl.href, {
         method: "GET",
         credentials: "omit",
         mode: "cors",
@@ -311,7 +313,7 @@ export async function resolveMediaWikiPdfPagePreview(
         referrerPolicy: "no-referrer",
         ...(options.signal ? { signal: options.signal } : {}),
         headers: { Accept: "application/json" },
-      });
+      }, { signal: options.signal });
       if (!response.ok) continue;
       const payload = await response.json();
       const page = mediaWikiQueryPages(payload)[0];

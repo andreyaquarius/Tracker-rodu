@@ -27,6 +27,9 @@ gateway-сесія прив’язана до користувача, докум
 відрендерених сторінок у БД не зберігаються. Для приватного Google Drive
 короткочасний access token один раз шифрується сервером (AES-GCM) у
 service-only gateway-сесії з TTL; PDF.js отримує лише opaque URL gateway.
+Публічний Drive share перевіряється окремим server-only API key, відкривається
+без OAuth і так само віддається PDF.js лише через opaque gateway URL. Сам ключ
+не записується до `document_sources`, сесії або telemetry.
 
 ## Локальне ввімкнення
 
@@ -49,6 +52,11 @@ VITE_LOCAL_EDGE_FUNCTIONS_URL=http://127.0.0.1:54321/functions/v1
 Для приватних Google Drive PDF у ньому обов'язково задайте довгий випадковий
 `ENCRYPTION_KEY` (32+ байти). Це server-only значення без префікса `VITE_`.
 
+Для публічних Google Drive share-посилань задайте окремий server-side
+`GOOGLE_DRIVE_PUBLIC_API_KEY` з увімкненим Google Drive API. Не використовуйте
+для цього браузерний Picker key, обмежений HTTP referrer, і не додавайте
+префікс `VITE_`.
+
 Основні серверні обмеження мають безпечні значення за замовчуванням і за
 потреби змінюються у `.env.functions.local` або Supabase Secrets:
 
@@ -64,8 +72,32 @@ PDF_TELEMETRY_SUCCESS_SAMPLE_PERCENT=10
 PDF_PROXY_STREAM_IDLE_TIMEOUT_MS=30000
 PDF_PROXY_MAX_RANGE_RESPONSE_BYTES=8388608
 PDF_FALLBACK_MAX_BYTES_WITHOUT_RANGE=33554432
+PDF_EXPORT_WORKER_URL=http://host.docker.internal:8788
+PDF_EXPORT_WORKER_SECRET=replace-with-the-same-32-character-random-secret
+PDF_EXPORT_WORKER_ALLOW_HTTP_LOCAL=true
+PDF_EXPORT_MAX_REQUESTS_PER_WINDOW=10
+PDF_EXPORT_WINDOW_SECONDS=60
+PDF_EXPORT_MAX_PAGES=250
+PDF_EXPORT_MAX_RESULT_BYTES=1073741824
+PDF_EXPORT_WORKER_TIMEOUT_MS=240000
 ```
-3. У PowerShell виконайте:
+
+3. В окремому PowerShell зберіть і запустіть тимчасовий PDF worker. Він
+використовує `qpdf`, DNS pinning і приватний `/tmp`; оригінал та результат
+видаляються після завершення або помилки:
+
+```powershell
+docker build -t tracker-rodu-pdf-worker services/pdf-export-worker
+docker run --rm --name tracker-rodu-pdf-worker -p 8788:8080 `
+  -e PDF_EXPORT_WORKER_SECRET=replace-with-the-same-32-character-random-secret `
+  tracker-rodu-pdf-worker
+```
+
+`PDF_EXPORT_WORKER_ALLOW_HTTP_LOCAL=true` дозволяє лише локальний
+`http://host.docker.internal:<port>` між контейнерами. У production це значення
+має бути відсутнім або `false`, а worker — доступним виключно через HTTPS.
+
+4. У PowerShell виконайте:
 
 ```powershell
 npm.cmd exec supabase -- start
@@ -76,7 +108,7 @@ npm.cmd run dev
 
 Не додавайте `--no-verify-jwt`: локальний тест має відповідати production auth.
 
-4. У Supabase Studio `http://127.0.0.1:54323` виконайте:
+5. У Supabase Studio `http://127.0.0.1:54323` виконайте:
 
 ```sql
 update public.app_feature_flags
@@ -84,9 +116,9 @@ set is_enabled = true, updated_at = now()
 where key = 'external_pdf_viewer_v2';
 ```
 
-5. Відкрийте `http://localhost:5173`.
+6. Відкрийте `http://localhost:5173`.
 
-Міграції `202607300001`–`202607300007` створюють реєстр джерел і provenance,
+Міграції `202607300001`–`202608030002` створюють реєстр джерел і provenance,
 короткочасні gateway-сесії, додаткові security constraints, окремий rate limit
 операційної телеметрії, зашифровану короткочасну авторизацію Google Drive та
 безпечне підтвердження fingerprint разом із перевіреними metadata нової версії.
@@ -99,6 +131,8 @@ where key = 'external_pdf_viewer_v2';
 - Generic HTTPS PDF без CORS переходить на gateway; `Range` повертає `206`.
 - Приватний Google Drive PDF відкривається через opaque gateway URL; Drive
   Bearer не передається у URL, PDF.js або persisted metadata.
+- Публічний Google Drive PDF відкривається без OAuth; server API key не
+  повертається у браузер і не зберігається у metadata документа.
 - Перехід одразу на сторінку 900 не створює сотні canvas.
 - При великому zoom або сторінці нестандартного розміру canvas основної сторінки
   та мініатюри не перевищує налаштовані ліміти пікселів і сторони.
@@ -114,6 +148,20 @@ where key = 'external_pdf_viewer_v2';
   джерелі; старі fingerprint/metadata у вже створених знахідках лишаються.
 
 ## Production rollout
+
+Етап 7 виконується fail-closed: міграція створює DB flag вимкненим, повторне
+застосування міграції не змінює вибір адміністратора, а frontend потребує
+одночасно build-time дозволу і DB flag. Перед будь-яким production rollout
+запустіть:
+
+```powershell
+npm.cmd run verify:pdf-rollout
+```
+
+CI додатково перевіряє точний HTTPS origin, повний набір упорядкованих PDF-
+міграцій, наявність `ENCRYPTION_KEY` та `GOOGLE_DRIVE_PUBLIC_API_KEY` серед
+Supabase Function Secrets, збірку контейнера PDF worker і наявність
+`pdf-gateway` після deploy. Значення секретів команда не читає і не виводить.
 
 Перед увімкненням прапорця:
 
@@ -131,8 +179,22 @@ VITE_PDF_VIEWER_MAX_CANVAS_SIDE=8192
 навмисний fail-closed захист: production origin не вгадується і не замінюється
 на `*`.
 
-Окремо перевірте, що у Supabase Edge Function Secrets уже є чинний
-`ENCRYPTION_KEY`. Не додавайте його до frontend/GitHub Pages secrets.
+Окремо перевірте, що у Supabase Edge Function Secrets уже є чинні
+`ENCRYPTION_KEY` і `GOOGLE_DRIVE_PUBLIC_API_KEY`. Не додавайте їх до
+frontend/GitHub Pages secrets.
+
+У GitHub `Settings → Secrets and variables → Actions → Secrets` задайте:
+
+```text
+PDF_EXPORT_WORKER_URL=https://your-pdf-worker.example
+PDF_EXPORT_WORKER_SECRET=<той самий випадковий секрет 32+ символи, що й у worker>
+```
+
+Спочатку розгорніть контейнер із `services/pdf-export-worker`, перевірте
+`GET /health`, а потім запускайте workflow Supabase. URL і HMAC-секрет
+передаються до `pdf-gateway` як server-only secrets. Workflow навмисно
+зупиняється, якщо worker не налаштований: у production через нього проходять і
+DNS-pinned Range-запити переглядача, і векторний експорт великих PDF.
 
 2. Зробіть backup таблиць `documents`, `document_sources` і
 `finding_document_references`. Залиште DB flag вимкненим.
@@ -144,7 +206,7 @@ npm.cmd exec supabase -- link --project-ref <PROJECT_REF>
 npm.cmd exec supabase -- migration list --linked
 npm.cmd exec supabase -- db push --linked --dry-run
 npm.cmd exec supabase -- db push --linked --yes
-npm.cmd exec supabase -- secrets set APP_URL=<APP_URL> ALLOWED_ORIGIN=<ALLOWED_ORIGIN> --project-ref <PROJECT_REF>
+npm.cmd exec supabase -- secrets set APP_URL=<APP_URL> ALLOWED_ORIGIN=<ALLOWED_ORIGIN> GOOGLE_DRIVE_PUBLIC_API_KEY=<SERVER_DRIVE_API_KEY> PDF_EXPORT_WORKER_URL=<HTTPS_WORKER_URL> PDF_EXPORT_WORKER_SECRET=<WORKER_SECRET> --project-ref <PROJECT_REF>
 npm.cmd exec supabase -- functions deploy pdf-gateway --project-ref <PROJECT_REF>
 ```
 
@@ -155,6 +217,20 @@ probe, `Range`/`206`, відхилення чужого документа та 
 `external_pdf_viewer_v2`. Frontend і Supabase workflows запускаються окремо,
 тому при змінах PDF-контуру не залишайте DB flag увімкненим між несумісними
 деплоями.
+
+Остаточне перемикання після успішного smoke-test:
+
+```sql
+update public.app_feature_flags
+set is_enabled = true, updated_at = now()
+where key = 'external_pdf_viewer_v2';
+```
+
+Після перемикання перевірте старий документ без `document_sources`, новий
+Wikimedia/generic PDF, приватний Google Drive PDF, `Range: bytes=0-4`, створення
+знахідки та експорт. Старий запис має або ліниво пройти resolver і отримати
+перевірений source, або залишитися в legacy viewer без запису неперевірених
+metadata.
 
 ## Операційна телеметрія
 
@@ -178,8 +254,10 @@ unit/integration/contract тестів. Локально виконайте:
 ```powershell
 npm.cmd run typecheck
 npm.cmd run lint
+npm.cmd run verify:pdf-rollout
 npm.cmd test
 npm.cmd run test:integration
+npm.cmd run test:e2e
 npm.cmd run build
 npm.cmd run verify:pages
 ```
@@ -205,26 +283,32 @@ Build-time kill switch `VITE_EXTERNAL_PDF_VIEWER_V2=false` потребує по
 
 ## Відомі обмеження
 
-Поточна production-safe стратегія експорту є клієнтською і має жорсткі ліміти розміру, сторінок, пікселів та пам’яті. Для великого PDF або невідомого розміру операція відхиляється до виклику `PDFDocumentProxy.getData()`. Server streaming/ephemeral export потребує окремого runtime з надійним PDF-інструментом і не повинен імітуватися через повне завантаження великого PDF в пам’ять Edge Function.
+Для малого PDF переглядач копіює вибрані оригінальні сторінки у браузері без
+растеризації. Для великого PDF або невідомого розміру `pdf-gateway` передає
+збережене й авторизоване джерело до HMAC-захищеного worker. Worker завантажує
+оригінал у приватний тимчасовий каталог, `qpdf` копіює вибрані сторінки зі
+збереженням векторів і текстового шару, результат одразу stream-иться
+користувачу, а каталог гарантовано видаляється у `finally`. Supabase Storage
+для цієї операції не використовується. Якщо worker навмисно не налаштований у
+локальному середовищі, залишається обмежений растеризований fallback; production
+workflow таку конфігурацію не пропускає.
 
-Публічне Google Drive share-посилання зараз проходить через чинний
-OAuth-backed Drive adapter: користувач має підключити Google Drive. Окремий
-anonymous public-share режим не реалізований. Для приватного Drive access token
+Для приватного Drive access token
 отримується browser OAuth, один раз передається Edge Function через TLS,
 зберігається лише зашифрованим у короткочасній service-only сесії й ніколи не
 повертається PDF.js, не потрапляє в URL, metadata, telemetry або application
 logs. Довготривалого refresh-token vault немає: після завершення Google-сесії
 користувач підключає Drive повторно.
 
-У репозиторії немає browser E2E harness для PDF. Наявні unit, security,
-integration та contract тести не є доказом повного сценарію
-UI → PDF.js → deployed Edge → RLS. Перед увімкненням прапорця потрібен ручний
-smoke-test за матрицею вище.
+Автоматичний E2E workflow перевіряє повний клієнтський контракт
+resolver → opaque session → Range URL → server export без витоку upstream URL
+або OAuth token. Реальний ланцюжок browser → PDF.js → deployed Edge → RLS →
+зовнішній провайдер усе одно потребує ручного smoke-test, оскільки тестовий CI
+не повинен містити постійний Google OAuth доступ до приватних документів.
 
-Gateway відхиляє loopback, private, link-local і зарезервовані адреси, повторює
-перевірку DNS для кожного redirect та після відповіді upstream. Водночас Deno
-`fetch` не надає API, яке прив'язує перевірену DNS-відповідь до фактичного
-мережевого з'єднання. Для середовища з підвищеними вимогами до захисту від DNS
-rebinding направляйте вихідний трафік `pdf-gateway` через egress proxy з DNS
-pinning або обмежте його allowlist-ом довірених провайдерів. Не вимикайте наявні
-SSRF-перевірки як спосіб обходу цього обмеження.
+Gateway відхиляє loopback, private, link-local і зарезервовані адреси та не
+приймає upstream URL від браузера під час перегляду або експорту. У production
+фактичне мережеве з’єднання виконує worker: він перевіряє всі DNS-відповіді,
+відхиляє змішані public/private набори, прив’язує HTTPS-з’єднання до перевіреної
+IP-адреси та повторює цю процедуру для кожного redirect. Авторизовані Google
+Drive redirect додатково обмежені точним allowlist хостів.

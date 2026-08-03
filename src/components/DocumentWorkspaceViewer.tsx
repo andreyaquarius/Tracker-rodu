@@ -27,7 +27,10 @@ import {
   uploadFileToGoogleDrive,
   type GoogleDrivePickerFolder,
 } from "../services/googleDriveStorage";
-import { createDocumentSourceViewerSession } from "../services/documentSourceViewerAccess.ts";
+import {
+  createDocumentSourceViewerSession,
+  exportDocumentSourcePdfPages,
+} from "../services/documentSourceViewerAccess.ts";
 import { confirmDocumentSourceVersion } from "../services/documentSourceRevalidation.ts";
 import {
   resolveMediaWikiPdfPagePreview,
@@ -38,8 +41,10 @@ import type {
   NormalizedPageSelectionInput,
 } from "../services/findingDocumentReferences.ts";
 import {
+  choosePdfSubsetExportStrategy,
   createPageImagesZip,
   createPdfSubsetBlob,
+  createRasterizedPdfSubsetBlob,
   downloadGeneratedFile,
   firstKnownPositiveSize,
   parsePageRange,
@@ -49,6 +54,7 @@ import {
   renderPdfPageImage,
   validateKnownClientExportSize,
   type PdfExportFormat,
+  type PdfSubsetExportStrategy,
 } from "../services/pdfPageExport.ts";
 import {
   BoundedResourceCache,
@@ -294,6 +300,7 @@ type PdfExportDestination = "download" | "google-drive";
 type PdfExportImageScale = 1 | 1.5 | 2;
 type PdfExportJpegQuality = 70 | 85 | 95;
 type CropSnapshotDestination = "google-drive" | "download" | "none";
+type FindingCaptureMode = "fragment" | "full-page";
 export type FindingDocumentReferenceDraft = Omit<CreateFindingDocumentReferenceInput, "findingId">;
 
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
@@ -395,6 +402,7 @@ export function DocumentWorkspaceViewer({
   const [creatingCrop, setCreatingCrop] = useState(false);
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [cropSnapshotDestination, setCropSnapshotDestination] = useState<CropSnapshotDestination>("google-drive");
+  const [findingCaptureMode, setFindingCaptureMode] = useState<FindingCaptureMode>("fragment");
   const [fullscreenError, setFullscreenError] = useState("");
   const [previewReloadKey, setPreviewReloadKey] = useState(0);
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<number, string>>({});
@@ -420,6 +428,14 @@ export function DocumentWorkspaceViewer({
   const currentPreview = currentScan
     ? previewCacheRef.current.get(currentScan.id)
     : undefined;
+  const currentPdfExportLimits = pdfClientExportLimits();
+  const currentPdfSubsetStrategy = choosePdfSubsetExportStrategy(
+    firstKnownPositiveSize(currentPreview?.documentSource?.fileSizeBytes, currentScan?.size),
+    1,
+    currentPdfExportLimits,
+  );
+  const pdfExportUsesRasterizedPages = exportFormat === "pdf"
+    && currentPdfSubsetStrategy === "rasterized";
   const effectiveSourceVersionStatus = viewer?.sourceVersionStatus === "changed"
     || currentPreview?.sourceVersionStatus === "changed"
     ? "changed"
@@ -705,6 +721,7 @@ export function DocumentWorkspaceViewer({
     setConfirmingSourceVersion(false);
     setCropDialogOpen(false);
     setCropSnapshotDestination("google-drive");
+    setFindingCaptureMode("fragment");
     restoredFindingSelectionRef.current = "";
   }, [viewer?.openedAt, viewerV2Enabled]);
 
@@ -1261,24 +1278,38 @@ export function DocumentWorkspaceViewer({
     });
   };
 
-  const createFindingFromCrop = async (destination: CropSnapshotDestination) => {
-    if (!sourceDocument || !cropRect) return;
+  const createFindingFromCrop = async (
+    destination: CropSnapshotDestination,
+    captureMode: FindingCaptureMode = "fragment",
+  ) => {
+    if (!sourceDocument || (captureMode === "fragment" && !cropRect)) return;
     cropOperationAbortRef.current?.abort();
     const abortController = new AbortController();
     cropOperationAbortRef.current = abortController;
     setError("");
     setCreatingCrop(true);
     try {
-      const sourceName = `${sourceDocument.title || activeScan.name}-сторінка-${navigationPageNumber}-фрагмент.png`;
-      const fragmentSelection = documentFragmentSelectionFromCrop(
-        sourceDocument.id,
-        activeScan,
-        navigationPageNumber,
-        kind === "pdf" ? effectivePdfRotation : rotation,
-        cropRect,
-        kind === "pdf" ? pdfCanvasRef.current : imageRef.current,
-        fitScale * zoom,
-      );
+      const isFullPage = captureMode === "full-page";
+      const sourceName = isFullPage
+        ? `${sourceDocument.title || activeScan.name}-сторінка-${navigationPageNumber}.png`
+        : `${sourceDocument.title || activeScan.name}-сторінка-${navigationPageNumber}-фрагмент.png`;
+      const captureRotation = kind === "pdf" ? effectivePdfRotation : rotation;
+      const fragmentSelection = isFullPage
+        ? fullPageDocumentSelection(
+            sourceDocument.id,
+            activeScan,
+            navigationPageNumber,
+            captureRotation,
+          )
+        : documentFragmentSelectionFromCrop(
+            sourceDocument.id,
+            activeScan,
+            navigationPageNumber,
+            captureRotation,
+            cropRect!,
+            kind === "pdf" ? pdfCanvasRef.current : imageRef.current,
+            fitScale * zoom,
+          );
       if (!fragmentSelection) {
         throw new Error("Не вдалося визначити координати виділеного фрагмента.");
       }
@@ -1312,7 +1343,10 @@ export function DocumentWorkspaceViewer({
           sourcePage.cleanup();
         }
       } else if (destination !== "none" && imageRef.current) {
-        croppedFile = await cropImageToFile(imageRef.current, cropRect, sourceName, fitScale * zoom);
+        const imageCrop = isFullPage
+          ? fullRenderedElementCrop(imageRef.current, fitScale * zoom)
+          : cropRect!;
+        croppedFile = await cropImageToFile(imageRef.current, imageCrop, sourceName, fitScale * zoom);
         throwIfViewerOperationAborted(abortController.signal);
       }
       if (destination !== "none" && !croppedFile) {
@@ -1358,6 +1392,7 @@ export function DocumentWorkspaceViewer({
       setSelectionMode(false);
       setCropRect(null);
       setCropDialogOpen(false);
+      setFindingCaptureMode("fragment");
       await minimizeViewerForRecordAction();
       throwIfViewerOperationAborted(abortController.signal);
       onCreateFinding({
@@ -1372,11 +1407,17 @@ export function DocumentWorkspaceViewer({
         ...(fragmentScan ? { scans: [fragmentScan] } : {}),
         fragmentSelection,
         ...(documentReferenceDraft ? { documentReferenceDraft } : {}),
-        notes: `Створено з виділеного фрагмента документа «${sourceDocument.title}». Джерело: ${activeScan.name}.`,
+        notes: isFullPage
+          ? `Створено з повної сторінки документа «${sourceDocument.title}». Джерело: ${activeScan.name}.`
+          : `Створено з виділеного фрагмента документа «${sourceDocument.title}». Джерело: ${activeScan.name}.`,
       });
     } catch (cropError) {
       if (!isViewerOperationAbort(cropError)) {
-        setError(cropError instanceof Error ? cropError.message : "Не вдалося створити знахідку з фрагмента.");
+        setError(cropError instanceof Error
+          ? cropError.message
+          : captureMode === "full-page"
+            ? "Не вдалося створити знахідку з повної сторінки."
+            : "Не вдалося створити знахідку з фрагмента.");
       }
     } finally {
       if (cropOperationAbortRef.current === abortController) {
@@ -1669,6 +1710,7 @@ export function DocumentWorkspaceViewer({
   const closeCropDialog = () => {
     cropOperationAbortRef.current?.abort();
     setCropDialogOpen(false);
+    setFindingCaptureMode("fragment");
   };
 
   const chooseExportDriveFolder = async () => {
@@ -1711,17 +1753,51 @@ export function DocumentWorkspaceViewer({
       throwIfViewerOperationAborted(abortController.signal);
       let result: Blob;
       let fileName: string;
+      let pdfSubsetStrategy: PdfSubsetExportStrategy | undefined;
       if (exportFormat === "pdf") {
+        fileName = pdfExportFileName(sourceDocument.title, selectedPages, "pdf");
         const persistedSource = previewCacheRef.current.get(currentScan.id)?.documentSource;
         const knownSize = firstKnownPositiveSize(
           persistedSource?.fileSizeBytes,
           currentScan.size,
         );
-        validateKnownClientExportSize(knownSize, selectedPages.length, limits);
-        const sourceBytes = await pdfDocument.getData();
-        throwIfViewerOperationAborted(abortController.signal);
-        result = await createPdfSubsetBlob(sourceBytes, selectedPages, limits, abortController.signal);
-        fileName = pdfExportFileName(sourceDocument.title, selectedPages, "pdf");
+        pdfSubsetStrategy = choosePdfSubsetExportStrategy(knownSize, selectedPages.length, limits);
+        if (pdfSubsetStrategy === "vector") {
+          validateKnownClientExportSize(knownSize, selectedPages.length, limits);
+          const sourceBytes = await pdfDocument.getData();
+          throwIfViewerOperationAborted(abortController.signal);
+          result = await createPdfSubsetBlob(sourceBytes, selectedPages, limits, abortController.signal);
+        } else {
+          const cachedPreview = previewCacheRef.current.get(currentScan.id);
+          const serverResult = persistedSource && sourceContext
+            ? await exportDocumentSourcePdfPages({
+                projectId: sourceContext.projectId,
+                documentId: sourceContext.documentId,
+                userId: sourceContext.userId,
+                source: persistedSource,
+                pages: selectedPages,
+                fileName,
+                accessUrl: cachedPreview?.url,
+                signal: abortController.signal,
+              })
+            : null;
+          if (serverResult) {
+            result = serverResult;
+            pdfSubsetStrategy = "server";
+            setExportMessage("Вибрані сторінки скопійовано сервером без растеризації.");
+          } else {
+            setExportMessage(
+              "Серверний export worker не налаштовано: послідовно формуємо обмежену растрову копію лише вибраних сторінок…",
+            );
+            result = await createRasterizedPdfSubsetBlob(
+              pdfDocument,
+              selectedPages,
+              limits,
+              abortController.signal,
+              imageExportOptions,
+            );
+          }
+        }
       } else if (exportFormat === "png" || exportFormat === "jpeg") {
         if (selectedPages.length !== 1) {
           throw new Error("Для кількох зображень оберіть ZIP (PNG) або ZIP (JPEG).");
@@ -1754,10 +1830,17 @@ export function DocumentWorkspaceViewer({
       }
       throwIfViewerOperationAborted(abortController.signal);
       exportedBytes = result.size;
+      const rasterizedResultNote = pdfSubsetStrategy === "rasterized"
+        ? " Вибрані сторінки додано як високоякісні зображення; весь оригінал не завантажувався."
+        : pdfSubsetStrategy === "server"
+          ? " Сторінки скопійовано без растеризації через тимчасовий серверний процес; оригінал не зберігався."
+          : "";
 
       if (exportDestination === "download") {
         downloadGeneratedFile(result, fileName);
-        setExportMessage(`Файл «${fileName}» сформовано та передано браузеру для завантаження.`);
+        setExportMessage(
+          `Файл «${fileName}» сформовано та передано браузеру для завантаження.${rasterizedResultNote}`,
+        );
       } else {
         if (!sourceContext) throw new Error("Для збереження в Google Drive потрібен активний проєкт.");
         await authorizeGoogleDrive();
@@ -1795,9 +1878,10 @@ export function DocumentWorkspaceViewer({
           pages: selectedPages,
           format: exportFormat,
           destinationPath: destinationIdentity,
-          ...(exportFormat === "pdf" ? {} : {
+          ...(pdfSubsetStrategy ? { renderMode: pdfSubsetStrategy } : {}),
+          ...(exportFormat === "pdf" && pdfSubsetStrategy !== "rasterized" ? {} : {
             imageScale: exportImageScale,
-            ...(exportFormat === "jpeg" || exportFormat === "zip-jpeg"
+            ...(exportFormat === "jpeg" || exportFormat === "zip-jpeg" || pdfSubsetStrategy === "rasterized"
               ? { jpegQuality: exportJpegQuality / 100 }
               : {}),
           }),
@@ -1824,8 +1908,8 @@ export function DocumentWorkspaceViewer({
         setExportResultUrl(uploaded.webViewLink);
         setExportMessage(
           exportDriveFolder
-            ? `Файл «${fileName}» збережено у папці «${exportDriveFolder.name}».`
-            : `Файл «${fileName}» збережено у Google Drive.`,
+            ? `Файл «${fileName}» збережено у папці «${exportDriveFolder.name}».${rasterizedResultNote}`
+            : `Файл «${fileName}» збережено у Google Drive.${rasterizedResultNote}`,
         );
       }
       if (sourceContext) {
@@ -2857,9 +2941,12 @@ export function DocumentWorkspaceViewer({
                 <button
                   type="button"
                   className="button button-primary"
-                  disabled={!hasValidCrop || creatingCrop}
-                  onClick={() => {
-                    if (viewerV2Enabled) setCropDialogOpen(true);
+                   disabled={!hasValidCrop || creatingCrop}
+                   onClick={() => {
+                    if (viewerV2Enabled) {
+                      setFindingCaptureMode("fragment");
+                      setCropDialogOpen(true);
+                    }
                     else void createFindingFromCrop("google-drive");
                   }}
                 >
@@ -2873,6 +2960,19 @@ export function DocumentWorkspaceViewer({
             <button type="button" className="button button-primary" onClick={() => void createFinding()}>
               Створити знахідку
             </button>
+            {viewerV2Enabled && isInteractivePdf ? (
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={creatingCrop || pdfRendering}
+                onClick={() => {
+                  setFindingCaptureMode("full-page");
+                  setCropDialogOpen(true);
+                }}
+              >
+                Знахідка зі сторінки
+              </button>
+            ) : null}
             {viewerV2Enabled && isInteractivePdf ? (
               <button type="button" className="button button-secondary" onClick={openPdfExport}>
                 Експорт сторінок
@@ -2956,14 +3056,22 @@ export function DocumentWorkspaceViewer({
                 onChange={(event) => setExportFormat(event.target.value as PdfExportFormat)}
                 disabled={exporting}
               >
-                <option value="pdf">Один PDF без растеризації</option>
+                <option value="pdf">Один PDF (автоматичний режим)</option>
                 <option value="png">PNG (одна сторінка)</option>
                 <option value="jpeg">JPEG (одна сторінка)</option>
                 <option value="zip-png">ZIP із PNG</option>
                 <option value="zip-jpeg">ZIP із JPEG</option>
               </select>
             </label>
-            {exportFormat !== "pdf" ? (
+            {pdfExportUsesRasterizedPages ? (
+              <div className="workspace-export-message" aria-live="polite">
+                <span>
+                  Великий PDF або файл невідомого розміру: переглядач завантажить лише вибрані сторінки
+                  й збере їх у новий PDF як зображення. Увесь оригінал у пам’ять не потрапить.
+                </span>
+              </div>
+            ) : null}
+            {exportFormat !== "pdf" || pdfExportUsesRasterizedPages ? (
               <div className="workspace-export-image-options">
                 <label>
                   <span>Масштаб зображення</span>
@@ -2977,7 +3085,7 @@ export function DocumentWorkspaceViewer({
                     <option value={2}>2× — деталізований</option>
                   </select>
                 </label>
-                {exportFormat === "jpeg" || exportFormat === "zip-jpeg" ? (
+                {exportFormat === "jpeg" || exportFormat === "zip-jpeg" || pdfExportUsesRasterizedPages ? (
                   <label>
                     <span>Якість JPEG</span>
                     <select
@@ -3087,7 +3195,9 @@ export function DocumentWorkspaceViewer({
           >
             <div className="workspace-export-header">
               <div>
-                <span className="eyebrow">Фрагмент PDF</span>
+                <span className="eyebrow">
+                  {findingCaptureMode === "full-page" ? "Повна сторінка PDF" : "Фрагмент PDF"}
+                </span>
                 <h3 id="workspace-crop-title">Створити знахідку</h3>
               </div>
               <button
@@ -3099,9 +3209,13 @@ export function DocumentWorkspaceViewer({
                 ×
               </button>
             </div>
-            <p>Координати та джерело будуть збережені у знахідці незалежно від вибраного варіанта.</p>
+            <p>
+              {findingCaptureMode === "full-page"
+                ? "Номер сторінки, її розміри та джерело будуть збережені у знахідці незалежно від вибраного варіанта."
+                : "Координати та джерело будуть збережені у знахідці незалежно від вибраного варіанта."}
+            </p>
             <fieldset>
-              <legend>Копія фрагмента</legend>
+              <legend>{findingCaptureMode === "full-page" ? "Копія сторінки" : "Копія фрагмента"}</legend>
               <label>
                 <input
                   type="radio"
@@ -3145,7 +3259,7 @@ export function DocumentWorkspaceViewer({
                 type="button"
                 className="button button-primary"
                 disabled={creatingCrop}
-                onClick={() => void createFindingFromCrop(cropSnapshotDestination)}
+                onClick={() => void createFindingFromCrop(cropSnapshotDestination, findingCaptureMode)}
               >
                 {creatingCrop ? "Створення…" : "Продовжити"}
               </button>
@@ -3344,6 +3458,33 @@ function documentFragmentSelectionFromCrop(
     rotation,
     rect: normalizedRect,
     createdAt: new Date().toISOString(),
+  };
+}
+
+function fullPageDocumentSelection(
+  documentId: string,
+  scan: ScanAttachment,
+  pageNumber: number,
+  rotation: number,
+): DocumentFragmentSelection {
+  return {
+    documentId,
+    sourceFileId: scan.storagePath || scan.id,
+    pageNumber,
+    rotation: normalizeQuarterRotation(rotation),
+    rect: { x: 0, y: 0, width: 1, height: 1 },
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function fullRenderedElementCrop(element: HTMLElement, zoom: number): CropRect {
+  const rendered = element.getBoundingClientRect();
+  const safeZoom = Math.max(zoom, MIN_ZOOM);
+  return {
+    x: 0,
+    y: 0,
+    width: Math.max(1, rendered.width / safeZoom),
+    height: Math.max(1, rendered.height / safeZoom),
   };
 }
 

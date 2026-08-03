@@ -17,6 +17,13 @@ export interface DirectPdfGatewayProbe {
   fingerprint: DocumentSourceFingerprint;
 }
 
+export interface ServerPdfExportInput {
+  pages: readonly number[];
+  fileName: string;
+  /** Ephemeral gateway stream URL from the current viewer session. */
+  accessUrl?: string;
+}
+
 export interface DocumentSourceGatewayClient {
   /**
    * Server-side metadata probe for a URL already accepted by the registry.
@@ -27,12 +34,33 @@ export interface DocumentSourceGatewayClient {
     context: ResolveSourceContext,
   ): Promise<DirectPdfGatewayProbe>;
 
+  /**
+   * Probes a public Drive share through the server-only Drive API key. The
+   * optional method keeps custom/test gateways compatible with the older
+   * private-OAuth-only contract.
+   */
+  probePublicGoogleDrivePdf?(
+    inputUrl: string,
+    context: ResolveSourceContext,
+  ): Promise<DirectPdfGatewayProbe>;
+
   /** Creates an opaque, short-lived stream session for a persisted source. */
   createAccessSession(
     source: StoredDocumentSource,
     context: AccessContext,
     providerAccess?: DocumentSourceProviderAccess,
   ): Promise<PdfAccessDescriptor>;
+
+  /**
+   * Uses the optional qpdf worker for a vector subset of a large source. A null
+   * result means the worker is intentionally not configured and the viewer may
+   * retain its bounded client fallback.
+   */
+  exportPdfPages?(
+    source: StoredDocumentSource,
+    context: AccessContext,
+    input: ServerPdfExportInput,
+  ): Promise<Blob | null>;
 }
 
 /**
@@ -70,7 +98,23 @@ export class HttpDocumentSourceGatewayClient implements DocumentSourceGatewayCli
     inputUrl: string,
     context: ResolveSourceContext,
   ): Promise<DirectPdfGatewayProbe> {
-    const endpoint = new URL("probe-source", this.#functionBaseUrl);
+    return this.#probePdf("probe-source", inputUrl, context);
+  }
+
+  async probePublicGoogleDrivePdf(
+    inputUrl: string,
+    context: ResolveSourceContext,
+  ): Promise<DirectPdfGatewayProbe> {
+    return this.#probePdf("probe-google-drive-public", inputUrl, context, true);
+  }
+
+  async #probePdf(
+    route: "probe-source" | "probe-google-drive-public",
+    inputUrl: string,
+    context: ResolveSourceContext,
+    googleDrivePublic = false,
+  ): Promise<DirectPdfGatewayProbe> {
+    const endpoint = new URL(route, this.#functionBaseUrl);
     const additionalHeaders = this.#headers ? await this.#headers() : {};
     let response: Response;
     try {
@@ -94,6 +138,13 @@ export class HttpDocumentSourceGatewayClient implements DocumentSourceGatewayCli
     }
 
     if (response.status === 401 || response.status === 403) {
+      const payload = await readJson(response).catch(() => null);
+      const errorCode = isRecord(payload) && typeof payload.error === "string"
+        ? payload.error
+        : "";
+      if (googleDrivePublic && errorCode === "GOOGLE_DRIVE_PERMISSION_DENIED") {
+        throw new DocumentSourceError("GOOGLE_DRIVE_PERMISSION_DENIED");
+      }
       throw new DocumentSourceError("ACCESS_DENIED");
     }
     if (response.status === 404) throw new DocumentSourceError("SOURCE_NOT_FOUND");
@@ -222,6 +273,72 @@ export class HttpDocumentSourceGatewayClient implements DocumentSourceGatewayCli
       ...(Object.keys(streamHeaders).length ? { httpHeaders: streamHeaders } : {}),
     };
   }
+
+  async exportPdfPages(
+    source: StoredDocumentSource,
+    context: AccessContext,
+    input: ServerPdfExportInput,
+  ): Promise<Blob | null> {
+    if (source.documentId !== context.documentId) {
+      throw new DocumentSourceError("ACCESS_DENIED");
+    }
+    const pages = [...new Set(input.pages)].sort((left, right) => left - right);
+    if (!pages.length || pages.some((page) => !Number.isSafeInteger(page) || page < 1)) {
+      throw new DocumentSourceError("EXPORT_FAILED");
+    }
+    const sessionToken = input.accessUrl
+      ? opaqueSessionTokenFromGatewayUrl(input.accessUrl, this.#functionBaseUrl)
+      : undefined;
+    const endpoint = new URL("export-pages", this.#functionBaseUrl);
+    const additionalHeaders = this.#headers ? await this.#headers() : {};
+    let response: Response;
+    try {
+      response = await this.#fetch(endpoint, {
+        method: "POST",
+        credentials: "omit",
+        headers: {
+          "Content-Type": "application/json",
+          ...headersRecord(additionalHeaders),
+        },
+        body: JSON.stringify({
+          projectId: context.projectId,
+          documentId: context.documentId,
+          documentSourceId: source.id,
+          pages,
+          fileName: input.fileName,
+          ...(sessionToken ? { sessionToken } : {}),
+        }),
+        signal: context.signal,
+      });
+    } catch (cause) {
+      if (isAbortError(cause)) throw new DocumentSourceError("TIMEOUT", { cause });
+      throw new DocumentSourceError("NETWORK_ERROR", { cause });
+    }
+
+    if (!response.ok) {
+      const payload = await readJson(response).catch(() => null);
+      const code = isRecord(payload) && typeof payload.error === "string" ? payload.error : "";
+      if (response.status === 503 && code === "SERVER_EXPORT_NOT_CONFIGURED") return null;
+      if (response.status === 401 && code === "OAUTH_REQUIRED") throw new DocumentSourceError("OAUTH_REQUIRED");
+      if (response.status === 403 || response.status === 404) throw new DocumentSourceError("ACCESS_DENIED");
+      if (response.status === 413) throw new DocumentSourceError("SOURCE_TOO_LARGE_WITHOUT_RANGE");
+      if (response.status === 504) throw new DocumentSourceError("TIMEOUT");
+      throw new DocumentSourceError("EXPORT_FAILED");
+    }
+    const mediaType = response.headers.get("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLocaleLowerCase("en-US");
+    if (mediaType !== "application/pdf") {
+      await response.body?.cancel("invalid-server-export").catch(() => undefined);
+      throw new DocumentSourceError("EXPORT_FAILED");
+    }
+    const blob = await response.blob();
+    if (blob.size < 5 || new TextDecoder("ascii").decode(await blob.slice(0, 5).arrayBuffer()) !== "%PDF-") {
+      throw new DocumentSourceError("EXPORT_FAILED");
+    }
+    return blob;
+  }
 }
 
 function safePublicPdfUrl(value: unknown): string {
@@ -324,6 +441,18 @@ function safeGatewayStreamUrl(value: string, functionBaseUrl: string): string {
     throw new DocumentSourceError("NETWORK_ERROR");
   }
   return parsed.href;
+}
+
+function opaqueSessionTokenFromGatewayUrl(value: string, functionBaseUrl: string): string | undefined {
+  const parsed = new URL(value, functionBaseUrl);
+  const base = new URL(functionBaseUrl);
+  if (parsed.origin !== base.origin || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    return undefined;
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const streamIndex = segments.lastIndexOf("stream");
+  const token = streamIndex >= 0 ? segments[streamIndex + 1] ?? "" : "";
+  return /^[A-Za-z0-9_-]{43}$/u.test(token) ? token : undefined;
 }
 
 function viteSupabaseUrl(): string | undefined {

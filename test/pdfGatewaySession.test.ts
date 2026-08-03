@@ -46,6 +46,11 @@ test("gateway limits are configurable, bounded and have a 10 minute default sess
   assert.equal(defaults.telemetryRequestsPerWindow, 120);
   assert.equal(defaults.telemetryWindowSeconds, 60);
   assert.equal(defaults.telemetrySuccessSamplePercent, 10);
+  assert.equal(defaults.exportRequestsPerWindow, 10);
+  assert.equal(defaults.exportWindowSeconds, 60);
+  assert.equal(defaults.exportMaxPages, 250);
+  assert.equal(defaults.exportMaxResultBytes, 1024 * 1024 * 1024);
+  assert.equal(defaults.exportWorkerTimeoutMs, 240_000);
 
   const configured = pdfGatewayLimitsFromEnvironment({
     PDF_PROXY_TOKEN_TTL_SECONDS: "900",
@@ -61,6 +66,11 @@ test("gateway limits are configurable, bounded and have a 10 minute default sess
     PDF_TELEMETRY_MAX_EVENTS_PER_WINDOW: "240",
     PDF_TELEMETRY_WINDOW_SECONDS: "180",
     PDF_TELEMETRY_SUCCESS_SAMPLE_PERCENT: "25",
+    PDF_EXPORT_MAX_REQUESTS_PER_WINDOW: "20",
+    PDF_EXPORT_WINDOW_SECONDS: "180",
+    PDF_EXPORT_MAX_PAGES: "400",
+    PDF_EXPORT_MAX_RESULT_BYTES: String(512 * 1024 * 1024),
+    PDF_EXPORT_WORKER_TIMEOUT_MS: "300000",
   });
   assert.equal(configured.sessionTtlSeconds, 900);
   assert.equal(configured.maxRedirects, 2);
@@ -75,6 +85,11 @@ test("gateway limits are configurable, bounded and have a 10 minute default sess
   assert.equal(configured.telemetryRequestsPerWindow, 240);
   assert.equal(configured.telemetryWindowSeconds, 180);
   assert.equal(configured.telemetrySuccessSamplePercent, 25);
+  assert.equal(configured.exportRequestsPerWindow, 20);
+  assert.equal(configured.exportWindowSeconds, 180);
+  assert.equal(configured.exportMaxPages, 400);
+  assert.equal(configured.exportMaxResultBytes, 512 * 1024 * 1024);
+  assert.equal(configured.exportWorkerTimeoutMs, 300_000);
 
   assert.equal(
     pdfGatewayLimitsFromEnvironment({ PDF_PROXY_TOKEN_TTL_SECONDS: "999999" }).sessionTtlSeconds,
@@ -101,5 +116,9 @@ test("gateway limits are configurable, bounded and have a 10 minute default sess
   assert.equal(
     pdfGatewayLimitsFromEnvironment({ PDF_TELEMETRY_SUCCESS_SAMPLE_PERCENT: "101" }).telemetrySuccessSamplePercent,
     10,
+  );
+  assert.equal(
+    pdfGatewayLimitsFromEnvironment({ PDF_EXPORT_MAX_PAGES: "1001" }).exportMaxPages,
+    250,
   );
 });

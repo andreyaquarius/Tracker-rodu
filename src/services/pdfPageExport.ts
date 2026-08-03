@@ -2,6 +2,7 @@ import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 
 export type PdfPageImageFormat = "png" | "jpeg";
 export type PdfExportFormat = "pdf" | PdfPageImageFormat | "zip-png" | "zip-jpeg";
+export type PdfSubsetExportStrategy = "vector" | "server" | "rasterized";
 
 export interface PdfClientExportLimits {
   maxSourceBytes: number;
@@ -32,6 +33,7 @@ export interface PdfExportDeduplicationInput {
   pages: readonly number[];
   format: PdfExportFormat;
   destinationPath?: readonly string[];
+  renderMode?: PdfSubsetExportStrategy;
   imageScale?: number;
   jpegQuality?: number;
 }
@@ -162,6 +164,79 @@ export async function createPdfSubsetBlob(
   return new Blob([bytes], { type: "application/pdf" });
 }
 
+/**
+ * Chooses the only client strategy that may materialize the complete source.
+ * Large and unknown-size sources stay inside PDF.js range loading and are
+ * rebuilt from selected, sequentially rendered pages.
+ */
+export function choosePdfSubsetExportStrategy(
+  sourceBytes: number | null | undefined,
+  selectedPages: number,
+  limits: PdfClientExportLimits = DEFAULT_PDF_CLIENT_EXPORT_LIMITS,
+): PdfSubsetExportStrategy {
+  validateSelectedPageCount(selectedPages, limits.maxPages);
+  return typeof sourceBytes === "number"
+    && Number.isSafeInteger(sourceBytes)
+    && sourceBytes > 0
+    && sourceBytes <= limits.maxSourceBytes
+    ? "vector"
+    : "rasterized";
+}
+
+/**
+ * Builds a new PDF without calling `PDFDocumentProxy.getData()`. PDF.js loads
+ * only the ranges required for each selected page, while one canvas is kept in
+ * memory at a time. The resulting pages are JPEG-backed to keep large scans
+ * bounded and portable.
+ */
+export async function createRasterizedPdfSubsetBlob(
+  document: PDFDocumentProxy,
+  pages: readonly number[],
+  limits: PdfClientExportLimits = DEFAULT_PDF_CLIENT_EXPORT_LIMITS,
+  signal?: AbortSignal,
+  options: PdfPageImageExportOptions = {},
+): Promise<Blob> {
+  throwIfAborted(signal);
+  validatePageNumbers(pages, document.numPages);
+  validateSelectedPageCount(pages.length, limits.maxPages);
+  const { PDFDocument } = await import("pdf-lib");
+  const result = await PDFDocument.create();
+  let usage: PdfZipBudgetUsage = { totalPixels: 0, largestPagePixels: 0, encodedBytes: 0 };
+
+  for (const pageNumber of pages) {
+    throwIfAborted(signal);
+    const page = await document.getPage(pageNumber);
+    try {
+      const pagePixels = pdfPageRenderPixels(page, limits, options);
+      usage = {
+        ...usage,
+        totalPixels: usage.totalPixels + pagePixels,
+        largestPagePixels: Math.max(usage.largestPagePixels, pagePixels),
+      };
+      validateRasterExportBudget(usage, limits, "PDF");
+
+      const image = await renderLoadedPdfPageImage(page, "jpeg", limits, signal, options);
+      usage = { ...usage, encodedBytes: usage.encodedBytes + image.size };
+      validateRasterExportBudget(usage, limits, "PDF");
+      throwIfAborted(signal);
+
+      const viewport = page.getViewport({ scale: 1 });
+      const width = Math.max(1, viewport.width);
+      const height = Math.max(1, viewport.height);
+      const embedded = await result.embedJpg(await image.arrayBuffer());
+      const outputPage = result.addPage([width, height]);
+      outputPage.drawImage(embedded, { x: 0, y: 0, width, height });
+    } finally {
+      page.cleanup();
+    }
+  }
+
+  throwIfAborted(signal);
+  const bytes = await result.save({ useObjectStreams: true });
+  throwIfAborted(signal);
+  return new Blob([bytes], { type: "application/pdf" });
+}
+
 export async function renderPdfPageImage(
   document: PDFDocumentProxy,
   pageNumber: number,
@@ -224,9 +299,7 @@ export async function createPageImagesZip(
 ): Promise<Blob> {
   throwIfAborted(signal);
   validatePageNumbers(pages, document.numPages);
-  if (pages.length > limits.maxPages) {
-    throw new Error(`За одну операцію можна експортувати не більше ${limits.maxPages} сторінок.`);
-  }
+  validateSelectedPageCount(pages.length, limits.maxPages);
   const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   const extension = format === "jpeg" ? "jpg" : "png";
@@ -280,20 +353,28 @@ export function validateZipExportBudget(
   usage: PdfZipBudgetUsage,
   limits: PdfClientExportLimits,
 ): void {
+  validateRasterExportBudget(usage, limits, "ZIP");
+}
+
+function validateRasterExportBudget(
+  usage: PdfZipBudgetUsage,
+  limits: PdfClientExportLimits,
+  output: "PDF" | "ZIP",
+): void {
   const values = [usage.totalPixels, usage.largestPagePixels, usage.encodedBytes];
   if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
-    throw new Error("Не вдалося безпечно оцінити розмір ZIP-експорту.");
+    throw new Error(`Не вдалося безпечно оцінити розмір ${output}-експорту.`);
   }
   if (usage.totalPixels > limits.maxZipTotalPixels) {
     throw new Error(
-      `Вибрані сторінки завеликі для ZIP-експорту у браузері. `
+      `Вибрані сторінки завеликі для ${output}-експорту у браузері. `
       + `Сумарний ліміт: ${limits.maxZipTotalPixels.toLocaleString("uk-UA")} пікселів.`,
     );
   }
   const estimatedMemoryBytes = usage.largestPagePixels * 4 + usage.encodedBytes * 3;
   if (estimatedMemoryBytes > limits.maxZipMemoryBytes) {
     throw new Error(
-      `ZIP-експорт потребує забагато пам’яті браузера (оцінка ${formatBytes(estimatedMemoryBytes)}). `
+      `${output}-експорт потребує забагато пам’яті браузера (оцінка ${formatBytes(estimatedMemoryBytes)}). `
       + `Ліміт: ${formatBytes(limits.maxZipMemoryBytes)}.`,
     );
   }
@@ -317,6 +398,7 @@ export function pdfExportDeduplicationKey(input: PdfExportDeduplicationInput): s
     pages,
     format: input.format,
     destinationPath: (input.destinationPath ?? []).map((part) => part.trim()).filter(Boolean),
+    ...(input.renderMode ? { renderMode: input.renderMode } : {}),
     ...(imageScale === null ? {} : { imageScale }),
     ...(jpegQuality === null ? {} : { jpegQuality }),
   });
@@ -346,8 +428,15 @@ export function validateClientExportSize(
       + `Ліміт: ${formatBytes(limits.maxSourceBytes)}.`,
     );
   }
-  if (selectedPages > limits.maxPages) {
-    throw new Error(`За одну операцію можна експортувати не більше ${limits.maxPages} сторінок.`);
+  validateSelectedPageCount(selectedPages, limits.maxPages);
+}
+
+function validateSelectedPageCount(selectedPages: number, maxPages: number): void {
+  if (!Number.isSafeInteger(selectedPages) || selectedPages < 1) {
+    throw new Error("Для експорту потрібно вибрати хоча б одну сторінку.");
+  }
+  if (selectedPages > maxPages) {
+    throw new Error(`За одну операцію можна експортувати не більше ${maxPages} сторінок.`);
   }
 }
 

@@ -2864,8 +2864,10 @@ export default function App() {
         refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("documents", previousEntity, saved);
         syncEntityAttachmentMetadata("documents", saved);
-        if (externalPdfViewerV2Enabled) {
-          void syncDocumentSourcesForDocument(projectId, saved)
+        if (externalPdfViewerV2Enabled && account) {
+          void syncDocumentSourcesForDocument(projectId, saved, undefined, {
+            userId: account.id,
+          })
             .then((result) => {
               if (!result.failures.length) return;
               notify(

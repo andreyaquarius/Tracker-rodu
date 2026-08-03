@@ -78,6 +78,42 @@ test("gateway metadata probe supports a new unsaved document without weakening p
   });
 });
 
+test("gateway probes a public Drive share through its dedicated server route", async () => {
+  let requestedUrl = "";
+  let requestedBody = "";
+  const shareUrl = "https://drive.google.com/file/d/1AbCdef_ghijklmnopQRstuV/view";
+  const client = new HttpDocumentSourceGatewayClient({
+    baseUrl: "https://project.supabase.co",
+    headers: () => ({ Authorization: "Bearer user-jwt" }),
+    fetch: async (input, init) => {
+      requestedUrl = String(input);
+      requestedBody = String(init?.body ?? "");
+      return new Response(JSON.stringify({
+        canonicalUrl: shareUrl,
+        displayName: "Public register.pdf",
+        mimeType: "application/pdf",
+        fileSizeBytes: 55_000,
+        acceptsRanges: true,
+        fingerprint: { md5: "public-md5", contentLength: 55_000 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    },
+  });
+
+  const probe = await client.probePublicGoogleDrivePdf(shareUrl, context());
+
+  assert.equal(
+    requestedUrl,
+    "https://project.supabase.co/functions/v1/pdf-gateway/probe-google-drive-public",
+  );
+  assert.deepEqual(JSON.parse(requestedBody), {
+    projectId: "project-1",
+    documentId: "document-1",
+    url: shareUrl,
+  });
+  assert.equal(probe.displayName, "Public register.pdf");
+  assert.equal(probe.fingerprint.md5, "public-md5");
+});
+
 test("gateway opens an opaque Supabase session without sending the upstream URL", async () => {
   let requestedUrl = "";
   let requestedBody = "";
@@ -257,6 +293,57 @@ test("gateway rejects cross-origin or non-gateway stream URLs", async () => {
       (error) => error instanceof DocumentSourceError && error.code === "NETWORK_ERROR",
     );
   }
+});
+
+test("gateway streams a server PDF subset using only the opaque viewer session token", async () => {
+  let requestedUrl = "";
+  let requestedBody = "";
+  const token = "a".repeat(43);
+  const client = new HttpDocumentSourceGatewayClient({
+    baseUrl: "https://project.supabase.co",
+    headers: () => ({ Authorization: "Bearer user-jwt" }),
+    fetch: async (input, init) => {
+      requestedUrl = String(input);
+      requestedBody = String(init?.body ?? "");
+      return new Response("%PDF-export", {
+        status: 200,
+        headers: { "Content-Type": "application/pdf" },
+      });
+    },
+  });
+
+  const result = await client.exportPdfPages(source(), context(), {
+    pages: [8, 1, 8],
+    fileName: "Metric book.pdf",
+    accessUrl: `https://project.supabase.co/functions/v1/pdf-gateway/stream/${token}`,
+  });
+
+  assert.equal(requestedUrl, "https://project.supabase.co/functions/v1/pdf-gateway/export-pages");
+  assert.deepEqual(JSON.parse(requestedBody), {
+    projectId: "project-1",
+    documentId: "document-1",
+    documentSourceId: "source-1",
+    pages: [1, 8],
+    fileName: "Metric book.pdf",
+    sessionToken: token,
+  });
+  assert.equal(requestedBody.includes("archive.example.org"), false);
+  assert.equal(result?.type, "application/pdf");
+  assert.equal(await result?.text(), "%PDF-export");
+});
+
+test("viewer keeps its bounded fallback when the optional server export worker is absent", async () => {
+  const client = new HttpDocumentSourceGatewayClient({
+    baseUrl: "https://project.supabase.co",
+    fetch: async () => new Response(JSON.stringify({ error: "SERVER_EXPORT_NOT_CONFIGURED" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    }),
+  });
+  assert.equal(await client.exportPdfPages(source(), context(), {
+    pages: [1],
+    fileName: "page.pdf",
+  }), null);
 });
 
 function source(): StoredDocumentSource {

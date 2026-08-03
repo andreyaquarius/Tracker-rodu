@@ -25,6 +25,11 @@ const limits: PdfGatewayLimits = {
   telemetryRequestsPerWindow: 120,
   telemetryWindowSeconds: 60,
   telemetrySuccessSamplePercent: 10,
+  exportRequestsPerWindow: 10,
+  exportWindowSeconds: 60,
+  exportMaxPages: 250,
+  exportMaxResultBytes: 1024 * 1024 * 1024,
+  exportWorkerTimeoutMs: 240_000,
   maxRequestBodyBytes: 4_096,
 };
 

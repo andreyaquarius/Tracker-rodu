@@ -102,6 +102,10 @@ test("Viewer v2 supports page jumps, fit, rotation and explicit exports", () => 
   assert.match(viewer, /rotateImage\(-90\)/u);
   assert.match(viewer, /Експорт сторінок/u);
   assert.match(viewer, /createPdfSubsetBlob/u);
+  assert.match(viewer, /createRasterizedPdfSubsetBlob/u);
+  assert.match(viewer, /choosePdfSubsetExportStrategy/u);
+  assert.match(viewer, /pdfSubsetStrategy === "vector"[\s\S]*?pdfDocument\.getData\(\)/u);
+  assert.match(viewer, /Великий PDF або файл невідомого розміру/u);
   assert.match(viewer, /createPageImagesZip/u);
   assert.match(viewer, /uploadFileToGoogleDrive/u);
   assert.match(viewer, /markedExportPages/u);

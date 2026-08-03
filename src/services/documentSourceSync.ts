@@ -1,6 +1,10 @@
 import type { DocumentRecord, ScanAttachment } from "../types";
 import type { StoredDocumentSource } from "./document-sources/contracts.ts";
 import type { SaveDocumentSourceInput } from "./documentSources.ts";
+import type {
+  DocumentSourceAddContext,
+  DocumentSourceAddResolution,
+} from "./documentSourceAddFlow.ts";
 import { DocumentSourceError } from "./document-sources/errors.ts";
 import { normalizeExternalDocumentUrl } from "../utils/documentSourceUrlSecurity.ts";
 
@@ -28,6 +32,17 @@ export interface DocumentSourceSyncPersistence {
     projectId: string,
     input: SaveDocumentSourceInput,
   ) => Promise<StoredDocumentSource>;
+}
+
+export interface DocumentSourceSyncOptions {
+  /** The resolver probe is editor-scoped and must never run anonymously. */
+  userId: string;
+  signal?: AbortSignal;
+  now?: () => Date;
+  resolveSource?: (
+    inputUrl: string,
+    context: DocumentSourceAddContext,
+  ) => Promise<DocumentSourceAddResolution>;
 }
 
 export function isExternalPdfViewerV2Enabled(
@@ -130,6 +145,7 @@ export async function syncDocumentSourcesForDocument(
   projectId: string,
   document: DocumentRecord,
   persistence?: DocumentSourceSyncPersistence,
+  options?: DocumentSourceSyncOptions,
 ): Promise<DocumentSourceSyncResult> {
   // Keep pure source projection usable in Node tests and defer the browser
   // Supabase client until an enabled rollout actually performs persistence.
@@ -145,6 +161,10 @@ export async function syncDocumentSourcesForDocument(
     else if (isPdfAttachment(attachment)) skippedAttachmentIds.push(attachment.id);
   }
 
+  const resolveSource = options?.resolveSource
+    ?? (options?.userId
+      ? (await import("./documentSourceAddFlow.ts")).resolveDocumentSourceForAdd
+      : undefined);
   const outcomes = await Promise.all(candidates.map(async (candidate) => {
     const matched = existing.find((source) =>
       source.id === document.scans.find((scan) => scan.id === candidate.attachmentId)?.documentSourceId
@@ -153,9 +173,30 @@ export async function syncDocumentSourcesForDocument(
     // A validated registry row is authoritative. Legacy attachment JSON can be
     // stale and must never roll confirmed/pending/changed state backwards.
     if (matched) return { source: matched, failure: null };
-    try {
+    if (!resolveSource || !options?.userId.trim()) {
       return {
-        source: await saveDocumentSource(projectId, candidate.source),
+        source: null,
+        failure: {
+          attachmentId: candidate.attachmentId,
+          message: "SOURCE_VALIDATION_REQUIRED",
+        },
+      };
+    }
+    try {
+      const resolution = await resolveSource(candidate.source.originalUrl, {
+        userId: options.userId,
+        projectId,
+        documentId: document.id,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      const validated = selectValidatedSource(resolution, candidate.source);
+      if (!validated) throw new DocumentSourceError("MULTIPLE_SOURCE_CANDIDATES");
+      return {
+        source: await saveDocumentSource(projectId, {
+          ...validated,
+          documentId: document.id,
+          lastValidatedAt: (options.now?.() ?? new Date()).toISOString(),
+        }),
         failure: null,
       };
     } catch (error) {
@@ -174,6 +215,19 @@ export async function syncDocumentSourcesForDocument(
     skippedAttachmentIds,
     failures: outcomes.flatMap((outcome) => outcome.failure ? [outcome.failure] : []),
   };
+}
+
+function selectValidatedSource(
+  resolution: DocumentSourceAddResolution,
+  candidate: SaveDocumentSourceInput,
+): SaveDocumentSourceInput | null {
+  const resolved = resolution.candidates.map(({ source }) => ({
+    ...source,
+    documentId: candidate.documentId,
+  }));
+  const exact = resolved.find((source) => sourceIdentityMatches(source, candidate));
+  if (exact) return exact;
+  return resolved.length === 1 ? resolved[0]! : null;
 }
 
 function isPdfAttachment(attachment: ScanAttachment): boolean {
@@ -196,7 +250,10 @@ function persistableAttachmentUrl(value: string): string | null {
 }
 
 function sourceIdentityMatches(
-  stored: StoredDocumentSource,
+  stored: Pick<
+    StoredDocumentSource,
+    "provider" | "providerFileId" | "canonicalUrl" | "originalUrl"
+  >,
   candidate: SaveDocumentSourceInput,
 ): boolean {
   if (stored.provider !== candidate.provider) return false;

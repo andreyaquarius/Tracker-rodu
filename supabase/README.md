@@ -1,5 +1,36 @@
 # Supabase
 
+## External PDF gateway and worker
+
+`pdf-gateway` does not persist original external PDFs in Supabase Storage. In
+production, DNS-pinned Range streaming and vector export of large page subsets
+require the `services/pdf-export-worker` container with `qpdf`.
+
+Configure the worker with at least:
+
+```text
+PDF_EXPORT_WORKER_SECRET=<random 32+ character secret>
+PDF_EXPORT_MAX_SOURCE_BYTES=2147483648
+PDF_EXPORT_MAX_PAGES=250
+PDF_EXPORT_MAX_CONCURRENT=2
+PDF_STREAM_MAX_CONCURRENT=32
+PDF_STREAM_MAX_RESPONSE_BYTES=33554432
+```
+
+Configure the same secret and the clean HTTPS worker URL as Supabase Function
+Secrets:
+
+```text
+PDF_EXPORT_WORKER_URL=https://your-pdf-worker.example
+PDF_EXPORT_WORKER_SECRET=<the same 32+ character secret>
+```
+
+The worker accepts only short-lived HMAC-signed requests from the Edge
+Function, validates every DNS result, and pins the HTTPS connection to the
+validated public IP for every redirect. Temporary files exist only for the
+`qpdf` export inside a private `/tmp` directory and are deleted on success,
+failure, or client disconnect. Range viewing does not create temporary files.
+
 Цей каталог містить схему основного серверного сховища Трекера Роду,
 налаштування Supabase Storage, Realtime та Edge Functions.
 
@@ -46,6 +77,9 @@
 серверний секрет:
 
 - `ENCRYPTION_KEY` — випадковий довгий секрет щонайменше з 32 символів.
+- `GOOGLE_DRIVE_PUBLIC_API_KEY` — окремий server-side ключ Google Drive API
+  для PDF, відкритих за публічним share-посиланням; не використовувати
+  browser Picker key із HTTP-referrer обмеженням.
 - `GEMINI_API_KEY` — ваш серверний Google Gemini API-ключ для включених
   аналізів на тарифах `free`, `researcher` і `professional`.
   Серверний ключ використовує фіксовану модель `gemini-3.5-flash`.

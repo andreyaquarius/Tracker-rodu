@@ -14,6 +14,7 @@ import { DocumentSourceError } from "./errors.ts";
 import type { DirectPdfGatewayProbe, DocumentSourceGatewayClient } from "./gatewayClient.ts";
 import { directAccessDescriptor } from "./gatewayClient.ts";
 import { sourceValidationResult, validationResultForError } from "./adapterSupport.ts";
+import { fetchWithBoundedRetry } from "./boundedFetchRetry.ts";
 import { isSupportedMediaWikiHost } from "../mediaWikiPdfSource.ts";
 
 export interface DirectPdfAdapterOptions {
@@ -127,7 +128,7 @@ export async function probeDirectPdfOverCors(
   const normalized = normalizeExternalDocumentUrl(inputUrl);
   let head: Response | null = null;
   try {
-    head = await fetchImplementation(normalized.url, {
+    head = await fetchWithBoundedRetry(fetchImplementation, normalized.url, {
       method: "HEAD",
       credentials: "omit",
       mode: "cors",
@@ -135,7 +136,7 @@ export async function probeDirectPdfOverCors(
       referrerPolicy: "no-referrer",
       signal,
       headers: { Accept: "application/pdf" },
-    });
+    }, { signal });
     if (head.status === 401 || head.status === 403) throw new DocumentSourceError("ACCESS_DENIED");
     if (head.status === 404) throw new DocumentSourceError("SOURCE_NOT_FOUND");
     if (!head.ok && head.status !== 405 && head.status !== 501) {
@@ -149,7 +150,7 @@ export async function probeDirectPdfOverCors(
 
   let response: Response;
   try {
-    response = await fetchImplementation(normalized.url, {
+    response = await fetchWithBoundedRetry(fetchImplementation, normalized.url, {
       method: "GET",
       credentials: "omit",
       mode: "cors",
@@ -160,7 +161,7 @@ export async function probeDirectPdfOverCors(
         Accept: "application/pdf",
         Range: "bytes=0-4",
       },
-    });
+    }, { signal });
   } catch (cause) {
     if (isAbortError(cause)) throw new DocumentSourceError("TIMEOUT", { cause });
     throw new DocumentSourceError("NETWORK_ERROR", { cause });

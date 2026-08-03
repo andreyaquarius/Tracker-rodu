@@ -7,6 +7,8 @@ on:
       - "supabase/functions/**"
       - "supabase/migrations/**"
       - "supabase/config.toml"
+      - "scripts/verify-external-pdf-rollout.mjs"
+      - "services/pdf-export-worker/**"
       # process-gedcom-exports reuses Edge-safe GEDCOM modules from the app
       # source tree. Changes there must redeploy the function as well.
       - "src/types/**"
@@ -29,6 +31,8 @@ jobs:
       GA4_MEASUREMENT_ID: G-SF2725LS4P
       APP_URL: ${{ vars.APP_URL }}
       ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
+      PDF_EXPORT_WORKER_URL: ${{ secrets.PDF_EXPORT_WORKER_URL }}
+      PDF_EXPORT_WORKER_SECRET: ${{ secrets.PDF_EXPORT_WORKER_SECRET }}
 
     steps:
       - name: Checkout repository
@@ -55,6 +59,10 @@ jobs:
             "test/pdf*.test.ts" \
             "test/scanStorageExternalPreviewStrategy.test.ts" \
             "test/integration/externalPdfViewerCoreIntegration.test.ts"
+          npm run test:e2e
+
+      - name: Verify PDF worker container
+        run: docker build --tag tracker-rodu-pdf-worker:test services/pdf-export-worker
 
       - name: Verify Supabase deployment configuration
         run: |
@@ -82,6 +90,22 @@ jobs:
             echo "::error::Repository variables APP_URL and ALLOWED_ORIGIN are required for the PDF gateway CORS allowlist."
             exit 1
           fi
+          if [ -z "$PDF_EXPORT_WORKER_URL" ]; then
+            echo "::error::Repository secret PDF_EXPORT_WORKER_URL is required for DNS-pinned PDF streaming and large vector exports."
+            exit 1
+          fi
+          if [ "${#PDF_EXPORT_WORKER_SECRET}" -lt 32 ]; then
+            echo "::error::Repository secret PDF_EXPORT_WORKER_SECRET must contain at least 32 characters."
+            exit 1
+          fi
+          node --input-type=module -e '
+            const url = new URL(process.env.PDF_EXPORT_WORKER_URL);
+            if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+              throw new Error("PDF_EXPORT_WORKER_URL must be a clean HTTPS URL without credentials, query or fragment.");
+            }
+          '
+
+          node scripts/verify-external-pdf-rollout.mjs --deployment
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
@@ -124,6 +148,17 @@ jobs:
       - name: Link Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --yes
 
+      - name: Verify PDF gateway server secrets
+        run: |
+          if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])ENCRYPTION_KEY([[:space:]]|$)'; then
+            echo "::error::Supabase Edge Function secret ENCRYPTION_KEY is required for private Google Drive PDF sessions."
+            exit 1
+          fi
+          if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])GOOGLE_DRIVE_PUBLIC_API_KEY([[:space:]]|$)'; then
+            echo "::error::Supabase Edge Function secret GOOGLE_DRIVE_PUBLIC_API_KEY is required for public Google Drive PDF shares."
+            exit 1
+          fi
+
       - name: Preview database migrations
         run: supabase db push --linked --dry-run
 
@@ -138,6 +173,8 @@ jobs:
             GA4_MEASUREMENT_ID="$GA4_MEASUREMENT_ID" \
             APP_URL="$APP_URL" \
             ALLOWED_ORIGIN="$ALLOWED_ORIGIN" \
+            PDF_EXPORT_WORKER_URL="$PDF_EXPORT_WORKER_URL" \
+            PDF_EXPORT_WORKER_SECRET="$PDF_EXPORT_WORKER_SECRET" \
             --project-ref "$SUPABASE_PROJECT_REF"
 
           for function_dir in supabase/functions/*; do
@@ -153,6 +190,21 @@ jobs:
             echo "Deploying $function_name"
             supabase functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF"
           done
+
+      - name: Verify PDF gateway deployment
+        run: |
+          if ! supabase functions list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])pdf-gateway([[:space:]]|$)'; then
+            echo "::error::pdf-gateway is missing after Edge Function deployment."
+            exit 1
+          fi
+          if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])PDF_EXPORT_WORKER_URL([[:space:]]|$)'; then
+            echo "::error::PDF_EXPORT_WORKER_URL is missing after deployment."
+            exit 1
+          fi
+          if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])PDF_EXPORT_WORKER_SECRET([[:space:]]|$)'; then
+            echo "::error::PDF_EXPORT_WORKER_SECRET is missing after deployment."
+            exit 1
+          fi
 
       - name: Deliver overdue task reminders after deployment
         env:

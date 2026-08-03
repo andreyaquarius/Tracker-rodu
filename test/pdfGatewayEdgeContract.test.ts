@@ -24,6 +24,24 @@ const driveGatewayMigration = readFileSync(
   ),
   "utf8",
 );
+const publicDriveMigration = readFileSync(
+  new URL(
+    "../supabase/migrations/202608030001_public_google_drive_pdf_sessions.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const exportRateLimitMigration = readFileSync(
+  new URL(
+    "../supabase/migrations/202608030002_external_pdf_export_rate_limit.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const exportWorker = readFileSync(
+  new URL("../services/pdf-export-worker/server.mjs", import.meta.url),
+  "utf8",
+);
 const config = readFileSync(
   new URL("../supabase/config.toml", import.meta.url),
   "utf8",
@@ -167,6 +185,20 @@ test("private Drive sessions retain only encrypted short-lived upstream authoriz
   assert.match(edgeSource, /"www\.googleapis\.com"[\s\S]*?"content\.googleapis\.com"[\s\S]*?"drive\.usercontent\.google\.com"/u);
 });
 
+test("public Drive shares use a keyless opaque session while the API key remains server-only", () => {
+  assert.match(edgeSource, /async function probePublicGoogleDrive/u);
+  assert.match(edgeSource, /GOOGLE_DRIVE_PUBLIC_API_KEY/u);
+  assert.match(edgeSource, /googleDrivePublicMetadataUrl/u);
+  assert.match(edgeSource, /googleDrivePublicMediaUrl/u);
+  assert.match(edgeSource, /remainder\[0\] === "probe-google-drive-public"/u);
+  assert.match(edgeSource, /target_upstream_access_mode: source\.access_mode/u);
+  assert.match(publicDriveMigration, /add column if not exists upstream_access_mode text/u);
+  assert.match(publicDriveMigration, /upstream_access_mode = 'google_drive_api'[\s\S]*?upstream_authorization_ciphertext is not null/u);
+  assert.match(publicDriveMigration, /upstream_access_mode = 'secure_proxy'[\s\S]*?upstream_authorization_ciphertext is null/u);
+  assert.match(publicDriveMigration, /target_upstream_access_mode/u);
+  assert.doesNotMatch(publicDriveMigration, /GOOGLE_DRIVE_PUBLIC_API_KEY/u);
+});
+
 test("gateway reserves each outbound metadata probe in an atomic server-side rate bucket", () => {
   assert.match(hardeningMigration, /create table if not exists private\.external_pdf_probe_rate_limits/u);
   assert.match(hardeningMigration, /primary key \(user_id, project_id\)/u);
@@ -197,4 +229,45 @@ test("privacy-safe client events are authenticated, membership scoped, and indep
   assert.match(edgeSource, /PDF_TELEMETRY_SUCCESS_SAMPLE_PERCENT/u);
   assert.match(edgeSource, /"X-Request-Id": requestId\(request\)/u);
   assert.match(edgeSource, /remainder\[0\] === "client-event"/u);
+});
+
+test("large PDF subsets use an authenticated, bounded, ephemeral qpdf worker", () => {
+  const exportBody = /async function exportPdfPages[\s\S]*?\n\}\n\nasync function probeSource/u
+    .exec(edgeSource)?.[0] ?? "";
+  assert.match(exportBody, /authenticatedContext\(request\)/u);
+  assert.match(exportBody, /requireExternalPdfViewerEnabled\(admin\)/u);
+  assert.match(exportBody, /requireCurrentProjectMembership\(admin, projectId, user\.id\)/u);
+  assert.match(exportBody, /reserveServerExport\(admin, projectId, user\.id, limits\)/u);
+  assert.match(exportBody, /sourceForSession\(admin, session, env\)/u);
+  assert.match(exportBody, /X-Tracker-Timestamp/u);
+  assert.match(exportBody, /X-Tracker-Signature/u);
+  assert.match(exportBody, /createBoundedPdfStream\(workerResponse\.body/u);
+  assert.doesNotMatch(exportBody, /input\.sourceUrl/u);
+  assert.match(edgeSource, /remainder\[0\] === "export-pages"/u);
+
+  assert.match(exportRateLimitMigration, /create table if not exists private\.external_pdf_export_rate_limits/u);
+  assert.match(exportRateLimitMigration, /create or replace function public\.reserve_external_pdf_export/u);
+  assert.match(exportRateLimitMigration, /on conflict \(user_id, project_id\) do update/u);
+  assert.match(exportRateLimitMigration, /revoke all on function public\.reserve_external_pdf_export[\s\S]*?from public, anon, authenticated/u);
+  assert.match(exportRateLimitMigration, /grant execute on function public\.reserve_external_pdf_export[\s\S]*?to service_role/u);
+
+  assert.match(exportWorker, /mkdtemp\(join\(tmpdir\(\), "tracker-pdf-export-"\)\)/u);
+  assert.match(exportWorker, /spawn\(binary, \[[\s\S]*?"--pages"/u);
+  assert.match(exportWorker, /rm\(temporaryDirectory, \{ recursive: true, force: true \}\)/u);
+  assert.doesNotMatch(exportWorker, /supabase|storage\.from|console\./iu);
+});
+
+test("production proxy streaming is HMAC authenticated and DNS-pinned by the worker", () => {
+  const streamBody = /async function streamPdf[\s\S]*?\n\}\n\nfunction pdfResponse/u
+    .exec(edgeSource)?.[0] ?? "";
+  assert.match(streamBody, /optionalConfiguredPdfStreamWorker\(env\)/u);
+  assert.match(streamBody, /fetchPdfThroughPinnedWorker/u);
+  assert.match(edgeSource, /worker\.url\.pathname = "\/v1\/stream"/u);
+  assert.match(edgeSource, /X-Tracker-Timestamp/u);
+  assert.match(edgeSource, /X-Tracker-Signature/u);
+  assert.match(exportWorker, /request\.url === "\/v1\/stream"/u);
+  assert.match(exportWorker, /resolveAndPinPublicAddress\(currentUrl\.hostname\)/u);
+  assert.match(exportWorker, /lookup: \(_hostname, _options, callback\) => callback\(null, pinned\.address, pinned\.family\)/u);
+  assert.match(exportWorker, /records\.some\(\(record\) => !isPublicIpAddress\(record\.address\)\)/u);
+  assert.match(exportWorker, /REDIRECT_HOST_BLOCKED/u);
 });

@@ -21,6 +21,7 @@ import type {
 } from "./contracts.ts";
 import { probeDirectPdfOverCors } from "./directPdfAdapter.ts";
 import { DocumentSourceError } from "./errors.ts";
+import { fetchWithBoundedRetry } from "./boundedFetchRetry.ts";
 import {
   directAccessDescriptor,
   type DirectPdfGatewayProbe,
@@ -306,7 +307,7 @@ async function fetchMediaWikiJson(
 ): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetchImplementation(apiUrl, {
+    response = await fetchWithBoundedRetry(fetchImplementation, apiUrl, {
       method: "GET",
       credentials: "omit",
       mode: "cors",
@@ -314,7 +315,7 @@ async function fetchMediaWikiJson(
       referrerPolicy: "no-referrer",
       signal,
       headers: { Accept: "application/json" },
-    });
+    }, { signal });
   } catch (cause) {
     if (isAbortError(cause)) throw new DocumentSourceError("TIMEOUT", { cause });
     throw new DocumentSourceError("NETWORK_ERROR", { cause });

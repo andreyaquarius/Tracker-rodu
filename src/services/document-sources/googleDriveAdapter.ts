@@ -40,9 +40,9 @@ export interface GoogleDrivePdfSourceAdapterOptions {
 }
 
 /**
- * Resolves stable Google Drive file pages through the existing OAuth-backed
- * Drive service. OAuth tokens remain inside googleDriveStorage and are never
- * returned in source metadata or access URLs.
+ * Resolves public Drive shares through the server-only API-key gateway first,
+ * then falls back to the existing OAuth-backed Drive service for private
+ * files. OAuth tokens never enter source metadata or PDF.js URLs.
  */
 export class GoogleDrivePdfSourceAdapter implements DocumentSourceAdapter {
   readonly provider = "google_drive" as const;
@@ -70,6 +70,27 @@ export class GoogleDrivePdfSourceAdapter implements DocumentSourceAdapter {
     const reference = parseGoogleDriveFileReference(normalized.url);
     if (!reference) throw new DocumentSourceError("INVALID_URL");
     throwIfAborted(context.signal);
+
+    if (this.#gateway?.probePublicGoogleDrivePdf) {
+      try {
+        const probe = await this.#gateway.probePublicGoogleDrivePdf(
+          reference.canonicalUrl,
+          context,
+        );
+        throwIfAborted(context.signal);
+        return resolvedPublicGoogleDriveSource(normalized.url, reference, probe);
+      } catch (error) {
+        const mapped = error instanceof DocumentSourceError
+          ? error
+          : mapGoogleDriveSourceError(error);
+        // Project authorization and non-PDF errors are authoritative. A
+        // missing/private file or an unavailable public API key may still be
+        // opened through the user's OAuth grant below.
+        if (mapped.code === "ACCESS_DENIED" || mapped.code === "SOURCE_NOT_PDF") {
+          throw mapped;
+        }
+      }
+    }
 
     let metadata: GoogleDriveFileMetadata;
     try {
@@ -119,6 +140,14 @@ export class GoogleDrivePdfSourceAdapter implements DocumentSourceAdapter {
     }
     throwIfAborted(context.signal);
 
+    if (source.accessMode === "secure_proxy") {
+      if (!this.#gateway) throw new DocumentSourceError("ACCESS_DENIED");
+      return this.#gateway.createAccessSession(source, context);
+    }
+    if (source.accessMode !== "google_drive_api") {
+      throw new DocumentSourceError("ACCESS_DENIED");
+    }
+
     let access: GoogleDriveDownloadAccess;
     try {
       access = await this.#createDownloadAccess(fileId);
@@ -161,6 +190,28 @@ export class GoogleDrivePdfSourceAdapter implements DocumentSourceAdapter {
       return validationResultForError(source, error, validatedAt);
     }
   }
+}
+
+function resolvedPublicGoogleDriveSource(
+  originalUrl: string,
+  reference: GoogleDriveFileReference,
+  probe: Awaited<ReturnType<NonNullable<DocumentSourceGatewayClient["probePublicGoogleDrivePdf"]>>>,
+): ResolvedPdfSource {
+  return {
+    provider: "google_drive",
+    originalUrl,
+    canonicalUrl: reference.canonicalUrl,
+    sourcePageUrl: reference.canonicalUrl,
+    providerHost: "drive.google.com",
+    providerFileId: reference.fileId,
+    displayName: probe.displayName?.trim() || "Google Drive PDF",
+    mimeType: GOOGLE_DRIVE_PDF_MIME_TYPE,
+    ...(probe.fileSizeBytes !== undefined ? { fileSizeBytes: probe.fileSizeBytes } : {}),
+    ...(probe.pageCount !== undefined ? { pageCount: probe.pageCount } : {}),
+    accessMode: "secure_proxy",
+    fingerprint: probe.fingerprint,
+    warnings: probe.acceptsRanges ? [] : ["Google Drive не підтвердив підтримку HTTP Range."],
+  };
 }
 
 /** Extracts a stable Drive file ID from supported share/view URL shapes. */

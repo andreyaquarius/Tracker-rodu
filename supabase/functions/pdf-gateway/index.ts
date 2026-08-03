@@ -19,6 +19,7 @@ import {
   rangeFromRequest,
 } from "./gatewayCore.ts";
 import {
+  assertSameAddressSet,
   PdfGatewaySecurityError,
   resolvePublicHostAddresses,
   validatePublicPdfUrl,
@@ -35,6 +36,13 @@ import {
   shouldWritePdfProxyRecord,
   writePdfOperationalRecord,
 } from "./telemetry.ts";
+import {
+  GoogleDrivePublicError,
+  googleDrivePublicMediaUrl,
+  googleDrivePublicMetadataUrl,
+  parseGoogleDrivePublicMetadata,
+  parseGoogleDrivePublicReference,
+} from "./googleDrivePublic.ts";
 
 type DocumentSourceRow = {
   id: string;
@@ -63,6 +71,7 @@ type PdfAccessSessionRow = {
   upstream_host: string;
   source_fingerprint: Record<string, unknown> | null;
   upstream_authorization_ciphertext: string | null;
+  upstream_access_mode: "secure_proxy" | "google_drive_api";
   expires_at: string;
 };
 
@@ -123,6 +132,15 @@ function environment(): Record<string, string | undefined> {
     PDF_TELEMETRY_SUCCESS_SAMPLE_PERCENT: Deno.env.get("PDF_TELEMETRY_SUCCESS_SAMPLE_PERCENT") ?? undefined,
     PDF_PROXY_MAX_REQUEST_BODY_BYTES: Deno.env.get("PDF_PROXY_MAX_REQUEST_BODY_BYTES") ?? undefined,
     ENCRYPTION_KEY: Deno.env.get("ENCRYPTION_KEY") ?? undefined,
+    GOOGLE_DRIVE_PUBLIC_API_KEY: Deno.env.get("GOOGLE_DRIVE_PUBLIC_API_KEY") ?? undefined,
+    PDF_EXPORT_WORKER_URL: Deno.env.get("PDF_EXPORT_WORKER_URL") ?? undefined,
+    PDF_EXPORT_WORKER_SECRET: Deno.env.get("PDF_EXPORT_WORKER_SECRET") ?? undefined,
+    PDF_EXPORT_WORKER_ALLOW_HTTP_LOCAL: Deno.env.get("PDF_EXPORT_WORKER_ALLOW_HTTP_LOCAL") ?? undefined,
+    PDF_EXPORT_MAX_REQUESTS_PER_WINDOW: Deno.env.get("PDF_EXPORT_MAX_REQUESTS_PER_WINDOW") ?? undefined,
+    PDF_EXPORT_WINDOW_SECONDS: Deno.env.get("PDF_EXPORT_WINDOW_SECONDS") ?? undefined,
+    PDF_EXPORT_MAX_PAGES: Deno.env.get("PDF_EXPORT_MAX_PAGES") ?? undefined,
+    PDF_EXPORT_MAX_RESULT_BYTES: Deno.env.get("PDF_EXPORT_MAX_RESULT_BYTES") ?? undefined,
+    PDF_EXPORT_WORKER_TIMEOUT_MS: Deno.env.get("PDF_EXPORT_WORKER_TIMEOUT_MS") ?? undefined,
   };
 }
 
@@ -312,6 +330,194 @@ function optionalGoogleDriveAccessToken(value: unknown): string | null {
   return token;
 }
 
+function optionalOpaqueAccessSessionToken(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  const token = typeof value === "string" ? value.trim() : "";
+  if (!isValidOpaqueSessionToken(token)) {
+    throw new PdfGatewayHttpError(400, "SESSION_INVALID", "Сесія перегляду недійсна.");
+  }
+  return token;
+}
+
+function requiredExportPages(value: unknown, maximumPages: number): number[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > maximumPages) {
+    throw new PdfGatewayHttpError(
+      400,
+      "EXPORT_PAGES_INVALID",
+      `Оберіть від 1 до ${maximumPages} сторінок для експорту.`,
+    );
+  }
+  const pages = [...new Set(value)];
+  if (pages.some((page) => !Number.isSafeInteger(page) || Number(page) < 1 || Number(page) > 1_000_000)) {
+    throw new PdfGatewayHttpError(400, "EXPORT_PAGES_INVALID", "Номери сторінок мають бути цілими числами від 1.");
+  }
+  return (pages as number[]).sort((left, right) => left - right);
+}
+
+function optionalExportFileName(value: unknown): string {
+  const raw = typeof value === "string" ? value.normalize("NFKC") : "";
+  const safe = raw
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/gu, "-")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 180);
+  return `${(safe || "document-pages").replace(/\.pdf$/iu, "")}.pdf`;
+}
+
+function configuredPdfExportWorker(
+  env: Record<string, string | undefined>,
+): { url: URL; secret: string } {
+  const rawUrl = env.PDF_EXPORT_WORKER_URL?.trim() ?? "";
+  const secret = env.PDF_EXPORT_WORKER_SECRET?.trim() ?? "";
+  if (!rawUrl || secret.length < 32) {
+    throw new PdfGatewayHttpError(
+      503,
+      "SERVER_EXPORT_NOT_CONFIGURED",
+      "Серверне формування великих PDF ще не налаштоване.",
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new PdfGatewayHttpError(503, "SERVER_EXPORT_NOT_CONFIGURED", "Адреса сервісу PDF-експорту некоректна.");
+  }
+  const hostname = url.hostname.replace(/^\[|\]$/gu, "").toLocaleLowerCase("en-US");
+  const loopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  const dockerHost = hostname === "host.docker.internal";
+  const localHttpAllowed = url.protocol === "http:"
+    && (loopback || (dockerHost && env.PDF_EXPORT_WORKER_ALLOW_HTTP_LOCAL === "true"));
+  if (
+    (url.protocol !== "https:" && !localHttpAllowed)
+    || url.username
+    || url.password
+    || url.search
+    || url.hash
+  ) {
+    throw new PdfGatewayHttpError(503, "SERVER_EXPORT_NOT_CONFIGURED", "Адреса сервісу PDF-експорту некоректна.");
+  }
+  if (!url.pathname || url.pathname === "/") url.pathname = "/v1/export";
+  return { url, secret };
+}
+
+function optionalConfiguredPdfStreamWorker(
+  env: Record<string, string | undefined>,
+): { url: URL; secret: string } | undefined {
+  const rawUrl = env.PDF_EXPORT_WORKER_URL?.trim() ?? "";
+  const secret = env.PDF_EXPORT_WORKER_SECRET?.trim() ?? "";
+  if (!rawUrl && !secret) return undefined;
+  const worker = configuredPdfExportWorker(env);
+  worker.url.pathname = "/v1/stream";
+  return worker;
+}
+
+async function signPdfExportWorkerBody(secret: string, timestamp: string, body: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${timestamp}\n${body}`),
+  );
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function fetchPdfThroughPinnedWorker(options: {
+  worker: { url: URL; secret: string };
+  url: URL;
+  method: "GET" | "HEAD";
+  range: ReturnType<typeof rangeFromRequest>;
+  ifRange?: string | null;
+  authorization?: { bearerToken: string; allowedHosts: readonly string[] };
+  allowedRedirectHosts?: readonly string[];
+  clientSignal: AbortSignal;
+  connectTimeoutMs: number;
+}): Promise<Awaited<ReturnType<typeof fetchPublicPdfWithRedirects>>> {
+  const workerBody = JSON.stringify({
+    nonce: crypto.randomUUID(),
+    sourceUrl: options.url.href,
+    method: options.method,
+    ...(options.range ? { range: options.range.header } : {}),
+    ...(options.range && options.ifRange?.trim() ? { ifRange: options.ifRange.trim() } : {}),
+    ...(options.authorization ? { authorization: `Bearer ${options.authorization.bearerToken}` } : {}),
+    ...(options.allowedRedirectHosts?.length
+      ? { allowedRedirectHosts: options.allowedRedirectHosts }
+      : {}),
+  });
+  const timestamp = String(Date.now());
+  const signature = await signPdfExportWorkerBody(
+    options.worker.secret,
+    timestamp,
+    workerBody,
+  );
+  const controller = new AbortController();
+  const abortFromClient = () => controller.abort(options.clientSignal.reason);
+  options.clientSignal.addEventListener("abort", abortFromClient, { once: true });
+  if (options.clientSignal.aborted) abortFromClient();
+  const timeout = setTimeout(() => controller.abort("connect-timeout"), options.connectTimeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(options.worker.url, {
+      method: "POST",
+      redirect: "error",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tracker-Timestamp": timestamp,
+        "X-Tracker-Signature": signature,
+      },
+      body: workerBody,
+    });
+  } catch {
+    options.clientSignal.removeEventListener("abort", abortFromClient);
+    if (controller.signal.aborted) throw new PdfGatewayUpstreamError("UPSTREAM_TIMEOUT");
+    throw new PdfGatewayUpstreamError("UPSTREAM_FAILED");
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const mediaType = response.headers.get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLocaleLowerCase("en-US");
+  if (mediaType === "application/json") {
+    const payload = await readBoundedResponseJson(response, 16 * 1024).catch(() => null);
+    options.clientSignal.removeEventListener("abort", abortFromClient);
+    const workerCode = payload && typeof payload === "object" && !Array.isArray(payload)
+      && typeof (payload as Record<string, unknown>).error === "string"
+      ? String((payload as Record<string, unknown>).error)
+      : "UPSTREAM_FAILED";
+    if (workerCode === "DNS_RESOLUTION_FAILED") {
+      throw new PdfGatewaySecurityError("DNS_RESOLUTION_FAILED");
+    }
+    if (workerCode === "SSRF_HOST_BLOCKED" || workerCode === "SSRF_ADDRESS_BLOCKED") {
+      throw new PdfGatewaySecurityError("SOURCE_URL_NOT_SAFE");
+    }
+    if (workerCode === "REDIRECT_HOST_BLOCKED") {
+      throw new PdfGatewaySecurityError("REDIRECT_NOT_ALLOWED");
+    }
+    if (workerCode === "UPSTREAM_TIMEOUT" || workerCode === "CLIENT_ABORTED") {
+      throw new PdfGatewayUpstreamError("UPSTREAM_TIMEOUT");
+    }
+    if (workerCode === "STREAM_RESPONSE_TOO_LARGE") {
+      throw new PdfGatewayUpstreamError("RANGE_RESPONSE_TOO_LARGE");
+    }
+    throw new PdfGatewayUpstreamError("UPSTREAM_FAILED");
+  }
+
+  return {
+    response,
+    finalUrl: options.url,
+    abort: (reason?: unknown) => controller.abort(reason),
+    dispose: () => options.clientSignal.removeEventListener("abort", abortFromClient),
+  };
+}
+
 function googleDriveApiUrl(fileId: string | null): URL {
   const normalized = fileId?.trim() ?? "";
   if (!/^[a-zA-Z0-9_-]{10,200}$/u.test(normalized)) {
@@ -322,7 +528,10 @@ function googleDriveApiUrl(fileId: string | null): URL {
   );
 }
 
-function upstreamUrlForSource(source: DocumentSourceRow): URL {
+function upstreamUrlForSource(
+  source: DocumentSourceRow,
+  env: Record<string, string | undefined>,
+): URL {
   if (source.status !== "active" && source.status !== "changed") {
     throw new PdfGatewayHttpError(409, "SOURCE_UNAVAILABLE", "Джерело документа зараз недоступне.");
   }
@@ -334,8 +543,20 @@ function upstreamUrlForSource(source: DocumentSourceRow): URL {
     if (expectedHost && expectedHost !== "drive.google.com") {
       throw new PdfGatewayHttpError(409, "SOURCE_CHANGED", "Адреса Google Drive змінилася і потребує повторної перевірки.");
     }
-    if (source.access_mode !== "google_drive_api") {
+    if (source.access_mode !== "google_drive_api" && source.access_mode !== "secure_proxy") {
       throw new PdfGatewayHttpError(409, "SOURCE_CHANGED", "Спосіб доступу до Google Drive змінився.");
+    }
+    if (source.access_mode === "secure_proxy") {
+      const apiKey = env.GOOGLE_DRIVE_PUBLIC_API_KEY?.trim() ?? "";
+      try {
+        return googleDrivePublicMediaUrl(source.provider_file_id ?? "", apiKey);
+      } catch {
+        throw new PdfGatewayHttpError(
+          503,
+          "GOOGLE_DRIVE_PUBLIC_GATEWAY_NOT_CONFIGURED",
+          "Серверний перегляд публічних Google Drive PDF ще не налаштовано.",
+        );
+      }
     }
     return googleDriveApiUrl(source.provider_file_id);
   }
@@ -436,7 +657,7 @@ async function openSession(request: Request): Promise<Response> {
   }
   const source = data as DocumentSourceRow;
   await requireCurrentProjectMembership(admin, source.project_id, user.id);
-  const upstreamUrl = upstreamUrlForSource(source);
+  const upstreamUrl = upstreamUrlForSource(source, env);
   await resolvePublicHostAddresses(upstreamUrl.hostname, resolveDnsAddresses);
 
   if (
@@ -460,18 +681,20 @@ async function openSession(request: Request): Promise<Response> {
     });
   }
   const isGoogleDrive = source.provider === "google_drive";
+  const isPrivateGoogleDrive = isGoogleDrive && source.access_mode === "google_drive_api";
+  const isPublicGoogleDrive = isGoogleDrive && source.access_mode === "secure_proxy";
   if (
     (!isGoogleDrive && source.access_mode !== "secure_proxy")
-    || (isGoogleDrive && source.access_mode !== "google_drive_api")
+    || (isGoogleDrive && !isPrivateGoogleDrive && !isPublicGoogleDrive)
   ) {
     throw new PdfGatewayHttpError(400, "UNSUPPORTED_PROVIDER", "Це джерело потребує іншого способу доступу.");
   }
-  if (!isGoogleDrive && googleDriveAccessToken) {
+  if ((!isGoogleDrive || isPublicGoogleDrive) && googleDriveAccessToken) {
     throw new PdfGatewayHttpError(400, "GOOGLE_DRIVE_TOKEN_UNEXPECTED", "Облікові дані Google Drive не потрібні для цього джерела.");
   }
 
   let upstreamAuthorizationCiphertext: string | null = null;
-  if (isGoogleDrive) {
+  if (isPrivateGoogleDrive) {
     if (!googleDriveAccessToken) {
       throw new PdfGatewayHttpError(401, "OAUTH_REQUIRED", "Підключіть Google Drive і повторіть відкриття документа.");
     }
@@ -492,6 +715,7 @@ async function openSession(request: Request): Promise<Response> {
     target_document_source_id: source.id,
     target_user_id: user.id,
     target_provider: source.provider,
+    target_upstream_access_mode: source.access_mode,
     target_upstream_host: upstreamUrl.hostname.replace(/^\[|\]$/gu, "").toLocaleLowerCase("en-US"),
     target_source_fingerprint: source.fingerprint ?? {},
     target_max_requests: limits.maxRequestsPerSession,
@@ -511,11 +735,11 @@ async function openSession(request: Request): Promise<Response> {
   }
 
   return json(request, {
-    accessMode: isGoogleDrive ? "google_drive_api" : "secure_proxy",
+    accessMode: source.access_mode,
     streamUrl: streamUrl(request, token),
     expiresAt,
     fingerprint: source.fingerprint ?? {},
-    requiresAuthorization: true,
+    requiresAuthorization: isPrivateGoogleDrive,
     ...(source.initial_page ? { initialPage: source.initial_page } : {}),
   });
 }
@@ -581,6 +805,28 @@ async function reserveTelemetryEvent(
   }
 }
 
+async function reserveServerExport(
+  admin: ReturnType<typeof createClient>,
+  projectId: string,
+  userId: string,
+  limits: PdfGatewayLimits,
+): Promise<void> {
+  const { data, error } = await admin.rpc("reserve_external_pdf_export", {
+    target_user_id: userId,
+    target_project_id: projectId,
+    target_max_requests: limits.exportRequestsPerWindow,
+    target_window_seconds: limits.exportWindowSeconds,
+  });
+  if (error) throw error;
+  if (data !== true) {
+    throw new PdfGatewayHttpError(
+      429,
+      "EXPORT_RATE_LIMIT",
+      "Забагато одночасних PDF-експортів. Зачекайте хвилину та спробуйте ще раз.",
+    );
+  }
+}
+
 async function clientEvent(request: Request): Promise<Response> {
   const limits = pdfGatewayLimitsFromEnvironment(environment());
   const { user, admin } = await authenticatedContext(request);
@@ -600,6 +846,152 @@ async function clientEvent(request: Request): Promise<Response> {
   await reserveTelemetryEvent(admin, parsed.projectId, user.id, limits);
   writePdfOperationalRecord(parsed.record);
   return json(request, { accepted: true }, 202);
+}
+
+async function exportPdfPages(request: Request): Promise<Response> {
+  const env = environment();
+  const limits = pdfGatewayLimitsFromEnvironment(env);
+  const worker = configuredPdfExportWorker(env);
+  const { user, userClient, admin } = await authenticatedContext(request);
+  await requireExternalPdfViewerEnabled(admin);
+  const input = await readBoundedJson(request, limits.maxRequestBodyBytes);
+  const projectId = requiredUuid(input.projectId, "PROJECT_ID_INVALID");
+  const documentId = requiredUuid(input.documentId, "DOCUMENT_ID_INVALID");
+  const sourceId = requiredUuid(input.documentSourceId ?? input.sourceId, "DOCUMENT_SOURCE_ID_INVALID");
+  const pages = requiredExportPages(input.pages, limits.exportMaxPages);
+  const fileName = optionalExportFileName(input.fileName);
+  const sessionToken = optionalOpaqueAccessSessionToken(input.sessionToken);
+
+  const { data, error } = await userClient
+    .from("document_sources")
+    .select(DOCUMENT_SOURCE_FIELDS)
+    .eq("id", sourceId)
+    .eq("project_id", projectId)
+    .eq("document_id", documentId)
+    .in("status", ["active", "changed"])
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new PdfGatewayHttpError(404, "SOURCE_NOT_FOUND", "Джерело документа не знайдено.");
+  }
+  let source = data as DocumentSourceRow;
+  await requireCurrentProjectMembership(admin, projectId, user.id);
+  await reserveServerExport(admin, projectId, user.id, limits);
+
+  let session: PdfAccessSessionRow | null = null;
+  if (sessionToken) {
+    session = await consumeSession(admin, sessionToken, user.id);
+    if (
+      session.project_id !== projectId
+      || session.document_id !== documentId
+      || session.document_source_id !== sourceId
+    ) {
+      throw new PdfGatewayHttpError(403, "ACCESS_DENIED", "Сесія належить іншому документу.");
+    }
+    source = await sourceForSession(admin, session, env);
+  }
+  if (source.provider === "google_drive" && source.access_mode === "google_drive_api" && !session) {
+    throw new PdfGatewayHttpError(
+      401,
+      "OAUTH_REQUIRED",
+      "Сесія Google Drive завершилася. Підключіть диск і відкрийте документ повторно.",
+    );
+  }
+
+  const upstreamUrl = upstreamUrlForSource(source, env);
+  await resolvePublicHostAddresses(upstreamUrl.hostname, resolveDnsAddresses);
+  const upstreamAuthorization = session
+    ? await upstreamAuthorizationForSession(source, session, env)
+    : undefined;
+  const allowedRedirectHosts = upstreamAuthorization?.allowedHosts
+    ?? (source.provider === "google_drive"
+      ? ["www.googleapis.com", "content.googleapis.com", "drive.usercontent.google.com"]
+      : []);
+  const workerBody = JSON.stringify({
+    nonce: crypto.randomUUID(),
+    sourceUrl: upstreamUrl.href,
+    pages,
+    fileName,
+    ...(upstreamAuthorization ? { authorization: `Bearer ${upstreamAuthorization.bearerToken}` } : {}),
+    ...(allowedRedirectHosts.length ? { allowedRedirectHosts } : {}),
+  });
+  const timestamp = String(Date.now());
+  const signature = await signPdfExportWorkerBody(worker.secret, timestamp, workerBody);
+  const workerController = new AbortController();
+  const abortFromClient = () => workerController.abort(request.signal.reason);
+  request.signal.addEventListener("abort", abortFromClient, { once: true });
+  const timeout = setTimeout(() => workerController.abort("worker-timeout"), limits.exportWorkerTimeoutMs);
+  let workerResponse: Response;
+  try {
+    workerResponse = await fetch(worker.url, {
+      method: "POST",
+      redirect: "error",
+      signal: workerController.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tracker-Timestamp": timestamp,
+        "X-Tracker-Signature": signature,
+      },
+      body: workerBody,
+    });
+  } catch (cause) {
+    clearTimeout(timeout);
+    request.signal.removeEventListener("abort", abortFromClient);
+    if (workerController.signal.aborted) {
+      throw new PdfGatewayHttpError(504, "EXPORT_TIMEOUT", "Сервер не встиг сформувати PDF. Зменште діапазон сторінок.");
+    }
+    throw new PdfGatewayHttpError(502, "EXPORT_WORKER_UNAVAILABLE", "Сервіс формування PDF зараз недоступний.");
+  }
+  clearTimeout(timeout);
+
+  if (!workerResponse.ok) {
+    request.signal.removeEventListener("abort", abortFromClient);
+    const payload = await readBoundedResponseJson(workerResponse, 16 * 1024).catch(() => null);
+    const workerCode = payload && typeof payload === "object" && !Array.isArray(payload)
+      && typeof (payload as Record<string, unknown>).error === "string"
+      ? String((payload as Record<string, unknown>).error)
+      : "PDF_EXPORT_FAILED";
+    if (workerResponse.status === 413) {
+      throw new PdfGatewayHttpError(413, "SOURCE_TOO_LARGE", "PDF перевищує тимчасовий ліміт сервісу експорту.");
+    }
+    if (workerResponse.status === 429) {
+      throw new PdfGatewayHttpError(429, "EXPORT_WORKER_BUSY", "Сервіс експорту зайнятий. Спробуйте трохи пізніше.");
+    }
+    if (workerResponse.status === 401 || workerResponse.status === 403) {
+      throw new PdfGatewayHttpError(502, "EXPORT_WORKER_AUTH_FAILED", "Сервіс експорту відхилив службовий запит.");
+    }
+    throw new PdfGatewayHttpError(
+      workerResponse.status === 422 ? 422 : 502,
+      workerCode === "SOURCE_NOT_PDF" ? "SOURCE_NOT_PDF" : "PDF_EXPORT_FAILED",
+      workerCode === "SOURCE_NOT_PDF"
+        ? "Зовнішнє джерело більше не повертає PDF."
+        : "Не вдалося сформувати вибрані сторінки PDF.",
+    );
+  }
+
+  const contentType = workerResponse.headers.get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLocaleLowerCase("en-US");
+  const contentLength = nonNegativeHeaderInteger(workerResponse.headers.get("content-length"));
+  if (contentType !== "application/pdf" || (contentLength !== undefined && contentLength > limits.exportMaxResultBytes)) {
+    request.signal.removeEventListener("abort", abortFromClient);
+    await workerResponse.body?.cancel("invalid-export-response").catch(() => undefined);
+    throw new PdfGatewayHttpError(502, "EXPORT_RESPONSE_INVALID", "Сервіс експорту повернув некоректний результат.");
+  }
+  const resultBody = createBoundedPdfStream(workerResponse.body, {
+    maximumBytes: limits.exportMaxResultBytes,
+    verifyMagicPrefix: true,
+    idleTimeoutMs: limits.streamIdleTimeoutMs,
+    abort: (reason) => workerController.abort(reason),
+    dispose: () => request.signal.removeEventListener("abort", abortFromClient),
+  });
+  const resultHeaders = new Headers({
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+  });
+  if (contentLength !== undefined) resultHeaders.set("Content-Length", String(contentLength));
+  return pdfResponse(request, resultBody, 200, resultHeaders);
 }
 
 async function probeSource(request: Request): Promise<Response> {
@@ -700,6 +1092,229 @@ async function probeSource(request: Request): Promise<Response> {
   });
 }
 
+const GOOGLE_DRIVE_METADATA_MAX_BYTES = 64 * 1024;
+const GOOGLE_DRIVE_METADATA_MAX_ATTEMPTS = 3;
+
+async function probePublicGoogleDrive(request: Request): Promise<Response> {
+  const env = environment();
+  const limits = pdfGatewayLimitsFromEnvironment(env);
+  const { user, userClient, admin } = await authenticatedContext(request);
+  await requireExternalPdfViewerEnabled(admin);
+  const input = await readBoundedJson(request, limits.maxRequestBodyBytes);
+  const projectId = requiredUuid(input.projectId, "PROJECT_ID_INVALID");
+  const documentId = input.documentId === undefined || input.documentId === null || input.documentId === ""
+    ? null
+    : requiredUuid(input.documentId, "DOCUMENT_ID_INVALID");
+  if (documentId) await requireProjectDocument(userClient, projectId, documentId);
+  await requireCurrentProjectEditor(admin, projectId, user.id);
+  await reserveSourceProbe(admin, projectId, user.id, limits);
+
+  let reference: ReturnType<typeof parseGoogleDrivePublicReference>;
+  let metadataUrl: URL;
+  let mediaUrl: URL;
+  try {
+    reference = parseGoogleDrivePublicReference(input.url);
+    const apiKey = env.GOOGLE_DRIVE_PUBLIC_API_KEY?.trim() ?? "";
+    metadataUrl = googleDrivePublicMetadataUrl(reference.fileId, apiKey);
+    mediaUrl = googleDrivePublicMediaUrl(reference.fileId, apiKey);
+  } catch (error) {
+    if (error instanceof GoogleDrivePublicError && error.code === "API_KEY_INVALID") {
+      throw new PdfGatewayHttpError(
+        503,
+        "GOOGLE_DRIVE_PUBLIC_GATEWAY_NOT_CONFIGURED",
+        "Серверний перегляд публічних Google Drive PDF ще не налаштовано.",
+      );
+    }
+    throw error;
+  }
+
+  const metadataResponse = await fetchGoogleDriveMetadataWithRetry(
+    metadataUrl,
+    request.signal,
+    limits.connectTimeoutMs,
+  );
+  if (metadataResponse.status === 401 || metadataResponse.status === 403) {
+    await metadataResponse.body?.cancel("google-drive-public-denied").catch(() => undefined);
+    throw new PdfGatewayHttpError(
+      403,
+      "GOOGLE_DRIVE_PERMISSION_DENIED",
+      "Файл не є публічним або Google Drive заборонив його завантаження.",
+    );
+  }
+  if (metadataResponse.status === 404) {
+    await metadataResponse.body?.cancel("google-drive-public-not-found").catch(() => undefined);
+    throw new PdfGatewayHttpError(404, "SOURCE_NOT_FOUND", "Файл Google Drive не знайдено.");
+  }
+  if (!metadataResponse.ok) {
+    await metadataResponse.body?.cancel("google-drive-public-metadata-failed").catch(() => undefined);
+    throw new PdfGatewayHttpError(502, "UPSTREAM_FAILED", "Google Drive не повернув metadata файла.");
+  }
+  const metadataPayload = await readBoundedResponseJson(
+    metadataResponse,
+    GOOGLE_DRIVE_METADATA_MAX_BYTES,
+  );
+  const metadata = parseGoogleDrivePublicMetadata(metadataPayload, reference.fileId);
+
+  const probeRange = rangeFromRequest(new Request(request.url, {
+    headers: { Range: "bytes=0-4" },
+  }));
+  const probe = await fetchPublicPdfWithRedirects({
+    url: mediaUrl,
+    method: "GET",
+    range: probeRange,
+    resolver: resolveDnsAddresses,
+    limits,
+    clientSignal: request.signal,
+  });
+  if (probe.response.status === 401 || probe.response.status === 403) {
+    await probe.response.body?.cancel("google-drive-public-download-denied").catch(() => undefined);
+    probe.abort("google-drive-public-download-denied");
+    probe.dispose();
+    throw new PdfGatewayHttpError(
+      403,
+      "GOOGLE_DRIVE_PERMISSION_DENIED",
+      "Google Drive не дозволив завантажити цей публічний файл.",
+    );
+  }
+  const validated = validatePdfUpstreamResponse(probe.response, probeRange, limits);
+  const probeBody = createBoundedPdfStream(probe.response.body, {
+    maximumBytes: validated.maximumBodyBytes,
+    verifyMagicPrefix: true,
+    idleTimeoutMs: limits.streamIdleTimeoutMs,
+    abort: probe.abort,
+    dispose: probe.dispose,
+  });
+  const reader = probeBody.getReader();
+  try {
+    const first = await reader.read();
+    if (first.done || !first.value?.byteLength) {
+      throw new PdfGatewayUpstreamError("EMPTY_RESPONSE");
+    }
+  } finally {
+    await reader.cancel("google-drive-public-probe-complete").catch(() => undefined);
+  }
+
+  return json(request, {
+    canonicalUrl: reference.canonicalUrl,
+    displayName: metadata.name,
+    mimeType: "application/pdf",
+    ...(metadata.size === undefined ? {} : { fileSizeBytes: metadata.size }),
+    acceptsRanges: validated.status === 206,
+    fingerprint: {
+      ...(metadata.md5Checksum ? { md5: metadata.md5Checksum } : {}),
+      ...(metadata.headRevisionId ? { revisionId: metadata.headRevisionId } : {}),
+      ...(metadata.modifiedTime ? { modifiedTime: metadata.modifiedTime } : {}),
+      ...(metadata.size === undefined ? {} : { contentLength: metadata.size }),
+    },
+  });
+}
+
+async function fetchGoogleDriveMetadataWithRetry(
+  url: URL,
+  clientSignal: AbortSignal,
+  timeoutMs: number,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= GOOGLE_DRIVE_METADATA_MAX_ATTEMPTS; attempt += 1) {
+    if (clientSignal.aborted) {
+      throw new PdfGatewayHttpError(504, "UPSTREAM_TIMEOUT", "Запит скасовано.");
+    }
+    const addressesBefore = await resolvePublicHostAddresses(url.hostname, resolveDnsAddresses);
+    const controller = new AbortController();
+    const abortFromClient = () => controller.abort(clientSignal.reason);
+    clientSignal.addEventListener("abort", abortFromClient, { once: true });
+    const timeout = setTimeout(() => controller.abort("connect-timeout"), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        redirect: "error",
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "identity",
+          "User-Agent": "TrackerRodu-PdfGateway/1.0",
+        },
+      });
+      const addressesAfter = await resolvePublicHostAddresses(url.hostname, resolveDnsAddresses);
+      assertSameAddressSet(addressesBefore, addressesAfter);
+      if (!isTransientUpstreamStatus(response.status) || attempt === GOOGLE_DRIVE_METADATA_MAX_ATTEMPTS) {
+        return response;
+      }
+      await response.body?.cancel("retry-google-drive-metadata").catch(() => undefined);
+    } catch (error) {
+      lastError = error;
+      if (controller.signal.aborted && clientSignal.aborted) {
+        throw new PdfGatewayHttpError(504, "UPSTREAM_TIMEOUT", "Запит скасовано.");
+      }
+      if (attempt === GOOGLE_DRIVE_METADATA_MAX_ATTEMPTS) break;
+    } finally {
+      clearTimeout(timeout);
+      clientSignal.removeEventListener("abort", abortFromClient);
+    }
+    await boundedRetryDelay(attempt, clientSignal);
+  }
+  if (lastError instanceof PdfGatewaySecurityError) throw lastError;
+  throw new PdfGatewayHttpError(502, "UPSTREAM_FAILED", "Google Drive не відповів на запит metadata.");
+}
+
+async function readBoundedResponseJson(response: Response, maximumBytes: number): Promise<unknown> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maximumBytes) {
+    await response.body?.cancel("metadata-response-too-large").catch(() => undefined);
+    throw new PdfGatewayHttpError(502, "UPSTREAM_FAILED", "Google Drive повернув завеликі metadata.");
+  }
+  if (!response.body) throw new PdfGatewayHttpError(502, "UPSTREAM_FAILED", "Google Drive не повернув metadata.");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      total += value.byteLength;
+      if (total > maximumBytes) {
+        throw new PdfGatewayHttpError(502, "UPSTREAM_FAILED", "Google Drive повернув завеликі metadata.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel("metadata-read-complete").catch(() => undefined);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new PdfGatewayHttpError(502, "UPSTREAM_FAILED", "Google Drive повернув некоректні metadata.");
+  }
+}
+
+function isTransientUpstreamStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status === 500
+    || status === 502 || status === 503 || status === 504;
+}
+
+function boundedRetryDelay(attempt: number, signal: AbortSignal): Promise<void> {
+  const delayMs = Math.min(1_500, 180 * (2 ** Math.max(0, attempt - 1)));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(new PdfGatewayHttpError(504, "UPSTREAM_TIMEOUT", "Запит скасовано."));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function displayNameFromUrl(url: URL): string {
   const raw = url.pathname.split("/").filter(Boolean).at(-1) ?? "document.pdf";
   let decoded = raw;
@@ -767,6 +1382,7 @@ async function consumeSession(
 async function sourceForSession(
   admin: ReturnType<typeof createClient>,
   session: PdfAccessSessionRow,
+  env: Record<string, string | undefined>,
 ): Promise<DocumentSourceRow> {
   const { data, error } = await admin
     .from("document_sources")
@@ -786,7 +1402,10 @@ async function sourceForSession(
   ) {
     throw new PdfGatewayHttpError(409, "SOURCE_CHANGED", "Джерело змінилося. Оновіть його перед переглядом.");
   }
-  const upstreamUrl = upstreamUrlForSource(source);
+  if (source.access_mode !== session.upstream_access_mode) {
+    throw new PdfGatewayHttpError(409, "SOURCE_CHANGED", "Спосіб доступу до джерела змінився.");
+  }
+  const upstreamUrl = upstreamUrlForSource(source, env);
   if (
     upstreamUrl.hostname.replace(/^\[|\]$/gu, "").toLocaleLowerCase("en-US")
       !== session.upstream_host.toLocaleLowerCase("en-US")
@@ -801,7 +1420,7 @@ async function upstreamAuthorizationForSession(
   session: PdfAccessSessionRow,
   env: Record<string, string | undefined>,
 ): Promise<{ bearerToken: string; allowedHosts: readonly string[] } | undefined> {
-  if (source.provider !== "google_drive") return undefined;
+  if (source.provider !== "google_drive" || source.access_mode === "secure_proxy") return undefined;
   const ciphertext = session.upstream_authorization_ciphertext?.trim();
   const encryptionKey = env.ENCRYPTION_KEY?.trim();
   if (!ciphertext || !encryptionKey) {
@@ -828,6 +1447,7 @@ async function upstreamAuthorizationForSession(
 
 async function rejectGoogleDriveAuthorizationFailure(
   provider: string,
+  accessMode: string,
   upstream: Awaited<ReturnType<typeof fetchPublicPdfWithRedirects>>,
   admin: ReturnType<typeof createClient>,
   sessionId: string,
@@ -844,7 +1464,7 @@ async function rejectGoogleDriveAuthorizationFailure(
     // The authorization error remains authoritative even if best-effort
     // session cleanup cannot reach the database.
   }
-  if (upstream.response.status === 401) {
+  if (accessMode === "google_drive_api" && upstream.response.status === 401) {
     throw new PdfGatewayHttpError(401, "OAUTH_REQUIRED", "Сесія Google Drive завершилася. Підключіть диск повторно.");
   }
   throw new PdfGatewayHttpError(403, "GOOGLE_DRIVE_PERMISSION_DENIED", "Google Drive не надав доступ до цього файла.");
@@ -856,6 +1476,7 @@ async function streamPdf(request: Request): Promise<Response> {
   const startedAt = performance.now();
   const gatewayRequestId = requestId(request);
   let provider: DocumentSourceRow["provider"] = "unknown";
+  let accessMode: string | undefined;
   let telemetryFinalized = false;
   const finalizeTelemetry = (
     statusCode: number,
@@ -868,6 +1489,7 @@ async function streamPdf(request: Request): Promise<Response> {
       const record = createPdfProxyTelemetryRecord({
         requestId: gatewayRequestId,
         provider,
+        accessMode,
         statusCode,
         ...(errorCode ? { errorCode } : {}),
         durationMs: performance.now() - startedAt,
@@ -886,23 +1508,45 @@ async function streamPdf(request: Request): Promise<Response> {
     await requireExternalPdfViewerEnabled(admin);
     const session = await consumeSession(admin, streamToken(request), user.id);
     await requireCurrentProjectMembership(admin, session.project_id, user.id);
-    const source = await sourceForSession(admin, session);
+    const source = await sourceForSession(admin, session, env);
     provider = source.provider;
-    const upstreamUrl = upstreamUrlForSource(source);
+    accessMode = source.access_mode;
+    const upstreamUrl = upstreamUrlForSource(source, env);
     const upstreamAuthorization = await upstreamAuthorizationForSession(source, session, env);
     const range = rangeFromRequest(request);
+    const pinnedWorker = optionalConfiguredPdfStreamWorker(env);
+    const pinnedRedirectHosts = upstreamAuthorization?.allowedHosts
+      ?? (source.provider === "google_drive"
+        ? ["www.googleapis.com", "content.googleapis.com", "drive.usercontent.google.com"]
+        : []);
+    const fetchUpstream = (
+      method: "GET" | "HEAD",
+      requestedRange: ReturnType<typeof rangeFromRequest>,
+    ) => pinnedWorker
+      ? fetchPdfThroughPinnedWorker({
+        worker: pinnedWorker,
+        url: upstreamUrl,
+        method,
+        range: requestedRange,
+        ifRange: request.headers.get("if-range"),
+        allowedRedirectHosts: pinnedRedirectHosts,
+        clientSignal: request.signal,
+        connectTimeoutMs: limits.connectTimeoutMs,
+        ...(upstreamAuthorization ? { authorization: upstreamAuthorization } : {}),
+      })
+      : fetchPublicPdfWithRedirects({
+        url: upstreamUrl,
+        method,
+        range: requestedRange,
+        ifRange: request.headers.get("if-range"),
+        resolver: resolveDnsAddresses,
+        limits,
+        clientSignal: request.signal,
+        ...(upstreamAuthorization ? { authorization: upstreamAuthorization } : {}),
+      });
 
-  let upstream = await fetchPublicPdfWithRedirects({
-    url: upstreamUrl,
-    method: request.method as "GET" | "HEAD",
-    range,
-    ifRange: request.headers.get("if-range"),
-    resolver: resolveDnsAddresses,
-    limits,
-    clientSignal: request.signal,
-    ...(upstreamAuthorization ? { authorization: upstreamAuthorization } : {}),
-  });
-  await rejectGoogleDriveAuthorizationFailure(provider, upstream, admin, session.id);
+  let upstream = await fetchUpstream(request.method as "GET" | "HEAD", range);
+  await rejectGoogleDriveAuthorizationFailure(provider, source.access_mode, upstream, admin, session.id);
 
   if (request.method === "HEAD") {
     if (upstream.response.status === 405 || upstream.response.status === 501) {
@@ -910,16 +1554,8 @@ async function streamPdf(request: Request): Promise<Response> {
       upstream.abort("head-not-supported");
       upstream.dispose();
       const probeRange = rangeFromRequest(new Request(request.url, { headers: { Range: "bytes=0-4" } }));
-      upstream = await fetchPublicPdfWithRedirects({
-        url: upstreamUrl,
-        method: "GET",
-        range: probeRange,
-        resolver: resolveDnsAddresses,
-        limits,
-        clientSignal: request.signal,
-        ...(upstreamAuthorization ? { authorization: upstreamAuthorization } : {}),
-      });
-      await rejectGoogleDriveAuthorizationFailure(provider, upstream, admin, session.id);
+      upstream = await fetchUpstream("GET", probeRange);
+      await rejectGoogleDriveAuthorizationFailure(provider, source.access_mode, upstream, admin, session.id);
       const validated = validatePdfUpstreamResponse(upstream.response, probeRange, limits);
       const probeStream = createBoundedPdfStream(upstream.response.body, {
         maximumBytes: validated.maximumBodyBytes,
@@ -992,7 +1628,7 @@ function pdfResponse(
   return new Response(body, { status, headers });
 }
 
-function route(request: Request): "open-session" | "probe-source" | "client-event" | "stream" | "unknown" {
+function route(request: Request): "open-session" | "probe-source" | "probe-google-drive-public" | "export-pages" | "client-event" | "stream" | "unknown" {
   const segments = new URL(request.url).pathname.split("/").filter(Boolean);
   const functionIndex = segments.lastIndexOf("pdf-gateway");
   const remainder = functionIndex >= 0 ? segments.slice(functionIndex + 1) : segments;
@@ -1001,6 +1637,12 @@ function route(request: Request): "open-session" | "probe-source" | "client-even
   }
   if (request.method === "POST" && remainder[0] === "probe-source") {
     return "probe-source";
+  }
+  if (request.method === "POST" && remainder[0] === "probe-google-drive-public") {
+    return "probe-google-drive-public";
+  }
+  if (request.method === "POST" && remainder[0] === "export-pages") {
+    return "export-pages";
   }
   if (request.method === "POST" && remainder[0] === "client-event") {
     return "client-event";
@@ -1013,6 +1655,18 @@ function route(request: Request): "open-session" | "probe-source" | "client-even
 
 function publicError(error: unknown): PdfGatewayHttpError {
   if (error instanceof PdfGatewayHttpError) return error;
+  if (error instanceof GoogleDrivePublicError) {
+    const mappings: Record<string, [number, string, string]> = {
+      REFERENCE_INVALID: [400, "INVALID_URL", "Некоректне посилання Google Drive."],
+      API_KEY_INVALID: [503, "GOOGLE_DRIVE_PUBLIC_GATEWAY_NOT_CONFIGURED", "Серверний перегляд публічних Google Drive PDF ще не налаштовано."],
+      METADATA_INVALID: [502, "UPSTREAM_FAILED", "Google Drive повернув некоректні metadata файла."],
+      SOURCE_NOT_PDF: [415, "SOURCE_NOT_PDF", "Файл Google Drive не є PDF-документом."],
+      DOWNLOAD_FORBIDDEN: [403, "GOOGLE_DRIVE_PERMISSION_DENIED", "Google Drive не дозволяє завантажити цей файл."],
+    };
+    const [status, code, message] = mappings[error.code]
+      ?? [502, "UPSTREAM_FAILED", "Не вдалося перевірити публічний файл Google Drive."];
+    return new PdfGatewayHttpError(status, code, message);
+  }
   if (error instanceof PdfGatewaySecurityError) {
     if (error.code === "RANGE_INVALID") {
       return new PdfGatewayHttpError(416, error.code, "Підтримується лише один коректний byte range.");
@@ -1052,6 +1706,8 @@ Deno.serve(async (request) => {
     const selectedRoute = route(request);
     if (selectedRoute === "open-session") return await openSession(request);
     if (selectedRoute === "probe-source") return await probeSource(request);
+    if (selectedRoute === "probe-google-drive-public") return await probePublicGoogleDrive(request);
+    if (selectedRoute === "export-pages") return await exportPdfPages(request);
     if (selectedRoute === "client-event") return await clientEvent(request);
     if (selectedRoute === "stream") return await streamPdf(request);
     return json(request, { error: "METHOD_NOT_ALLOWED", message: "Маршрут або метод не підтримується." }, 405);

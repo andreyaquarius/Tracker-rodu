@@ -213,7 +213,10 @@ test("the document workspace keeps finding and fragment tools for resolved PDF p
   assert.match(viewerSource, /const canSelectFragment\s*=[\s\S]*?kind === "pdf"/u);
   assert.match(viewerSource, /onClick=\{\(\) => \{[\s\S]*?setSelectionMode/u);
   assert.match(viewerSource, /createFindingFromCrop\("google-drive"\)/u);
-  assert.match(viewerSource, /createFindingFromCrop\(cropSnapshotDestination\)/u);
+  assert.match(viewerSource, /createFindingFromCrop\(cropSnapshotDestination, findingCaptureMode\)/u);
+  assert.match(viewerSource, /setFindingCaptureMode\("full-page"\)/u);
+  assert.match(viewerSource, /Знахідка зі сторінки/u);
+  assert.match(viewerSource, /rect:\s*\{\s*x:\s*0,\s*y:\s*0,\s*width:\s*1,\s*height:\s*1\s*\}/u);
   assert.match(viewerSource, /onClick=\{\(\) => void createFinding\(\)\}/u);
   assert.match(viewerSource, /Створити знахідку/u);
 });

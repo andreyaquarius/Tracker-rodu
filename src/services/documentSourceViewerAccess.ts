@@ -32,6 +32,40 @@ export interface DocumentSourceViewerSession {
   canConfirmSourceVersion: boolean;
 }
 
+export interface DocumentSourceServerPdfExportRequest {
+  projectId: string;
+  documentId: string;
+  userId: string;
+  source: StoredDocumentSource;
+  pages: readonly number[];
+  fileName: string;
+  accessUrl?: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Returns a streamed, vector-preserving server subset, or null when the
+ * optional ephemeral qpdf worker has not been configured for this deployment.
+ */
+export async function exportDocumentSourcePdfPages(
+  request: DocumentSourceServerPdfExportRequest,
+): Promise<Blob | null> {
+  const gateway = new HttpDocumentSourceGatewayClient({
+    baseUrl: configuredGatewayBaseUrl(),
+    headers: authenticatedGatewayHeaders,
+  });
+  return gateway.exportPdfPages(request.source, {
+    projectId: request.projectId,
+    documentId: request.documentId,
+    userId: request.userId,
+    ...(request.signal ? { signal: request.signal } : {}),
+  }, {
+    pages: request.pages,
+    fileName: request.fileName,
+    ...(request.accessUrl ? { accessUrl: request.accessUrl } : {}),
+  });
+}
+
 /**
  * Opens a persisted source through its provider adapter. A null result means
  * the legacy attachment has not been migrated yet and the caller may use the

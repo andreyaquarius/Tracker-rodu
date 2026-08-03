@@ -95,6 +95,10 @@ test("default registry falls back from a direct Wikimedia upload to an opaque ga
 
   assert.deepEqual(requests, [
     { method: "HEAD", range: null },
+    { method: "HEAD", range: null },
+    { method: "HEAD", range: null },
+    { method: "GET", range: "bytes=0-4" },
+    { method: "GET", range: "bytes=0-4" },
     { method: "GET", range: "bytes=0-4" },
   ]);
   assert.deepEqual(gateway.probeCalls, [input]);

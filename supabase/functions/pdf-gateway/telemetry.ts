@@ -123,12 +123,16 @@ export function parseClientPdfOperationalEvent(input: unknown): ParsedClientPdfO
 export function createPdfProxyTelemetryRecord(input: {
   requestId: string;
   provider?: unknown;
+  accessMode?: unknown;
   statusCode: number;
   errorCode?: unknown;
   durationMs: number;
   transferredBytes: number;
 }): PdfOperationalRecord {
   const provider = optionalEnum(input.provider, PROVIDERS) ?? "unknown";
+  const accessMode = typeof input.accessMode === "string" && ACCESS_MODES.has(input.accessMode)
+    ? input.accessMode
+    : undefined;
   const statusCode = optionalInteger(input.statusCode, 100, 599) ?? 500;
   const durationMs = optionalInteger(Math.round(input.durationMs), 0, 10 * 60 * 1000) ?? 0;
   const transferredBytes = optionalInteger(input.transferredBytes, 0, Number.MAX_SAFE_INTEGER) ?? 0;
@@ -140,7 +144,7 @@ export function createPdfProxyTelemetryRecord(input: {
     event: "pdf_proxy_request",
     request_id: UUID_PATTERN.test(input.requestId) ? input.requestId : crypto.randomUUID(),
     provider: provider as PdfOperationalRecord["provider"],
-    access_mode: "secure_proxy",
+    ...(accessMode ? { access_mode: accessMode as PdfOperationalRecord["access_mode"] } : {}),
     status_code: statusCode,
     ...(errorCode ? { error_code: errorCode } : {}),
     duration_ms: durationMs,

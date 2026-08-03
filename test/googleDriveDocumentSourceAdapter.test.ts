@@ -72,6 +72,86 @@ test("Google Drive adapter resolves PDF metadata without exposing OAuth credenti
   assert.equal(JSON.stringify(source).includes("oauth-token"), false);
 });
 
+test("public Google Drive PDF opens through the gateway without requesting OAuth", async () => {
+  let metadataCalls = 0;
+  let downloadAccessCalls = 0;
+  let accessRequests = 0;
+  const adapter = new GoogleDrivePdfSourceAdapter({
+    getFileMetadata: async () => {
+      metadataCalls += 1;
+      throw new Error("OAuth metadata must not be requested for a public share");
+    },
+    createDownloadAccess: async () => {
+      downloadAccessCalls += 1;
+      throw new Error("OAuth download access must not be requested for a public share");
+    },
+    gateway: {
+      probeDirectPdf: async () => { throw new Error("not used"); },
+      probePublicGoogleDrivePdf: async (inputUrl) => ({
+        canonicalUrl: inputUrl,
+        displayName: "Public archive.pdf",
+        mimeType: "application/pdf",
+        fileSizeBytes: 654_321,
+        acceptsRanges: true,
+        fingerprint: {
+          md5: "public-md5",
+          modifiedTime: "2026-08-03T09:00:00.000Z",
+          contentLength: 654_321,
+        },
+      }),
+      createAccessSession: async (source, _context, providerAccess) => {
+        accessRequests += 1;
+        assert.equal(providerAccess, undefined);
+        assert.equal(source.accessMode, "secure_proxy");
+        return {
+          accessMode: "secure_proxy",
+          url: "https://project.supabase.co/functions/v1/pdf-gateway/stream/public-session",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          fingerprint: source.fingerprint,
+        };
+      },
+    },
+  });
+
+  const resolved = await adapter.resolve(
+    `https://drive.google.com/file/d/${FILE_ID}/view`,
+    context(),
+  );
+  const descriptor = await adapter.createAccessDescriptor(storedSource(resolved), context());
+
+  assert.equal(resolved.accessMode, "secure_proxy");
+  assert.equal(resolved.displayName, "Public archive.pdf");
+  assert.equal(resolved.fileSizeBytes, 654_321);
+  assert.equal(metadataCalls, 0);
+  assert.equal(downloadAccessCalls, 0);
+  assert.equal(accessRequests, 1);
+  assert.equal(descriptor.accessMode, "secure_proxy");
+});
+
+test("private Drive share falls back to OAuth after anonymous access is denied", async () => {
+  let metadataCalls = 0;
+  const adapter = new GoogleDrivePdfSourceAdapter({
+    gateway: {
+      probeDirectPdf: async () => { throw new Error("not used"); },
+      probePublicGoogleDrivePdf: async () => {
+        throw new DocumentSourceError("GOOGLE_DRIVE_PERMISSION_DENIED");
+      },
+      createAccessSession: async () => { throw new Error("not used"); },
+    },
+    getFileMetadata: async () => {
+      metadataCalls += 1;
+      return pdfMetadata();
+    },
+  });
+
+  const source = await adapter.resolve(
+    `https://drive.google.com/file/d/${FILE_ID}/view`,
+    context(),
+  );
+  assert.equal(metadataCalls, 1);
+  assert.equal(source.accessMode, "google_drive_api");
+});
+
 test("Google Drive adapter rejects folders and Google-native documents as non-PDF", async () => {
   for (const mimeType of [
     "application/vnd.google-apps.folder",

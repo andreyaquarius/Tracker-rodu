@@ -83,6 +83,7 @@ test("proxy success sampling is deterministic while failures are always retained
   const success = createPdfProxyTelemetryRecord({
     requestId: REQUEST_ID,
     provider: "wikimedia",
+    accessMode: "secure_proxy",
     statusCode: 206,
     durationMs: 25,
     transferredBytes: 1024,
@@ -97,4 +98,19 @@ test("proxy success sampling is deterministic while failures are always retained
   });
   assert.equal(shouldWritePdfProxyRecord(success, 0), false);
   assert.equal(shouldWritePdfProxyRecord(failure, 0), true);
+});
+
+test("proxy telemetry preserves the actual Drive access mode", () => {
+  const record = createPdfProxyTelemetryRecord({
+    requestId: REQUEST_ID,
+    provider: "google_drive",
+    accessMode: "google_drive_api",
+    statusCode: 206,
+    durationMs: 40,
+    transferredBytes: 4096,
+  });
+
+  assert.equal(record.provider, "google_drive");
+  assert.equal(record.access_mode, "google_drive_api");
+  assert.equal(JSON.stringify(record).includes("secure_proxy"), false);
 });

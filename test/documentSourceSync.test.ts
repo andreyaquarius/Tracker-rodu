@@ -144,3 +144,104 @@ test("sync keeps an existing validated source authoritative over stale attachmen
   assert.deepEqual(result.sources, [existing]);
   assert.deepEqual(result.failures, []);
 });
+
+test("sync resolves missing legacy metadata before it can enter document_sources", async () => {
+  const stale = attachment({
+    name: "stale-name.pdf",
+    size: 1234,
+    sourceFingerprint: { etag: '"unverified"' },
+  });
+  let savedInput: unknown;
+  let resolvedContext: unknown;
+  const result = await syncDocumentSourcesForDocument(
+    "project-1",
+    { id: "document-1", scans: [stale] } as DocumentRecord,
+    {
+      listDocumentSources: async () => [],
+      saveDocumentSource: async (_projectId, input) => {
+        savedInput = input;
+        return {
+          id: "source-validated",
+          ...input,
+          status: "active",
+          createdAt: "2026-08-03T09:00:00.000Z",
+          updatedAt: "2026-08-03T09:00:00.000Z",
+        };
+      },
+    },
+    {
+      userId: "user-1",
+      now: () => new Date("2026-08-03T09:00:00.000Z"),
+      resolveSource: async (_url, context) => {
+        resolvedContext = context;
+        return {
+          provider: "direct_pdf",
+          requestId: "request-1",
+          candidates: [{
+            id: "validated",
+            source: {
+              provider: "direct_pdf",
+              originalUrl: stale.storagePath,
+              canonicalUrl: "https://cdn.example.org/validated.pdf",
+              providerHost: "cdn.example.org",
+              displayName: "validated.pdf",
+              mimeType: "application/pdf",
+              fileSizeBytes: 5678,
+              accessMode: "secure_proxy",
+              fingerprint: { etag: '"validated"', contentLength: 5678 },
+              warnings: [],
+            },
+          }],
+        };
+      },
+    },
+  );
+
+  assert.equal(result.failures.length, 0);
+  assert.equal(result.sources[0]?.id, "source-validated");
+  assert.deepEqual(resolvedContext, {
+    userId: "user-1",
+    projectId: "project-1",
+    documentId: "document-1",
+  });
+  assert.deepEqual(savedInput, {
+    provider: "direct_pdf",
+    originalUrl: stale.storagePath,
+    canonicalUrl: "https://cdn.example.org/validated.pdf",
+    providerHost: "cdn.example.org",
+    displayName: "validated.pdf",
+    mimeType: "application/pdf",
+    fileSizeBytes: 5678,
+    accessMode: "secure_proxy",
+    fingerprint: { etag: '"validated"', contentLength: 5678 },
+    warnings: [],
+    documentId: "document-1",
+    lastValidatedAt: "2026-08-03T09:00:00.000Z",
+  });
+});
+
+test("sync fails open to the legacy viewer when resolver validation fails", async () => {
+  let saveCalls = 0;
+  const result = await syncDocumentSourcesForDocument(
+    "project-1",
+    { id: "document-1", scans: [attachment()] } as DocumentRecord,
+    {
+      listDocumentSources: async () => [],
+      saveDocumentSource: async () => {
+        saveCalls += 1;
+        throw new Error("unverified metadata must not be saved");
+      },
+    },
+    {
+      userId: "user-1",
+      resolveSource: async () => {
+        throw new Error("temporary upstream failure");
+      },
+    },
+  );
+
+  assert.equal(saveCalls, 0);
+  assert.deepEqual(result.sources, []);
+  assert.equal(result.failures.length, 1);
+  assert.equal(result.failures[0]?.attachmentId, "scan-1");
+});

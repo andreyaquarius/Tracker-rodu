@@ -12,6 +12,11 @@ export type PdfGatewayLimits = {
   telemetryRequestsPerWindow: number;
   telemetryWindowSeconds: number;
   telemetrySuccessSamplePercent: number;
+  exportRequestsPerWindow: number;
+  exportWindowSeconds: number;
+  exportMaxPages: number;
+  exportMaxResultBytes: number;
+  exportWorkerTimeoutMs: number;
   maxRequestBodyBytes: number;
 };
 
@@ -110,6 +115,36 @@ export function pdfGatewayLimitsFromEnvironment(
       10,
       0,
       100,
+    ),
+    exportRequestsPerWindow: boundedInteger(
+      environment.PDF_EXPORT_MAX_REQUESTS_PER_WINDOW,
+      10,
+      1,
+      200,
+    ),
+    exportWindowSeconds: boundedInteger(
+      environment.PDF_EXPORT_WINDOW_SECONDS,
+      60,
+      10,
+      3_600,
+    ),
+    exportMaxPages: boundedInteger(
+      environment.PDF_EXPORT_MAX_PAGES,
+      250,
+      1,
+      1_000,
+    ),
+    exportMaxResultBytes: boundedInteger(
+      environment.PDF_EXPORT_MAX_RESULT_BYTES,
+      1024 * 1024 * 1024,
+      1024 * 1024,
+      2 * 1024 * 1024 * 1024,
+    ),
+    exportWorkerTimeoutMs: boundedInteger(
+      environment.PDF_EXPORT_WORKER_TIMEOUT_MS,
+      240_000,
+      5_000,
+      900_000,
     ),
     maxRequestBodyBytes: boundedInteger(
       environment.PDF_PROXY_MAX_REQUEST_BODY_BYTES,

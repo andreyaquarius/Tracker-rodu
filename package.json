@@ -17,6 +17,7 @@
     "benchmark:gedcom": "node scripts/benchmark-gedcom-export.ts",
     "functions:serve:index-finding": "supabase functions serve index-finding-fragment --env-file .env.functions.local --no-verify-jwt",
     "verify:pages": "node scripts/verify-pages-build.mjs",
+    "verify:pdf-rollout": "node scripts/verify-external-pdf-rollout.mjs",
     "qa:family-tree": "node scripts/family-tree-visual-qa.ts"
   },
   "dependencies": {
