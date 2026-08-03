@@ -397,6 +397,49 @@ async function listProjectRelationRowsBetween(
   }
 }
 
+async function listProjectRelationRowsForPerson(
+  projectId: string,
+  personId: string,
+): Promise<RelationRow[]> {
+  const client = getSupabaseClient();
+  const selectRows = async (columns: string): Promise<RelationRow[]> => {
+    const [outgoing, incoming] = await Promise.all([
+      selectRowsInParallel<RelationRow>(
+        () => client
+          .from("person_relations")
+          .select(columns)
+          .eq("project_id", projectId)
+          .eq("person_id", personId)
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: true }) as unknown as PagedRangeRequest<RelationRow>,
+        SELECT_BATCH_SIZE,
+        SELECT_CONCURRENCY_PER_TABLE,
+      ),
+      selectRowsInParallel<RelationRow>(
+        () => client
+          .from("person_relations")
+          .select(columns)
+          .eq("project_id", projectId)
+          .eq("related_person_id", personId)
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: true }) as unknown as PagedRangeRequest<RelationRow>,
+        SELECT_BATCH_SIZE,
+        SELECT_CONCURRENCY_PER_TABLE,
+      ),
+    ]);
+    return [...new Map(
+      [...outgoing, ...incoming].map((row) => [row.id, row]),
+    ).values()];
+  };
+
+  try {
+    return await selectRows(RELATION_SELECT);
+  } catch (error) {
+    if (!isMissingPersonRelationProvenanceColumnsError(error)) throw error;
+    return selectRows(LEGACY_RELATION_SELECT);
+  }
+}
+
 export async function listProjectPeople(projectId: string): Promise<{
   persons: Person[];
   relations: PersonRelation[];
@@ -484,6 +527,21 @@ export async function listProjectPersonRelationsBetween(
       leftPersonId,
       rightPersonId,
     ))
+    .map(relationFromRow);
+}
+
+/**
+ * Reads the complete compatibility-relation snapshot for one person. This is
+ * intentionally narrower than listProjectPeople so a newly created tree card
+ * can become available in the Persons module without reloading a large tree.
+ */
+export async function listProjectPersonRelationsForPerson(
+  projectId: string,
+  personId: string,
+): Promise<PersonRelation[]> {
+  const normalizedPersonId = personId.trim();
+  if (!normalizedPersonId) return [];
+  return (await listProjectRelationRowsForPerson(projectId, normalizedPersonId))
     .map(relationFromRow);
 }
 

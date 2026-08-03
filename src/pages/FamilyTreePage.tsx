@@ -171,6 +171,7 @@ export type FamilyTreePageProps = {
   researchRequired?: boolean;
   gedcomResearchRequired?: boolean;
   onSubscriptionChanged?: () => void;
+  onPersonCreated?: (personId: string) => void | Promise<void>;
   onPersonRelationsDetached?: (
     result: DeleteRelationshipResult,
   ) => void | Promise<void>;
@@ -242,6 +243,7 @@ export function LegacyFamilyTreePage({
   treeLimitMessage,
   researchRequired = false,
   onSubscriptionChanged,
+  onPersonCreated,
   onPersonRelationsDetached,
   onOpenPerson,
   onActiveContextChange,
@@ -933,6 +935,7 @@ export function LegacyFamilyTreePage({
         person: payload.person,
       });
       if (!created) return;
+      await onPersonCreated?.(created.personId);
       setToolbarState((current) => ({
         ...current,
         treeId: created.treeId,
@@ -989,6 +992,7 @@ export function LegacyFamilyTreePage({
     }
 
     if (!createdPersonId) return;
+    await onPersonCreated?.(createdPersonId);
     setBuilderTarget(null);
     setBuilderNotice("Особу додано до родового дерева. Граф оновлено.");
     await refetch();

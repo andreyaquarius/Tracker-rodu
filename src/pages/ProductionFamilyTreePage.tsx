@@ -159,6 +159,7 @@ export interface ProductionFamilyTreePageProps {
   researchRequired?: boolean;
   gedcomResearchRequired?: boolean;
   onSubscriptionChanged?: () => void;
+  onPersonCreated?: (personId: string) => void | Promise<void>;
   onPersonRelationsDetached?: (
     result: DeleteRelationshipResult,
   ) => void | Promise<void>;
@@ -203,6 +204,7 @@ export function ProductionFamilyTreePage({
   onOpenPerson,
   onActiveContextChange,
   onSubscriptionChanged,
+  onPersonCreated,
   onPersonRelationsDetached,
 }: ProductionFamilyTreePageProps) {
   const [entryPoints, setEntryPoints] = useState<FamilyTreeEntryPoint[]>([]);
@@ -369,6 +371,7 @@ export function ProductionFamilyTreePage({
       title: selectedEntry?.title || "Родове дерево",
     });
     if (!result) return;
+    await onPersonCreated?.(result.personId);
     setSelectedTreeId(result.treeId);
     setRootDialogOpen(false);
     setReloadRevision((value) => value + 1);
@@ -618,6 +621,7 @@ export function ProductionFamilyTreePage({
           onFocusPersonChange={handleActiveTreeFocusPersonChange}
           onOpenPerson={onOpenPerson}
           onSubscriptionChanged={onSubscriptionChanged}
+          onPersonCreated={onPersonCreated}
           onPersonRelationsDetached={onPersonRelationsDetached}
           initialFocusPersonId={routedFocusPersonId}
         />
@@ -699,6 +703,7 @@ function LoadedFamilyTree({
   onFocusPersonChange,
   onOpenPerson,
   onSubscriptionChanged,
+  onPersonCreated,
   onPersonRelationsDetached,
   initialFocusPersonId,
 }: {
@@ -713,6 +718,7 @@ function LoadedFamilyTree({
   onFocusPersonChange: (personId: string) => void;
   onOpenPerson?: (personId: string) => void;
   onSubscriptionChanged?: () => void;
+  onPersonCreated?: (personId: string) => void | Promise<void>;
   onPersonRelationsDetached?: (
     result: DeleteRelationshipResult,
   ) => void | Promise<void>;
@@ -1733,6 +1739,7 @@ function LoadedFamilyTree({
       });
     }
     if (!result) return;
+    await onPersonCreated?.(result);
     setBuilderTarget(null);
     setNotice("Родича створено й приєднано до дерева.");
     reloadPedigreeAfterMutation();

@@ -124,6 +124,7 @@ import {
   getProjectPerson,
   getProjectPersonRelation,
   importProjectPeople,
+  listProjectPersonRelationsForPerson,
   listProjectPersonRelationsBetween,
   listProjectPeople,
   loadProjectPeopleCache,
@@ -132,6 +133,7 @@ import {
   saveProjectPersonPhotoBackups,
   saveProjectPersonRelation,
 } from "./services/projectPeople";
+import { mergeProjectPersonSnapshot } from "./utils/projectPersonSnapshot.ts";
 import type { DeleteRelationshipResult } from "./services/familyTreeMutationService";
 import { reconcileProjectPersonRelationsForPair } from "./utils/personRelationReconciliation";
 import type { GedcomImportGroup } from "./utils/gedcomImportGroups.ts";
@@ -638,6 +640,8 @@ export default function App() {
   const [projectPersonRelations, setProjectPersonRelations] = useState<PersonRelation[]>([]);
   const projectPersonsRef = useRef(projectPersons);
   projectPersonsRef.current = projectPersons;
+  const projectPersonRelationsRef = useRef(projectPersonRelations);
+  projectPersonRelationsRef.current = projectPersonRelations;
   const [projectDocuments, setProjectDocuments] = useState<DocumentRecord[]>([]);
   const [projectYearMatrix, setProjectYearMatrix] = useState<YearMatrixRecord[]>([]);
   const [documentsReadyForProject, setDocumentsReadyForProject] = useState<string | null>(null);
@@ -4037,6 +4041,51 @@ export default function App() {
       );
     }
   };
+  const syncFamilyTreeCreatedPerson = async (personId: string): Promise<boolean> => {
+    const normalizedPersonId = personId.trim();
+    const targetWorkspace = workspace;
+    if (!normalizedPersonId || !targetWorkspace) return false;
+    const projectId = targetWorkspace.projectId;
+    try {
+      const [person, relations] = await Promise.all([
+        getProjectPerson(projectId, normalizedPersonId),
+        listProjectPersonRelationsForPerson(projectId, normalizedPersonId),
+      ]);
+      if (!person) throw new Error("Створену особу не знайдено в проєкті.");
+      if (activeWorkspaceIdRef.current !== projectId) return false;
+
+      const next = mergeProjectPersonSnapshot(
+        projectPersonsRef.current,
+        projectPersonRelationsRef.current,
+        person,
+        relations,
+      );
+      projectPersonsRef.current = next.persons;
+      projectPersonRelationsRef.current = next.relations;
+      setProjectPersons(next.persons);
+      setProjectPersonRelations(next.relations);
+      saveProjectPeopleCache(projectId, next.persons, next.relations);
+      return true;
+    } catch (error) {
+      notify(
+        describeError(
+          error,
+          "Особу створено, але не вдалося оновити модуль «Особи». Спробуйте відкрити картку ще раз.",
+        ),
+        true,
+      );
+      return false;
+    }
+  };
+  const openFamilyTreePerson = async (personId: string): Promise<void> => {
+    const normalizedPersonId = personId.trim();
+    if (!normalizedPersonId) return;
+    if (!projectPersonsRef.current.some((person) => person.id === normalizedPersonId)) {
+      const synchronized = await syncFamilyTreeCreatedPerson(normalizedPersonId);
+      if (!synchronized) return;
+    }
+    openRelatedRecord("persons", normalizedPersonId);
+  };
   const showPersonInFamilyTree = async (person: Person) => {
     if (!canUseFamilyTreeFeature) {
       notify("Не вдалося підтвердити доступ до модуля «Родове дерево». Оновіть сторінку або спробуйте ще раз.", true);
@@ -5323,7 +5372,10 @@ export default function App() {
                 if (!workspace) return;
                 return reconcilePersonRelationsAfterTreeDetach(workspace.projectId, result);
               }}
-              onOpenPerson={(personId) => openRelatedRecord("persons", personId)}
+              onPersonCreated={async (personId) => {
+                await syncFamilyTreeCreatedPerson(personId);
+              }}
+              onOpenPerson={(personId) => void openFamilyTreePerson(personId)}
               onActiveContextChange={handleFamilyTreeActiveContextChange}
               personProfileNavigationEnabled={personsModuleV2Enabled}
               useProductionRenderer

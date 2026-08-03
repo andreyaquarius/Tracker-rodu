@@ -98,7 +98,7 @@ test("family tree routes person opens to V2 profiles while preserving legacy win
   );
   assert.match(
     app,
-    /onOpenPerson=\{\(personId\) => openRelatedRecord\("persons", personId\)\}[\s\S]*?personProfileNavigationEnabled=\{personsModuleV2Enabled\}/,
+    /onOpenPerson=\{\(personId\) => void openFamilyTreePerson\(personId\)\}[\s\S]*?personProfileNavigationEnabled=\{personsModuleV2Enabled\}/,
   );
   assert.match(windows, /<PersonCardModal/);
   assert.match(windows, /onOpenRelated=\{openRelatedRecordWindow\}/);
