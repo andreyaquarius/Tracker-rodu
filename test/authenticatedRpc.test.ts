@@ -7,6 +7,10 @@ import {
   type AuthenticatedRpcAuthResult,
   type AuthenticatedRpcResult,
 } from "../src/utils/authenticatedRpc.ts";
+import {
+  isSupabaseAuthenticationError,
+  runAuthenticatedSupabaseRequest,
+} from "../src/utils/authenticatedSupabaseRequest.ts";
 
 const VALID_SESSION = {
   access_token: "access-token",
@@ -137,6 +141,71 @@ test("database errors unrelated to authentication are not retried", async () => 
   assert.equal(result.error, databaseError);
   assert.equal(invokes, 1);
   assert.equal(refreshes, 0);
+});
+
+test("authenticated Supabase request never runs for a different user session", async () => {
+  let invokes = 0;
+  const client = {
+    auth: {
+      getSession: async () => authResult(VALID_SESSION),
+      refreshSession: async () => authResult(VALID_SESSION),
+    },
+  };
+
+  await assert.rejects(
+    runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        invokes += 1;
+        return { data: "unexpected", error: null };
+      },
+      "another-user-id",
+    ),
+    AuthenticatedSessionRequiredError,
+  );
+
+  assert.equal(invokes, 0);
+});
+
+test("authenticated Supabase request refreshes and retries a Postgres auth failure once", async () => {
+  const permissionError = {
+    code: "42501",
+    message: "permission denied for table task_notifications",
+  };
+  let invokes = 0;
+  let refreshes = 0;
+  const client = {
+    auth: {
+      getSession: async () => authResult({
+        ...VALID_SESSION,
+        expires_at: Math.floor(Date.now() / 1_000) + 3_600,
+      }),
+      refreshSession: async () => {
+        refreshes += 1;
+        return authResult(VALID_SESSION);
+      },
+    },
+  };
+
+  const result = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      invokes += 1;
+      return invokes === 1
+        ? { data: null, error: permissionError }
+        : { data: "ok", error: null };
+    },
+    VALID_SESSION.user.id,
+  );
+
+  assert.deepEqual(result, { data: "ok", error: null });
+  assert.equal(invokes, 2);
+  assert.equal(refreshes, 1);
+  assert.equal(isSupabaseAuthenticationError(permissionError), true);
+  assert.equal(
+    isSupabaseAuthenticationError({ code: "57014", message: "statement timeout" }),
+    false,
+  );
 });
 
 test("subscription context ACL migration grants only authenticated execution", () => {

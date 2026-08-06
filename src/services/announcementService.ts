@@ -6,17 +6,34 @@ import type {
   AnnouncementMediaType,
   AppAnnouncement,
 } from "../types/announcements";
+import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest.ts";
 
-export async function loadMyAnnouncements(): Promise<AppAnnouncement[]> {
-  const { data, error } = await getSupabaseClient().rpc("list_my_app_announcements");
+export async function loadMyAnnouncements(expectedUserId?: string): Promise<AppAnnouncement[]> {
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("list_my_app_announcements");
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
   if (error) throw error;
-  return (data ?? []).map(mapAnnouncement);
+  return ((data ?? []) as Array<Record<string, unknown>>).map(mapAnnouncement);
 }
 
-export async function markAnnouncementRead(id: string): Promise<void> {
-  const { error } = await getSupabaseClient().rpc("mark_app_announcement_read", {
-    target_announcement_id: id,
-  });
+export async function markAnnouncementRead(id: string, expectedUserId?: string): Promise<void> {
+  const client = getSupabaseClient();
+  const { error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("mark_app_announcement_read", {
+        target_announcement_id: id,
+      });
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
   if (error) throw error;
 }
 

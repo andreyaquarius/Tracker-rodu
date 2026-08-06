@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "./supabaseAuth";
 import type { TaskReminderNotification } from "../types/notifications";
+import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest.ts";
 
 type TaskNotificationRow = {
   id: string;
@@ -19,30 +20,58 @@ const TASK_NOTIFICATION_SELECT =
 
 export async function loadMyTaskNotifications(
   limit = 50,
+  expectedUserId?: string,
 ): Promise<TaskReminderNotification[]> {
   const boundedLimit = Math.min(100, Math.max(1, Math.trunc(limit)));
-  const { data, error } = await getSupabaseClient()
-    .from("task_notifications")
-    .select(TASK_NOTIFICATION_SELECT)
-    .order("created_at", { ascending: false })
-    .limit(boundedLimit);
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client
+        .from("task_notifications")
+        .select(TASK_NOTIFICATION_SELECT)
+        .order("created_at", { ascending: false })
+        .limit(boundedLimit);
+      return { data: result.data as TaskNotificationRow[] | null, error: result.error };
+    },
+    expectedUserId,
+  );
   if (error) throw error;
   return ((data ?? []) as TaskNotificationRow[]).map(taskNotificationFromRow);
 }
 
-export async function markTaskNotificationRead(id: string): Promise<void> {
-  const { error } = await getSupabaseClient()
-    .from("task_notifications")
-    .update({ read_at: new Date().toISOString() })
-    .eq("id", id);
+export async function markTaskNotificationRead(
+  id: string,
+  expectedUserId?: string,
+): Promise<void> {
+  const client = getSupabaseClient();
+  const { error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client
+        .from("task_notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("id", id);
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
   if (error) throw error;
 }
 
-export async function markAllTaskNotificationsRead(): Promise<void> {
-  const { error } = await getSupabaseClient()
-    .from("task_notifications")
-    .update({ read_at: new Date().toISOString() })
-    .is("read_at", null);
+export async function markAllTaskNotificationsRead(expectedUserId?: string): Promise<void> {
+  const client = getSupabaseClient();
+  const { error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client
+        .from("task_notifications")
+        .update({ read_at: new Date().toISOString() })
+        .is("read_at", null);
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
   if (error) throw error;
 }
 

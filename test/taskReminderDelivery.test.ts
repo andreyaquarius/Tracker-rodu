@@ -29,6 +29,10 @@ const service = readFileSync(
   new URL("../src/services/taskNotificationService.ts", import.meta.url),
   "utf8",
 );
+const announcementService = readFileSync(
+  new URL("../src/services/announcementService.ts", import.meta.url),
+  "utf8",
+);
 
 test("task notifications are private per-user records", () => {
   assert.match(migration, /alter table public\.task_notifications enable row level security/i);
@@ -114,4 +118,12 @@ test("notification bell refreshes within a minute and whenever the panel opens",
     /(?:currentTarget|target)\.open[\s\S]{0,200}(?:void\s+)?refresh\(\)/,
     "opening the notifications panel must fetch reminders immediately",
   );
+});
+
+test("notification bell never queries protected records without the matching session", () => {
+  assert.match(bell, /loadMyAnnouncements\(expectedUserId\)/);
+  assert.match(bell, /loadMyTaskNotifications\(50, expectedUserId\)/);
+  assert.match(bell, /refreshGenerationRef/);
+  assert.match(service, /runAuthenticatedSupabaseRequest/);
+  assert.match(announcementService, /runAuthenticatedSupabaseRequest/);
 });

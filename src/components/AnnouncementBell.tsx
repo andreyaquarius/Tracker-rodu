@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 import type { SupabaseAccount } from "../services/supabaseAuth";
 import {
@@ -31,6 +31,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
   const [taskNotifications, setTaskNotifications] = useState<TaskReminderNotification[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const refreshGenerationRef = useRef(0);
 
   const unreadCount = useMemo(
     () =>
@@ -40,14 +41,18 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
   );
 
   const refresh = async () => {
-    if (!account) return;
+    const expectedUserId = account?.id;
+    const generation = ++refreshGenerationRef.current;
+    const isCurrent = () => refreshGenerationRef.current === generation;
+    if (!expectedUserId) return;
     setLoading(true);
     setError("");
     try {
       const [announcementResult, taskResult] = await Promise.allSettled([
-        loadMyAnnouncements(),
-        loadMyTaskNotifications(),
+        loadMyAnnouncements(expectedUserId),
+        loadMyTaskNotifications(50, expectedUserId),
       ]);
+      if (!isCurrent()) return;
       if (announcementResult.status === "fulfilled") {
         setAnnouncements(announcementResult.value);
       }
@@ -61,16 +66,20 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
         setError("Частину сповіщень тимчасово не вдалося завантажити.");
       }
     } catch (loadError) {
+      if (!isCurrent()) return;
       setError(loadError instanceof Error ? loadError.message : "Не вдалося завантажити сповіщення.");
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   };
 
   useEffect(() => {
+    refreshGenerationRef.current += 1;
     if (!account) {
       setAnnouncements([]);
       setTaskNotifications([]);
+      setError("");
+      setLoading(false);
       return;
     }
     void refresh();
@@ -78,6 +87,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {
+      refreshGenerationRef.current += 1;
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
@@ -93,7 +103,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
       ),
     );
     try {
-      await markAnnouncementRead(announcement.id);
+      await markAnnouncementRead(announcement.id, account?.id);
     } catch {
       void refresh();
     }
@@ -109,7 +119,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
       ),
     );
     try {
-      await markTaskNotificationRead(notification.id);
+      await markTaskNotificationRead(notification.id, account?.id);
     } catch {
       void refresh();
     }
@@ -131,8 +141,8 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
     );
     try {
       await Promise.all([
-        ...unread.map((announcement) => markAnnouncementRead(announcement.id)),
-        ...(unreadTasks.length ? [markAllTaskNotificationsRead()] : []),
+        ...unread.map((announcement) => markAnnouncementRead(announcement.id, account?.id)),
+        ...(unreadTasks.length ? [markAllTaskNotificationsRead(account?.id)] : []),
       ]);
     } catch {
       void refresh();
