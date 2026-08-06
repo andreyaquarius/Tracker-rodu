@@ -91,18 +91,6 @@ export function BackupPage({
     }
   };
 
-  const createInternalBackup = () =>
-    run(async () => {
-      const activeWorkspace = requireOwner();
-      const backup = await createProjectBackup(activeWorkspace.projectId, db, "manual");
-      onActivity?.(
-        backup.id,
-        `Створено резервну копію «${backup.name}».`,
-        "backup_created",
-      );
-      await refreshBackups();
-    }, "Резервну копію проєкту створено.");
-
   const restoreBackup = (backup: BackupFile) => {
     if (!window.confirm(
       "Відновлення замінить поточні дані. Перед цим буде створено страхувальну копію поточного стану.",
@@ -120,7 +108,7 @@ export function BackupPage({
         message: "Створюємо страховочну копію поточних даних…",
         percent: 7,
       });
-      await createProjectBackup(activeWorkspace.projectId, db, "manual");
+      await createProjectBackup(activeWorkspace.projectId, db);
       setRestoreProgress({
         title: "Відновлення проєкту",
         message: "Завантажуємо та перевіряємо резервну копію…",
@@ -190,7 +178,7 @@ export function BackupPage({
         message: "Створюємо страховочну копію поточного проєкту…",
         percent: 7,
       });
-      await createProjectBackup(activeWorkspace.projectId, db, "manual");
+      await createProjectBackup(activeWorkspace.projectId, db);
       await onReplace(imported, (message, percent) =>
         setRestoreProgress({
           title: "Імпорт резервної копії",
@@ -234,7 +222,7 @@ export function BackupPage({
         message: "Створюємо страховочну копію поточного проєкту…",
         percent: 7,
       });
-      await createProjectBackup(activeWorkspace.projectId, db, "manual");
+      await createProjectBackup(activeWorkspace.projectId, db);
       await onReplace(imported, (message, percent) =>
         setRestoreProgress({
           title: "Імпорт Excel-копії",
@@ -319,19 +307,6 @@ export function BackupPage({
       </section>
 
       <section className="backup-grid">
-        <article className="panel backup-card">
-          <span className="card-icon">S</span>
-          <h2>Внутрішня копія</h2>
-          <p>Створіть повний знімок активного проєкту у приватному сховищі.</p>
-          <button
-            className="button button-secondary"
-            disabled={busy || !isOwner}
-            onClick={createInternalBackup}
-          >
-            Створити резервну копію
-          </button>
-        </article>
-
         <article className="panel backup-card">
           <span className="card-icon">↓</span>
           <h2>Завантажити копію</h2>

@@ -2144,7 +2144,7 @@ export default function App() {
     if (automaticProjectBackupRef.current === projectId) return;
     automaticProjectBackupRef.current = projectId;
 
-    void createProjectBackup(projectId, activeDb, "automatic")
+    void createProjectBackup(projectId, activeDb)
       .then(async () => {
         const lastAutomaticBackupAt = new Date().toISOString();
         const next = { ...projectPreferences, lastAutomaticBackupAt };

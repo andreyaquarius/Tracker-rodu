@@ -3,6 +3,7 @@ import { normalizeDatabase } from "../utils/database";
 import { getSupabaseClient } from "./supabaseAuth";
 
 const PROJECT_BACKUP_BUCKET = "project-backups";
+const MAX_AUTOMATIC_BACKUPS_PER_PROJECT = 7;
 
 function backupTypeFromName(name: string): BackupType {
   if (name.includes("-automatic-")) return "automatic";
@@ -13,16 +14,23 @@ function safeTimestamp(value = new Date()): string {
   return value.toISOString().replace(/[:.]/g, "-");
 }
 
-function backupName(type: BackupType): string {
-  return `tracker-rodu-${type}-${safeTimestamp()}.json`;
+function backupName(): string {
+  return `tracker-rodu-automatic-${safeTimestamp()}.json`;
 }
 
 export async function createProjectBackup(
   projectId: string,
   db: AppDatabase,
-  type: BackupType,
 ): Promise<BackupFile> {
-  const name = backupName(type);
+  // The list is newest-first. When seven copies already exist, delete the
+  // oldest one before uploading the eighth so the new snapshot is never
+  // blocked by the server-side seven-object safety limit.
+  await pruneAutomaticProjectBackups(
+    projectId,
+    MAX_AUTOMATIC_BACKUPS_PER_PROJECT - 1,
+  );
+
+  const name = backupName();
   const path = `${projectId}/${name}`;
   const content = JSON.stringify(db, null, 2);
   const blob = new Blob([content], { type: "application/json" });
@@ -34,25 +42,32 @@ export async function createProjectBackup(
     });
   if (error) throw error;
   const createdTime = new Date().toISOString();
-  if (type === "automatic") {
-    const automatic = (await listProjectBackups(projectId))
-      .filter((backup) => backup.type === "automatic")
-      .slice(7);
-    if (automatic.length) {
-      const { error: pruneError } = await getSupabaseClient().storage
-        .from(PROJECT_BACKUP_BUCKET)
-        .remove(automatic.map((backup) => backup.id));
-      if (pruneError) throw pruneError;
-    }
-  }
+  await pruneAutomaticProjectBackups(projectId, MAX_AUTOMATIC_BACKUPS_PER_PROJECT);
   return {
     id: path,
     name,
     createdTime,
     modifiedTime: createdTime,
     size: blob.size,
-    type,
+    type: "automatic",
   };
+}
+
+async function pruneAutomaticProjectBackups(
+  projectId: string,
+  keep: number,
+): Promise<void> {
+  const obsolete = (await listProjectBackups(projectId))
+    .filter((backup) => backup.type === "automatic")
+    // listProjectBackups returns newest-first, so everything after `keep` is
+    // the oldest part of the rotation.
+    .slice(Math.max(0, keep));
+  if (!obsolete.length) return;
+
+  const { error } = await getSupabaseClient().storage
+    .from(PROJECT_BACKUP_BUCKET)
+    .remove(obsolete.map((backup) => backup.id));
+  if (error) throw error;
 }
 
 export async function listProjectBackups(
