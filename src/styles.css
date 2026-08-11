@@ -2265,6 +2265,69 @@ tbody tr:hover { background: #fbfaf5; }
 .circular-ancestor-camera-controls button:focus-visible {
   background: var(--green-100);
 }
+.circular-ancestor-export-menu {
+  position: relative;
+}
+.circular-ancestor-export-menu > summary {
+  min-width: 32px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--green-900);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  list-style: none;
+  cursor: pointer;
+}
+.circular-ancestor-export-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.circular-ancestor-export-menu > summary:hover,
+.circular-ancestor-export-menu > summary:focus-visible,
+.circular-ancestor-export-menu[open] > summary {
+  background: var(--green-100);
+}
+.circular-ancestor-export-menu > summary[aria-disabled="true"] {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.circular-ancestor-export-menu > div {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  display: grid;
+  gap: 3px;
+  padding: 7px;
+  border: 1px solid #cbdad4;
+  border-radius: 11px;
+  background: #fffdfa;
+  box-shadow: 0 16px 38px rgba(20, 55, 46, .22);
+}
+.circular-ancestor-camera-controls .circular-ancestor-export-menu > div > button {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  display: block;
+  padding: 9px 10px;
+  border-radius: 7px;
+  color: var(--green-950);
+  background: transparent;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: left;
+  white-space: normal;
+}
+.circular-ancestor-camera-controls .circular-ancestor-export-menu > div > button:hover,
+.circular-ancestor-camera-controls .circular-ancestor-export-menu > div > button:focus-visible {
+  background: #edf5f1;
+}
 .circular-ancestor-camera-controls .circular-ancestor-readable-zoom {
   color: var(--green-950);
   background: #e4f0ea;
@@ -2276,6 +2339,12 @@ tbody tr:hover { background: #fbfaf5; }
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
+.circular-ancestor-camera-controls .circular-ancestor-export-menu > summary > span {
+  min-width: 0;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+}
 .circular-ancestor-list-toggle {
   white-space: nowrap;
 }
@@ -2285,6 +2354,10 @@ tbody tr:hover { background: #fbfaf5; }
   color: #63736c;
   background: #f0f4ef;
   font-size: 10px;
+}
+.circular-ancestor-export-feedback {
+  color: #285f52;
+  font-weight: 800;
 }
 .circular-ancestor-error,
 .circular-ancestor-warning {

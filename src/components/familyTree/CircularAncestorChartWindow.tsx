@@ -21,6 +21,11 @@ import {
   planCircularAncestorLabel,
   recommendCircularAncestorLabelZoom,
 } from "../../features/family-tree-view/circular/circularAncestorChartLabels";
+import {
+  CIRCULAR_ANCESTOR_EXPORT_OPTIONS,
+  exportCircularAncestorChart,
+  type CircularAncestorExportFormat,
+} from "../../features/family-tree-view/circular/circularAncestorChartExport.ts";
 import { createTrackerNeighborhoodClient } from "../../services/familyTreeNeighborhoodService";
 import {
   applyFamilyTreeNameDisplay,
@@ -87,6 +92,9 @@ export function CircularAncestorChartWindow({
   const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [fallbackFullscreen, setFallbackFullscreen] = useState(false);
   const [fullscreenPending, setFullscreenPending] = useState(false);
+  const [exportPending, setExportPending] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState("");
+  const [exportError, setExportError] = useState("");
   const [camera, setCamera] = useState<ChartCamera>({ zoom: 1, x: 0, y: 0 });
   const [svgSize, setSvgSize] = useState({ width: 1, height: 1 });
   const chartId = useId().replace(/:/g, "");
@@ -203,6 +211,38 @@ export function CircularAncestorChartWindow({
       ...current,
       zoom: Math.min(MAX_ZOOM, Math.max(0.7, nextZoom)),
     }));
+  }
+
+  async function saveChart(format: CircularAncestorExportFormat) {
+    const sourceSvg = svgRef.current;
+    if (!sourceSvg || !model.occurrences.length || exportPending) return;
+
+    setExportPending(true);
+    setExportFeedback("");
+    setExportError("");
+    try {
+      const message = await exportCircularAncestorChart({
+        sourceSvg,
+        worldSize,
+        format,
+        focusLabel: currentFocusLabel,
+        generations,
+        ancestorCount: Math.max(0, model.occurrences.length - 1),
+        generatedAtLabel: new Intl.DateTimeFormat("uk-UA", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(new Date()),
+      });
+      setExportFeedback(message);
+    } catch (error) {
+      setExportError(
+        error instanceof Error
+          ? error.message
+          : "Не вдалося зберегти кругову діаграму.",
+      );
+    } finally {
+      setExportPending(false);
+    }
   }
 
   function handleWheel(event: ReactWheelEvent<SVGSVGElement>) {
@@ -537,6 +577,36 @@ export function CircularAncestorChartWindow({
             >
               {fullscreen ? "Згорнути" : "На весь екран"}
             </button>
+            <details className="circular-ancestor-export-menu">
+              <summary
+                aria-label="Зберегти або надрукувати кругову діаграму"
+                aria-disabled={exportPending || neighborhood.loading || !model.occurrences.length}
+                title="Зберегти / PDF"
+                onClick={(event) => {
+                  if (exportPending || neighborhood.loading || !model.occurrences.length) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                <span aria-hidden="true">{exportPending ? "…" : "⇩"}</span>
+              </summary>
+              <div role="menu" aria-label="Формат збереження кругової діаграми">
+                {CIRCULAR_ANCESTOR_EXPORT_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="menuitem"
+                    disabled={exportPending || neighborhood.loading || !model.occurrences.length}
+                    onClick={(event) => {
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                      void saveChart(option.value);
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </details>
           </div>
           <button
             type="button"
@@ -554,12 +624,25 @@ export function CircularAncestorChartWindow({
             : `Знайдено ${Math.max(0, model.occurrences.length - 1)} позицій предків у ${generations} поколіннях. ` +
               `Читабельний масштаб: ${Math.round(readableLabelZoom * 100)}%. ` +
               "Натисніть на особу в діаграмі, щоб відкрити її дії праворуч."}
+          {exportFeedback ? <strong className="circular-ancestor-export-feedback"> {exportFeedback}</strong> : null}
         </div>
 
         {neighborhood.error ? (
           <div className="circular-ancestor-error" role="alert">
             <span>{neighborhood.error.message}</span>
             <button type="button" className="button button-secondary" onClick={neighborhood.reload}>Спробувати ще раз</button>
+          </div>
+        ) : null}
+        {exportError ? (
+          <div className="circular-ancestor-error" role="alert">
+            <span>{exportError}</span>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setExportError("")}
+            >
+              Закрити
+            </button>
           </div>
         ) : null}
         {chartWarnings.length ? (
