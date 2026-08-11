@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Modal } from "../Modal";
+import type { FamilyTreeAppearanceSyncState } from "../../hooks/useFamilyTreeAppearancePreferences.ts";
 import {
   DEFAULT_FAMILY_TREE_APPEARANCE,
   DIRECT_LINEAGE_COLOR_PRESETS,
@@ -8,6 +9,7 @@ import {
   directLineagePalette,
   type DirectLineageGrouping,
   type FamilyTreeAppearancePreferences,
+  type MarriedSurnameDisplay,
 } from "../../utils/familyTreeAppearance.ts";
 
 export interface FamilyTreeToolEntry {
@@ -15,6 +17,8 @@ export interface FamilyTreeToolEntry {
   title: string;
   isDefault?: boolean;
 }
+
+export type FamilyTreeDisplayMode = "classic" | "direct-ancestors";
 
 interface FamilyTreeToolsWindowProps {
   trees: readonly FamilyTreeToolEntry[];
@@ -27,19 +31,59 @@ interface FamilyTreeToolsWindowProps {
   gedcomPhotoBackupCount: number;
   canExportGedcom: boolean;
   exportingGedcom: boolean;
+  displayMode: FamilyTreeDisplayMode;
   appearance: FamilyTreeAppearancePreferences;
+  appearanceSyncState?: FamilyTreeAppearanceSyncState;
   notice?: string;
   onSelectTree: (treeId: string) => void;
   onSelectResearch: (researchId: string) => void;
   onImportGedcom: () => void;
   onOpenGedcomPhotoBackup: () => void;
   onExportGedcom: () => void;
+  onSelectDisplayMode: (mode: FamilyTreeDisplayMode) => void;
   onOpenCircularChart: () => void;
   onAppearanceChange: (value: FamilyTreeAppearancePreferences) => void;
   onClose: () => void;
 }
 
 type ToolsView = "main" | "visualizations" | "settings";
+
+const MARRIED_SURNAME_OPTIONS: readonly {
+  value: MarriedSurnameDisplay;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: "married-with-maiden",
+    label: "Прізвище за чоловіком (Дівоче прізвище)",
+    description: "Спочатку поточне прізвище, дівоче — у дужках.",
+  },
+  {
+    value: "maiden-with-married",
+    label: "Дівоче прізвище (Прізвище за чоловіком)",
+    description: "Спочатку дівоче прізвище, поточне — у дужках.",
+  },
+  {
+    value: "married-only",
+    label: "Прізвище за чоловіком",
+    description: "Показувати лише прізвище, набуте у шлюбі.",
+  },
+  {
+    value: "maiden-only",
+    label: "Дівоче прізвище",
+    description: "Показувати лише прізвище при народженні.",
+  },
+];
+
+const APPEARANCE_SYNC_COPY: Readonly<Record<
+  Exclude<FamilyTreeAppearanceSyncState, "idle">,
+  string
+>> = {
+  loading: "Завантажуємо ваші налаштування з облікового запису…",
+  saving: "Зберігаємо налаштування в обліковому записі…",
+  saved: "Збережено в обліковому записі. Ці налаштування діятимуть і на інших пристроях.",
+  error: "Не вдалося синхронізувати з обліковим записом. На цьому пристрої зміни збережені локально.",
+};
 
 const GROUPING_OPTIONS: readonly {
   value: DirectLineageGrouping;
@@ -100,13 +144,16 @@ export function FamilyTreeToolsWindow({
   gedcomPhotoBackupCount,
   canExportGedcom,
   exportingGedcom,
+  displayMode,
   appearance,
+  appearanceSyncState = "idle",
   notice,
   onSelectTree,
   onSelectResearch,
   onImportGedcom,
   onOpenGedcomPhotoBackup,
   onExportGedcom,
+  onSelectDisplayMode,
   onOpenCircularChart,
   onAppearanceChange,
   onClose,
@@ -287,7 +334,7 @@ export function FamilyTreeToolsWindow({
               <span className="family-tree-tools-icon" aria-hidden="true">⚙</span>
               <span>
                 <strong>Налаштування дерева</strong>
-                <small>Кольори прямої гілки та поділ родових секторів</small>
+                <small>ПІБ у картках, кольори гілок та родові сектори</small>
               </span>
             </button>
           </div>
@@ -308,15 +355,41 @@ export function FamilyTreeToolsWindow({
             <div className="family-tree-tools-grid">
               <button
                 type="button"
-                className="family-tree-tools-action family-tree-tools-action-active"
-                onClick={onClose}
+                className={`family-tree-tools-action${
+                  displayMode === "classic"
+                    ? " family-tree-tools-action-active"
+                    : ""
+                }`}
+                aria-pressed={displayMode === "classic"}
+                onClick={() => onSelectDisplayMode("classic")}
               >
                 <span className="family-tree-tools-icon" aria-hidden="true">⌘</span>
                 <span>
                   <strong>Класичне родове дерево</strong>
                   <small>Поточне відображення на полотні</small>
                 </span>
-                <span className="family-tree-tools-badge">Активне</span>
+                {displayMode === "classic" ? (
+                  <span className="family-tree-tools-badge">Активне</span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className={`family-tree-tools-action${
+                  displayMode === "direct-ancestors"
+                    ? " family-tree-tools-action-active"
+                    : ""
+                }`}
+                aria-pressed={displayMode === "direct-ancestors"}
+                onClick={() => onSelectDisplayMode("direct-ancestors")}
+              >
+                <span className="family-tree-tools-icon" aria-hidden="true">⑂</span>
+                <span>
+                  <strong>Родовід прямих предків</strong>
+                  <small>Окремий режим полотна · лише прямі предки зліва направо</small>
+                </span>
+                {displayMode === "direct-ancestors" ? (
+                  <span className="family-tree-tools-badge">Активне</span>
+                ) : null}
               </button>
               <button
                 type="button"
@@ -342,12 +415,69 @@ export function FamilyTreeToolsWindow({
             </button>
             <div>
               <span className="eyebrow">Налаштування дерева</span>
-              <h3>Заливка прямої гілки</h3>
+              <h3>Заливка прямої гілки та відображення імен</h3>
               <p>
-                Бокові родичі залишаються нейтральними, а прямі предки
-                отримують вибрану заливку в усіх режимах дерева.
+                Налаштуйте формат ПІБ у картках, кольори прямої гілки та
+                поділ родових секторів. Дані в профілях осіб не змінюються.
               </p>
+              {appearanceSyncState !== "idle" ? (
+                <p
+                  className="family-tree-appearance-sync"
+                  data-state={appearanceSyncState}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {APPEARANCE_SYNC_COPY[appearanceSyncState]}
+                </p>
+              ) : null}
             </div>
+
+            <fieldset className="family-tree-lineage-fieldset">
+              <legend>Відображення імен</legend>
+              <p>
+                Виберіть, як показувати прізвища жінок, для яких відомі
+                дівоче прізвище та прізвище у шлюбі.
+              </p>
+              <div className="family-tree-name-display-options">
+                {MARRIED_SURNAME_OPTIONS.map(option => (
+                  <label key={option.value}>
+                    <input
+                      type="radio"
+                      name="family-tree-married-surname-display"
+                      value={option.value}
+                      checked={appearance.marriedSurnameDisplay === option.value}
+                      onChange={() => onAppearanceChange({
+                        ...appearance,
+                        marriedSurnameDisplay: option.value,
+                      })}
+                    />
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{option.description}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <label className="family-tree-default-relatives">
+                <input
+                  type="checkbox"
+                  checked={appearance.inferMarriedSurnameFromHusband}
+                  onChange={event => onAppearanceChange({
+                    ...appearance,
+                    inferMarriedSurnameFromHusband: event.target.checked,
+                  })}
+                />
+                <span>
+                  <strong>
+                    Якщо прізвище за чоловіком не вказано, використовувати прізвище чоловіка
+                  </strong>
+                  <small>
+                    Береться прізвище активного або основного чоловіка зі
+                    зв’язків дерева. Збережені дані особи не змінюються.
+                  </small>
+                </span>
+              </label>
+            </fieldset>
 
             <fieldset className="family-tree-lineage-fieldset">
               <legend>Основний колір</legend>

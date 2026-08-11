@@ -245,7 +245,7 @@ test("leaving a special perspective restores the complete pedigree snapshot", ()
   assert.match(atomicRestore, /activeBranchLayerKeysRef\.current\.clear\(\)/);
 });
 
-test("all three perspectives persist independent camera snapshots", () => {
+test("all perspectives and display modes persist independent camera snapshots", () => {
   assert.match(
     productionPage,
     /useRef\(new Map<string, CameraState>\(\)\)/,
@@ -256,12 +256,16 @@ test("all three perspectives persist independent camera snapshots", () => {
   );
   assert.match(
     productionPage,
-    /cameraSnapshotsRef\.current\.set\(perspectiveKey, camera\)/,
+    /const viewKey = `\$\{displayMode\}:\$\{perspectiveKey\}`/,
   );
-  assert.match(productionPage, /key=\{perspectiveKey\}/);
   assert.match(
     productionPage,
-    /initialCamera=\{cameraSnapshotsRef\.current\.get\(perspectiveKey\)\}/,
+    /cameraSnapshotsRef\.current\.set\(viewKey, camera\)/,
+  );
+  assert.match(productionPage, /key=\{viewKey\}/);
+  assert.match(
+    productionPage,
+    /initialCamera=\{cameraSnapshotsRef\.current\.get\(viewKey\)\}/,
   );
   assert.match(productionPage, /onCameraChange=\{rememberCamera\}/);
 

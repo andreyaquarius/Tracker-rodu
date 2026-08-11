@@ -282,7 +282,7 @@ test("production keeps the stable root overlay out of the strict all-descendants
 
   assert.match(
     production,
-    /const homeLineageOverlayActive\s*=\s*perspective\.kind !== "all-descendants"\s*&&\s*\(perspective\.kind !== "pedigree" \|\| focusPersonId !== homePersonId\)/,
+    /const homeLineageOverlayActive\s*=\s*!directAncestorMode\s*&&\s*perspective\.kind !== "all-descendants"\s*&&\s*\(perspective\.kind !== "pedigree" \|\| focusPersonId !== homePersonId\)/,
     "the descendants session must not fetch the persisted home ancestor closure",
   );
   assert.match(

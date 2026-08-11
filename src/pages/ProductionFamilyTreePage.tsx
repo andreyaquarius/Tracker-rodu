@@ -9,7 +9,10 @@ import { Modal } from "../components/Modal";
 import { GedcomImportButton, type GedcomImportArchivePayload } from "../components/GedcomImportButton";
 import { GedcomPhotoBackupModal } from "../components/GedcomPhotoBackupModal.tsx";
 import { CircularAncestorChartWindow } from "../components/familyTree/CircularAncestorChartWindow";
-import { FamilyTreeToolsWindow } from "../components/familyTree/FamilyTreeToolsWindow";
+import {
+  FamilyTreeToolsWindow,
+  type FamilyTreeDisplayMode,
+} from "../components/familyTree/FamilyTreeToolsWindow";
 import {
   FamilyTreeAttachPersonDialog,
   type FamilyTreeAttachAction,
@@ -28,6 +31,7 @@ import {
 } from "../components/familyTree/FamilyTreeStates";
 import { FamilyTreeViewport } from "../features/family-tree-view/react/FamilyTreeViewport";
 import { attachTrackerPersonPhotos } from "../features/family-tree-view/adapters/trackerPersonPhotos.ts";
+import { applyFamilyTreeNameDisplay } from "../features/family-tree-view/adapters/familyTreeNameDisplay.ts";
 import { MAX_RENDERED_FAMILY_TREE_NODES } from "../features/family-tree-view/react/renderLimits";
 import {
   useFamilyTreeNeighborhood,
@@ -73,6 +77,7 @@ import type {
   TreeUnion,
 } from "../features/family-tree-view/types";
 import { useFamilyTreeMutations } from "../hooks/useFamilyTreeMutations";
+import { useFamilyTreeAppearancePreferences } from "../hooks/useFamilyTreeAppearancePreferences.ts";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 import {
   createFamilyTreeFromLegacyImport,
@@ -103,12 +108,8 @@ import {
   scopedFamilyTreeFocusPersonId,
 } from "../utils/familyTreeFocusHistory.ts";
 import {
-  DEFAULT_FAMILY_TREE_APPEARANCE,
   directLineageGroupingDepth,
   directLineagePalette,
-  normalizeFamilyTreeAppearance,
-  readFamilyTreeAppearance,
-  writeFamilyTreeAppearance,
   type FamilyTreeAppearancePreferences,
 } from "../utils/familyTreeAppearance.ts";
 import { formatDateForDisplay } from "../utils/dateHelpers.ts";
@@ -214,6 +215,8 @@ export function ProductionFamilyTreePage({
   const [reloadRevision, setReloadRevision] = useState(0);
   const [rootDialogOpen, setRootDialogOpen] = useState(false);
   const [treeToolsOpen, setTreeToolsOpen] = useState(false);
+  const [treeDisplayMode, setTreeDisplayMode] =
+    useState<FamilyTreeDisplayMode>("classic");
   const [activeTreeFocus, setActiveTreeFocus] = useState<{
     treeId: string;
     centralPersonId: string;
@@ -224,10 +227,6 @@ export function ProductionFamilyTreePage({
   const [gedcomResearchId, setGedcomResearchId] = useState("");
   const [gedcomPhotoRecovery, setGedcomPhotoRecovery] =
     useState<GedcomPhotoRecoverySnapshot | null>(null);
-  const [treeAppearance, setTreeAppearance] =
-    useState<FamilyTreeAppearancePreferences>({
-      ...DEFAULT_FAMILY_TREE_APPEARANCE,
-    });
   const preferredTreeIdRef = useRef("");
   const mutations = useFamilyTreeMutations();
   const persistedGedcomPhotoPlan = useMemo(
@@ -291,6 +290,11 @@ export function ProductionFamilyTreePage({
     entryPoints.find((entry) => entry.isDefault) ??
     entryPoints[0] ??
     null;
+  const {
+    appearance: treeAppearance,
+    syncState: treeAppearanceSyncState,
+    updateAppearance: updateTreeAppearance,
+  } = useFamilyTreeAppearancePreferences(projectId, selectedEntry?.id);
   const routedFocusPersonId = !initialTreeId?.trim() || selectedEntry?.id === initialTreeId.trim()
     ? initialFocusPersonId
     : undefined;
@@ -313,23 +317,6 @@ export function ProductionFamilyTreePage({
     });
   }, [onActiveContextChange, projectId, selectedEntry?.id, selectedEntry?.rootPersonId]);
 
-  useEffect(() => {
-    setTreeAppearance(
-      projectId && selectedEntry?.id
-        ? readFamilyTreeAppearance(projectId, selectedEntry.id)
-        : { ...DEFAULT_FAMILY_TREE_APPEARANCE },
-    );
-  }, [projectId, selectedEntry?.id]);
-
-  const updateTreeAppearance = useCallback((
-    value: FamilyTreeAppearancePreferences,
-  ) => {
-    const normalized = normalizeFamilyTreeAppearance(value);
-    setTreeAppearance(normalized);
-    if (projectId && selectedEntry?.id) {
-      writeFamilyTreeAppearance(projectId, selectedEntry.id, normalized);
-    }
-  }, [projectId, selectedEntry?.id]);
   const searchCircularAncestorFocusPersons = useCallback((query: string) => {
     const normalizedQuery = query.trim().toLocaleLowerCase("uk");
     if (!normalizedQuery) return [];
@@ -616,6 +603,7 @@ export function ProductionFamilyTreePage({
           readOnly={readOnly}
           canCreate={canCreate}
           appearance={treeAppearance}
+          displayMode={treeDisplayMode}
           treeToolsOpen={treeToolsOpen}
           onOpenTreeTools={openTreeTools}
           onFocusPersonChange={handleActiveTreeFocusPersonChange}
@@ -639,13 +627,19 @@ export function ProductionFamilyTreePage({
           gedcomPhotoBackupCount={pendingGedcomPhotoCount}
           canExportGedcom={Boolean(selectedEntry?.id && selectedEntry.rootPersonId)}
           exportingGedcom={exportingGedcom}
+          displayMode={treeDisplayMode}
           appearance={treeAppearance}
+          appearanceSyncState={treeAppearanceSyncState}
           notice={treeToolsNotice}
           onSelectTree={setSelectedTreeId}
           onSelectResearch={setGedcomResearchId}
           onImportGedcom={selectGedcomFile}
           onOpenGedcomPhotoBackup={openGedcomPhotoRecovery}
           onExportGedcom={() => void exportGedcom()}
+          onSelectDisplayMode={(mode) => {
+            setTreeDisplayMode(mode);
+            setTreeToolsOpen(false);
+          }}
           onOpenCircularChart={openCircularAncestorChart}
           onAppearanceChange={updateTreeAppearance}
           onClose={() => setTreeToolsOpen(false)}
@@ -668,6 +662,8 @@ export function ProductionFamilyTreePage({
           treeId={selectedEntry.id}
           focusPersonId={circularChartFocusPersonId}
           focusPersonLabel={circularChartFocusPersonLabel}
+          nameDisplayPreferences={treeAppearance}
+          nameProfiles={persons}
           searchFocusPersons={searchCircularAncestorFocusPersons}
           onFocusPersonChange={setCircularChartFocusPersonId}
           onOpenPerson={onOpenPerson}
@@ -698,6 +694,7 @@ function LoadedFamilyTree({
   readOnly,
   canCreate,
   appearance,
+  displayMode,
   treeToolsOpen,
   onOpenTreeTools,
   onFocusPersonChange,
@@ -713,6 +710,7 @@ function LoadedFamilyTree({
   readOnly: boolean;
   canCreate: boolean;
   appearance: FamilyTreeAppearancePreferences;
+  displayMode: FamilyTreeDisplayMode;
   treeToolsOpen: boolean;
   onOpenTreeTools: () => void;
   onFocusPersonChange: (personId: string) => void;
@@ -737,6 +735,7 @@ function LoadedFamilyTree({
   ));
   const appliedRouteFocusRef = useRef(requestedFocusPersonId);
   const focusPersonId = focusHistory[focusIndex] ?? homePersonId;
+  const directAncestorMode = displayMode === "direct-ancestors";
   useEffect(() => {
     onFocusPersonChange(focusPersonId);
   }, [focusPersonId, onFocusPersonChange]);
@@ -780,6 +779,7 @@ function LoadedFamilyTree({
   // persisted home-person ancestor closure here would re-introduce parents
   // above that person after the descendants projector has removed them.
   const homeLineageOverlayActive =
+    !directAncestorMode &&
     perspective.kind !== "all-descendants" &&
     (perspective.kind !== "pedigree" || focusPersonId !== homePersonId);
   const homeLineageRequestKey = homeLineageOverlayActive
@@ -791,13 +791,13 @@ function LoadedFamilyTree({
     treeId: entryPoint.id,
     focusPersonId,
     ancestorDepth,
-    descendantDepth,
-    collateralDepth,
+    descendantDepth: directAncestorMode ? 0 : descendantDepth,
+    collateralDepth: directAncestorMode ? 0 : collateralDepth,
     maxNodes,
-    sessionKey: "pedigree",
+    sessionKey: directAncestorMode ? "direct-pedigree" : "pedigree",
     defaultVisibleFamilyPersonId: focusPersonId,
     includeCousinDescendantsByDefault:
-      appearance.showCousinDescendantsByDefault,
+      !directAncestorMode && appearance.showCousinDescendantsByDefault,
   });
   useEffect(() => {
     if (!homeLineageOverlayActive) {
@@ -899,6 +899,15 @@ function LoadedFamilyTree({
     : specialNeighborhood;
 
   const pedigreeGraph = pedigreeNeighborhood.graph;
+  const directAncestorProjection = useMemo(
+    () => directAncestorMode
+      ? buildRootLineageProjection({
+          graph: pedigreeGraph,
+          rootPersonId: focusPersonId,
+        })
+      : undefined,
+    [directAncestorMode, focusPersonId, pedigreeGraph],
+  );
   const corridorSessionGraph = useMemo(() => {
     const specialGraph = perspective.kind === "all-descendants"
       ? progressiveDescendants.graph
@@ -982,7 +991,7 @@ function LoadedFamilyTree({
       ? corridorProjection?.perspectiveFocusPersonId ?? perspective.returnTo.focusPersonId
       : perspective.rootPersonId;
   const perspectiveGraph = perspective.kind === "pedigree"
-    ? pedigreeGraph
+    ? directAncestorProjection?.graph ?? pedigreeGraph
     : perspective.kind === "family-corridor"
       ? corridorProjection?.graph ?? graph
       : allDescendantsProjection?.graph ?? graph;
@@ -1040,18 +1049,29 @@ function LoadedFamilyTree({
       : perspectiveGraph,
     [perspective.kind, perspectiveGraph, rootLineageProjection],
   );
+  const displayedGraphWithPreferredNames = useMemo(
+    () => applyFamilyTreeNameDisplay(
+      displayedGraphWithoutPhotos,
+      appearance,
+      persons,
+    ),
+    [appearance, displayedGraphWithoutPhotos, persons],
+  );
   const displayedGraph = useMemo(
-    () => attachTrackerPersonPhotos(displayedGraphWithoutPhotos, persons),
-    [displayedGraphWithoutPhotos, persons],
+    () => attachTrackerPersonPhotos(displayedGraphWithPreferredNames, persons),
+    [displayedGraphWithPreferredNames, persons],
   );
   // Camera/layout focus is temporary. The direct-lineage fill is a stable
   // property of the persisted tree and is always rooted at its home person.
-  const lineageTargetPersonId = homePersonId;
+  const lineageTargetPersonId = directAncestorMode
+    ? focusPersonId
+    : homePersonId;
   const lineagePalette = useMemo(
     () => directLineagePalette(appearance),
     [appearance],
   );
   const perspectiveKey = familyTreePerspectiveKey(perspective, focusPersonId);
+  const viewKey = `${displayMode}:${perspectiveKey}`;
   const corridorBreadcrumbs = useMemo(
     () => perspective.kind === "family-corridor"
       ? perspective.trail.map((item, index) => ({
@@ -1078,8 +1098,8 @@ function LoadedFamilyTree({
     !progressiveDescendants.loading &&
     progressiveDescendants.loadedGenerations >= 100;
   const rememberCamera = useCallback((camera: CameraState) => {
-    cameraSnapshotsRef.current.set(perspectiveKey, camera);
-  }, [perspectiveKey]);
+    cameraSnapshotsRef.current.set(viewKey, camera);
+  }, [viewKey]);
   // The logical descendants graph may contain thousands of people. Scene
   // construction therefore gets a graph-derived occurrence budget, while the
   // viewport independently keeps at most 600 interactive items mounted.
@@ -1107,7 +1127,9 @@ function LoadedFamilyTree({
   );
   const layoutOptions = useMemo<FamilyTreeLayoutOptions>(() => ({
     focusPersonId: layoutFocusPersonId,
-    layoutMode: perspective.kind === "all-descendants"
+    layoutMode: directAncestorMode && perspective.kind === "pedigree"
+      ? "direct-pedigree"
+      : perspective.kind === "all-descendants"
       ? "descendant-forest"
       : "family-graph",
     ancestorDepth: MAX_RENDERED_FAMILY_TREE_NODES,
@@ -1125,7 +1147,7 @@ function LoadedFamilyTree({
     // The footer already exposes the complete add-relative menu. Rendering a
     // second dashed plus on the canvas duplicates that action and crowds the
     // branch controls, especially on compact and touch layouts.
-    showUnknownParentPlaceholders: false,
+    showUnknownParentPlaceholders: directAncestorMode,
     activeParentSetByChild,
     ...(geometryLineagePersonIds.length
       ? { primaryLineagePersonIds: geometryLineagePersonIds }
@@ -1133,6 +1155,7 @@ function LoadedFamilyTree({
   }), [
     activeParentSetByChild,
     appearance.directLineageGrouping,
+    directAncestorMode,
     geometryLineagePersonIds,
     layoutFocusPersonId,
     lineageTargetPersonId,
@@ -1249,6 +1272,13 @@ function LoadedFamilyTree({
     );
     restorePedigreeSnapshot(perspective.returnTo, graphIdentityChanged);
   }
+
+  useEffect(() => {
+    if (!directAncestorMode || !isSpecialFamilyTreePerspective(perspective)) {
+      return;
+    }
+    restorePedigreeSnapshot(perspective.returnTo);
+  }, [directAncestorMode]);
 
   function reloadPedigreeAfterMutation() {
     if (isSpecialFamilyTreePerspective(perspective)) {
@@ -2113,17 +2143,17 @@ function LoadedFamilyTree({
           <summary className="button button-secondary" aria-controls="family-tree-v2-view-settings-panel">Параметри</summary>
           <div id="family-tree-v2-view-settings-panel" className="family-tree-v2-view-settings-panel">
         <label>
-          <span>Предків</span>
+          <span>{directAncestorMode ? "Поколінь предків" : "Предків"}</span>
           <input type="number" min={0} value={ancestorDepth} disabled={specialPerspectiveActive} onChange={(event) => setAncestorDepth(nonNegativeInteger(event.target.value, 7))} />
         </label>
-        <label>
+        {!directAncestorMode ? <label>
           <span>Нащадків</span>
           <input type="number" min={0} value={descendantDepth} disabled={specialPerspectiveActive} onChange={(event) => setDescendantDepth(nonNegativeInteger(event.target.value, 0))} />
-        </label>
-        <label className="checkbox-line">
+        </label> : null}
+        {!directAncestorMode ? <label className="checkbox-line">
           <input type="checkbox" checked={collateralDepth > 0} disabled={specialPerspectiveActive} onChange={(event) => setCollateralDepth(event.target.checked ? 1 : 0)} />
           <span>Показати бічні гілки зараз</span>
-        </label>
+        </label> : null}
         <label className="checkbox-line">
           <input type="checkbox" checked={showAllParentSets} disabled={specialPerspectiveActive} onChange={(event) => setShowAllParentSets(event.target.checked)} />
           <span>Усі набори батьків</span>
@@ -2174,14 +2204,14 @@ function LoadedFamilyTree({
         />
       ) : (
       <FamilyTreeViewport
-        key={perspectiveKey}
+        key={viewKey}
         className="family-tree-v2-viewport"
         graph={displayedGraph}
         options={layoutOptions}
         lineageColor={appearance.directLineageColor}
         lineagePalette={lineagePalette}
         maxRenderedNodes={MAX_RENDERED_FAMILY_TREE_NODES}
-        initialCamera={cameraSnapshotsRef.current.get(perspectiveKey)}
+        initialCamera={cameraSnapshotsRef.current.get(viewKey)}
         onCameraChange={rememberCamera}
         selectedPersonId={selectedPersonId}
         preserveAnchorOccurrenceId={anchorOccurrenceId}
@@ -2189,13 +2219,21 @@ function LoadedFamilyTree({
           setSelectedPersonId(personId);
           onOpenPerson?.(personId);
         }}
-        onShowAllDescendants={(personId) => enterAllDescendants(personId)}
+        onShowAllDescendants={directAncestorMode
+          ? undefined
+          : (personId) => enterAllDescendants(personId)}
         onFocusPerson={changeFocus}
-        branchTogglePersonIds={new Set(neighborhood.branchTogglePersonIds)}
-        collapsedBranchPersonIds={new Set(neighborhood.collapsedBranchPersonIds)}
-        onTogglePersonBranches={togglePersonBranches}
-        familyContinuationOwnerByScope={familyContinuationOwnerByScope}
-        onToggleFamilyContinuation={(continuation, occurrenceId, ownerPersonId) => {
+        branchTogglePersonIds={directAncestorMode
+          ? new Set()
+          : new Set(neighborhood.branchTogglePersonIds)}
+        collapsedBranchPersonIds={directAncestorMode
+          ? new Set()
+          : new Set(neighborhood.collapsedBranchPersonIds)}
+        onTogglePersonBranches={directAncestorMode ? undefined : togglePersonBranches}
+        familyContinuationOwnerByScope={directAncestorMode
+          ? new Map()
+          : familyContinuationOwnerByScope}
+        onToggleFamilyContinuation={directAncestorMode ? undefined : (continuation, occurrenceId, ownerPersonId) => {
           void toggleFamilyContinuation(
             continuation,
             occurrenceId,
@@ -2206,7 +2244,9 @@ function LoadedFamilyTree({
           mutations.resetError();
           setRelativeMenuPersonId(personId);
         } : undefined}
-        onExpandContinuation={(token, node) => void expandContinuation(token, node)}
+        onExpandContinuation={directAncestorMode
+          ? undefined
+          : (token, node) => void expandContinuation(token, node)}
         onLayoutWarnings={setLayoutWarnings}
         resolvePhotoSource={resolveFamilyTreePhotoSource}
       />

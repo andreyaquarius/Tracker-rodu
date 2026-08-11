@@ -1,5 +1,6 @@
 import { layoutFamilyGraph } from "../layout/layoutFamilyGraph.ts";
 import { layoutDescendantForest } from "../layout/layoutDescendantForest.ts";
+import { layoutDirectPedigree } from "../layout/layoutDirectPedigree.ts";
 import type { FamilyTreeLayoutInput, LayoutResult } from "../types.ts";
 import type {
   FamilyTreeWorkerResponse,
@@ -32,10 +33,15 @@ export function runFamilyTreeLayoutTask({
   let worker: Worker | undefined;
   let fallbackHandle: ReturnType<typeof setTimeout> | undefined;
   let fallbackScheduled = false;
-  const calculate = calculateFallback ?? (input =>
-    input.options.layoutMode === "descendant-forest"
-      ? layoutDescendantForest(input)
-      : layoutFamilyGraph(input));
+  const calculate = calculateFallback ?? (input => {
+    if (input.options.layoutMode === "descendant-forest") {
+      return layoutDescendantForest(input);
+    }
+    if (input.options.layoutMode === "direct-pedigree") {
+      return layoutDirectPedigree(input);
+    }
+    return layoutFamilyGraph(input);
+  });
 
   let handleMessage:
     | ((event: MessageEvent<FamilyTreeWorkerResponse>) => void)

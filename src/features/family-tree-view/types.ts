@@ -63,6 +63,11 @@ export interface TreePerson {
   displayName: string;
   givenName?: string;
   surname?: string;
+  patronymic?: string;
+  /** Birth/maiden surname used only for configurable tree labels. */
+  maidenSurname?: string;
+  /** Explicit surname acquired in marriage, when the source distinguishes it. */
+  marriedSurname?: string;
   sex?: Sex;
   birth?: SortableGenealogyDate;
   death?: SortableGenealogyDate;
@@ -187,12 +192,15 @@ export interface PreviousNodePosition {
   y: number;
 }
 
-export type FamilyTreeLayoutMode = "family-graph" | "descendant-forest";
+export type FamilyTreeLayoutMode =
+  | "family-graph"
+  | "descendant-forest"
+  | "direct-pedigree";
 export type FamilyTreeLineageGroupDepth = 0 | 1 | 2 | 3;
 
 export interface FamilyTreeLayoutOptions {
   focusPersonId: PersonId;
-  /** Selects one coordinate solver. Descendant mode never runs the pedigree solver. */
+  /** Selects one coordinate solver and presentation direction. */
   layoutMode?: FamilyTreeLayoutMode;
   /** Initial view policy only. Increase or re-root without a schema limit. */
   ancestorDepth?: number;

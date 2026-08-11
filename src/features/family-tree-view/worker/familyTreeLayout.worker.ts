@@ -2,6 +2,7 @@
 
 import { layoutFamilyGraph } from "../layout/layoutFamilyGraph.ts";
 import { layoutDescendantForest } from "../layout/layoutDescendantForest.ts";
+import { layoutDirectPedigree } from "../layout/layoutDirectPedigree.ts";
 import type {
   FamilyTreeWorkerRequest,
   FamilyTreeWorkerResponse,
@@ -22,7 +23,9 @@ self.onmessage = (event: MessageEvent<FamilyTreeWorkerRequest>): void => {
   try {
     const result = message.input.options.layoutMode === "descendant-forest"
       ? layoutDescendantForest(message.input)
-      : layoutFamilyGraph(message.input);
+      : message.input.options.layoutMode === "direct-pedigree"
+        ? layoutDirectPedigree(message.input)
+        : layoutFamilyGraph(message.input);
     if (message.revision < minimumRevision) return;
     const response: FamilyTreeWorkerResponse = {
       type: "LAYOUT_RESULT",

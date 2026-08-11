@@ -24,10 +24,10 @@ test("direct-lineage grouping exposes one, two, four and eight automatic colors"
   for (const [grouping, depth] of groupings) {
     assert.equal(directLineageGroupingDepth(grouping), depth);
     const preferences: FamilyTreeAppearancePreferences = {
+      ...DEFAULT_FAMILY_TREE_APPEARANCE,
       directLineageColor: "#2f7465",
       directLineageGrouping: grouping,
       directLineageBranchColors: [],
-      showCousinDescendantsByDefault: false,
     };
     const palette = directLineagePalette(preferences);
     const count = depth === 0 ? 1 : 2 ** depth;
@@ -45,6 +45,8 @@ test("eight valid custom branch colors override the automatic palette", () => {
     directLineageBranchColors: colors.map(color => color.toUpperCase()),
   });
   assert.equal(normalized.directLineageColor, "#abcdef");
+  assert.equal(normalized.marriedSurnameDisplay, "married-only");
+  assert.equal(normalized.inferMarriedSurnameFromHusband, false);
   assert.equal(normalized.showCousinDescendantsByDefault, false);
   assert.deepEqual(normalized.directLineageBranchColors, colors);
   assert.deepEqual(directLineagePalette(normalized), colors);
@@ -64,6 +66,24 @@ test("eight valid custom branch colors override the automatic palette", () => {
       directLineageBranchColors: [...colors.slice(0, 7), "not-a-color"],
     }).directLineageBranchColors,
     [],
+  );
+});
+
+test("name display preferences are normalized and legacy settings keep safe defaults", () => {
+  assert.deepEqual(
+    normalizeFamilyTreeAppearance({}),
+    DEFAULT_FAMILY_TREE_APPEARANCE,
+  );
+  const normalized = normalizeFamilyTreeAppearance({
+    marriedSurnameDisplay: "maiden-with-married",
+    inferMarriedSurnameFromHusband: true,
+  });
+  assert.equal(normalized.marriedSurnameDisplay, "maiden-with-married");
+  assert.equal(normalized.inferMarriedSurnameFromHusband, true);
+  assert.equal(
+    normalizeFamilyTreeAppearance({ marriedSurnameDisplay: "unsupported" })
+      .marriedSurnameDisplay,
+    DEFAULT_FAMILY_TREE_APPEARANCE.marriedSurnameDisplay,
   );
 });
 
@@ -87,6 +107,9 @@ test("appearance storage stays isolated per project and tree and tolerates failu
     },
   };
   const custom: FamilyTreeAppearancePreferences = {
+    ...DEFAULT_FAMILY_TREE_APPEARANCE,
+    marriedSurnameDisplay: "maiden-with-married",
+    inferMarriedSurnameFromHusband: true,
     directLineageColor: "#477fa5",
     directLineageGrouping: "grandparents",
     directLineageBranchColors: [...STANDARD_DIRECT_LINEAGE_PALETTES[0]!.colors],

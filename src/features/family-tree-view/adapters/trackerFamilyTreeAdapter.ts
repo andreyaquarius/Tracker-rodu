@@ -253,6 +253,16 @@ function mapPerson(input: PersonAdapterInput): TreePerson {
     input.names[0];
   const givenName = preferredName?.givenName || input.profile.givenName;
   const surname = preferredName?.surname || input.profile.surname;
+  const patronymic = preferredName?.patronymic || input.profile.patronymic;
+  const birthName = input.names.find(name => name.nameType === "birth");
+  const marriedName = input.names.find(name => name.nameType === "married");
+  const maidenSurname =
+    birthName?.surname || input.profile.maidenSurname;
+  const marriedSurname = marriedName?.surname || (
+    maidenSurname && input.profile.surname !== maidenSurname
+      ? input.profile.surname
+      : ""
+  );
   const displayName =
     preferredName?.fullName ||
     preferredName?.originalText ||
@@ -271,6 +281,9 @@ function mapPerson(input: PersonAdapterInput): TreePerson {
     displayName,
     ...(givenName ? { givenName } : {}),
     ...(surname ? { surname } : {}),
+    ...(patronymic ? { patronymic } : {}),
+    ...(maidenSurname ? { maidenSurname } : {}),
+    ...(marriedSurname ? { marriedSurname } : {}),
     sex: normalizeSex(input.profile.gender),
     ...(birth ? { birth } : {}),
     ...(death ? { death } : {}),

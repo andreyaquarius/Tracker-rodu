@@ -515,7 +515,7 @@ test("descendant convergence cannot erase the persisted root person's ancestors"
   }
 });
 
-test("production passes the persisted home as one lineage target for every perspective", () => {
+test("production keeps the classic lineage rooted at home and the direct pedigree rooted at its focus", () => {
   const productionPage = readFileSync(
     new URL("../src/pages/ProductionFamilyTreePage.tsx", import.meta.url),
     "utf8",
@@ -528,8 +528,8 @@ test("production passes the persisted home as one lineage target for every persp
   );
   assert.match(
     productionPage,
-    /const lineageTargetPersonId = homePersonId;/,
-    "temporary pedigree/corridor/descendant focus must not replace the root lineage target",
+    /const lineageTargetPersonId = directAncestorMode\s*\?\s*focusPersonId\s*:\s*homePersonId;/,
+    "classic perspectives must retain the home root while the separate direct pedigree follows its own focus",
   );
   assert.match(
     productionPage,

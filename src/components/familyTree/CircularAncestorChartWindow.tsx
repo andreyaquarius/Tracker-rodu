@@ -22,6 +22,12 @@ import {
   recommendCircularAncestorLabelZoom,
 } from "../../features/family-tree-view/circular/circularAncestorChartLabels";
 import { createTrackerNeighborhoodClient } from "../../services/familyTreeNeighborhoodService";
+import {
+  applyFamilyTreeNameDisplay,
+  type FamilyTreeNameDisplayPreferences,
+  type FamilyTreeNameProfile,
+} from "../../features/family-tree-view/adapters/familyTreeNameDisplay.ts";
+import { DEFAULT_FAMILY_TREE_APPEARANCE } from "../../utils/familyTreeAppearance.ts";
 
 const DEFAULT_GENERATIONS = 7;
 const MAX_GENERATIONS = 16;
@@ -32,6 +38,8 @@ interface CircularAncestorChartWindowProps {
   treeId: string;
   focusPersonId: string;
   focusPersonLabel?: string;
+  nameDisplayPreferences?: FamilyTreeNameDisplayPreferences;
+  nameProfiles?: readonly FamilyTreeNameProfile[];
   /** Optional dependency injection used by isolated previews and tests. */
   client?: FamilyTreeNeighborhoodClient;
   searchFocusPersons?: (
@@ -58,6 +66,8 @@ export function CircularAncestorChartWindow({
   treeId,
   focusPersonId,
   focusPersonLabel,
+  nameDisplayPreferences,
+  nameProfiles = [],
   client: providedClient,
   searchFocusPersons,
   onFocusPersonChange,
@@ -106,13 +116,21 @@ export function CircularAncestorChartWindow({
     collateralDepth: 0,
     maxNodes: MAX_CHART_PERSONS,
   });
+  const displayGraph = useMemo(
+    () => applyFamilyTreeNameDisplay(
+      neighborhood.graph,
+      nameDisplayPreferences ?? DEFAULT_FAMILY_TREE_APPEARANCE,
+      nameProfiles,
+    ),
+    [nameDisplayPreferences, nameProfiles, neighborhood.graph],
+  );
   const model = useMemo(
     () => buildCircularAncestorChartModel(
-      neighborhood.graph,
+      displayGraph,
       focusPersonId,
       generations,
     ),
-    [focusPersonId, generations, neighborhood.graph],
+    [displayGraph, focusPersonId, generations],
   );
   const selectedOccurrence = model.occurrences.find(
     (occurrence) => occurrence.occurrenceId === selectedOccurrenceId,

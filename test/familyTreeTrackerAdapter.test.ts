@@ -263,6 +263,20 @@ test("adapter namespaces union IDs while preserving canonical IDs, union data, a
   const graph = adaptTrackerFamilyTreeSnapshot(snapshot(
     ["root", "partner-a", "partner-b", "child-a", "child-b"],
     {
+      personProfiles: [
+        profile("root", {
+          gender: "female",
+          surname: "Коваль",
+          maidenSurname: "Петренко",
+          givenName: "Олена",
+          patronymic: "Іванівна",
+          fullName: "Коваль Олена Іванівна",
+        }),
+        profile("partner-a"),
+        profile("partner-b"),
+        profile("child-a"),
+        profile("child-b"),
+      ],
       treePersons: [
         treePerson("root", 20),
         treePerson("partner-a", 30),
@@ -352,6 +366,10 @@ test("adapter namespaces union IDs while preserving canonical IDs, union data, a
   const root = graph.persons.find(person => person.id === "root")!;
   const partnerB = graph.persons.find(person => person.id === "partner-b")!;
   assert.equal(root.displayName, "Коваль Олена Іванівна");
+  assert.equal(root.givenName, "Олена");
+  assert.equal(root.patronymic, "Іванівна");
+  assert.equal(root.maidenSurname, "Петренко");
+  assert.equal(root.marriedSurname, "Коваль");
   assert.deepEqual(root.birth, { display: "3 квітня 1880", sort: "1880-04-03" });
   assert.ok(partnerB.displayOrder! < root.displayOrder!);
 

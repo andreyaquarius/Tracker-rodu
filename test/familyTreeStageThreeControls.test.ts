@@ -21,8 +21,9 @@ const styles = readFileSync(
 test("stage three keeps the all-descendants command on each person card", () => {
   assert.match(
     page,
-    /<FamilyTreeViewport[\s\S]*?onShowAllDescendants=\{\(personId\) => enterAllDescendants\(personId\)\}/,
+    /<FamilyTreeViewport[\s\S]*?onShowAllDescendants=\{directAncestorMode[\s\S]*?\(personId\) => enterAllDescendants\(personId\)\}/,
   );
+  assert.match(page, /onShowAllDescendants=\{directAncestorMode\s*\?\s*undefined/);
   assert.doesNotMatch(page, /Усі нащадки вибраної особи/);
 });
 

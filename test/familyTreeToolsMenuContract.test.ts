@@ -28,6 +28,20 @@ const styles = readFileSync(
   new URL("../src/styles.css", import.meta.url),
   "utf8",
 );
+const appearanceHook = readFileSync(
+  new URL(
+    "../src/hooks/useFamilyTreeAppearancePreferences.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const appearanceService = readFileSync(
+  new URL(
+    "../src/services/familyTreeAppearancePreferences.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const importButton = readFileSync(
   new URL("../src/components/GedcomImportButton.tsx", import.meta.url),
   "utf8",
@@ -76,6 +90,9 @@ test("tree tools window exposes GEDCOM and clearly marks future modules", () => 
   assert.match(toolsWindow, /Майбутній розділ · незабаром/);
   assert.match(toolsWindow, /Відображення дерева/);
   assert.match(toolsWindow, /Кругова діаграма предків/);
+  assert.match(toolsWindow, /Родовід прямих предків/);
+  assert.match(toolsWindow, /onSelectDisplayMode\("direct-ancestors"\)/);
+  assert.match(toolsWindow, /displayMode === "direct-ancestors"/);
   assert.match(toolsWindow, /Від 1 до 16 поколінь прямих предків · інтерактивний огляд/);
   assert.match(toolsWindow, /onClick=\{onOpenCircularChart\}/);
   assert.doesNotMatch(toolsWindow, /Кругова діаграма предків[\s\S]{0,160}заплановано/);
@@ -113,14 +130,34 @@ test("tree tools expose persistent direct-lineage palettes and per-branch colors
   assert.match(toolsWindow, /const colors = \[\.\.\.lineagePalette\]/);
   assert.match(toolsWindow, /colors\[index\] = color/);
   assert.match(toolsWindow, /directLineageBranchColors: colors/);
-  assert.match(productionPage, /readFamilyTreeAppearance\(projectId, selectedEntry\.id\)/);
-  assert.match(productionPage, /writeFamilyTreeAppearance\(projectId, selectedEntry\.id, normalized\)/);
+  assert.match(productionPage, /useFamilyTreeAppearancePreferences\(projectId, selectedEntry\?\.id\)/);
+  assert.match(appearanceHook, /readFamilyTreeAppearance\(projectId, treeId\)/);
+  assert.match(appearanceHook, /loadFamilyTreeAppearancePreference\(projectId, treeId\)/);
+  assert.match(appearanceHook, /saveFamilyTreeAppearancePreference\(/);
+  assert.match(appearanceHook, /saveChainRef/);
+  assert.match(appearanceService, /\.from\("family_tree_user_preferences"\)/);
+  assert.match(appearanceService, /onConflict: "user_id,tree_id"/);
+  assert.match(toolsWindow, /Ці налаштування діятимуть і на інших пристроях/);
   assert.match(productionPage, /lineagePalette=\{lineagePalette\}/);
   assert.match(productionPage, /defaultVisibleFamilyPersonId:\s*focusPersonId/);
   assert.match(productionPage, /includeCousinDescendantsByDefault:[\s\S]*?appearance\.showCousinDescendantsByDefault/);
   assert.match(productionPage, /Показати бічні гілки зараз/);
   assert.match(styles, /\.family-tree-lineage-branches/);
   assert.match(styles, /\.family-tree-lineage-branch-color/);
+});
+
+test("tree settings expose persistent married and maiden surname display rules", () => {
+  assert.match(toolsWindow, /Відображення імен/);
+  assert.match(toolsWindow, /Прізвище за чоловіком \(Дівоче прізвище\)/);
+  assert.match(toolsWindow, /Дівоче прізвище \(Прізвище за чоловіком\)/);
+  assert.match(toolsWindow, /value: "married-only"/);
+  assert.match(toolsWindow, /value: "maiden-only"/);
+  assert.match(toolsWindow, /checked=\{appearance\.marriedSurnameDisplay === option\.value\}/);
+  assert.match(toolsWindow, /inferMarriedSurnameFromHusband: event\.target\.checked/);
+  assert.match(productionPage, /applyFamilyTreeNameDisplay\(/);
+  assert.match(productionPage, /nameDisplayPreferences=\{treeAppearance\}/);
+  assert.match(circularChart, /applyFamilyTreeNameDisplay\(/);
+  assert.match(styles, /\.family-tree-name-display-options/);
 });
 
 test("circular ancestor chart uses an isolated bounded direct-ancestor session", () => {
@@ -133,6 +170,9 @@ test("circular ancestor chart uses an isolated bounded direct-ancestor session",
   assert.match(circularChart, /Поколінь предків/);
   assert.match(circularChart, /Доступний список/);
   assert.match(productionPage, /onFocusPersonChange=\{handleActiveTreeFocusPersonChange\}/);
+  assert.match(productionPage, /layoutMode: directAncestorMode/);
+  assert.match(productionPage, /buildRootLineageProjection\(\{/);
+  assert.match(productionPage, /directAncestorMode\s*\?\s*"direct-pedigree"/);
   assert.match(productionPage, /<CircularAncestorChartWindow/);
 });
 

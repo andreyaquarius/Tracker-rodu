@@ -8,7 +8,10 @@ const productionPage = readFileSync(
 );
 
 test("production tree does not duplicate the card add-relative action with a canvas placeholder", () => {
-  assert.match(productionPage, /showUnknownParentPlaceholders:\s*false/);
+  assert.match(
+    productionPage,
+    /showUnknownParentPlaceholders:\s*directAncestorMode/,
+  );
   assert.doesNotMatch(
     productionPage,
     /showUnknownParentPlaceholders:\s*!readOnly\s*&&\s*canCreate/,

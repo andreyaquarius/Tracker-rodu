@@ -1792,6 +1792,20 @@ tbody tr:hover { background: #fbfaf5; }
   color: var(--muted);
   font-size: 12px;
 }
+.family-tree-tools-settings .family-tree-appearance-sync {
+  margin-top: 9px;
+  border: 1px solid #c9ddd5;
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--green-800);
+  background: #edf5f1;
+  font-weight: 700;
+}
+.family-tree-tools-settings .family-tree-appearance-sync[data-state="error"] {
+  border-color: #e7beb8;
+  color: #8e3028;
+  background: #fff1ef;
+}
 .family-tree-tools-back {
   justify-self: start;
 }
@@ -1844,12 +1858,14 @@ tbody tr:hover { background: #fbfaf5; }
   background: var(--paper);
   cursor: pointer;
 }
-.family-tree-lineage-grouping {
+.family-tree-lineage-grouping,
+.family-tree-name-display-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
-.family-tree-lineage-grouping label {
+.family-tree-lineage-grouping label,
+.family-tree-name-display-options label {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 9px;
@@ -1859,22 +1875,27 @@ tbody tr:hover { background: #fbfaf5; }
   padding: 10px;
   cursor: pointer;
 }
-.family-tree-lineage-grouping label:has(input:checked) {
+.family-tree-lineage-grouping label:has(input:checked),
+.family-tree-name-display-options label:has(input:checked) {
   border-color: #89ad9f;
   background: #edf5f1;
 }
-.family-tree-lineage-grouping input {
+.family-tree-lineage-grouping input,
+.family-tree-name-display-options input {
   margin-top: 3px;
   accent-color: var(--green-800);
 }
-.family-tree-lineage-grouping span {
+.family-tree-lineage-grouping span,
+.family-tree-name-display-options span {
   display: grid;
   gap: 3px;
 }
-.family-tree-lineage-grouping strong {
+.family-tree-lineage-grouping strong,
+.family-tree-name-display-options strong {
   font-size: 12px;
 }
-.family-tree-lineage-grouping small {
+.family-tree-lineage-grouping small,
+.family-tree-name-display-options small {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
@@ -2818,6 +2839,7 @@ tbody tr:hover { background: #fbfaf5; }
     grid-template-columns: 1fr;
   }
   .family-tree-lineage-grouping,
+  .family-tree-name-display-options,
   .family-tree-lineage-palettes,
   .family-tree-lineage-branches {
     grid-template-columns: 1fr;

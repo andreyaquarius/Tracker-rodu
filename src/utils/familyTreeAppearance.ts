@@ -6,7 +6,15 @@ export type DirectLineageGrouping =
   | "grandparents"
   | "great-grandparents";
 
+export type MarriedSurnameDisplay =
+  | "married-with-maiden"
+  | "maiden-with-married"
+  | "married-only"
+  | "maiden-only";
+
 export interface FamilyTreeAppearancePreferences {
+  marriedSurnameDisplay: MarriedSurnameDisplay;
+  inferMarriedSurnameFromHusband: boolean;
   directLineageColor: string;
   directLineageGrouping: DirectLineageGrouping;
   /** Eight stable sector slots; an empty list means an automatic palette. */
@@ -15,6 +23,9 @@ export interface FamilyTreeAppearancePreferences {
 }
 
 export const DEFAULT_FAMILY_TREE_APPEARANCE: FamilyTreeAppearancePreferences = {
+  // Preserve the historical tree label until the user selects another rule.
+  marriedSurnameDisplay: "married-only",
+  inferMarriedSurnameFromHusband: false,
   directLineageColor: "#2f7465",
   directLineageGrouping: "single",
   directLineageBranchColors: [],
@@ -104,6 +115,17 @@ function validGrouping(value: unknown): value is DirectLineageGrouping {
   );
 }
 
+function validMarriedSurnameDisplay(
+  value: unknown,
+): value is MarriedSurnameDisplay {
+  return (
+    value === "married-with-maiden" ||
+    value === "maiden-with-married" ||
+    value === "married-only" ||
+    value === "maiden-only"
+  );
+}
+
 export function normalizeFamilyTreeAppearance(
   value: unknown,
 ): FamilyTreeAppearancePreferences {
@@ -117,6 +139,13 @@ export function normalizeFamilyTreeAppearance(
     ? candidate.directLineageBranchColors.map(color => color.toLowerCase())
     : [];
   return {
+    marriedSurnameDisplay: validMarriedSurnameDisplay(
+        candidate.marriedSurnameDisplay,
+      )
+      ? candidate.marriedSurnameDisplay
+      : DEFAULT_FAMILY_TREE_APPEARANCE.marriedSurnameDisplay,
+    inferMarriedSurnameFromHusband:
+      candidate.inferMarriedSurnameFromHusband === true,
     directLineageColor: validHexColor(candidate.directLineageColor)
       ? candidate.directLineageColor.toLowerCase()
       : DEFAULT_FAMILY_TREE_APPEARANCE.directLineageColor,
