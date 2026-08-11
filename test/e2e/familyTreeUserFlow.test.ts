@@ -108,7 +108,10 @@ test("renderer source preserves Canvas, semantic-list, reduced-motion, and DOM b
   assert.match(viewport, /collapsedBranchPersonIds/);
   assert.match(viewport, /onTogglePersonBranches/);
   assert.match(page, /neighborhood\.branchTogglePersonIds/);
-  assert.match(page, /onTogglePersonBranches=\{togglePersonBranches\}/);
+  assert.match(
+    page,
+    /onTogglePersonBranches=\{directAncestorMode \? undefined : togglePersonBranches\}/,
+  );
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
 });
 
