@@ -108,7 +108,7 @@ jobs:
           node scripts/verify-external-pdf-rollout.mjs --deployment
 
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2
         with:
           version: 2.108.0
 
