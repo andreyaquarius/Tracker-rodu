@@ -123,6 +123,19 @@ test("Viewer v2 supports page jumps, fit, rotation and explicit exports", () => 
   assert.match(viewer, /jpegQuality:\s*exportJpegQuality \/ 100/u);
 });
 
+test("page number input jumps directly through both PDFs and attached image pages", () => {
+  assert.match(viewer, /setPageNumberInput\(String\(navigationPageNumber\)\)/u);
+  assert.match(viewer, /max=\{navigationPageCount\}/u);
+  assert.match(
+    viewer,
+    /const applyPageNumberInput = \(\) => \{[\s\S]*?if \(isInteractivePdf\) \{[\s\S]*?setPdfPageNumber\(requested\);[\s\S]*?return;[\s\S]*?setCurrentIndex\(requested - 1\);/u,
+  );
+  const controlsStart = viewer.indexOf('className="workspace-page-controls"');
+  const controlsEnd = viewer.indexOf("{canSelectFragment ?", controlsStart);
+  assert.ok(controlsStart >= 0 && controlsEnd > controlsStart);
+  assert.doesNotMatch(viewer.slice(controlsStart, controlsEnd), /viewerV2Enabled/u);
+});
+
 test("document image tools support manuscript filters and centered direct rotation without mutating the source", () => {
   assert.match(viewer, /Обробка рукописного документа/u);
   assert.match(viewer, /className="workspace-image-rotation-control"/u);

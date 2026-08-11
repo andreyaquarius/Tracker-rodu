@@ -900,7 +900,10 @@ export function DocumentWorkspaceViewer({
   }, [currentScan?.id, blobUrl]);
 
   useEffect(() => {
-    setPageNumberInput(String(pdfPageNumber));
+    setPageNumberInput(String(navigationPageNumber));
+  }, [navigationPageNumber]);
+
+  useEffect(() => {
     if (!exportOpen) setExportRange(String(pdfPageNumber));
   }, [pdfPageNumber, exportOpen]);
 
@@ -1550,18 +1553,22 @@ export function DocumentWorkspaceViewer({
   };
 
   const applyPageNumberInput = () => {
-    if (!isInteractivePdf || pdfPageCount < 1) return;
+    if (navigationPageCount < 1) return;
     const requested = Number(pageNumberInput);
-    if (!Number.isSafeInteger(requested) || requested < 1 || requested > pdfPageCount) {
-      setPageNumberInput(String(pdfPageNumber));
-      setError(`Введіть номер сторінки від 1 до ${pdfPageCount}.`);
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested > navigationPageCount) {
+      setPageNumberInput(String(navigationPageNumber));
+      setError(`Введіть номер сторінки від 1 до ${navigationPageCount}.`);
       return;
     }
     setError("");
-    setMarkedExportPages(new Set());
     setSelectionMode(false);
     setCropRect(null);
-    setPdfPageNumber(requested);
+    if (isInteractivePdf) {
+      setMarkedExportPages(new Set());
+      setPdfPageNumber(requested);
+      return;
+    }
+    setCurrentIndex(requested - 1);
   };
 
   const changeZoom = (delta: number) => {
@@ -2897,25 +2904,21 @@ export function DocumentWorkspaceViewer({
                 >
                   ←
                 </button>
-                {viewerV2Enabled && isInteractivePdf ? (
-                  <label className="workspace-page-input">
-                    <span className="visually-hidden">Перейти до сторінки</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={pdfPageCount}
-                      value={pageNumberInput}
-                      onChange={(event) => setPageNumberInput(event.target.value)}
-                      onBlur={applyPageNumberInput}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") applyPageNumberInput();
-                      }}
-                    />
-                    <span>/ {navigationPageCount}</span>
-                  </label>
-                ) : (
-                  <span>{navigationPageNumber} / {navigationPageCount}</span>
-                )}
+                <label className="workspace-page-input">
+                  <span className="visually-hidden">Перейти до сторінки</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={navigationPageCount}
+                    value={pageNumberInput}
+                    onChange={(event) => setPageNumberInput(event.target.value)}
+                    onBlur={applyPageNumberInput}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") applyPageNumberInput();
+                    }}
+                  />
+                  <span>/ {navigationPageCount}</span>
+                </label>
                 <button
                   type="button"
                   className="button button-secondary"
