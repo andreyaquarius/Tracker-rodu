@@ -256,6 +256,14 @@ export function HelpCenter({ page, accountId }: HelpCenterProps) {
             </div>
 
             <div className="help-panel-actions">
+              <a
+                className="button button-secondary help-faq-link"
+                href="/faq"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Відкрити FAQ
+              </a>
               <button
                 type="button"
                 className="button button-secondary"

@@ -22,7 +22,7 @@ test("root uses the local managed analytics bootstrap and no unconditional remot
 });
 
 test("every standalone public page uses one local auto-public bootstrap and analytics CSP", () => {
-  for (const page of ["features", "pricing", "privacy", "terms"]) {
+  for (const page of ["features", "pricing", "faq", "privacy", "terms"]) {
     const html = read(`public/${page}/index.html`);
     assert.equal(
       count(html, /src="\/site-analytics\.js"\s+data-analytics-mode="auto-public"/g),

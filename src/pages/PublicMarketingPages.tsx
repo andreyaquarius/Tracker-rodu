@@ -3,14 +3,16 @@ import {
   publicFeatures,
   publicPricingPlans,
 } from "../utils/publicSiteContent";
+import { publicFaqSections } from "../utils/publicFaqContent";
 
-type PublicPageKind = "features" | "pricing";
+type PublicPageKind = "features" | "pricing" | "faq";
 
 function PublicNav({ current }: { current: PublicPageKind }) {
   const items = [
     { href: "/", label: "Головна", key: "home" },
     { href: "/features", label: "Можливості", key: "features" },
     { href: "/pricing", label: "Тарифи", key: "pricing" },
+    { href: "/faq", label: "FAQ", key: "faq" },
     { href: "/privacy", label: "Політика конфіденційності", key: "privacy" },
     { href: "/terms", label: "Умови користування", key: "terms" },
   ];
@@ -65,6 +67,7 @@ function PublicLayout({
         <a href="/">Головна</a>
         <a href="/features">Можливості</a>
         <a href="/pricing">Тарифи</a>
+        <a href="/faq">FAQ</a>
         <a href="/privacy">Політика конфіденційності</a>
         <a href="/terms">Умови користування</a>
       </footer>
@@ -151,6 +154,61 @@ export function PricingPage() {
           Особи рахуються у всіх проєктах власника. Один редактор займає одне місце незалежно від кількості
           проєктів, а власник і глядачі редакторські місця не займають.
         </p>
+      </section>
+    </PublicLayout>
+  );
+}
+
+export function FaqPage() {
+  return (
+    <PublicLayout
+      current="faq"
+      eyebrow="Довідка"
+      title="Часті запитання про Трекер Роду"
+      description="Короткі відповіді про початок роботи, родове дерево, GEDCOM, документи, Google Drive, тарифи та безпеку даних."
+    >
+      <section className="public-section faq-layout">
+        <nav className="faq-category-nav" aria-label="Розділи частих запитань">
+          <strong>На цій сторінці</strong>
+          {publicFaqSections.map((section) => (
+            <a href={`#${section.id}`} key={section.id}>{section.title}</a>
+          ))}
+        </nav>
+
+        <div className="faq-sections">
+          {publicFaqSections.map((section) => (
+            <section className="faq-section" id={section.id} key={section.id}>
+              <div className="public-section-heading faq-section-heading">
+                <div>
+                  <h2>{section.title}</h2>
+                  <p>{section.description}</p>
+                </div>
+              </div>
+              <div className="faq-list">
+                {section.items.map((item) => (
+                  <details className="faq-item" key={item.question}>
+                    <summary>{item.question}</summary>
+                    <div className="faq-answer">
+                      <p>{item.answer}</p>
+                      {item.link ? <a href={item.link.href}>{item.link.label}</a> : null}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      </section>
+
+      <section className="public-section faq-cta-panel">
+        <div>
+          <h2>Готові почати дослідження?</h2>
+          <p>Створіть проєкт або перегляньте повний перелік можливостей Трекера Роду.</p>
+        </div>
+        <div className="faq-cta-actions">
+          <a className="public-cta" href="/">Почати роботу</a>
+          <a className="public-cta muted" href="/features">Переглянути можливості</a>
+        </div>
       </section>
     </PublicLayout>
   );

@@ -24,6 +24,12 @@ const publicPages = [
     text: "Тарифи Трекера Роду",
   },
   {
+    path: "faq/index.html",
+    url: "https://trekerrodu.com.ua/faq",
+    title: "Часті запитання про Трекер Роду",
+    text: "Часті запитання про Трекер Роду",
+  },
+  {
     path: "privacy/index.html",
     url: "https://trekerrodu.com.ua/privacy",
     title: "Політика конфіденційності — Трекер Роду",

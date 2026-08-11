@@ -1044,6 +1044,7 @@ tbody tr:hover { background: #fbfaf5; }
   background: var(--paper);
   border-top: 1px solid var(--line);
 }
+.help-faq-link { margin-right: auto; }
 .restore-progress-backdrop { position: fixed; inset: 0; z-index: 180; padding: 24px; display: grid; place-items: center; background: rgba(10,28,24,.68); backdrop-filter: blur(6px); }
 .restore-progress-dialog { width: min(560px, 100%); padding: 30px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 22px; align-items: start; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 28px 80px rgba(0,0,0,.3); }
 .restore-progress-dialog h2 { margin: 5px 0 8px; font-size: 27px; }
@@ -6401,6 +6402,107 @@ tbody tr:hover { background: #fbfaf5; }
   font-size: 13px; font-weight: 900; text-decoration: none;
 }
 .public-cta.muted { color: var(--muted); background: transparent; border-color: var(--line); }
+.faq-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.faq-category-nav {
+  position: sticky;
+  top: 20px;
+  display: grid;
+  gap: 4px;
+  padding: 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.faq-category-nav strong {
+  margin-bottom: 8px;
+  color: var(--green-950);
+  font-size: 13px;
+}
+.faq-category-nav a {
+  padding: 8px 10px;
+  color: var(--green-800);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-decoration: none;
+}
+.faq-category-nav a:hover,
+.faq-category-nav a:focus-visible { background: var(--green-100); }
+.faq-sections { display: grid; gap: 22px; min-width: 0; }
+.faq-section {
+  scroll-margin-top: 20px;
+  padding: 22px;
+  background: rgba(255, 253, 248, .52);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.faq-section-heading { display: block; }
+.faq-section-heading p { margin-top: 8px; }
+.faq-list { display: grid; gap: 10px; }
+.faq-item {
+  min-width: 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.faq-item[open] { border-color: var(--green-300); }
+.faq-item summary {
+  position: relative;
+  padding: 16px 48px 16px 18px;
+  color: var(--green-950);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.45;
+  list-style: none;
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after {
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  content: "+";
+  color: var(--green-700);
+  font-size: 20px;
+  font-weight: 700;
+  transform: translateY(-50%);
+}
+.faq-item[open] summary::after { content: "−"; }
+.faq-answer {
+  padding: 0 18px 18px;
+  border-top: 1px solid var(--line);
+}
+.faq-answer p { margin: 14px 0 0; }
+.faq-answer a {
+  display: inline-flex;
+  margin-top: 12px;
+  color: var(--green-800);
+  font-size: 13px;
+  font-weight: 900;
+}
+.faq-cta-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.faq-cta-panel h2 { margin-bottom: 8px; }
+.faq-cta-panel p { margin: 0; }
+.faq-cta-actions { display: flex; flex-wrap: wrap; gap: 10px; flex: 0 0 auto; }
+.faq-cta-actions .public-cta { margin: 0; }
 .public-footer { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 18px; margin-top: 28px; font-size: 12px; }
 .public-footer a { color: var(--green-800); font-weight: 800; }
 .alert { padding: 11px; border-radius: 8px; font-size: 11px; }
@@ -7863,6 +7965,10 @@ tbody tr:hover { background: #fbfaf5; }
 @media (max-width: 850px) {
   .plan-grid, .usage-grid { grid-template-columns: 1fr; }
   .feature-grid, .public-plan-grid, .public-section-heading { grid-template-columns: 1fr; }
+  .faq-layout { grid-template-columns: 1fr; }
+  .faq-category-nav { position: static; }
+  .faq-cta-panel { align-items: stretch; flex-direction: column; }
+  .faq-cta-actions .public-cta { flex: 1 1 180px; }
   .subscription-status-band { grid-template-columns: 1fr; }
   .subscription-cancel-panel { align-items: stretch; flex-direction: column; }
   .subscription-cancel-panel .button { width: 100%; }

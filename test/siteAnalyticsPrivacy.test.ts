@@ -9,7 +9,7 @@ import {
   safeAnalyticsReferrer,
 } from "../public/site-analytics.js";
 
-const publicPaths = ["/", "/features", "/pricing", "/privacy", "/terms"] as const;
+const publicPaths = ["/", "/features", "/pricing", "/faq", "/privacy", "/terms"] as const;
 
 const privateSentinels = [
   "/projects/private-project-sentinel",
@@ -19,10 +19,11 @@ const privateSentinels = [
   "/auth/callback",
   "/features/private-nested-sentinel",
   "/pricing/private-nested-sentinel",
+  "/faq/private-nested-sentinel",
   "/auth/success",
 ] as const;
 
-test("analytics allowlist contains only the five public pages", () => {
+test("analytics allowlist contains only the six public pages", () => {
   for (const path of publicPaths) {
     assert.equal(normalizePublicAnalyticsPath(path), path);
     assert.equal(normalizePublicAnalyticsPath(`${path === "/" ? "" : path}/`), path);

@@ -33,7 +33,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PrivacyPage, TermsPage } from "./pages/LegalPages";
-import { FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
+import { FaqPage, FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
 import { MapPage } from "./pages/MapPage";
 import { FamilyTreePage } from "./pages/FamilyTreePage";
 import { FamilyTreeErrorBoundary } from "./components/familyTree/FamilyTreeErrorBoundary";
@@ -296,7 +296,7 @@ const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
 const SITE_ORIGIN = "https://trekerrodu.com.ua";
 const SITE_IMAGE_URL = `${SITE_ORIGIN}/tracker-rodu-logo.png`;
 
-type PublicPageKey = "privacy" | "terms" | "features" | "pricing";
+type PublicPageKey = "privacy" | "terms" | "features" | "pricing" | "faq";
 
 const PUBLIC_PAGE_SEO: Record<PublicPageKey, {
   title: string;
@@ -326,6 +326,12 @@ const PUBLIC_PAGE_SEO: Record<PublicPageKey, {
     description:
       "Тарифи Трекера Роду за кількістю осіб, дерев, редакторів і ШІ-кредитів; 30 днів можливостей Professional без платіжної картки.",
     canonical: `${SITE_ORIGIN}/pricing`,
+  },
+  faq: {
+    title: "Часті запитання про Трекер Роду",
+    description:
+      "Відповіді про роботу з Трекером Роду: особи, родове дерево, GEDCOM, документи, Google Drive, тарифи, резервні копії та приватність.",
+    canonical: `${SITE_ORIGIN}/faq`,
   },
 };
 
@@ -2664,7 +2670,8 @@ export default function App() {
     if (route.page === "privacy") return <PrivacyPage />;
     if (route.page === "terms") return <TermsPage />;
     if (route.page === "features") return <FeaturesPage />;
-    return <PricingPage />;
+    if (route.page === "pricing") return <PricingPage />;
+    return <FaqPage />;
   }
 
   if (!account) {

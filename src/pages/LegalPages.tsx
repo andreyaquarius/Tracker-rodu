@@ -8,6 +8,7 @@ function LegalPublicNav({ current }: { current: LegalPageKind }) {
     { href: "/", label: "Головна", key: "home" },
     { href: "/features", label: "Можливості", key: "features" },
     { href: "/pricing", label: "Тарифи", key: "pricing" },
+    { href: "/faq", label: "FAQ", key: "faq" },
     { href: "/privacy", label: "Політика конфіденційності", key: "privacy" },
     { href: "/terms", label: "Умови користування", key: "terms" },
   ];
@@ -85,6 +86,7 @@ function LegalLayout({
         <a href="/">На головну</a>
         <a href="/features">Можливості</a>
         <a href="/pricing">Тарифи</a>
+        <a href="/faq">FAQ</a>
         <a href="/privacy">Політика конфіденційності</a>
         <a href="/terms">Умови користування</a>
       </footer>

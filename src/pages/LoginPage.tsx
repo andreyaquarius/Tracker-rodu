@@ -145,6 +145,7 @@ export function LoginPage({
             <a href="/" aria-current="page">Головна</a>
             <a href="/features">Можливості</a>
             <a href="/pricing">Тарифи</a>
+            <a href="/faq">FAQ</a>
           </nav>
         </div>
         <span className="eyebrow">Робочий простір для генеалогічного дослідження</span>
