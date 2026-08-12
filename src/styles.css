@@ -2501,6 +2501,11 @@ tbody tr:hover { background: #fbfaf5; }
   font-weight: 650;
   letter-spacing: 0;
 }
+.circular-ancestor-label-inline {
+  fill: #173f36;
+  font-weight: 760;
+  letter-spacing: -0.01em;
+}
 .circular-ancestor-sector-label,
 .circular-ancestor-focus-label {
   pointer-events: none;
@@ -2508,8 +2513,6 @@ tbody tr:hover { background: #fbfaf5; }
 .circular-ancestor-duplicate-mark {
   fill: #b57d22;
   stroke: #fff8e8;
-  stroke-width: 1.2;
-  vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
 .circular-ancestor-focus {

@@ -185,6 +185,9 @@ test("circular chart keeps full labels fitted and supports a reversible fullscre
   assert.match(circularChart, /<textPath/);
   assert.match(circularChart, /<clipPath/);
   assert.match(circularChart, /className="circular-ancestor-label-radial"/);
+  assert.match(circularChart, /label\.radialLineMode === "inline"/);
+  assert.match(circularChart, /scale\(\$\{label\.glyphScale\}\)/);
+  assert.match(circularChart, /planCircularAncestorDuplicateMarker\(occurrence\)/);
   assert.match(circularChart, /const MAX_ZOOM = 1024/);
   assert.match(circularChart, /new ResizeObserver\(updateSize\)/);
   assert.match(circularChart, /ref=\{fullscreenTargetRef\}/);

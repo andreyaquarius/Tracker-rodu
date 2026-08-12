@@ -3,10 +3,12 @@ import test from "node:test";
 import {
   formatCircularAncestorLife,
   formatCircularAncestorName,
+  planCircularAncestorDuplicateMarker,
   planCircularAncestorLabel,
   recommendCircularAncestorLabelZoom,
 } from "../src/features/family-tree-view/circular/circularAncestorChartLabels.ts";
 import {
+  circularAncestorSectorGapDegrees,
   CIRCULAR_ANCESTOR_FOCUS_RADIUS,
   CIRCULAR_ANCESTOR_RING_WIDTH,
   type CircularAncestorOccurrence,
@@ -191,6 +193,61 @@ test("supports a custom readability target and generation boundary", () => {
     result.minimumWorldFontSize * result.recommendedScale + 1e-9 >= 9,
     true,
   );
+});
+
+test("deep rings use one complete vector-scaled radial line without losing data", () => {
+  const value = occurrence(16, person({
+    displayName: "Deep Ancestor Full Name",
+    birth: { sort: "1662" },
+  }));
+  const plan = planCircularAncestorLabel(value);
+
+  assert.equal(plan.mode, "radial");
+  assert.equal(plan.radialLineMode, "inline");
+  assert.match(plan.inlineText, /Deep Ancestor Full Name/);
+  assert.match(plan.inlineText, /1662/);
+  assert.equal(plan.glyphFontSize >= 8, true);
+  assert.equal(plan.glyphScale < 0.01, true);
+  assert.equal(plan.requiredLength <= plan.availableLength + 1e-9, true);
+  assert.equal(plan.requiredCrossSize <= plan.availableCrossSize + 1e-9, true);
+});
+
+test("generation 14-16 labels fit inside the actual clipped sector", () => {
+  for (const generation of [14, 15, 16]) {
+    const value = occurrence(generation, person({
+      id: `deep-${generation}`,
+      displayName: "Меньков Феліп Олексійович",
+      birth: { sort: "1665" },
+    }));
+    const plan = planCircularAncestorLabel(value);
+    const gap = circularAncestorSectorGapDegrees(
+      value.startAngle,
+      value.endAngle,
+    );
+    const visibleSweep =
+      Math.abs(value.endAngle - value.startAngle) - gap * 2;
+    const middleRadius = (value.innerRadius + value.outerRadius) / 2;
+    const visibleCrossSize = middleRadius * visibleSweep * Math.PI / 180;
+
+    assert.equal(visibleSweep > 0, true, `generation ${generation}`);
+    assert.equal(
+      plan.requiredCrossSize <= visibleCrossSize + 1e-9,
+      true,
+      `generation ${generation}: label must fit inside the clipped sector`,
+    );
+  }
+});
+
+test("repeated-ancestor markers shrink with distant sector width", () => {
+  const near = planCircularAncestorDuplicateMarker(occurrence(5));
+  const middle = planCircularAncestorDuplicateMarker(occurrence(10));
+  const far = planCircularAncestorDuplicateMarker(occurrence(16));
+
+  assert.equal(near.radius, 2.8);
+  assert.equal(near.radius > middle.radius, true);
+  assert.equal(middle.radius > far.radius, true);
+  assert.equal(far.radius * 2 <= far.availableDiameter + 1e-9, true);
+  assert.equal(far.strokeWidth < far.radius, true);
 });
 
 test("label planning remains one-to-one with sparse known occurrences", () => {

@@ -76,10 +76,14 @@ const EXPORT_SVG_STYLES = `
     font-weight: 600;
     letter-spacing: 0;
   }
+  .circular-ancestor-label-inline {
+    fill: #173f36;
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
   .circular-ancestor-duplicate-mark {
     fill: #b57d22;
     stroke: #fff8e8;
-    stroke-width: 1.2;
   }
   .circular-ancestor-focus circle {
     fill: #fffdfa;

@@ -7,6 +7,7 @@ export type CircularAncestorVisibleLabelMode = Exclude<
   CircularAncestorLabelMode,
   "hidden"
 >;
+export type CircularAncestorRadialLineMode = "stacked" | "inline";
 
 export interface CircularAncestorLabelPlan {
   /** The planner always returns a visible geometry mode for valid sectors. */
@@ -15,6 +16,10 @@ export interface CircularAncestorLabelPlan {
   preferredMode: CircularAncestorVisibleLabelMode;
   name: string;
   life: string;
+  /** Full single-line fallback used by narrow distant ancestor sectors. */
+  inlineText: string;
+  /** Radial sectors choose the layout that yields the largest readable type. */
+  radialLineMode: CircularAncestorRadialLineMode;
   /** All dimensions are SVG/world units, not CSS pixels. */
   fontSize: number;
   lifeFontSize: number;
@@ -25,6 +30,26 @@ export interface CircularAncestorLabelPlan {
   requiredCrossSize: number;
   /** Geometry-only scale applied to the nominal world-unit typography. */
   fitScale: number;
+  /**
+   * SVG glyphs are authored at these stable sizes and scaled as a vector group.
+   * This avoids browser hinting artefacts caused by sub-pixel font-size values
+   * in generations 12-16 while preserving the exact fitted geometry.
+   */
+  glyphFontSize: number;
+  glyphLifeFontSize: number;
+  glyphLineGap: number;
+  glyphScale: number;
+}
+
+export interface CircularAncestorDuplicateMarkerPlan {
+  /** Marker radius in SVG/world units. */
+  radius: number;
+  /** Matching scalable outline width in SVG/world units. */
+  strokeWidth: number;
+  /** Distance from the outer edge of the generation ring. */
+  radialInset: number;
+  /** Tangential room reserved for the marker inside this exact sector. */
+  availableDiameter: number;
 }
 
 export interface CircularAncestorZoomRecommendationOptions {
@@ -53,6 +78,8 @@ const CURVED_MIN_ANGLE = 22.5;
 const NAME_WORLD_FONT_SIZE = 11;
 const LIFE_WORLD_FONT_SIZE = 8.5;
 const LINE_GAP_WORLD_SIZE = 3.5;
+const INLINE_WORLD_FONT_SIZE = 10;
+const INLINE_SEPARATOR = " · ";
 const DEFAULT_TARGET_SCREEN_FONT_SIZE = 7;
 const DEFAULT_RECOMMENDATION_MAX_GENERATION = 8;
 
@@ -115,6 +142,7 @@ export function planCircularAncestorLabel(
 ): CircularAncestorLabelPlan {
   const name = formatCircularAncestorName(occurrence.person);
   const life = formatCircularAncestorLife(occurrence.person);
+  const inlineText = `${name}${INLINE_SEPARATOR}${life}`;
   const sweepDegrees = Math.abs(occurrence.endAngle - occurrence.startAngle);
   const sweepRadians = sweepDegrees * Math.PI / 180;
   const midRadius = (occurrence.innerRadius + occurrence.outerRadius) / 2;
@@ -140,22 +168,67 @@ export function planCircularAncestorLabel(
   );
   const baseRequiredCrossSize =
     baseFontSize + baseLineGap + baseLifeFontSize;
-  const fitScale = Math.min(
+  const stackedFitScale = Math.min(
     1,
     availableLength / Math.max(1e-6, baseRequiredLength),
     availableCrossSize / Math.max(1e-6, baseRequiredCrossSize),
   );
-  const fontSize = baseFontSize * fitScale;
-  const lifeFontSize = baseLifeFontSize * fitScale;
-  const lineGap = baseLineGap * fitScale;
-  const requiredLength = baseRequiredLength * fitScale;
-  const requiredCrossSize = baseRequiredCrossSize * fitScale;
+  const inlineRequiredLength = estimatedTextUnits(inlineText) *
+    INLINE_WORLD_FONT_SIZE;
+  const inlineRequiredCrossSize = INLINE_WORLD_FONT_SIZE;
+  const inlineFitScale = preferredMode === "radial"
+    ? Math.min(
+        1,
+        availableLength / Math.max(1e-6, inlineRequiredLength),
+        availableCrossSize / Math.max(1e-6, inlineRequiredCrossSize),
+      )
+    : 0;
+
+  // Two lines are easier to scan while they fit comfortably. Distant rings
+  // switch to one complete line only when that produces materially larger
+  // letters. No name or date content is removed.
+  const stackedMinimumFontSize = baseLifeFontSize * stackedFitScale;
+  const inlineFontSize = INLINE_WORLD_FONT_SIZE * inlineFitScale;
+  const radialLineMode: CircularAncestorRadialLineMode =
+    preferredMode === "radial" &&
+    inlineFontSize > stackedMinimumFontSize * 1.08
+      ? "inline"
+      : "stacked";
+  const usesInlineRadialLabel =
+    preferredMode === "radial" && radialLineMode === "inline";
+  const fitScale = usesInlineRadialLabel
+    ? inlineFitScale
+    : stackedFitScale;
+  const glyphFontSize = usesInlineRadialLabel
+    ? INLINE_WORLD_FONT_SIZE
+    : baseFontSize;
+  const glyphLifeFontSize = usesInlineRadialLabel
+    ? INLINE_WORLD_FONT_SIZE
+    : baseLifeFontSize;
+  const glyphLineGap = usesInlineRadialLabel ? 0 : baseLineGap;
+  const fontSize = glyphFontSize * fitScale;
+  const lifeFontSize = glyphLifeFontSize * fitScale;
+  const lineGap = glyphLineGap * fitScale;
+  const requiredLength = (usesInlineRadialLabel
+    ? inlineRequiredLength
+    : baseRequiredLength) * fitScale;
+  const requiredCrossSize = (usesInlineRadialLabel
+    ? inlineRequiredCrossSize
+    : baseRequiredCrossSize) * fitScale;
+
+  // Curved text follows world-space paths and is already large enough in the
+  // inner rings. Radial labels are authored at normal glyph sizes and their
+  // group is scaled, preventing Chrome from rasterizing 0.02-unit fonts into
+  // black blobs or widely separated characters at deep zoom levels.
+  const glyphScale = preferredMode === "radial" ? fitScale : 1;
 
   return {
     mode: preferredMode,
     preferredMode,
     name,
     life,
+    inlineText,
+    radialLineMode,
     fontSize,
     lifeFontSize,
     lineGap,
@@ -164,6 +237,46 @@ export function planCircularAncestorLabel(
     requiredLength,
     requiredCrossSize,
     fitScale,
+    glyphFontSize: preferredMode === "radial" ? glyphFontSize : fontSize,
+    glyphLifeFontSize: preferredMode === "radial"
+      ? glyphLifeFontSize
+      : lifeFontSize,
+    glyphLineGap: preferredMode === "radial" ? glyphLineGap : lineGap,
+    glyphScale,
+  };
+}
+
+/**
+ * Fits a repeated-ancestor dot to the exact angular width of its sector.
+ * Fixed-size circles overwhelm generations 10-16 because their sectors are
+ * fractions of a world unit wide; this plan remains proportional at any ring.
+ */
+export function planCircularAncestorDuplicateMarker(
+  occurrence: CircularAncestorOccurrence,
+): CircularAncestorDuplicateMarkerPlan {
+  const sweepRadians = Math.abs(
+    occurrence.endAngle - occurrence.startAngle,
+  ) * Math.PI / 180;
+  const ringWidth = Math.max(
+    0,
+    occurrence.outerRadius - occurrence.innerRadius,
+  );
+  const radialInset = Math.min(5, Math.max(2, ringWidth * 0.085));
+  const markerRadiusFromCenter = Math.max(
+    occurrence.innerRadius,
+    occurrence.outerRadius - radialInset,
+  );
+  const availableDiameter = markerRadiusFromCenter * sweepRadians * 0.68;
+  const radius = Math.max(
+    1e-4,
+    Math.min(2.8, ringWidth * 0.06, availableDiameter * 0.32),
+  );
+
+  return {
+    radius,
+    strokeWidth: Math.max(1e-4, radius * 0.24),
+    radialInset,
+    availableDiameter,
   };
 }
 

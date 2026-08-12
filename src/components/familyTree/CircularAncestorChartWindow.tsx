@@ -12,6 +12,7 @@ import type { FamilyTreeNeighborhoodClient } from "../../features/family-tree-vi
 import { useFamilyTreeNeighborhood } from "../../features/family-tree-view/react/useFamilyTreeNeighborhood";
 import {
   buildCircularAncestorChartModel,
+  circularAncestorSectorGapDegrees,
   CIRCULAR_ANCESTOR_FOCUS_RADIUS,
   CIRCULAR_ANCESTOR_RING_WIDTH,
   MAX_CIRCULAR_ANCESTOR_OCCURRENCES,
@@ -19,6 +20,7 @@ import {
 } from "../../features/family-tree-view/circular/circularAncestorChartLayout";
 import {
   formatCircularAncestorLife,
+  planCircularAncestorDuplicateMarker,
   planCircularAncestorLabel,
   recommendCircularAncestorLabelZoom,
 } from "../../features/family-tree-view/circular/circularAncestorChartLabels";
@@ -819,8 +821,9 @@ function AncestorSector({
     4,
     Math.max(1.5, (occurrence.outerRadius - occurrence.innerRadius) * 0.08),
   );
+  const duplicateMarker = planCircularAncestorDuplicateMarker(occurrence);
   const duplicatePoint = polarPoint(
-    occurrence.outerRadius - 5,
+    occurrence.outerRadius - duplicateMarker.radialInset,
     midAngle,
   );
   return (
@@ -892,29 +895,44 @@ function AncestorSector({
                 </text>
               </>
             ) : (
-              <text
+              <g
                 className="circular-ancestor-label-radial"
-                transform={`translate(${labelPoint.x} ${labelPoint.y}) rotate(${radialRotation})`}
-                textAnchor="middle"
-                dominantBaseline="central"
+                transform={[
+                  `translate(${labelPoint.x} ${labelPoint.y})`,
+                  `rotate(${radialRotation})`,
+                  `scale(${label.glyphScale})`,
+                ].join(" ")}
               >
-                <tspan
-                  className="circular-ancestor-label-name"
-                  x={0}
-                  y={-(label.lifeFontSize + label.lineGap) / 2}
-                  style={{ fontSize: label.fontSize }}
-                >
-                  {label.name}
-                </tspan>
-                <tspan
-                  className="circular-ancestor-label-life"
-                  x={0}
-                  y={(label.fontSize + label.lineGap) / 2}
-                  style={{ fontSize: label.lifeFontSize }}
-                >
-                  {label.life}
-                </tspan>
-              </text>
+                {label.radialLineMode === "inline" ? (
+                  <text
+                    className="circular-ancestor-label-inline"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    style={{ fontSize: label.glyphFontSize }}
+                  >
+                    {label.inlineText}
+                  </text>
+                ) : (
+                  <text textAnchor="middle" dominantBaseline="central">
+                    <tspan
+                      className="circular-ancestor-label-name"
+                      x={0}
+                      y={-(label.glyphLifeFontSize + label.glyphLineGap) / 2}
+                      style={{ fontSize: label.glyphFontSize }}
+                    >
+                      {label.name}
+                    </tspan>
+                    <tspan
+                      className="circular-ancestor-label-life"
+                      x={0}
+                      y={(label.glyphFontSize + label.glyphLineGap) / 2}
+                      style={{ fontSize: label.glyphLifeFontSize }}
+                    >
+                      {label.life}
+                    </tspan>
+                  </text>
+                )}
+              </g>
             )}
           </g>
         </>
@@ -924,7 +942,8 @@ function AncestorSector({
           className="circular-ancestor-duplicate-mark"
           cx={duplicatePoint.x}
           cy={duplicatePoint.y}
-          r={2.8}
+          r={duplicateMarker.radius}
+          style={{ strokeWidth: duplicateMarker.strokeWidth }}
         />
       ) : null}
     </g>
@@ -1013,7 +1032,7 @@ function curvedLabelPath(
   endAngle: number,
   labelPadding: number,
 ): string {
-  const sectorGap = sectorAngleGapDegrees(startAngle, endAngle);
+  const sectorGap = circularAncestorSectorGapDegrees(startAngle, endAngle);
   const textPadding = labelPadding / Math.max(1, radius) * 180 / Math.PI;
   const start = startAngle + sectorGap + textPadding;
   const end = endAngle - sectorGap - textPadding;
@@ -1053,7 +1072,7 @@ function annularSectorPath(
   startAngle: number,
   endAngle: number,
 ): string {
-  const angleGap = sectorAngleGapDegrees(startAngle, endAngle);
+  const angleGap = circularAncestorSectorGapDegrees(startAngle, endAngle);
   const start = startAngle + angleGap;
   const end = endAngle - angleGap;
   const outerStart = polarPoint(outerRadius - 1, start);
@@ -1068,13 +1087,6 @@ function annularSectorPath(
     `A ${innerRadius + 1} ${innerRadius + 1} 0 ${largeArc} 1 ${innerStart.x} ${innerStart.y}`,
     "Z",
   ].join(" ");
-}
-
-function sectorAngleGapDegrees(startAngle: number, endAngle: number): number {
-  return Math.min(
-    0.65,
-    Math.max(0.003, Math.abs(endAngle - startAngle) * 0.055),
-  );
 }
 
 function personInitials(name: string): string {

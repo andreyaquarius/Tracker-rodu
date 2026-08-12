@@ -14,6 +14,19 @@ export const CIRCULAR_ANCESTOR_RING_WIDTH = 58;
 /** Keeps pedigree-collapse DAGs from expanding into an exponential SVG. */
 export const MAX_CIRCULAR_ANCESTOR_OCCURRENCES = 2400;
 
+/**
+ * Keeps the visual gap proportional to the sector width. A fixed minimum gap
+ * would consume most of generation 15 and invert generation 16 sectors.
+ */
+export function circularAncestorSectorGapDegrees(
+  startAngle: number,
+  endAngle: number,
+): number {
+  const sweep = Math.abs(endAngle - startAngle);
+  if (!Number.isFinite(sweep) || sweep <= 0) return 0;
+  return Math.min(0.65, sweep * 0.055);
+}
+
 export interface CircularAncestorOccurrence {
   occurrenceId: string;
   personId: string;
