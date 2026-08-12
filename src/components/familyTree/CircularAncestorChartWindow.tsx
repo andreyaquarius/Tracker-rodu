@@ -14,6 +14,7 @@ import {
   buildCircularAncestorChartModel,
   CIRCULAR_ANCESTOR_FOCUS_RADIUS,
   CIRCULAR_ANCESTOR_RING_WIDTH,
+  MAX_CIRCULAR_ANCESTOR_OCCURRENCES,
   type CircularAncestorOccurrence,
 } from "../../features/family-tree-view/circular/circularAncestorChartLayout";
 import {
@@ -36,7 +37,7 @@ import { DEFAULT_FAMILY_TREE_APPEARANCE } from "../../utils/familyTreeAppearance
 
 const DEFAULT_GENERATIONS = 7;
 const MAX_GENERATIONS = 16;
-const MAX_CHART_PERSONS = 600;
+const MAX_CHART_PERSONS = MAX_CIRCULAR_ANCESTOR_OCCURRENCES;
 const MAX_ZOOM = 1024;
 
 interface CircularAncestorChartWindowProps {
@@ -123,6 +124,7 @@ export function CircularAncestorChartWindow({
     descendantDepth: 0,
     collateralDepth: 0,
     maxNodes: MAX_CHART_PERSONS,
+    structuralOnly: true,
   });
   const displayGraph = useMemo(
     () => applyFamilyTreeNameDisplay(

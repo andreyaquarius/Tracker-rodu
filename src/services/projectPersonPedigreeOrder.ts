@@ -1,13 +1,12 @@
 import {
-  buildCircularAncestorChartModel,
-  MAX_CIRCULAR_ANCESTOR_GENERATIONS,
-} from "../features/family-tree-view/circular/circularAncestorChartLayout.ts";
-import { pedigreeRanksFromOccurrences } from "../utils/personPedigreeOrder.ts";
+  pedigreeRanksFromAncestorOrderRows,
+  type PersonPedigreeAncestorOrderRow,
+} from "../utils/personPedigreeOrder.ts";
 import {
-  createTrackerNeighborhoodClient,
   readFamilyTreeEntryPoints,
   type FamilyTreeEntryPoint,
 } from "./familyTreeNeighborhoodService.ts";
+import { getSupabaseClient } from "./supabaseAuth.ts";
 
 export interface ProjectPersonPedigreeContext {
   treeId: string;
@@ -63,8 +62,9 @@ export function invalidateProjectPersonPedigreeOrder(
 }
 
 /**
- * Loads the same canonical, privacy-filtered ancestor neighborhood that powers
- * the circular chart and converts its Ahnentafel slots into catalogue ranks.
+ * Loads the complete canonical, privacy-filtered ancestor order for the
+ * persisted tree root. Catalogue ordering is intentionally independent from
+ * the bounded graph used by interactive tree visualisations.
  */
 export async function loadProjectPersonPedigreeOrder(
   projectId: string,
@@ -124,33 +124,50 @@ async function fetchProjectPersonPedigreeOrder(
   // The persisted tree root is authoritative. Temporary focus changes in the
   // workspace and circular chart must never change catalogue ordering.
   const rootPersonId = entry.rootPersonId;
-  const client = createTrackerNeighborhoodClient();
-  const graph = await client.load({
-    treeId: entry.id,
-    focusPersonId: rootPersonId,
-    ancestorDepth: MAX_CIRCULAR_ANCESTOR_GENERATIONS,
-    descendantDepth: 0,
-    collateralDepth: 0,
-    maxNodes: 600,
-    // Catalogue sorting only needs the persisted root and its ancestor links.
-    // Avoid calculating expandable branch metadata in the background while a
-    // person card is navigating to the tree.
-    structuralOnly: true,
-  });
-  const model = buildCircularAncestorChartModel(
-    graph,
-    rootPersonId,
-    MAX_CIRCULAR_ANCESTOR_GENERATIONS,
+  const { data, error } = await getSupabaseClient().rpc(
+    "list_family_tree_direct_ancestor_order_v1",
+    {
+      target_tree_id: entry.id,
+      target_root_person_id: rootPersonId,
+    },
   );
-  return createPedigreeOrder(entry.id, rootPersonId, model.occurrences);
+  if (error) throw error;
+  const ranks = pedigreeRanksFromAncestorOrderRows(
+    rootPersonId,
+    assertAncestorOrderRows(data),
+  );
+  return {
+    treeId: entry.id,
+    rootPersonId,
+    ...ranks,
+  };
 }
 
-function createPedigreeOrder(
-  treeId: string,
-  rootPersonId: string,
-  occurrences: readonly { personId: string; slot: number }[],
-): ProjectPersonPedigreeOrder {
-  return { treeId, rootPersonId, ...pedigreeRanksFromOccurrences(rootPersonId, occurrences) };
+function assertAncestorOrderRows(value: unknown): PersonPedigreeAncestorOrderRow[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Сервер повернув некоректний порядок прямих предків.");
+  }
+  return value.map((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error("Сервер повернув некоректний запис прямого предка.");
+    }
+    const row = candidate as Partial<PersonPedigreeAncestorOrderRow>;
+    const generation = Number(row.generation);
+    if (
+      typeof row.person_id !== "string" ||
+      !row.person_id.trim() ||
+      !Number.isInteger(generation) ||
+      generation < 0 ||
+      typeof row.order_path !== "string"
+    ) {
+      throw new Error("Сервер повернув неповний запис прямого предка.");
+    }
+    return {
+      person_id: row.person_id,
+      generation,
+      order_path: row.order_path,
+    };
+  });
 }
 
 function pedigreeCacheKey(

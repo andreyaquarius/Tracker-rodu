@@ -165,7 +165,8 @@ test("circular ancestor chart uses an isolated bounded direct-ancestor session",
   assert.match(circularChart, /descendantDepth:\s*0/);
   assert.match(circularChart, /collateralDepth:\s*0/);
   assert.match(circularChart, /maxNodes:\s*MAX_CHART_PERSONS/);
-  assert.match(circularChart, /const MAX_CHART_PERSONS = 600/);
+  assert.match(circularChart, /const MAX_CHART_PERSONS = MAX_CIRCULAR_ANCESTOR_OCCURRENCES/);
+  assert.match(circularChart, /structuralOnly:\s*true/);
   assert.match(circularChart, /const MAX_GENERATIONS = 16/);
   assert.match(circularChart, /Поколінь предків/);
   assert.match(circularChart, /Доступний список/);

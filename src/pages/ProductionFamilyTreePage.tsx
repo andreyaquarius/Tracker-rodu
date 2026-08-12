@@ -33,6 +33,7 @@ import { FamilyTreeViewport } from "../features/family-tree-view/react/FamilyTre
 import { attachTrackerPersonPhotos } from "../features/family-tree-view/adapters/trackerPersonPhotos.ts";
 import { applyFamilyTreeNameDisplay } from "../features/family-tree-view/adapters/familyTreeNameDisplay.ts";
 import { MAX_RENDERED_FAMILY_TREE_NODES } from "../features/family-tree-view/react/renderLimits";
+import { MAX_CIRCULAR_ANCESTOR_OCCURRENCES } from "../features/family-tree-view/circular/circularAncestorChartLayout.ts";
 import {
   useFamilyTreeNeighborhood,
 } from "../features/family-tree-view/react/useFamilyTreeNeighborhood";
@@ -132,7 +133,8 @@ type GedcomPhotoRecoverySnapshot = {
 
 const FAMILY_TREE_GEDCOM_INPUT_ID = "family-tree-tools-gedcom-input";
 const HOME_LINEAGE_ANCESTOR_DEPTH = 16;
-const HOME_LINEAGE_MAX_NODES = 600;
+const STRUCTURAL_ANCESTOR_MAX_NODES = MAX_CIRCULAR_ANCESTOR_OCCURRENCES;
+const HOME_LINEAGE_MAX_NODES = STRUCTURAL_ANCESTOR_MAX_NODES;
 const GEDCOM_EXPORT_PRIVACY_CONFIRMATION =
   "GEDCOM-файл може містити персональні та приватні дані, зокрема відомості про живих осіб. " +
   "Файл буде сформовано у фоновому режимі, а захищене посилання для завантаження надійде на email вашого облікового запису. " +
@@ -742,7 +744,7 @@ function LoadedFamilyTree({
   const [ancestorDepth, setAncestorDepth] = useState(7);
   const [descendantDepth, setDescendantDepth] = useState(0);
   const [collateralDepth, setCollateralDepth] = useState(0);
-  const maxNodes = 400;
+  const maxNodes = directAncestorMode ? STRUCTURAL_ANCESTOR_MAX_NODES : 400;
   const [showAllParentSets, setShowAllParentSets] = useState(false);
   const [activeParentSetByChild, setActiveParentSetByChild] = useState<Record<string, string>>({});
   const [selectedPersonId, setSelectedPersonId] = useState(focusPersonId);
@@ -794,6 +796,7 @@ function LoadedFamilyTree({
     descendantDepth: directAncestorMode ? 0 : descendantDepth,
     collateralDepth: directAncestorMode ? 0 : collateralDepth,
     maxNodes,
+    structuralOnly: directAncestorMode,
     sessionKey: directAncestorMode ? "direct-pedigree" : "pedigree",
     defaultVisibleFamilyPersonId: focusPersonId,
     includeCousinDescendantsByDefault:
@@ -1100,10 +1103,10 @@ function LoadedFamilyTree({
   const rememberCamera = useCallback((camera: CameraState) => {
     cameraSnapshotsRef.current.set(viewKey, camera);
   }, [viewKey]);
-  // The logical descendants graph may contain thousands of people. Scene
-  // construction therefore gets a graph-derived occurrence budget, while the
-  // viewport independently keeps at most 600 interactive items mounted.
-  const logicalSceneNodeBudget = perspective.kind === "all-descendants"
+  // The logical descendants and direct-pedigree graphs may contain thousands
+  // of people. Scene construction gets a graph-derived occurrence budget,
+  // while the viewport still mounts at most 600 interactive items at once.
+  const logicalSceneNodeBudget = perspective.kind === "all-descendants" || directAncestorMode
     ? Math.max(
         MAX_RENDERED_FAMILY_TREE_NODES,
         displayedGraph.persons.length +
