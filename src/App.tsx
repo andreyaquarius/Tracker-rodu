@@ -735,6 +735,13 @@ export default function App() {
     Boolean(account) && route.kind !== "public",
     account?.id ?? "",
   );
+  const handleFamilyTreeDataChanged = useCallback(() => {
+    void subscriptionAccess.refreshSubscription();
+    const projectId = workspace?.projectId;
+    if (!projectId) return;
+    invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
+    setPersonPedigreeRevision((current) => current + 1);
+  }, [account?.id, subscriptionAccess.refreshSubscription, workspace?.projectId]);
   useEffect(() => {
     let active = true;
     if (!account || route.kind === "public") {
@@ -4072,6 +4079,8 @@ export default function App() {
       setProjectPersons(next.persons);
       setProjectPersonRelations(next.relations);
       saveProjectPeopleCache(projectId, next.persons, next.relations);
+      invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
+      setPersonPedigreeRevision((current) => current + 1);
       return true;
     } catch (error) {
       notify(
@@ -4464,6 +4473,8 @@ export default function App() {
     result: DeleteRelationshipResult,
   ): Promise<void> => {
     if (activeWorkspaceIdRef.current !== projectId) return;
+    invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
+    setPersonPedigreeRevision((current) => current + 1);
 
     if (result.deletedLegacyRelationIds.length) {
       const removedRelationIds = new Set(result.deletedLegacyRelationIds);
@@ -4650,6 +4661,7 @@ export default function App() {
     return saveProjectPersonRelation(projectId, relation)
       .then((saved) => {
         invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
+        setPersonPedigreeRevision((current) => current + 1);
         const latestPeople = loadProjectPeopleCache(projectId);
         const peopleForNames = latestPeople.persons.length ? latestPeople.persons : projectPersons;
         const firstPerson = peopleForNames.find((person) => person.id === saved.personId);
@@ -4705,6 +4717,7 @@ export default function App() {
     saveProjectPeopleCache(projectId, projectPersons, optimistic);
     void deleteProjectPersonRelation(projectId, id).then(() => {
       invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
+      setPersonPedigreeRevision((current) => current + 1);
       recordProjectActivity(
         "persons",
         id,
@@ -5374,7 +5387,7 @@ export default function App() {
               treeLimitMessage={familyTreeLimitMessage}
               researchRequired={researchRequiredByPlan}
               gedcomResearchRequired={false}
-              onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
+              onSubscriptionChanged={handleFamilyTreeDataChanged}
               onPersonRelationsDetached={(result) => {
                 if (!workspace) return;
                 return reconcilePersonRelationsAfterTreeDetach(workspace.projectId, result);
@@ -5521,7 +5534,7 @@ export default function App() {
                 canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
                 canCreateTree={subscriptionAccess.canCreateFamilyTree}
                 canImportTable={subscriptionAccess.canImportTable}
-                onSubscriptionChanged={() => void subscriptionAccess.refreshSubscription()}
+                onSubscriptionChanged={handleFamilyTreeDataChanged}
                 projectName={workspace?.projectName}
                 researchRequired={false}
                 canUseGedcom={canUseFamilyTreeFeature}

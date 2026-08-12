@@ -44,6 +44,7 @@ export interface PersonsCatalogFiltersV2 {
 export interface PersonsCatalogV2Props {
   persons: readonly Person[];
   directAncestorIds?: ReadonlySet<string> | readonly string[];
+  kinshipLabels?: ReadonlyMap<string, string>;
   familyOrder?: ReadonlyMap<string, number>;
   familyOrderStatus?: PersonsCatalogFamilyOrderStatusV2;
   initialSegment?: PersonsCatalogSegmentV2;
@@ -72,6 +73,7 @@ const emptyFilters: PersonsCatalogFiltersV2 = {
   status: "all",
 };
 const emptyFamilyOrderV2: ReadonlyMap<string, number> = new Map();
+const emptyKinshipLabelsV2: ReadonlyMap<string, string> = new Map();
 
 const segmentLabels: Record<PersonsCatalogSegmentV2, string> = {
   all: "Усі особи",
@@ -83,6 +85,7 @@ const segmentLabels: Record<PersonsCatalogSegmentV2, string> = {
 export function PersonsCatalogV2({
   persons,
   directAncestorIds = [],
+  kinshipLabels = emptyKinshipLabelsV2,
   familyOrder = emptyFamilyOrderV2,
   familyOrderStatus = familyOrder.size ? "ready" : "unavailable",
   initialSegment = "all",
@@ -389,7 +392,7 @@ export function PersonsCatalogV2({
         view === "list" ? (
           <PersonsListV2
             persons={visiblePersons}
-            directIds={directIds}
+            kinshipLabels={kinshipLabels}
             selectedIds={selectedIds}
             activePersonId={selectedPersonId}
             summaries={summaries}
@@ -402,7 +405,7 @@ export function PersonsCatalogV2({
         ) : (
           <PersonsGridV2
             persons={visiblePersons}
-            directIds={directIds}
+            kinshipLabels={kinshipLabels}
             selectedIds={selectedIds}
             activePersonId={selectedPersonId}
             summaries={summaries}
@@ -446,7 +449,7 @@ export function PersonsCatalogV2({
 
 interface PersonsCollectionViewPropsV2 {
   persons: readonly Person[];
-  directIds: ReadonlySet<string>;
+  kinshipLabels: ReadonlyMap<string, string>;
   selectedIds: ReadonlySet<string>;
   activePersonId?: string;
   summaries: ReadonlyMap<string, ProjectPersonSummary>;
@@ -459,7 +462,7 @@ interface PersonsCollectionViewPropsV2 {
 
 function PersonsListV2({
   persons,
-  directIds,
+  kinshipLabels,
   selectedIds,
   activePersonId,
   summaries,
@@ -510,7 +513,7 @@ function PersonsListV2({
               </td>
               <td>{personLifeYearsV2(person)}</td>
               <td><span className="status-pill">{person.status}</span></td>
-              <td>{directIds.has(person.id) ? "Прямий предок" : "—"}</td>
+              <td>{kinshipLabels.get(person.id) ?? "Зв’язок не визначено"}</td>
               <td>{personPlacesV2(person) || "—"}</td>
               <td>{summaries.get(person.id)?.documentCount ?? 0}</td>
               <td>{lastEventLabelV2(person, summaries.get(person.id))}</td>
@@ -541,7 +544,7 @@ function PersonsListV2({
 
 function PersonsGridV2({
   persons,
-  directIds,
+  kinshipLabels,
   selectedIds,
   activePersonId,
   summaries,
@@ -595,7 +598,9 @@ function PersonsGridV2({
             <div><dt>Місця</dt><dd>{personPlacesV2(person) || "—"}</dd></div>
             <div><dt>Документи</dt><dd>{summaries.get(person.id)?.documentCount ?? 0}</dd></div>
           </dl>
-          {directIds.has(person.id) ? <strong className="persons-v2-direct-badge">Прямий предок</strong> : null}
+          <strong className="persons-v2-direct-badge">
+            {kinshipLabels.get(person.id) ?? "Зв’язок не визначено"}
+          </strong>
         </article>
       ))}
     </div>

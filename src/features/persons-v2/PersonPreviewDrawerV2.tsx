@@ -37,7 +37,7 @@ export interface PersonPreviewDrawerV2Props {
   hypotheses?: readonly Hypothesis[];
   archiveRequests?: readonly ArchiveRequest[];
   photoUrl?: string;
-  directAncestor?: boolean;
+  kinshipLabel?: string;
   onClose: () => void;
   onOpenProfile?: (person: Person) => void;
   onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[]) => void;
@@ -59,7 +59,7 @@ export function PersonPreviewDrawerV2({
   hypotheses = [],
   archiveRequests = [],
   photoUrl,
-  directAncestor = false,
+  kinshipLabel,
   onClose,
   onOpenProfile,
   onOpenPhoto,
@@ -242,7 +242,7 @@ export function PersonPreviewDrawerV2({
           <h2 id="persons-v2-preview-title">{name}</h2>
           <div className="persons-v2-preview__badges">
             <span className="status-pill">{person.status}</span>
-            {directAncestor ? <span className="status-pill">Прямий предок</span> : null}
+            {kinshipLabel ? <span className="status-pill">{kinshipLabel}</span> : null}
           </div>
           <p id="persons-v2-preview-summary">
             {personLifeYears(person) || "Роки життя не вказані"} · {person.gender}
@@ -252,6 +252,12 @@ export function PersonPreviewDrawerV2({
       </header>
 
       <dl className="persons-v2-preview__facts">
+        {kinshipLabel ? (
+          <PreviewFactV2
+            term="Щодо кореневої особи"
+            value={kinshipLabel}
+          />
+        ) : null}
         <PreviewFactV2
           term="Народження"
           value={previewFactV2(

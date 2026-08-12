@@ -45,7 +45,21 @@ test("V2 catalogue loads canonical Ahnentafel order and forwards it to sorting",
   assert.match(pedigreeService, /cacheScope/);
   assert.match(pedigreeService, /A missing tree\/root is expected[\s\S]*?if \(value\.treeId && value\.rootPersonId\)/);
   assert.match(pedigreeService, /list_family_tree_direct_ancestor_order_v1/);
+  assert.match(pedigreeService, /list_family_tree_root_kinship_v1/);
+  assert.match(pedigreeService, /kinshipByPersonId/);
   assert.match(pedigreeService, /pedigreeRanksFromAncestorOrderRows/);
   assert.doesNotMatch(pedigreeService, /buildCircularAncestorChartModel/);
   assert.doesNotMatch(pedigreeService, /maxNodes: 600/);
+});
+
+test("V2 catalogue renders exact kinship instead of a disappearing ancestor flag", () => {
+  const catalogue = readFileSync(
+    new URL("../src/features/persons-v2/PersonsCatalogV2.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(personsModule, /personKinshipLabel\(kinship/);
+  assert.match(personsModule, /kinshipLabels=\{kinshipLabels\}/);
+  assert.match(personsModule, /kinshipLabel=\{kinshipLabels\.get\(routePerson\.id\)/);
+  assert.match(catalogue, /kinshipLabels\.get\(person\.id\) \?\? "Зв’язок не визначено"/);
+  assert.doesNotMatch(catalogue, /directIds\.has\(person\.id\) \? "Прямий предок" : "—"/);
 });

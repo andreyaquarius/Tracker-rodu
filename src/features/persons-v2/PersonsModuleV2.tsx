@@ -69,6 +69,10 @@ import {
 } from "../../utils/gedcomImportGroups.ts";
 import { GedcomImportManagerV2 } from "./GedcomImportManagerV2.tsx";
 import { listProjectGedcomImportDatasets } from "../../services/projectPeople.ts";
+import {
+  personKinshipLabel,
+  type PersonKinshipDescriptor,
+} from "../../utils/personKinship.ts";
 
 export interface PersonsModuleV2Props {
   db: AppDatabase;
@@ -139,6 +143,7 @@ const emptyDetailBundle: PersonDetailBundle = {
 };
 const emptyPersonFamilyOrder: ReadonlyMap<string, number> = new Map();
 const emptyPersonIdSet: ReadonlySet<string> = new Set();
+const emptyPersonKinship: ReadonlyMap<string, PersonKinshipDescriptor> = new Map();
 
 export function PersonsModuleV2({
   db,
@@ -230,6 +235,30 @@ export function PersonsModuleV2({
     ?? canonicalPedigree?.directAncestorIds
     ?? emptyPersonIdSet;
   const familyOrder = canonicalPedigree?.familyOrder ?? emptyPersonFamilyOrder;
+  const kinshipByPersonId = canonicalPedigree?.kinshipByPersonId ?? emptyPersonKinship;
+  const personsById = useMemo(
+    () => new Map(persons.map((person) => [person.id, person])),
+    [persons],
+  );
+  const kinshipLabels = useMemo<ReadonlyMap<string, string>>(() => {
+    const labels = new Map<string, string>();
+    for (const [personId, kinship] of kinshipByPersonId) {
+      const person = personsById.get(personId);
+      const viaPerson = kinship.viaPersonId
+        ? personsById.get(kinship.viaPersonId)
+        : undefined;
+      labels.set(personId, personKinshipLabel(kinship, {
+        gender: person?.gender,
+        viaGender: viaPerson?.gender,
+      }));
+    }
+    // Older callers may still provide only a direct-ancestor set. Keep their
+    // useful value visible while the canonical kinship RPC is rolling out.
+    for (const personId of effectiveDirectAncestorIds) {
+      if (!labels.has(personId)) labels.set(personId, "Прямий предок");
+    }
+    return labels;
+  }, [effectiveDirectAncestorIds, kinshipByPersonId, personsById]);
   const familyOrderStatus: "loading" | "ready" | "unavailable" = canonicalPedigree
     ? "ready"
     : currentPedigreeLoad?.status === "unavailable" || currentPedigreeLoad?.status === "ready"
@@ -431,7 +460,7 @@ export function PersonsModuleV2({
           archiveRequests={detail.archiveRequests}
           photoUrl={selectedPhotoUrl}
           photoUrlForPerson={safeExternalPhotoUrl}
-          directAncestor={effectiveDirectAncestorIds.has(routePerson.id)}
+          kinshipLabel={kinshipLabels.get(routePerson.id) ?? "Зв’язок не визначено"}
           onBack={() => onNavigate({ mode: "list" })}
           onEdit={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
           onDelete={!readOnly && onDeletePersons && !deletingPersons
@@ -636,6 +665,7 @@ export function PersonsModuleV2({
             persons={persons}
             initialQuery={initialSearch}
             directAncestorIds={effectiveDirectAncestorIds}
+            kinshipLabels={kinshipLabels}
             familyOrder={familyOrder}
             familyOrderStatus={familyOrderStatus}
             selectedPersonId={previewPersonId}
@@ -677,7 +707,9 @@ export function PersonsModuleV2({
           hypotheses={detail.hypotheses}
           archiveRequests={detail.archiveRequests}
           photoUrl={selectedPhotoUrl}
-          directAncestor={detailPerson ? effectiveDirectAncestorIds.has(detailPerson.id) : false}
+          kinshipLabel={detailPerson
+            ? kinshipLabels.get(detailPerson.id) ?? "Зв’язок не визначено"
+            : undefined}
           onClose={() => setPreviewPersonId("")}
           onOpenProfile={(person) => onNavigate({ mode: "profile", personId: person.id })}
           onOpenPhoto={onOpenPhoto}

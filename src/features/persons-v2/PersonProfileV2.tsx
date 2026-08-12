@@ -88,7 +88,7 @@ export interface PersonProfileV2Props {
   archiveRequests?: readonly ArchiveRequest[];
   photoUrl?: string;
   photoUrlForPerson?: (person: Person) => string | undefined;
-  directAncestor?: boolean;
+  kinshipLabel?: string;
   activeTab?: PersonProfileTabV2;
   defaultTab?: PersonProfileTabV2;
   onTabChange?: (tab: PersonProfileTabV2) => void;
@@ -157,7 +157,7 @@ export function PersonProfileV2({
   archiveRequests = [],
   photoUrl,
   photoUrlForPerson,
-  directAncestor = false,
+  kinshipLabel,
   activeTab: controlledTab,
   defaultTab = "overview",
   onTabChange,
@@ -330,7 +330,7 @@ export function PersonProfileV2({
             <p>{personLifeYears(person) || "Роки життя не вказані"} · {person.gender}</p>
             <div className="persons-v2-profile__badges">
               <span className="status-pill">{person.status}</span>
-              {directAncestor ? <span className="status-pill">Прямий предок</span> : null}
+              {kinshipLabel ? <span className="status-pill">{kinshipLabel}</span> : null}
               <span className="status-pill">{privacyLabelV2(person.privacyStatus)}</span>
             </div>
             {research ? <small>Проєкт: {research.title}</small> : null}
