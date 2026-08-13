@@ -9,6 +9,7 @@ import {
   type FamilyTreePersonMutationDraft,
 } from "../../services/familyTreeMutationService";
 import {
+  autoFormatFlexibleDateInput,
   formatDateForDisplay,
   normalizeFlexibleDateInput,
 } from "../../utils/dateHelpers";
@@ -205,9 +206,10 @@ export function FamilyTreePersonDialog({
             <input
               type="text"
               inputMode="numeric"
+              maxLength={10}
               placeholder="дд.мм.рррр або рррр"
               value={person.birthDate}
-              onChange={(event) => updatePerson({ birthDate: event.target.value })}
+              onChange={(event) => updatePerson({ birthDate: autoFormatFlexibleDateInput(event.target.value) })}
               onBlur={() => normalizeDate("birthDate")}
             />
           </label>
@@ -216,9 +218,10 @@ export function FamilyTreePersonDialog({
             <input
               type="text"
               inputMode="numeric"
+              maxLength={10}
               placeholder="дд.мм.рррр або рррр"
               value={person.deathDate}
-              onChange={(event) => updatePerson({ deathDate: event.target.value })}
+              onChange={(event) => updatePerson({ deathDate: autoFormatFlexibleDateInput(event.target.value) })}
               onBlur={() => normalizeDate("deathDate")}
             />
           </label>

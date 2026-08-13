@@ -49,6 +49,7 @@ test("converts GEDCOM people and family links into app records", () => {
   assert.equal(mother?.surname, "Married");
   assert.equal(mother?.maidenSurname, "Birth");
   assert.equal(mother?.isLiving, false);
+  assert.equal(mother?.customFields.__gedcomVitalStatus, "deceased");
   assert.equal(mother?.researchId, "research-1");
   assert.equal(mother?.events.find((event) => event.type === "death")?.value, null);
 
@@ -115,6 +116,34 @@ test("keeps MyHeritage private living people as living app persons", () => {
   assert.equal(living?.isLiving, true);
   assert.equal(living?.deathDate, "");
   assert.equal(deceased?.isLiving, false);
+});
+
+test("stores the reconstructed MyHeritage binary status on app persons", () => {
+  let id = 0;
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "1 SOUR MYHERITAGE",
+    "1 DATE 19 JUL 2026",
+    "0 @I1@ INDI",
+    "1 NAME Default /Living/",
+    "0 @I2@ INDI",
+    "1 NAME Historical /Person/",
+    "1 BIRT",
+    "2 DATE 1900",
+    "0 TRLR",
+  ].join("\n"));
+
+  const result = buildGedcomAppImport(draft, {
+    idFactory: () => `id-${++id}`,
+    nowFactory: () => "2026-07-05T00:00:00.000Z",
+  });
+  const living = result.people.find((person) => person.givenName === "Default");
+  const deceased = result.people.find((person) => person.givenName === "Historical");
+
+  assert.equal(living?.isLiving, true);
+  assert.equal(living?.customFields.__gedcomVitalStatus, "living");
+  assert.equal(deceased?.isLiving, false);
+  assert.equal(deceased?.customFields.__gedcomVitalStatus, "deceased");
 });
 
 test("maps GEDCOM central person marker to imported app person id", () => {

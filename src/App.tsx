@@ -31,11 +31,13 @@ import { YearMatrixPage } from "./pages/YearMatrixPage";
 import { BackupPage } from "./pages/BackupPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SubscriptionPage } from "./pages/SubscriptionPage";
+import { FeedbackPage } from "./pages/FeedbackPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { FaqPage, FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
 import { MapPage } from "./pages/MapPage";
 import { FamilyTreePage } from "./pages/FamilyTreePage";
+import { FamilyTreeStatisticsPage } from "./pages/FamilyTreeStatisticsPage.tsx";
 import { FamilyTreeErrorBoundary } from "./components/familyTree/FamilyTreeErrorBoundary";
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
@@ -49,7 +51,9 @@ import {
 } from "./components/DocumentWorkspaceViewer";
 import { isHierarchyPage } from "./utils/sectionHierarchy";
 import {
+  canonicalRouteLocation,
   familyTreePath,
+  familyTreeStatisticsPath,
   pagePath,
   parseAppRoute,
   parseFamilyTreeRouteFocus,
@@ -1033,13 +1037,23 @@ export default function App() {
     }
     const canonicalPath = route.page === "persons" && route.personMode
       ? personPath(requestedWorkspace.projectSlug, route.personId, route.personMode)
-      : pagePath(
+      : route.page === "familyTree" && route.familyTreeView === "statistics"
+        ? familyTreeStatisticsPath(requestedWorkspace.projectSlug, familyTreeRouteFocus.treeId)
+        : pagePath(
           requestedWorkspace.projectSlug,
           route.page,
           projectCustomSections,
         );
-    if (location.pathname !== canonicalPath) {
-      routerNavigate(`${canonicalPath}${location.search}${location.hash}`, { replace: true });
+    const canonicalLocation = canonicalRouteLocation(
+      canonicalPath,
+      location.search,
+      location.hash,
+    );
+    if (
+      location.pathname !== canonicalLocation.pathname
+      || location.search !== canonicalLocation.search
+    ) {
+      routerNavigate(canonicalLocation.href, { replace: true });
     }
   }, [
     account,
@@ -4018,8 +4032,14 @@ export default function App() {
     setModuleSearch("");
     setOpenEntityId("");
     setCreateRequest(null);
-    if (nextPage === "settings" || nextPage === "subscription") {
-      routerNavigate(nextPage === "settings" ? "/settings" : "/settings/subscription");
+    if (nextPage === "settings" || nextPage === "subscription" || nextPage === "feedback") {
+      routerNavigate(
+        nextPage === "settings"
+          ? "/settings"
+          : nextPage === "subscription"
+            ? "/settings/subscription"
+            : "/feedback",
+      );
       return;
     }
     if (workspace) {
@@ -5348,6 +5368,21 @@ export default function App() {
             </section>
           );
         }
+        if (route.kind === "project" && route.familyTreeView === "statistics") {
+          return (
+            <FamilyTreeErrorBoundary>
+              <FamilyTreeStatisticsPage
+                projectId={workspace?.projectId}
+                initialTreeId={familyTreeRouteFocus.treeId}
+                onBack={(treeId) => {
+                  if (!workspace) return;
+                  routerNavigate(familyTreePath(workspace.projectSlug, { treeId }));
+                }}
+                onOpenPerson={(personId) => void openFamilyTreePerson(personId)}
+              />
+            </FamilyTreeErrorBoundary>
+          );
+        }
         return (
           <FamilyTreeErrorBoundary>
             <FamilyTreePage
@@ -5396,6 +5431,10 @@ export default function App() {
                 await syncFamilyTreeCreatedPerson(personId);
               }}
               onOpenPerson={(personId) => void openFamilyTreePerson(personId)}
+              onOpenStatistics={(treeId) => {
+                if (!workspace) return;
+                routerNavigate(familyTreeStatisticsPath(workspace.projectSlug, treeId));
+              }}
               onActiveContextChange={handleFamilyTreeActiveContextChange}
               personProfileNavigationEnabled={personsModuleV2Enabled}
               useProductionRenderer
@@ -5620,6 +5659,14 @@ export default function App() {
             onRefresh={subscriptionAccess.refreshSubscription}
           />
         );
+      case "feedback":
+        return account ? (
+          <FeedbackPage account={account} isAdmin={subscriptionAccess.isAdmin} />
+        ) : (
+          <section className="panel empty-state">
+            <strong>Увійдіть до облікового запису, щоб відкрити приватні звернення.</strong>
+          </section>
+        );
     }
   })();
 
@@ -5666,6 +5713,11 @@ export default function App() {
     <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
         page={route.kind === "projects" ? null : page}
+        familyTreeView={
+          route.kind === "project" && route.page === "familyTree"
+            ? route.familyTreeView ?? "tree"
+            : undefined
+        }
         onNavigate={navigate}
         onOpenProjects={openProjects}
         onOpenGeneHelp={() => {

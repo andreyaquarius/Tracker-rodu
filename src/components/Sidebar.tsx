@@ -10,6 +10,7 @@ import {
   sectionAncestors,
 } from "../utils/sectionHierarchy";
 import { SectionIcon } from "./SectionIcon";
+import { FeedbackNavBadge } from "./FeedbackNavBadge";
 
 export type StandardPageKey =
   | "dashboard"
@@ -17,6 +18,7 @@ export type StandardPageKey =
   | "familyTree"
   | CustomFieldModule
   | "backup"
+  | "feedback"
   | "subscription"
   | "settings";
 
@@ -59,6 +61,7 @@ type NavigationIconName =
   | "lightbulb"
   | "users"
   | "send"
+  | "message-square"
   | "refresh"
   | "credit-card"
   | "settings";
@@ -122,6 +125,12 @@ function NavigationIcon({ icon }: { icon: NavigationIconName }) {
         <path d="m4 7 1.5 1.5L8.5 5" />
         <path d="m4 17 1.5 1.5 3-3.5" />
         <path d="M12 7h8M12 17h8" />
+      </>
+    ),
+    "message-square": (
+      <>
+        <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+        <path d="M8 9h8M8 13h5" />
       </>
     ),
     "bookmark-check": (
@@ -201,6 +210,7 @@ interface SidebarProps {
   onClose: () => void;
   desktopCollapsed: boolean;
   onToggleDesktopCollapsed: () => void;
+  accountId?: string;
 }
 
 export function Sidebar({
@@ -215,6 +225,7 @@ export function Sidebar({
   onClose,
   desktopCollapsed,
   onToggleDesktopCollapsed,
+  accountId,
 }: SidebarProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const activeAncestors = useMemo(() => {
@@ -434,8 +445,19 @@ export function Sidebar({
           </div>
         </nav>
         <div className="sidebar-foot">
-          <span>Ваші дані належать вам</span>
-          <small>Захищене збереження та резервні копії</small>
+          <button
+            type="button"
+            className={`sidebar-feedback-action ${page === "feedback" ? "active" : ""}`}
+            onClick={() => navigate("feedback")}
+          >
+            <span className="nav-icon"><NavigationIcon icon="message-square" /></span>
+            <span className="sidebar-feedback-label">Зворотний зв’язок</span>
+            {accountId ? <FeedbackNavBadge accountId={accountId} /> : null}
+          </button>
+          <div className="sidebar-privacy-copy">
+            <span>Ваші дані належать вам</span>
+            <small>Захищене збереження та резервні копії</small>
+          </div>
         </div>
       </aside>
     </>

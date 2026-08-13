@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import { createId } from "../utils/id";
 import {
+  autoFormatFlexibleDateInput,
   formatFlexibleDateForDisplay,
   normalizeFlexibleDateInput,
   nowIso,
@@ -61,11 +62,12 @@ function PersonDateInput({
       <input
         type="text"
         inputMode="numeric"
+        maxLength={10}
         autoComplete="off"
         placeholder="дд.мм.рррр або рррр"
         value={value}
         aria-invalid={error ? "true" : undefined}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => onChange(autoFormatFlexibleDateInput(event.target.value))}
         onBlur={onBlur}
       />
       {error ? <small className="form-field-error">{error}</small> : null}

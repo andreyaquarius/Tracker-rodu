@@ -14,6 +14,15 @@ export interface PersonPedigreeAncestorOrderRow {
   order_path: string;
 }
 
+export interface PedigreeKinshipRank {
+  kind: "root" | "ancestor" | "descendant" | "collateral" | "affinal";
+  upSteps: number;
+  downSteps: number;
+  partnerSteps: number;
+  orderPath: string;
+  viaPersonId?: string;
+}
+
 /** Converts sparse Ahnentafel occurrences into one stable rank per person. */
 export function pedigreeRanksFromOccurrences(
   centralPersonId: string,
@@ -83,6 +92,30 @@ export function pedigreeRanksFromAncestorOrderRows(
       orderedIds.filter((personId) => personId !== centralPersonId),
     ),
   };
+}
+
+/** Direct-ancestor results are authoritative over broader kinship labels. */
+export function mergeCanonicalAncestorKinship<T extends PedigreeKinshipRank>(
+  broaderKinship: ReadonlyMap<string, T>,
+  canonicalKinship: ReadonlyMap<string, T>,
+): ReadonlyMap<string, T> {
+  const result = new Map(broaderKinship);
+  for (const [personId, kinship] of canonicalKinship) {
+    result.set(personId, kinship);
+  }
+  return result;
+}
+
+/** Keeps Ahnentafel people first and appends other relatives once. */
+export function mergeCanonicalFamilyOrder(
+  canonicalAncestorOrder: ReadonlyMap<string, number>,
+  broaderFamilyOrder: ReadonlyMap<string, number>,
+): ReadonlyMap<string, number> {
+  const orderedIds = [...canonicalAncestorOrder.keys()];
+  for (const personId of broaderFamilyOrder.keys()) {
+    if (!canonicalAncestorOrder.has(personId)) orderedIds.push(personId);
+  }
+  return new Map(orderedIds.map((personId, index) => [personId, index]));
 }
 
 function compareCodePoints(left: string, right: string): number {

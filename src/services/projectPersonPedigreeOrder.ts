@@ -1,4 +1,6 @@
 import {
+  mergeCanonicalAncestorKinship,
+  mergeCanonicalFamilyOrder,
   pedigreeRanksFromAncestorOrderRows,
   type PersonPedigreeAncestorOrderRow,
 } from "../utils/personPedigreeOrder.ts";
@@ -37,6 +39,7 @@ const EMPTY_PEDIGREE_ORDER: ProjectPersonPedigreeOrder = {
 };
 
 const PEDIGREE_ORDER_CACHE_TTL_MS = 10 * 60 * 1000;
+const PEDIGREE_ORDER_CACHE_VERSION = "canonical-direct-ancestors-v2";
 const pedigreeOrderCache = new Map<string, {
   value: ProjectPersonPedigreeOrder;
   expiresAt: number;
@@ -131,41 +134,65 @@ async function fetchProjectPersonPedigreeOrder(
   // workspace and circular chart must never change catalogue ordering.
   const rootPersonId = entry.rootPersonId;
   const client = getSupabaseClient();
-  const kinshipResult = await client.rpc(
-    "list_family_tree_root_kinship_v1",
-    {
-      target_tree_id: entry.id,
-      target_root_person_id: rootPersonId,
-    },
-  );
-  if (!kinshipResult.error) {
-    const kinshipByPersonId = kinshipMapFromRows(assertKinshipRows(kinshipResult.data));
+  const rpcArguments = {
+    target_tree_id: entry.id,
+    target_root_person_id: rootPersonId,
+  };
+  const [ancestorResult, kinshipResult] = await Promise.all([
+    client.rpc("list_family_tree_direct_ancestor_order_v1", rpcArguments),
+    client.rpc("list_family_tree_root_kinship_v1", rpcArguments),
+  ]);
+
+  // The complete direct-ancestor traversal is the canonical source for the
+  // catalogue segment and Ahnentafel ordering. The broader kinship traversal
+  // is intentionally used only to enrich labels for descendants, collateral
+  // and affinal relatives; it must never redefine who is a direct ancestor.
+  if (!ancestorResult.error) {
+    const ancestorRows = assertAncestorOrderRows(ancestorResult.data);
+    const canonicalRanks = pedigreeRanksFromAncestorOrderRows(rootPersonId, ancestorRows);
+    const canonicalKinship = ancestorKinshipMap(rootPersonId, ancestorRows);
+
+    if (!kinshipResult.error) {
+      const broaderKinship = kinshipMapFromRows(assertKinshipRows(kinshipResult.data));
+      const kinshipByPersonId = mergeCanonicalAncestorKinship(
+        broaderKinship,
+        canonicalKinship,
+      );
+      return {
+        treeId: entry.id,
+        rootPersonId,
+        familyOrder: mergeCanonicalFamilyOrder(
+          canonicalRanks.familyOrder,
+          pedigreeOrderFromKinship(rootPersonId, kinshipByPersonId).familyOrder,
+        ),
+        directAncestorIds: canonicalRanks.directAncestorIds,
+        kinshipByPersonId,
+      };
+    }
+    // Relationship-label enrichment is optional. A transient or rolling-
+    // deployment failure of the broader graph must not hide a valid canonical
+    // ancestor list or mark the tree as unavailable in the Persons module.
     return {
       treeId: entry.id,
       rootPersonId,
-      ...pedigreeOrderFromKinship(rootPersonId, kinshipByPersonId),
-      kinshipByPersonId,
+      ...canonicalRanks,
+      kinshipByPersonId: canonicalKinship,
     };
   }
-  if (!isMissingRootKinshipFunctionError(kinshipResult.error)) throw kinshipResult.error;
 
-  // Compatibility during a rolling deployment: keep the former complete
-  // direct-ancestor RPC so the key relationship column never disappears.
-  const ancestorResult = await client.rpc(
-    "list_family_tree_direct_ancestor_order_v1",
-    {
-      target_tree_id: entry.id,
-      target_root_person_id: rootPersonId,
-    },
-  );
-  if (ancestorResult.error) throw ancestorResult.error;
-  const ancestorRows = assertAncestorOrderRows(ancestorResult.data);
-  const ranks = pedigreeRanksFromAncestorOrderRows(rootPersonId, ancestorRows);
+  // Compatibility during a rolling deployment in which the newer complete
+  // ancestor RPC is not available yet. Other server errors stay visible so a
+  // partial kinship result cannot silently produce a smaller ancestor count.
+  if (!isMissingDirectAncestorFunctionError(ancestorResult.error)) {
+    throw ancestorResult.error;
+  }
+  if (kinshipResult.error) throw kinshipResult.error;
+  const kinshipByPersonId = kinshipMapFromRows(assertKinshipRows(kinshipResult.data));
   return {
     treeId: entry.id,
     rootPersonId,
-    ...ranks,
-    kinshipByPersonId: ancestorKinshipMap(rootPersonId, ancestorRows),
+    ...pedigreeOrderFromKinship(rootPersonId, kinshipByPersonId),
+    kinshipByPersonId,
   };
 }
 
@@ -294,7 +321,7 @@ function kinshipPriority(value: PersonKinshipDescriptor): number {
   return 4;
 }
 
-function isMissingRootKinshipFunctionError(error: unknown): boolean {
+function isMissingDirectAncestorFunctionError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const record = error as Record<string, unknown>;
   const code = String(record.code ?? "").toUpperCase();
@@ -303,7 +330,7 @@ function isMissingRootKinshipFunctionError(error: unknown): boolean {
     .join(" ")
     .toLocaleLowerCase("en");
   return code === "PGRST202"
-    || (message.includes("list_family_tree_root_kinship_v1") && (
+    || (message.includes("list_family_tree_direct_ancestor_order_v1") && (
       message.includes("not find")
       || message.includes("does not exist")
       || message.includes("schema cache")
@@ -353,7 +380,7 @@ function pedigreeCacheKey(
 }
 
 function pedigreeCacheNamespace(projectId: string, cacheScope: string): string {
-  return [projectId, cacheScope].join("\u001f");
+  return [PEDIGREE_ORDER_CACHE_VERSION, projectId, cacheScope].join("\u001f");
 }
 
 function waitForPedigreeOrder(

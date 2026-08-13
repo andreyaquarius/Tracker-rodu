@@ -19,6 +19,7 @@ const pageSegments: Partial<Record<PageKey, string>> = {
   hypotheses: "hypotheses",
   persons: "persons",
   backup: "backups",
+  feedback: "feedback",
 };
 
 const segmentPages = new Map(
@@ -29,13 +30,14 @@ export type AppRoute =
   | { kind: "root" }
   | { kind: "public"; page: "privacy" | "terms" | "features" | "pricing" | "faq" }
   | { kind: "projects" }
-  | { kind: "settings"; page: "settings" | "subscription" }
+  | { kind: "settings"; page: "settings" | "subscription" | "feedback" }
   | {
       kind: "project";
       projectRef: string;
       page: PageKey;
       personId?: string;
       personMode?: "profile" | "edit" | "new";
+      familyTreeView?: "tree" | "statistics";
       unresolvedSectionPath?: boolean;
     }
   | { kind: "unknown" };
@@ -122,7 +124,8 @@ export function parseAppRoute(
   pathname: string,
   sections: CustomSectionDefinition[] = [],
 ): AppRoute {
-  const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  const pathOnly = pathname.split(/[?#]/, 1)[0] ?? pathname;
+  const parts = pathOnly.split("/").filter(Boolean).map(decodeURIComponent);
   if (!parts.length) return { kind: "root" };
   if (parts.length === 1 && parts[0] === "privacy") {
     return { kind: "public", page: "privacy" };
@@ -145,6 +148,9 @@ export function parseAppRoute(
   }
   if (parts.length === 2 && parts[0] === "settings" && parts[1] === "subscription") {
     return { kind: "settings", page: "subscription" };
+  }
+  if (parts.length === 1 && parts[0] === "feedback") {
+    return { kind: "settings", page: "feedback" };
   }
   if (parts[0] !== "projects" || !parts[1]) return { kind: "unknown" };
 
@@ -208,6 +214,18 @@ export function parseAppRoute(
       };
     }
   }
+  if (
+    standardPage === "familyTree" &&
+    sectionPath.length === 2 &&
+    sectionPath[1] === "statystyka"
+  ) {
+    return {
+      kind: "project",
+      projectRef,
+      page: "familyTree",
+      familyTreeView: "statistics",
+    };
+  }
   if (standardPage && sectionPath.length === 1) {
     return { kind: "project", projectRef, page: standardPage };
   }
@@ -226,6 +244,7 @@ export function pagePath(
 ): string {
   if (page === "settings") return "/settings";
   if (page === "subscription") return "/settings/subscription";
+  if (page === "feedback") return "/feedback";
   if (page.startsWith("custom:")) {
     const sectionId = page.slice("custom:".length);
     const section = sections.find((item) => item.id === sectionId);
@@ -261,6 +280,46 @@ export function familyTreePath(
   if (focusPersonId) params.set("focusPersonId", focusPersonId);
   const query = params.toString();
   return query ? `${base}?${query}` : base;
+}
+
+export function familyTreeStatisticsPath(
+  projectSlug: string,
+  treeId?: string,
+): string {
+  const base = `${pagePath(projectSlug, "familyTree")}/statystyka`;
+  const normalizedTreeId = treeId?.trim();
+  return normalizedTreeId
+    ? `${base}?${new URLSearchParams({ treeId: normalizedTreeId }).toString()}`
+    : base;
+}
+
+export interface CanonicalRouteLocation {
+  pathname: string;
+  search: string;
+  href: string;
+}
+
+/**
+ * Builds one canonical browser location without appending an existing query
+ * to a route that already owns its query parameters.
+ */
+export function canonicalRouteLocation(
+  canonicalPath: string,
+  currentSearch = "",
+  currentHash = "",
+): CanonicalRouteLocation {
+  const queryIndex = canonicalPath.indexOf("?");
+  const pathname = queryIndex >= 0
+    ? canonicalPath.slice(0, queryIndex)
+    : canonicalPath;
+  const search = queryIndex >= 0
+    ? canonicalPath.slice(queryIndex)
+    : currentSearch;
+  return {
+    pathname,
+    search,
+    href: `${pathname}${search}${currentHash}`,
+  };
 }
 
 export function parseFamilyTreeRouteFocus(search: string): FamilyTreeRouteFocus {

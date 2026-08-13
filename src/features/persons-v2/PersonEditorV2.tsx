@@ -26,6 +26,7 @@ import { InlineCustomFieldCreator } from "../../components/InlineCustomFieldCrea
 import { PersonEventsEditor } from "../../components/PersonEventsEditor";
 import { ScanAttachmentsEditor } from "../../components/ScanAttachments";
 import {
+  autoFormatFlexibleDateInput,
   formatFlexibleDateForDisplay,
   normalizeFlexibleDateInput,
   nowIso,
@@ -369,11 +370,12 @@ function PersonDateInput({
       <input
         type="text"
         inputMode="numeric"
+        maxLength={10}
         autoComplete="off"
         placeholder="дд.мм.рррр або рррр"
         value={value}
         aria-invalid={error ? "true" : undefined}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => onChange(autoFormatFlexibleDateInput(event.target.value))}
         onBlur={onBlur}
       />
       <FieldError message={error} />

@@ -1,0 +1,124 @@
+.family-tree-quick-edit-modal {
+  width: min(860px, 100%);
+}
+
+.family-tree-quick-edit {
+  min-width: 0;
+  padding: 20px 24px 24px;
+}
+
+.family-tree-quick-edit__intro {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.family-tree-quick-edit__section {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper) 94%, var(--green-100));
+}
+
+.family-tree-quick-edit__section + .family-tree-quick-edit__section {
+  margin-top: 14px;
+}
+
+.family-tree-quick-edit__section > h3 {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+
+.family-tree-quick-edit__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.family-tree-quick-edit__events {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.family-tree-quick-edit__fact,
+.family-tree-quick-edit__life-status {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.family-tree-quick-edit__fact {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--paper);
+}
+
+.family-tree-quick-edit__fact legend,
+.family-tree-quick-edit__life-status legend {
+  padding: 0 6px;
+  color: var(--green-950);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.family-tree-quick-edit__life-status {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 22px;
+  padding: 11px 14px 12px;
+}
+
+.family-tree-quick-edit__life-status label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.family-tree-quick-edit__life-status input {
+  width: 18px;
+  min-height: 18px;
+  margin: 0;
+}
+
+.family-tree-quick-edit__life-status label > span {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.family-tree-quick-edit__actions {
+  bottom: -24px;
+}
+
+.family-tree-quick-edit__full {
+  margin-right: auto;
+}
+
+@media (max-width: 760px) {
+  .family-tree-quick-edit__grid,
+  .family-tree-quick-edit__events {
+    grid-template-columns: 1fr;
+  }
+
+  .family-tree-quick-edit__life-status {
+    grid-column: auto;
+  }
+
+  .family-tree-quick-edit__actions {
+    flex-wrap: wrap;
+  }
+
+  .family-tree-quick-edit__full {
+    width: 100%;
+    margin-right: 0;
+  }
+}

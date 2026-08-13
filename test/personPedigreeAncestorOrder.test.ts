@@ -36,3 +36,26 @@ test("pedigree collapse keeps the nearest and earliest stable occurrence", () =>
   ]);
   assert.deepEqual([...result.directAncestorIds], ["father", "mother", "shared"]);
 });
+
+test("296 occupied pedigree positions with collapse produce 284 unique catalogue ancestors", () => {
+  const uniqueAncestors = Array.from({ length: 284 }, (_, index) => ({
+    person_id: `ancestor-${String(index + 1).padStart(3, "0")}`,
+    generation: Math.min(16, Math.floor(Math.log2(index + 2))),
+    order_path: `/primary/${String(index + 1).padStart(3, "0")}`,
+  }));
+  const repeatedPositions = uniqueAncestors.slice(0, 12).map((ancestor, index) => ({
+    ...ancestor,
+    generation: Math.min(16, ancestor.generation + 2),
+    order_path: `/collapsed/${String(index + 1).padStart(3, "0")}`,
+  }));
+
+  assert.equal(uniqueAncestors.length + repeatedPositions.length, 296);
+  const result = pedigreeRanksFromAncestorOrderRows("root", [
+    { person_id: "root", generation: 0, order_path: "" },
+    ...uniqueAncestors,
+    ...repeatedPositions,
+  ]);
+
+  assert.equal(result.directAncestorIds.size, 284);
+  assert.equal(result.familyOrder.size, 285);
+});

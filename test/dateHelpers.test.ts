@@ -1,11 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  autoFormatFlexibleDateInput,
   formatDateForDisplay,
   formatDateTimeForDisplay,
   formatFlexibleDateForDisplay,
   normalizeFlexibleDateInput,
 } from "../src/utils/dateHelpers.ts";
+
+test("adds date separators after eight digits on numeric keyboards", () => {
+  assert.equal(autoFormatFlexibleDateInput("01011865"), "01.01.1865");
+  assert.equal(autoFormatFlexibleDateInput("1865"), "1865");
+  assert.equal(autoFormatFlexibleDateInput("0101186"), "0101186");
+  assert.equal(autoFormatFlexibleDateInput("01.01.1865"), "01.01.1865");
+});
+
+test("normalizes compact Ukrainian dates as DDMMYYYY", () => {
+  assert.deepEqual(normalizeFlexibleDateInput("01011865"), { value: "1865-01-01" });
+});
 
 test("normalizes Ukrainian dotted dates", () => {
   assert.deepEqual(normalizeFlexibleDateInput("08.02.1852"), { value: "1852-02-08" });

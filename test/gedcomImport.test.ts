@@ -192,6 +192,74 @@ test("treats a death structure with evidence as deceased and lets it override li
   assert.equal(draft.people.find((person) => person.xref === "@I2@")?.vitalStatus, "deceased");
 });
 
+test("treats GEDCOM DEAT Y without a death date as an explicit deceased status", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Undated /Deceased/",
+    "1 DEAT Y",
+    "0 TRLR",
+  ].join("\n"));
+
+  assert.equal(draft.people[0]?.vitalStatus, "deceased");
+  assert.equal(draft.people[0]?.isLiving, false);
+  assert.equal(draft.people[0]?.events.some((event) => event.eventType === "death"), true);
+  const death = draft.people[0]?.events.find((event) => event.eventType === "death");
+  assert.equal(death?.eventDate, "");
+  assert.equal(death?.dateText, "");
+});
+
+test("reconstructs the omitted MyHeritage living and deceased flags", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "1 SOUR MYHERITAGE",
+    "1 DATE 19 JUL 2026",
+    "0 @I1@ INDI",
+    "1 NAME Explicit /Deceased/",
+    "1 DEAT Y",
+    "0 @I2@ INDI",
+    "1 NAME Historical /Birth/",
+    "1 BIRT",
+    "2 DATE 1900",
+    "0 @I3@ INDI",
+    "1 NAME Recent /Birth/",
+    "1 BIRT",
+    "2 DATE 1980",
+    "0 @I4@ INDI",
+    "1 NAME Default /Living/",
+    "0 @I5@ INDI",
+    "1 NAME Parent /WithoutBirth/",
+    "1 FAMS @F1@",
+    "0 @I6@ INDI",
+    "1 NAME Historical /Child/",
+    "1 BIRT",
+    "2 DATE 1805",
+    "0 @I7@ INDI",
+    "1 NAME Spouse /WithoutBirth/",
+    "1 FAMS @F2@",
+    "0 @I8@ INDI",
+    "1 NAME Historical /Spouse/",
+    "1 BIRT",
+    "2 DATE 1870",
+    "0 @F1@ FAM",
+    "1 HUSB @I5@",
+    "1 CHIL @I6@",
+    "0 @F2@ FAM",
+    "1 HUSB @I7@",
+    "1 WIFE @I8@",
+    "0 TRLR",
+  ].join("\n"));
+
+  const statuses = Object.fromEntries(draft.people.map((person) => [person.xref, person.vitalStatus]));
+  assert.equal(statuses["@I1@"], "deceased");
+  assert.equal(statuses["@I2@"], "deceased");
+  assert.equal(statuses["@I3@"], "living");
+  assert.equal(statuses["@I4@"], "living");
+  assert.equal(statuses["@I5@"], "deceased");
+  assert.equal(statuses["@I7@"], "deceased");
+  assert.equal(draft.people.some((person) => person.vitalStatus === "unknown"), false);
+});
+
 test("reads MyHeritage-style married surname extension", () => {
   const draft = buildGedcomImportDraft([
     "0 HEAD",

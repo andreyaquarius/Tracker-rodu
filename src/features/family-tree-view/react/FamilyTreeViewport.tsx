@@ -49,6 +49,7 @@ export interface FamilyTreeViewportProps {
   onOpenPerson?: (personId: string, occurrenceId: string) => void;
   onFocusPerson?: (personId: string) => void;
   onShowAllDescendants?: (personId: string, occurrenceId: string) => void;
+  onEditPerson?: (personId: string) => void;
   onAddRelative?: (personId: string) => void;
   branchTogglePersonIds?: ReadonlySet<string>;
   collapsedBranchPersonIds?: ReadonlySet<string>;
@@ -91,6 +92,7 @@ export function FamilyTreeViewport({
   onOpenPerson,
   onFocusPerson,
   onShowAllDescendants,
+  onEditPerson,
   onAddRelative,
   branchTogglePersonIds,
   collapsedBranchPersonIds,
@@ -369,6 +371,7 @@ export function FamilyTreeViewport({
                     onOpen={onOpenPerson}
                     onFocus={onFocusPerson}
                     onShowAllDescendants={onShowAllDescendants}
+                    onEdit={onEditPerson}
                     onAddRelative={onAddRelative}
                     onToggleBranches={onTogglePersonBranches}
                     onExpandContinuation={onExpandContinuation}

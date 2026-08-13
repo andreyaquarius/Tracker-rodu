@@ -36,15 +36,20 @@ export function buildGedcomImportDraft(input: string | GedcomParseResult): Gedco
   const parseResult = typeof input === "string" ? parseGedcom(input) : input;
   const lineLookup = buildGedcomLineLookup(parseResult.lines);
   const warnings: FamilyTreeGraphIssue[] = [...parseResult.warnings];
-  const people = parseResult.records
+  const referenceYear = gedcomReferenceYearFromHead(parseResult, lineLookup);
+  let people: GedcomImportDraft["people"] = parseResult.records
     .filter((record) => record.tag === "INDI" && record.pointer)
-    .map((record) => personDraftFromRecord(record, lineLookup));
+    .map((record) => personDraftFromRecord(record, lineLookup, referenceYear));
   const families = parseResult.records
     .filter((record) => record.tag === "FAM" && record.pointer)
     .map((record) => familyDraftFromRecord(record, lineLookup));
   const sources = parseResult.records
     .filter((record) => record.tag === "SOUR" && record.pointer)
     .map((record) => sourceDraftFromRecord(record, lineLookup));
+
+  if (isMyHeritageGedcom(parseResult, lineLookup)) {
+    people = resolveMyHeritageVitalStatuses(people, families, referenceYear);
+  }
 
   const peopleByXref = new Map(people.map((person) => [person.xref, person]));
   const parentChildRelationships: GedcomImportParentChildDraft[] = [];
@@ -164,6 +169,7 @@ function rootPersonXrefFromHead(parseResult: GedcomParseResult, lineLookup: Gedc
 function personDraftFromRecord(
   record: GedcomRecord,
   lineLookup: GedcomLineLookup,
+  referenceYear: number,
 ) {
   const childLines = childrenOf(lineLookup, record.lineIndex);
   const names: GedcomImportNameDraft[] = [];
@@ -199,6 +205,7 @@ function personDraftFromRecord(
     privacyRestriction,
     deathAssertion,
     birthDate,
+    referenceYear,
   });
   const isLiving = vitalStatus === "living";
 
@@ -258,13 +265,99 @@ function inferGedcomVitalStatus(input: {
   privacyRestriction: string;
   deathAssertion: GedcomDeathAssertion;
   birthDate: string;
+  referenceYear: number;
 }): GedcomVitalStatus {
   if (input.deathAssertion === "present") return "deceased";
   if (input.explicitLiving === false) return "deceased";
   if (input.explicitLiving === true || input.deathAssertion === "absent") return "living";
   if (gedcomPrivacySuggestsLiving(input.privacyRestriction)) return "living";
-  if (gedcomBirthDateSuggestsLiving(input.birthDate)) return "living";
+  if (gedcomBirthDateSuggestsLiving(input.birthDate, input.referenceYear)) return "living";
   return "unknown";
+}
+
+/**
+ * MyHeritage keeps a mandatory living/deceased flag in its own database, but
+ * its GEDCOM export only writes `DEAT Y` for part of the deceased population
+ * and does not emit a corresponding living tag.  Reconstruct the omitted
+ * binary flag using MyHeritage's documented 110-year plausibility threshold.
+ *
+ * For people without a birth year, an old dated personal event, an old child,
+ * or an old spouse is sufficient chronological evidence that the person is no
+ * longer living.  All remaining records without a death assertion retain the
+ * MyHeritage default: living.  Explicit GEDCOM assertions always win.
+ */
+function resolveMyHeritageVitalStatuses(
+  people: GedcomImportDraft["people"],
+  families: GedcomImportFamilyDraft[],
+  referenceYear: number,
+): GedcomImportDraft["people"] {
+  const cutoffYear = referenceYear - GEDCOM_PRESUMED_LIVING_MAX_AGE;
+  const peopleByXref = new Map(people.map((person) => [person.xref, person]));
+  const familiesByXref = new Map(families.map((family) => [family.xref, family]));
+
+  return people.map((person) => {
+    if (person.vitalStatus !== "unknown") return person;
+
+    const ownEventYears = gedcomEventYears(person.events);
+    const familyEvidenceYears = person.fams.flatMap((familyXref) => {
+      const family = familiesByXref.get(familyXref);
+      if (!family) return [];
+      const childBirthYears = family.childXrefs.flatMap((childXref) => {
+        const child = peopleByXref.get(childXref);
+        return child ? gedcomBirthYears(child.events) : [];
+      });
+      const spouseBirthYears = family.partnerXrefs
+        .filter((partnerXref) => partnerXref !== person.xref)
+        .flatMap((partnerXref) => {
+          const spouse = peopleByXref.get(partnerXref);
+          return spouse ? gedcomBirthYears(spouse.events) : [];
+        });
+      return [...childBirthYears, ...spouseBirthYears];
+    });
+    const presumedDeceased = [...ownEventYears, ...familyEvidenceYears]
+      .some((year) => year < cutoffYear);
+    const vitalStatus: GedcomVitalStatus = presumedDeceased ? "deceased" : "living";
+
+    return {
+      ...person,
+      isLiving: vitalStatus === "living",
+      vitalStatus,
+    };
+  });
+}
+
+function gedcomBirthYears(events: GedcomImportEventDraft[]): number[] {
+  const birth = events.find((event) => event.eventType === "birth");
+  return birth ? gedcomYearsFromDateText(birth.eventDate || birth.dateText) : [];
+}
+
+function gedcomEventYears(events: GedcomImportEventDraft[]): number[] {
+  return events.flatMap((event) => gedcomYearsFromDateText(event.eventDate || event.dateText));
+}
+
+function gedcomYearsFromDateText(value: string): number[] {
+  return [...value.matchAll(/\b(\d{4})\b/g)]
+    .map((match) => Number(match[1]))
+    .filter((year) => year > 0 && year <= 9999);
+}
+
+function isMyHeritageGedcom(parseResult: GedcomParseResult, lineLookup: GedcomLineLookup): boolean {
+  const head = parseResult.records.find((record) => record.tag === "HEAD");
+  if (!head) return false;
+  return childrenOf(lineLookup, head.lineIndex).some((line) =>
+    (line.tag === "SOUR" || line.tag === "DEST")
+    && line.value.trim().toUpperCase().includes("MYHERITAGE"),
+  );
+}
+
+function gedcomReferenceYearFromHead(parseResult: GedcomParseResult, lineLookup: GedcomLineLookup): number {
+  const fallback = new Date().getUTCFullYear();
+  const head = parseResult.records.find((record) => record.tag === "HEAD");
+  if (!head) return fallback;
+  const exportedAt = childrenOf(lineLookup, head.lineIndex).find((line) => line.tag === "DATE")?.value ?? "";
+  const years = gedcomYearsFromDateText(exportedAt)
+    .filter((year) => year >= 1000 && year <= fallback + 1);
+  return years.at(-1) ?? fallback;
 }
 
 function gedcomPrivacySuggestsLiving(value: string): boolean {

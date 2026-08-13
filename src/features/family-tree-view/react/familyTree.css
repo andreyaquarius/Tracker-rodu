@@ -247,6 +247,44 @@
   cursor: pointer;
 }
 
+.ft-card-quick-edit {
+  position: absolute;
+  z-index: 4;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--ft-accent) 35%, var(--ft-border));
+  border-radius: 50%;
+  padding: 0;
+  color: var(--ft-accent);
+  background: color-mix(in srgb, var(--ft-card) 92%, transparent);
+  box-shadow: 0 2px 7px rgba(16, 47, 42, 0.14);
+  cursor: pointer;
+}
+
+.ft-card-quick-edit > svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.ft-card-quick-edit:hover,
+.ft-card-quick-edit:focus-visible {
+  color: #fff;
+  background: var(--ft-accent);
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--ft-accent) 18%, transparent),
+    0 3px 9px rgba(16, 47, 42, 0.2);
+}
+
 .ft-avatar {
   display: grid;
   width: 54px;
@@ -419,6 +457,10 @@
   top: 7px;
   right: 7px;
   padding: 3px 6px;
+}
+
+.ft-person-card:has(.ft-card-quick-edit) .ft-repeat-badge {
+  top: 34px;
 }
 
 .ft-reference-label {
@@ -607,7 +649,8 @@
 
 .ft-continuation::after,
 .ft-family-continuation::after,
-.ft-card-action::after {
+.ft-card-action::after,
+.ft-card-quick-edit::after {
   position: absolute;
   z-index: 30;
   top: calc(100% + 7px);
@@ -639,7 +682,8 @@
 
 .ft-continuation:hover::after,
 .ft-family-continuation:hover::after,
-.ft-card-action:hover::after {
+.ft-card-action:hover::after,
+.ft-card-quick-edit:hover::after {
   visibility: visible;
   opacity: 1;
   transform: translate(-50%, 0);
@@ -648,7 +692,8 @@
 
 .ft-continuation:focus-visible::after,
 .ft-family-continuation:focus-visible::after,
-.ft-card-action:focus-visible::after {
+.ft-card-action:focus-visible::after,
+.ft-card-quick-edit:focus-visible::after {
   visibility: visible;
   opacity: 1;
   transform: translate(-50%, 0);
@@ -657,7 +702,8 @@
 
 .ft-card-position:has(> .ft-continuation:is(:hover, :focus-visible)),
 .ft-card-position:has(> .ft-family-continuation:is(:hover, :focus-visible)),
-.ft-card-position:has(.ft-card-action:is(:hover, :focus-visible)) {
+.ft-card-position:has(.ft-card-action:is(:hover, :focus-visible)),
+.ft-card-position:has(.ft-card-quick-edit:is(:hover, :focus-visible)) {
   z-index: 30;
 }
 
@@ -665,9 +711,11 @@
   .ft-continuation,
   .ft-family-continuation,
   .ft-card-action,
+  .ft-card-quick-edit,
   .ft-continuation::after,
   .ft-family-continuation::after,
-  .ft-card-action::after {
+  .ft-card-action::after,
+  .ft-card-quick-edit::after {
     transition: none;
   }
 }
@@ -675,7 +723,8 @@
 @media (hover: none) {
   .ft-continuation::after,
   .ft-family-continuation::after,
-  .ft-card-action::after {
+  .ft-card-action::after,
+  .ft-card-quick-edit::after {
     display: none;
   }
 }

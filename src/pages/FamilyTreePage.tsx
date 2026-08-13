@@ -176,6 +176,7 @@ export type FamilyTreePageProps = {
     result: DeleteRelationshipResult,
   ) => void | Promise<void>;
   onOpenPerson?: (personId: string) => void;
+  onOpenStatistics?: (treeId: string) => void;
   onActiveContextChange?: (context: {
     projectId: string;
     treeId: string;

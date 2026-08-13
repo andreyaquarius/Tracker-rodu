@@ -7,6 +7,18 @@ export type FlexibleDateInputResult = {
   error?: string;
 };
 
+/**
+ * Makes full genealogical dates convenient to enter on a numeric mobile keyboard.
+ *
+ * Four digits remain a valid year-only value. A complete sequence of eight
+ * digits is interpreted as DDMMYYYY and receives separators only after the
+ * eighth digit, so typing a year does not unexpectedly turn into DD.MM.
+ */
+export function autoFormatFlexibleDateInput(input: string): string {
+  if (!/^\d{8}$/.test(input)) return input;
+  return `${input.slice(0, 2)}.${input.slice(2, 4)}.${input.slice(4)}`;
+}
+
 function isLeapYear(year: number): boolean {
   return year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0);
 }
@@ -35,7 +47,7 @@ function toIsoDate(year: number, month: number, day: number): string {
 }
 
 export function normalizeFlexibleDateInput(input: string): FlexibleDateInputResult {
-  const value = input.trim();
+  const value = autoFormatFlexibleDateInput(input.trim());
   if (!value) return { value: "" };
 
   const yearOnlyMatch = value.match(/^(\d{4})$/);

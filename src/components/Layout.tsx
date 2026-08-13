@@ -17,6 +17,7 @@ import {
 
 interface LayoutProps {
   page: PageKey | null;
+  familyTreeView?: "tree" | "statistics";
   onNavigate: (page: PageKey) => void;
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
@@ -44,8 +45,12 @@ export function Layout(props: LayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     readSidebarCollapsed(browserLocalStorage()),
   );
+  const isFamilyTreeStatistics =
+    props.page === "familyTree" && props.familyTreeView === "statistics";
   const pageClassName = props.page === "familyTree"
-    ? "page family-tree-page"
+    ? isFamilyTreeStatistics
+      ? "page family-tree-statistics-host"
+      : "page family-tree-page"
     : props.page === "persons"
       ? "page persons-v2-page"
       : "page";
@@ -83,11 +88,14 @@ export function Layout(props: LayoutProps) {
           onClose={() => setMenuOpen(false)}
           desktopCollapsed={sidebarCollapsed}
           onToggleDesktopCollapsed={() => setSidebarCollapsed((current) => !current)}
+          accountId={props.account?.id}
         />
         <div
           className={
             props.page === "familyTree"
-              ? "main-shell main-shell-family-tree"
+              ? isFamilyTreeStatistics
+                ? "main-shell main-shell-family-tree main-shell-family-tree-statistics"
+                : "main-shell main-shell-family-tree"
               : "main-shell"
           }
         >

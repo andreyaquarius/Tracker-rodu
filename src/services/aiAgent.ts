@@ -70,7 +70,7 @@ export async function getAiAgentSettings(): Promise<AiAgentSettings> {
 }
 
 export async function saveAiAgentKey(input: {
-  apiKey: string;
+  apiKey?: string;
   model: string;
   mode: AiAgentMode;
 }): Promise<AiAgentSettings> {

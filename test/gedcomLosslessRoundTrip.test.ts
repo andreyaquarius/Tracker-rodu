@@ -151,7 +151,7 @@ test("round-trips raw sources, citations, media, extensions and original xrefs",
   assert.equal(roundTrippedPerson.citations?.[0]?.text, "Повна транскрипція");
   assert.equal(roundTrippedPerson.media?.[0]?.file, "https://example.test/photo.jpg");
   assert.equal(secondDraft.families[0].events.find((event) => event.eventType === "marriage")?.placeName, "Війтівка");
-  assert.equal(secondDraft.people.find((person) => person.xref === "@I300@")?.vitalStatus, "unknown");
+  assert.equal(secondDraft.people.find((person) => person.xref === "@I300@")?.vitalStatus, "living");
 });
 
 test("round-trips a finding source URL without creating a Tracker document", () => {

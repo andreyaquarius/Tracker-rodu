@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canonicalRouteLocation,
+  familyTreeStatisticsPath,
   familyTreePath,
   parseAppRoute,
   parseFamilyTreeRouteFocus,
@@ -50,4 +52,43 @@ test("builds and parses a stable family-tree focus deep link", () => {
     { treeId: "tree/1", focusPersonId: "person + 1" },
   );
   assert.equal(familyTreePath("kalenski"), "/projects/kalenski/rodove-derevo");
+});
+
+test("family tree statistics has a stable nested route", () => {
+  assert.equal(
+    familyTreeStatisticsPath("Рід Каленських", "tree-1"),
+    "/projects/%D0%A0%D1%96%D0%B4%20%D0%9A%D0%B0%D0%BB%D0%B5%D0%BD%D1%81%D1%8C%D0%BA%D0%B8%D1%85/rodove-derevo/statystyka?treeId=tree-1",
+  );
+  assert.deepEqual(
+    parseAppRoute("/projects/kalenski/rodove-derevo/statystyka?treeId=tree-1"),
+    {
+      kind: "project",
+      projectRef: "kalenski",
+      page: "familyTree",
+      familyTreeView: "statistics",
+    },
+  );
+});
+
+test("canonical statistics route does not append treeId repeatedly", () => {
+  const route = familyTreeStatisticsPath("kalenski", "tree-1");
+  assert.deepEqual(
+    canonicalRouteLocation(route, "?treeId=tree-1", ""),
+    {
+      pathname: "/projects/kalenski/rodove-derevo/statystyka",
+      search: "?treeId=tree-1",
+      href: "/projects/kalenski/rodove-derevo/statystyka?treeId=tree-1",
+    },
+  );
+  assert.equal(
+    canonicalRouteLocation(route, "?treeId=tree-1?treeId=tree-1", "").href,
+    "/projects/kalenski/rodove-derevo/statystyka?treeId=tree-1",
+  );
+});
+
+test("feedback inbox is a stable account-level route", () => {
+  assert.deepEqual(parseAppRoute("/feedback"), {
+    kind: "settings",
+    page: "feedback",
+  });
 });

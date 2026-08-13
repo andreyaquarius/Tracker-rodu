@@ -47,19 +47,28 @@ export function AiAgentSettings() {
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!apiKey.trim()) {
+    const normalizedApiKey = apiKey.trim();
+    if (!settings?.configured && !normalizedApiKey) {
       setMessage({ text: "Введіть API-ключ Google AI Studio.", error: true });
       return;
     }
     setBusy("save");
     setMessage(null);
     try {
-      const saved = await saveAiAgentKey({ apiKey: apiKey.trim(), model, mode });
+      const saved = await saveAiAgentKey({
+        ...(normalizedApiKey ? { apiKey: normalizedApiKey } : {}),
+        model,
+        mode,
+      });
       setSettings(saved);
       setApiKey("");
-      setMessage({ text: "API-ключ зашифровано та збережено." });
+      setMessage({
+        text: normalizedApiKey
+          ? "API-ключ зашифровано, а налаштування збережено."
+          : "Налаштування ШІ-агента збережено. Збережений API-ключ не змінено.",
+      });
     } catch (error) {
-      setMessage({ text: readableError(error, "Не вдалося зберегти API-ключ."), error: true });
+      setMessage({ text: readableError(error, "Не вдалося зберегти налаштування ШІ-агента."), error: true });
     } finally {
       setBusy(null);
     }
@@ -135,7 +144,11 @@ export function AiAgentSettings() {
             placeholder={settings?.configured ? "Введіть лише для заміни ключа" : "Вставте ключ із Google AI Studio"}
             onChange={(event) => setApiKey(event.target.value)}
           />
-          <small className="field-hint">Ключ передається тільки захищеному серверному обробнику і зберігається зашифрованим.</small>
+          <small className="field-hint">
+            {settings?.configured
+              ? "Залиште поле порожнім, щоб зберегти поточний ключ і змінити лише модель або режим."
+              : "Ключ передається тільки захищеному серверному обробнику і зберігається зашифрованим."}
+          </small>
         </label>
         <label>
           <span>Модель</span>
@@ -156,7 +169,7 @@ export function AiAgentSettings() {
         </label>
         <div className="field-wide ai-settings-actions">
           <button className="button button-primary" disabled={Boolean(busy)} type="submit">
-            {busy === "save" ? "Збереження…" : "Зберегти ключ"}
+            {busy === "save" ? "Збереження…" : "Зберегти налаштування"}
           </button>
           <button
             className="button button-secondary"

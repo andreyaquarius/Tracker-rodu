@@ -46,6 +46,9 @@ test("V2 catalogue loads canonical Ahnentafel order and forwards it to sorting",
   assert.match(pedigreeService, /A missing tree\/root is expected[\s\S]*?if \(value\.treeId && value\.rootPersonId\)/);
   assert.match(pedigreeService, /list_family_tree_direct_ancestor_order_v1/);
   assert.match(pedigreeService, /list_family_tree_root_kinship_v1/);
+  assert.match(pedigreeService, /canonicalRanks\.directAncestorIds/);
+  assert.match(pedigreeService, /mergeCanonicalAncestorKinship/);
+  assert.match(pedigreeService, /PEDIGREE_ORDER_CACHE_VERSION/);
   assert.match(pedigreeService, /kinshipByPersonId/);
   assert.match(pedigreeService, /pedigreeRanksFromAncestorOrderRows/);
   assert.doesNotMatch(pedigreeService, /buildCircularAncestorChartModel/);

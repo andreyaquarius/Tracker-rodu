@@ -79,7 +79,7 @@ test("production tree replaces the large hero with one compact toolbar action", 
   );
 });
 
-test("tree tools window exposes GEDCOM and clearly marks future modules", () => {
+test("tree tools window exposes GEDCOM and opens the statistics module", () => {
   assert.match(
     toolsWindow,
     /<Modal[\s\S]*?title="Родове дерево"[\s\S]*?mode="window"[\s\S]*?minimizable=\{false\}/,
@@ -87,7 +87,7 @@ test("tree tools window exposes GEDCOM and clearly marks future modules", () => 
   assert.match(toolsWindow, /Імпорт GEDCOM/);
   assert.match(toolsWindow, /Експорт GEDCOM/);
   assert.match(toolsWindow, /Статистика/);
-  assert.match(toolsWindow, /Майбутній розділ · незабаром/);
+  assert.match(toolsWindow, /Звіти, діаграми, карта та якість даних/);
   assert.match(toolsWindow, /Відображення дерева/);
   assert.match(toolsWindow, /Кругова діаграма предків/);
   assert.match(toolsWindow, /Родовід прямих предків/);
@@ -98,7 +98,7 @@ test("tree tools window exposes GEDCOM and clearly marks future modules", () => 
   assert.doesNotMatch(toolsWindow, /Кругова діаграма предків[\s\S]{0,160}заплановано/);
   assert.match(
     toolsWindow,
-    /<strong>Статистика<\/strong>[\s\S]*?<small>Майбутній розділ · незабаром<\/small>/,
+    /onClick=\{onOpenStatistics\}[\s\S]*?<strong>Статистика<\/strong>/,
   );
   assert.match(
     toolsWindow,

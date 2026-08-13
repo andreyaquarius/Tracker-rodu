@@ -25,6 +25,10 @@ import {
   type FamilyTreePersonDialogSubmit,
 } from "../components/familyTree/FamilyTreePersonDialog";
 import {
+  FamilyTreeQuickEditPersonDialog,
+  type FamilyTreeQuickPersonSaveHandler,
+} from "../components/familyTree/FamilyTreeQuickEditPersonDialog.tsx";
+import {
   FamilyTreeEmptyState,
   FamilyTreeErrorState,
   FamilyTreeLoadingState,
@@ -181,7 +185,9 @@ export interface ProductionFamilyTreePageProps {
   onSaveRelation?: (
     relation: PersonRelation,
   ) => Promise<PersonRelation | null> | PersonRelation | null | void;
+  onSavePerson?: FamilyTreeQuickPersonSaveHandler;
   onOpenPerson?: (personId: string) => void;
+  onOpenStatistics?: (treeId: string) => void;
   onActiveContextChange?: (context: {
     projectId: string;
     treeId: string;
@@ -204,7 +210,9 @@ export function ProductionFamilyTreePage({
   onImportGedcom,
   onBackupGedcomPhotos,
   onSaveRelation,
+  onSavePerson,
   onOpenPerson,
+  onOpenStatistics,
   onActiveContextChange,
   onSubscriptionChanged,
   onPersonCreated,
@@ -610,6 +618,7 @@ export function ProductionFamilyTreePage({
           onOpenTreeTools={openTreeTools}
           onFocusPersonChange={handleActiveTreeFocusPersonChange}
           onOpenPerson={onOpenPerson}
+          onSavePerson={onSavePerson}
           onSubscriptionChanged={onSubscriptionChanged}
           onPersonCreated={onPersonCreated}
           onPersonRelationsDetached={onPersonRelationsDetached}
@@ -643,6 +652,11 @@ export function ProductionFamilyTreePage({
             setTreeToolsOpen(false);
           }}
           onOpenCircularChart={openCircularAncestorChart}
+          onOpenStatistics={() => {
+            if (!selectedEntry?.id) return;
+            setTreeToolsOpen(false);
+            onOpenStatistics?.(selectedEntry.id);
+          }}
           onAppearanceChange={updateTreeAppearance}
           onClose={() => setTreeToolsOpen(false)}
         />
@@ -701,6 +715,7 @@ function LoadedFamilyTree({
   onOpenTreeTools,
   onFocusPersonChange,
   onOpenPerson,
+  onSavePerson,
   onSubscriptionChanged,
   onPersonCreated,
   onPersonRelationsDetached,
@@ -717,6 +732,7 @@ function LoadedFamilyTree({
   onOpenTreeTools: () => void;
   onFocusPersonChange: (personId: string) => void;
   onOpenPerson?: (personId: string) => void;
+  onSavePerson?: FamilyTreeQuickPersonSaveHandler;
   onSubscriptionChanged?: () => void;
   onPersonCreated?: (personId: string) => void | Promise<void>;
   onPersonRelationsDetached?: (
@@ -749,6 +765,7 @@ function LoadedFamilyTree({
   const [activeParentSetByChild, setActiveParentSetByChild] = useState<Record<string, string>>({});
   const [selectedPersonId, setSelectedPersonId] = useState(focusPersonId);
   const [searchQuery, setSearchQuery] = useState("");
+  const [quickEditPersonId, setQuickEditPersonId] = useState("");
   const [relativeMenuPersonId, setRelativeMenuPersonId] = useState("");
   const [detachableRelationships, setDetachableRelationships] =
     useState<DetachableFamilyTreeRelationship[]>([]);
@@ -1693,6 +1710,10 @@ function LoadedFamilyTree({
       label: personLabel(person),
       detail: [formatDateForDisplay(person.birthDate), person.birthPlace].filter(Boolean).join(" · "),
     })), [persons, targetPersonId]);
+  const quickEditPerson = useMemo(
+    () => persons.find((person) => person.id === quickEditPersonId),
+    [persons, quickEditPersonId],
+  );
   const personLabelsById = useMemo(
     () => new Map(persons.map((person) => [person.id, personLabel(person)])),
     [persons],
@@ -2225,6 +2246,14 @@ function LoadedFamilyTree({
         onShowAllDescendants={directAncestorMode
           ? undefined
           : (personId) => enterAllDescendants(personId)}
+        onEditPerson={!readOnly && onSavePerson ? (personId) => {
+          if (!persons.some((person) => person.id === personId)) {
+            setNotice("Не вдалося завантажити повний запис цієї особи для редагування.");
+            return;
+          }
+          setSelectedPersonId(personId);
+          setQuickEditPersonId(personId);
+        } : undefined}
         onFocusPerson={changeFocus}
         branchTogglePersonIds={directAncestorMode
           ? new Set()
@@ -2254,6 +2283,23 @@ function LoadedFamilyTree({
         resolvePhotoSource={resolveFamilyTreePhotoSource}
       />
       )}
+
+      {quickEditPerson ? (
+        <FamilyTreeQuickEditPersonDialog
+          key={`quick-edit:${quickEditPerson.id}`}
+          person={quickEditPerson}
+          onClose={() => setQuickEditPersonId("")}
+          onOpenFull={onOpenPerson}
+          onSave={async (person) => {
+            if (!onSavePerson) return null;
+            const saved = await onSavePerson(person);
+            if (saved === null) return null;
+            setNotice("Основні дані особи збережено.");
+            reloadPedigreeAfterMutation();
+            return saved;
+          }}
+        />
+      ) : null}
 
       {relativeMenuPersonId ? (
         <RelativeMenu

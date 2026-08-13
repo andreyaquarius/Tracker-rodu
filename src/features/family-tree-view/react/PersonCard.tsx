@@ -26,6 +26,7 @@ export interface PersonCardProps {
   onShowAllDescendants?:
     | ((personId: string, occurrenceId: string) => void)
     | undefined;
+  onEdit?: ((personId: string) => void) | undefined;
   onAddRelative?: ((personId: string) => void) | undefined;
   onToggleBranches?:
     | ((personId: string, occurrenceId: string) => void)
@@ -58,6 +59,7 @@ export function PersonCard({
   onOpen,
   onFocus,
   onShowAllDescendants,
+  onEdit,
   onAddRelative,
   onToggleBranches,
   onExpandContinuation,
@@ -158,6 +160,17 @@ export function PersonCard({
       data-lineage-group={node.lineageGroup}
       aria-label={`${name}, ${life}${lineageDescription}${branchesCollapsed ? ", відкриті додаткові гілки згорнуто" : ""}`}
     >
+      {!compact && onEdit ? (
+        <button
+          type="button"
+          className="ft-card-quick-edit"
+          data-tooltip={`Швидко редагувати ${name}`}
+          aria-label={`Швидко редагувати особу ${name}`}
+          onClick={() => onEdit(personId)}
+        >
+          <PersonCardActionIcon kind="edit" />
+        </button>
+      ) : null}
       <button
         type="button"
         className="ft-card-main"

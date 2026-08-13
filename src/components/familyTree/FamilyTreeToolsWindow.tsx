@@ -42,6 +42,7 @@ interface FamilyTreeToolsWindowProps {
   onExportGedcom: () => void;
   onSelectDisplayMode: (mode: FamilyTreeDisplayMode) => void;
   onOpenCircularChart: () => void;
+  onOpenStatistics: () => void;
   onAppearanceChange: (value: FamilyTreeAppearancePreferences) => void;
   onClose: () => void;
 }
@@ -155,6 +156,7 @@ export function FamilyTreeToolsWindow({
   onExportGedcom,
   onSelectDisplayMode,
   onOpenCircularChart,
+  onOpenStatistics,
   onAppearanceChange,
   onClose,
 }: FamilyTreeToolsWindowProps) {
@@ -316,12 +318,13 @@ export function FamilyTreeToolsWindow({
             <button
               type="button"
               className="family-tree-tools-action"
-              disabled
+              disabled={!selectedTree?.id}
+              onClick={onOpenStatistics}
             >
               <span className="family-tree-tools-icon" aria-hidden="true">▥</span>
               <span>
                 <strong>Статистика</strong>
-                <small>Майбутній розділ · незабаром</small>
+                <small>Звіти, діаграми, карта та якість даних</small>
               </span>
             </button>
 

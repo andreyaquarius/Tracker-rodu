@@ -343,6 +343,7 @@ function moduleLabel(module: PageKey): string {
     archiveRequests: "Запити",
     persons: "Особи",
     backup: "Резервні копії",
+    feedback: "Зворотний зв’язок",
     subscription: "Тариф і підписка",
     settings: "Налаштування",
   };
@@ -364,6 +365,7 @@ function activityIcon(module: PageKey): string {
     archiveRequests: "А",
     persons: "О",
     backup: "↻",
+    feedback: "✉",
     subscription: "₴",
     settings: "Н",
   };

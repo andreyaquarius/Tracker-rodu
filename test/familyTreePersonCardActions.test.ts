@@ -25,6 +25,7 @@ const css = readFileSync(
 );
 
 test("person-card actions use semantic SVG shapes instead of ambiguous glyphs", () => {
+  assert.match(card, /<PersonCardActionIcon kind="edit" \/>/);
   assert.match(card, /<PersonCardActionIcon kind="focus" \/>/);
   assert.match(card, /<PersonCardActionIcon kind="descendants" \/>/);
   assert.match(
@@ -33,6 +34,7 @@ test("person-card actions use semantic SVG shapes instead of ambiguous glyphs", 
   );
   assert.doesNotMatch(card, /[◎⇊▸▾]/);
   assert.match(icons, /kind === "focus"/);
+  assert.match(icons, /kind === "edit"/);
   assert.match(icons, /kind === "descendants"/);
   assert.match(
     icons,
@@ -41,6 +43,8 @@ test("person-card actions use semantic SVG shapes instead of ambiguous glyphs", 
 });
 
 test("card actions preserve names, state, callbacks, and compact-mode hiding", () => {
+  assert.match(card, /\{!compact && onEdit \? \(/);
+  assert.match(card, /onClick=\{\(\) => onEdit\(personId\)\}/);
   assert.match(card, /aria-pressed=\{focused\}/);
   assert.match(card, /aria-expanded=\{!branchesCollapsed\}/);
   assert.match(card, /onFocus\?\.\(personId\)/);
@@ -64,6 +68,7 @@ test("focus, descendants, and branch toggles remain visually distinguishable", (
 });
 
 test("person-card actions share the delayed custom tooltip used by branch controls", () => {
+  assert.match(card, /data-tooltip=\{`Швидко редагувати \$\{name\}`\}/);
   assert.match(card, /data-tooltip=\{`Показати дерево від \$\{name\}`\}/);
   assert.match(
     card,
@@ -73,14 +78,15 @@ test("person-card actions share the delayed custom tooltip used by branch contro
   assert.doesNotMatch(card, /title="Показати дерево від цієї особи"/);
   assert.match(
     css,
-    /\.ft-continuation::after,[\s\S]*?\.ft-card-action::after \{[\s\S]*?content:\s*attr\(data-tooltip\)/,
+    /\.ft-continuation::after,[\s\S]*?\.ft-card-action::after,[\s\S]*?\.ft-card-quick-edit::after \{[\s\S]*?content:\s*attr\(data-tooltip\)/,
   );
   assert.match(
     css,
-    /\.ft-card-action:hover::after \{[\s\S]*?transition-delay:\s*700ms/,
+    /\.ft-card-action:hover::after,[\s\S]*?\.ft-card-quick-edit:hover::after \{[\s\S]*?transition-delay:\s*700ms/,
   );
   assert.match(
     css,
-    /\.ft-card-action:focus-visible::after \{[\s\S]*?transition-delay:\s*0ms/,
+    /\.ft-card-action:focus-visible::after,[\s\S]*?\.ft-card-quick-edit:focus-visible::after \{[\s\S]*?transition-delay:\s*0ms/,
   );
+  assert.match(css, /\.ft-card-quick-edit \{[\s\S]*?position:\s*absolute/);
 });

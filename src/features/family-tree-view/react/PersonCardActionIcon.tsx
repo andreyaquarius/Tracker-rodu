@@ -3,6 +3,7 @@
 import type { ReactElement } from "react";
 
 export type PersonCardActionIconKind =
+  | "edit"
   | "focus"
   | "descendants"
   | "collapse-branches"
@@ -13,6 +14,15 @@ export function PersonCardActionIcon({
 }: {
   kind: PersonCardActionIconKind;
 }): ReactElement {
+  if (kind === "edit") {
+    return (
+      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <path d="m4 16.5-.8 4.3 4.3-.8L19 8.5 15.5 5 4 16.5Z" />
+        <path d="m13.8 6.7 3.5 3.5M3.2 20.8h17.6" />
+      </svg>
+    );
+  }
+
   if (kind === "focus") {
     return (
       <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
