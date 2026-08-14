@@ -17,6 +17,8 @@ interface TopBarProps {
   onDeleteWorkspace: (projectId: string) => void;
   onOpenWorkspaceDeletion: (projectId: string) => void;
   onOpenTeam: () => void;
+  isAdmin: boolean;
+  onOpenAdmin: () => void;
   isAccountSigningIn: boolean;
   isCreatingWorkspace: boolean;
   helpAction?: ReactNode;
@@ -43,6 +45,8 @@ export function TopBar({
   onDeleteWorkspace,
   onOpenWorkspaceDeletion,
   onOpenTeam,
+  isAdmin,
+  onOpenAdmin,
   isAccountSigningIn,
   isCreatingWorkspace,
   helpAction,
@@ -217,6 +221,18 @@ export function TopBar({
             >
               Учасники та запрошення
             </button>
+            {isAdmin ? (
+              <button
+                className="button button-secondary"
+                onClick={() => {
+                  closeAccountMenu();
+                  onOpenAdmin();
+                }}
+                type="button"
+              >
+                Адмін-панель
+              </button>
+            ) : null}
             <button
               className="button button-secondary"
               onClick={() => {

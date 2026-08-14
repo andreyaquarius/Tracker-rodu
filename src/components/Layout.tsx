@@ -35,6 +35,8 @@ interface LayoutProps {
   onDeleteWorkspace: (projectId: string) => void;
   onOpenWorkspaceDeletion: (projectId: string) => void;
   onOpenTeam: () => void;
+  isAdmin: boolean;
+  onOpenAdmin: () => void;
   isAccountSigningIn: boolean;
   isCreatingWorkspace: boolean;
   children: ReactNode;
@@ -114,6 +116,8 @@ export function Layout(props: LayoutProps) {
             onDeleteWorkspace={props.onDeleteWorkspace}
             onOpenWorkspaceDeletion={props.onOpenWorkspaceDeletion}
             onOpenTeam={props.onOpenTeam}
+            isAdmin={props.isAdmin}
+            onOpenAdmin={props.onOpenAdmin}
             isAccountSigningIn={props.isAccountSigningIn}
             isCreatingWorkspace={props.isCreatingWorkspace}
             helpAction={(

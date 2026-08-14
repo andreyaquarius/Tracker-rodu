@@ -1,6 +1,7 @@
 import type { AppDatabase, SectionParentKey } from "../types";
 import { CustomSectionBuilder } from "../components/CustomSectionBuilder";
 import { AiAgentSettings } from "../components/AiAgentSettings";
+import { ProductAnalyticsPreferences } from "../components/ProductAnalyticsPreferences";
 import { openAnalyticsPreferences } from "../services/siteAnalytics";
 
 export function SettingsPage({
@@ -126,6 +127,8 @@ export function SettingsPage({
           </button>
         </div>
       </section>
+
+      <ProductAnalyticsPreferences />
     </>
   );
 }

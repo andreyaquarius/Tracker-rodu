@@ -92,3 +92,14 @@ test("feedback inbox is a stable account-level route", () => {
     page: "feedback",
   });
 });
+
+test("admin panel routes are account-level and never parsed as project routes", () => {
+  assert.deepEqual(parseAppRoute("/admin"), {
+    kind: "admin",
+    page: "overview",
+  });
+  assert.deepEqual(parseAppRoute("/admin/analytics"), {
+    kind: "admin",
+    page: "analytics",
+  });
+});

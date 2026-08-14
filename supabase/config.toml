@@ -55,6 +55,11 @@ verify_jwt = true
 [functions.track-authenticated-engagement]
 verify_jwt = true
 
+# First-party, consent-gated product analytics. The Edge Function validates the
+# caller again and stores only HMAC-pseudonymous, allowlisted usage events.
+[functions.collect-product-analytics]
+verify_jwt = true
+
 [functions.genehelp]
 verify_jwt = true
 

@@ -30,6 +30,7 @@ export type AppRoute =
   | { kind: "root" }
   | { kind: "public"; page: "privacy" | "terms" | "features" | "pricing" | "faq" }
   | { kind: "projects" }
+  | { kind: "admin"; page: "overview" | "analytics" }
   | { kind: "settings"; page: "settings" | "subscription" | "feedback" }
   | {
       kind: "project";
@@ -143,6 +144,12 @@ export function parseAppRoute(
     return { kind: "public", page: "faq" };
   }
   if (parts.length === 1 && parts[0] === "projects") return { kind: "projects" };
+  if (parts.length === 1 && parts[0] === "admin") {
+    return { kind: "admin", page: "overview" };
+  }
+  if (parts.length === 2 && parts[0] === "admin" && parts[1] === "analytics") {
+    return { kind: "admin", page: "analytics" };
+  }
   if (parts.length === 1 && parts[0] === "settings") {
     return { kind: "settings", page: "settings" };
   }

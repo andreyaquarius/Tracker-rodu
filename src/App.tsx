@@ -32,6 +32,7 @@ import { BackupPage } from "./pages/BackupPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
+import { AdminPanelPage } from "./pages/AdminPanelPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { FaqPage, FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
@@ -92,6 +93,14 @@ import {
   flushAndStopAuthenticatedEngagement,
   setAuthenticatedEngagementEnabled,
 } from "./services/authenticatedEngagement";
+import {
+  flushAndStopProductAnalytics,
+  setProductAnalyticsEnabled,
+  setProductAnalyticsPage,
+} from "./services/productAnalytics.ts";
+import { loadMyProductAnalyticsConsent } from "./services/productAnalyticsConsent.ts";
+import { ProductAnalyticsConsentPrompt } from "./components/ProductAnalyticsConsentPrompt.tsx";
+import { productAnalyticsPageCode } from "./utils/productAnalyticsRegistry.ts";
 import { useSubscription } from "./hooks/useSubscription";
 import {
   beginTableImport,
@@ -638,6 +647,7 @@ export default function App() {
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
+  const [productAnalyticsConsentOwnerId, setProductAnalyticsConsentOwnerId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);
   const [familyTreePedigreeContext, setFamilyTreePedigreeContext] = useState<(
@@ -890,11 +900,11 @@ export default function App() {
       ]);
   const researchRequiredByPlan = projectCapacityPlan !== "professional";
   const requestedDataGroups = useMemo(() => dataGroupsForPage(page), [page]);
-  const shouldLoadResearches = requestedDataGroups.has("researches");
-  const shouldLoadPeople = requestedDataGroups.has("people");
-  const shouldLoadDocuments = requestedDataGroups.has("documents");
-  const shouldLoadWork = requestedDataGroups.has("work");
-  const shouldLoadAnalysis = requestedDataGroups.has("analysis");
+  const shouldLoadResearches = route.kind !== "admin" && requestedDataGroups.has("researches");
+  const shouldLoadPeople = route.kind !== "admin" && requestedDataGroups.has("people");
+  const shouldLoadDocuments = route.kind !== "admin" && requestedDataGroups.has("documents");
+  const shouldLoadWork = route.kind !== "admin" && requestedDataGroups.has("work");
+  const shouldLoadAnalysis = route.kind !== "admin" && requestedDataGroups.has("analysis");
 
   useEffect(() => {
     if (route.kind === "public") {
@@ -934,9 +944,54 @@ export default function App() {
     const privateAuthenticatedSession = Boolean(account) &&
       !passwordRecovery &&
       route.kind !== "root" &&
-      route.kind !== "public";
+      route.kind !== "public" &&
+      route.kind !== "admin";
     setAuthenticatedEngagementEnabled(privateAuthenticatedSession);
   }, [account, passwordRecovery, route.kind]);
+
+  const productAnalyticsPage = useMemo(() => productAnalyticsPageCode(route), [route]);
+
+  useEffect(() => {
+    setProductAnalyticsPage(productAnalyticsPage);
+  }, [productAnalyticsPage]);
+
+  useEffect(() => {
+    let active = true;
+    setProductAnalyticsConsentOwnerId(null);
+    setProductAnalyticsEnabled(false);
+    if (!account) return () => {
+      active = false;
+    };
+    void loadMyProductAnalyticsConsent()
+      .then(() => {
+        if (active) setProductAnalyticsConsentOwnerId(account.id);
+      })
+      .catch(() => {
+        // Fail closed: no analytics request until the current account's consent is verified.
+      });
+    return () => {
+      active = false;
+    };
+  }, [account?.id]);
+
+  useEffect(() => {
+    const productAnalyticsAllowed = Boolean(account)
+      && productAnalyticsConsentOwnerId === account?.id
+      && !passwordRecovery
+      && !subscriptionAccess.loading
+      && !subscriptionAccess.isAdmin
+      && route.kind !== "root"
+      && route.kind !== "public"
+      && route.kind !== "admin";
+    setProductAnalyticsEnabled(productAnalyticsAllowed);
+  }, [
+    account,
+    productAnalyticsConsentOwnerId,
+    passwordRecovery,
+    route.kind,
+    subscriptionAccess.isAdmin,
+    subscriptionAccess.loading,
+  ]);
 
   const describeError = useCallback((error: unknown, fallback: string) => {
     if (subscriptionErrorCode(error)) return subscriptionErrorMessage(error);
@@ -2438,6 +2493,7 @@ export default function App() {
     let remoteSignOutError: unknown = null;
     try {
       await flushAndStopAuthenticatedEngagement().catch(() => undefined);
+      await flushAndStopProductAnalytics().catch(() => undefined);
       await signOutFromSupabase();
     } catch (error) {
       remoteSignOutError = error;
@@ -5826,6 +5882,22 @@ export default function App() {
     </>
   ) : content;
 
+  if (route.kind === "admin") {
+    return (
+      <AdminPanelPage
+        page={route.page}
+        allowed={subscriptionAccess.isAdmin}
+        accessLoading={subscriptionAccess.loading}
+        accountName={account?.name ?? "Адміністратор"}
+        onNavigate={(adminPage) => {
+          routerNavigate(adminPage === "overview" ? "/admin" : "/admin/analytics");
+        }}
+        onBack={() => routerNavigate("/projects")}
+        onSignOut={() => void signOutAccount()}
+      />
+    );
+  }
+
   const displayedContent = route.kind === "projects" ? (
     <ProjectsPage
       workspaces={workspaces}
@@ -5853,6 +5925,7 @@ export default function App() {
   );
 
   return (
+    <>
     <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
         page={route.kind === "projects" ? null : page}
@@ -5880,6 +5953,8 @@ export default function App() {
         onDeleteWorkspace={(projectId) => void removeWorkspace(projectId)}
         onOpenWorkspaceDeletion={(projectId) => void resumeWorkspaceDeletion(projectId)}
         onOpenTeam={() => setTeamOpen(true)}
+        isAdmin={subscriptionAccess.isAdmin}
+        onOpenAdmin={() => routerNavigate("/admin")}
         isAccountSigningIn={isAccountSigningIn}
         isCreatingWorkspace={isCreatingWorkspace}
       >
@@ -6012,5 +6087,12 @@ export default function App() {
       ) : null}
       {toast ? <div className={`toast ${toast.error ? "toast-error" : ""}`}>{toast.message}</div> : null}
     </div>
+    <ProductAnalyticsConsentPrompt
+      enabled={Boolean(account)
+        && !passwordRecovery
+        && !subscriptionAccess.loading
+        && !subscriptionAccess.isAdmin}
+    />
+    </>
   );
 }
