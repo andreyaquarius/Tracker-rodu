@@ -7,6 +7,7 @@ import { normalizeExternalDocumentUrl } from "../utils/documentSourceUrlSecurity
 import {
   getCachedDocumentBlob,
   putCachedDocumentBlob,
+  setDocumentBlobCacheScope,
 } from "./documentBlobCache.ts";
 import {
   deleteFileFromGoogleDrive,
@@ -117,11 +118,17 @@ export function setProjectAttachmentTarget(
   projectId: string | null,
   projectName = "",
   canUpload = true,
+  userId: string | null = null,
 ): void {
   activeProjectCanUpload = canUpload;
   activeProject = projectId
     ? { projectId, projectName: projectName.trim() || "Трекер Роду" }
     : null;
+  setDocumentBlobCacheScope(userId, projectId, {
+    // A v1 record is adopted only after its source identity matches an
+    // attachment that this authenticated user can read in the active project.
+    allowLegacyMigration: true,
+  });
 }
 
 export async function saveScan(

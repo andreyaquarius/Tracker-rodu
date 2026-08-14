@@ -67,6 +67,14 @@ type RegistrationGuardResponse = {
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? "";
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? "";
+const supabaseAuthStorageKey = (() => {
+  try {
+    const projectRef = new URL(supabaseUrl).hostname.split(".")[0]?.trim() ?? "";
+    return projectRef ? `sb-${projectRef}-auth-token` : "";
+  } catch {
+    return "";
+  }
+})();
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && publishableKey);
 
@@ -626,4 +634,28 @@ export async function signOutFromSupabase(): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
+}
+
+/**
+ * Clears the browser's persisted Supabase session even when the global revoke
+ * request is unavailable. This is a local privacy fallback, not a replacement
+ * for the normal server-side sign-out attempt.
+ */
+export async function signOutLocallyFromSupabase(): Promise<void> {
+  // Supabase auth-js still calls the remote /logout endpoint even for
+  // `scope: "local"`; therefore it cannot guarantee an offline sign-out.
+  // Remove only this project's documented/default auth keys. The caller then
+  // performs a hard reload to discard the SDK's in-memory session as well.
+  if (!supabaseAuthStorageKey || typeof localStorage === "undefined") return;
+  for (const key of [
+    supabaseAuthStorageKey,
+    `${supabaseAuthStorageKey}-code-verifier`,
+    `${supabaseAuthStorageKey}-user`,
+  ]) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Continue removing the remaining session fragments in privacy mode.
+    }
+  }
 }

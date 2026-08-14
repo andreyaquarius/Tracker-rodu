@@ -76,6 +76,7 @@ import {
   signInWithSupabaseEmail,
   signUpWithSupabaseEmail,
   signOutFromSupabase,
+  signOutLocallyFromSupabase,
   updateSupabasePassword,
   type SupabaseAccount,
   type SupabaseWorkspace,
@@ -241,14 +242,16 @@ import {
 } from "./services/projectRealtime";
 import { assertProjectRecordUnchanged } from "./services/projectConflicts";
 import { deleteScanFile, setProjectAttachmentTarget } from "./services/scanStorage";
-import { clearGoogleDriveSession } from "./services/googleDriveStorage";
 import {
   backupGedcomPhotosToGoogleDrive,
   type GedcomPhotoBackupPlan,
   type GedcomPhotoBackupProgress,
   type GedcomPhotoBackupResult,
 } from "./services/gedcomPhotoBackup.ts";
-import { clearAllProjectCaches } from "./utils/projectCache";
+import {
+  clearSensitiveBrowserState,
+  clearSensitiveProjectBrowserState,
+} from "./services/sensitiveBrowserState.ts";
 import { databaseStatementTimeoutMessage } from "./utils/databaseErrors";
 import {
   GedcomImportStageError,
@@ -708,6 +711,10 @@ export default function App() {
   const workspaceSetupRef = useRef<Promise<void> | null>(null);
   const passwordRecoveryRef = useRef(false);
   const lastPreparedUserRef = useRef<string | null>(null);
+  const knownWorkspaceIdsRef = useRef<{
+    userId: string;
+    projectIds: Set<string>;
+  }>({ userId: "", projectIds: new Set() });
   const activeWorkspaceIdRef = useRef<string | null>(null);
   const automaticProjectBackupRef = useRef<string | null>(null);
   const hydratedWorkspaceRef = useRef<string | null>(null);
@@ -1086,13 +1093,38 @@ export default function App() {
     const prepareWorkspace = async (session: Awaited<ReturnType<typeof getSupabaseSession>>) => {
       if (passwordRecoveryRef.current) return;
       if (!session) {
+        const previousUserId = lastPreparedUserRef.current;
+        await clearSensitiveBrowserState({
+          userId: previousUserId,
+          includeLegacyDocumentCache: true,
+          // With no authenticated owner there is no safe way to attribute a
+          // legacy unscoped cache. It contains downloaded copies only; remote
+          // project data and Drive files are never touched.
+          clearAllDocumentCaches: !previousUserId,
+        });
+        if (!active) return;
         setAccount(null);
         setWorkspace(null);
         setWorkspaces([]);
         setIsAccountSigningIn(false);
         setAuthReady(true);
+        setOnboarded(false);
         lastPreparedUserRef.current = null;
         return;
+      }
+
+      const previousUserId = lastPreparedUserRef.current;
+      if (previousUserId && previousUserId !== session.user.id) {
+        await clearSensitiveBrowserState({
+          userId: previousUserId,
+          includeLegacyDocumentCache: true,
+        });
+        if (!active) return;
+        setAccount(null);
+        setWorkspace(null);
+        setWorkspaces([]);
+        setOnboarded(false);
+        lastPreparedUserRef.current = null;
       }
 
       // Auth events can repeat on token refresh and on every tab focus.
@@ -1153,9 +1185,18 @@ export default function App() {
                   item.projectId === requestedRoute.projectRef,
               )
             : undefined;
+        const storedWorkspaceId = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
+        const requestedWorkspaceId = requestedWorkspace?.projectId ?? storedWorkspaceId;
+        if (
+          requestedWorkspaceId &&
+          !availableWorkspaces.some((item) => item.projectId === requestedWorkspaceId)
+        ) {
+          await clearSensitiveProjectBrowserState(session.user.id, requestedWorkspaceId);
+          if (!active) return;
+        }
         const activeWorkspace = chooseWorkspace(
           availableWorkspaces,
-          requestedWorkspace?.projectId ?? localStorage.getItem(ACTIVE_WORKSPACE_KEY),
+          requestedWorkspaceId,
           ensuredWorkspace?.projectId,
         );
 
@@ -1200,6 +1241,11 @@ export default function App() {
       if (!active) return;
       if (event === "PASSWORD_RECOVERY") {
         passwordRecoveryRef.current = true;
+        void clearSensitiveBrowserState({
+          userId: lastPreparedUserRef.current ?? session?.user.id ?? null,
+          includeLegacyDocumentCache: true,
+          clearAllDocumentCaches: !lastPreparedUserRef.current && !session?.user.id,
+        });
         setPasswordRecovery(true);
         setAccount(null);
         setWorkspace(null);
@@ -1247,8 +1293,28 @@ export default function App() {
       workspace?.projectId ?? null,
       workspace?.projectName ?? "",
       canCreateProjectRecords,
+      account?.id ?? null,
     );
-  }, [canCreateProjectRecords, workspace?.projectId, workspace?.projectName]);
+  }, [account?.id, canCreateProjectRecords, workspace?.projectId, workspace?.projectName]);
+
+  useEffect(() => {
+    const userId = account?.id ?? "";
+    if (!userId) {
+      knownWorkspaceIdsRef.current = { userId: "", projectIds: new Set() };
+      return;
+    }
+
+    const nextProjectIds = new Set(workspaces.map((item) => item.projectId));
+    const previous = knownWorkspaceIdsRef.current;
+    if (previous.userId === userId) {
+      for (const projectId of previous.projectIds) {
+        if (!nextProjectIds.has(projectId)) {
+          void clearSensitiveProjectBrowserState(userId, projectId);
+        }
+      }
+    }
+    knownWorkspaceIdsRef.current = { userId, projectIds: nextProjectIds };
+  }, [account?.id, workspaces]);
 
   useEffect(() => {
     const projectId = workspace?.projectId ?? null;
@@ -2368,29 +2434,44 @@ export default function App() {
   };
 
   const signOutAccount = async () => {
+    const signingOutUserId = account?.id ?? lastPreparedUserRef.current;
+    let remoteSignOutError: unknown = null;
     try {
       await flushAndStopAuthenticatedEngagement().catch(() => undefined);
-      clearGoogleDriveSession();
       await signOutFromSupabase();
+    } catch (error) {
+      remoteSignOutError = error;
+      // The server revoke can fail offline. Still remove the persisted browser
+      // session so a shared device cannot silently reopen the account.
+      await signOutLocallyFromSupabase().catch(() => undefined);
+    } finally {
+      await clearSensitiveBrowserState({
+        userId: signingOutUserId,
+        includeLegacyDocumentCache: true,
+        clearAllDocumentCaches: !signingOutUserId,
+      });
       setAccount(null);
       setWorkspace(null);
       setWorkspaces([]);
       setAuthReady(true);
       lastPreparedUserRef.current = null;
       workspaceSetupRef.current = null;
-      // Wipe cached personal project data so it cannot be read by the next
-      // user of a shared browser after sign-out.
-      clearAllProjectCaches();
-      localStorage.removeItem(ACCOUNT_ONBOARDING_KEY);
-      localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
       setOnboarded(false);
       setLoginError("");
       routerNavigate("/", { replace: true });
-    } catch (error) {
-      notify(
-        error instanceof Error ? error.message : "Не вдалося вийти з облікового запису.",
-        true,
-      );
+    }
+    if (remoteSignOutError) {
+      const message =
+        "Локальні приватні дані очищено. Сервер не підтвердив завершення інших сесій; увійдіть знову та повторіть вихід, коли мережа буде доступна.";
+      // A hard reload is required only for the offline/error path: the
+      // persisted token is already gone, and the reload discards the auth
+      // client's in-memory copy before the shared device can be reused.
+      if (typeof window !== "undefined") {
+        window.alert(message);
+        window.location.replace(new URL(import.meta.env.BASE_URL, window.location.href).toString());
+      } else {
+        notify(message, true);
+      }
     }
   };
 
