@@ -71,12 +71,13 @@ export function attachmentFromResolvedDocumentSource(source: ResolvedPdfSource):
   const providerFileId = source.providerFileId?.trim();
   const googleDrive = source.provider === "google_drive" && Boolean(providerFileId);
   const stableSourceUrl = source.sourcePageUrl ?? source.originalUrl;
+  const validatedAt = nowIso();
   return {
     id: createId(),
     name: source.displayName?.trim() || source.providerFileTitle?.replace(/^File:/u, "") || "document.pdf",
     mimeType: "application/pdf",
     size: source.fileSizeBytes ?? 0,
-    createdAt: nowIso(),
+    createdAt: validatedAt,
     storage: googleDrive ? "google-drive" : "external-url",
     storagePath: googleDrive ? providerFileId! : stableSourceUrl,
     webViewLink: stableSourceUrl,
@@ -89,6 +90,7 @@ export function attachmentFromResolvedDocumentSource(source: ResolvedPdfSource):
     ...(source.initialPage !== undefined ? { initialPage: source.initialPage } : {}),
     ...(source.pageCount !== undefined ? { sourcePageCount: source.pageCount } : {}),
     sourceAccessMode: source.accessMode,
+    sourceValidatedAt: validatedAt,
     sourceWarnings: [...source.warnings],
     sourceFingerprint: { ...source.fingerprint },
     ...(googleDrive && source.fingerprint.md5

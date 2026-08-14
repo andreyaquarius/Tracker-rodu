@@ -220,6 +220,92 @@ test("sync resolves missing legacy metadata before it can enter document_sources
   });
 });
 
+test("sync persists a freshly validated attachment without probing the remote PDF twice", async () => {
+  const validatedAt = "2026-08-14T10:00:00.000Z";
+  let resolveCalls = 0;
+  let savedInput: unknown;
+  const result = await syncDocumentSourcesForDocument(
+    "project-1",
+    {
+      id: "document-1",
+      scans: [attachment({
+        sourceProvider: "direct_pdf",
+        sourceAccessMode: "secure_proxy",
+        sourceValidatedAt: validatedAt,
+        canonicalSourceUrl: "https://cdn.example.org/book.pdf",
+        sourceFingerprint: { etag: '"validated"', contentLength: 1234 },
+      })],
+    } as DocumentRecord,
+    {
+      listDocumentSources: async () => [],
+      saveDocumentSource: async (_projectId, input) => {
+        savedInput = input;
+        return {
+          id: "source-validated",
+          ...input,
+          status: "active",
+          createdAt: validatedAt,
+          updatedAt: validatedAt,
+        };
+      },
+    },
+    {
+      userId: "user-1",
+      now: () => new Date("2026-08-14T10:05:00.000Z"),
+      resolveSource: async () => {
+        resolveCalls += 1;
+        throw new Error("the already validated source must not be probed again");
+      },
+    },
+  );
+
+  assert.equal(resolveCalls, 0);
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.sources[0]?.id, "source-validated");
+  assert.deepEqual(savedInput, {
+    documentId: "document-1",
+    provider: "direct_pdf",
+    originalUrl: "https://example.org/book.pdf",
+    canonicalUrl: "https://cdn.example.org/book.pdf",
+    providerHost: "cdn.example.org",
+    displayName: "book.pdf",
+    mimeType: "application/pdf",
+    fileSizeBytes: 1234,
+    accessMode: "secure_proxy",
+    fingerprint: { etag: '"validated"', contentLength: 1234 },
+    warnings: [],
+    lastValidatedAt: validatedAt,
+  });
+});
+
+test("sync reports a safe registry reason when persistence rejects validated metadata", async () => {
+  const result = await syncDocumentSourcesForDocument(
+    "project-1",
+    {
+      id: "document-1",
+      scans: [attachment({
+        sourceProvider: "direct_pdf",
+        sourceAccessMode: "secure_proxy",
+        sourceValidatedAt: "2026-08-14T10:00:00.000Z",
+      })],
+    } as DocumentRecord,
+    {
+      listDocumentSources: async () => [],
+      saveDocumentSource: async () => {
+        throw { code: "42501", message: "private database details" };
+      },
+    },
+    {
+      userId: "user-1",
+      now: () => new Date("2026-08-14T10:01:00.000Z"),
+    },
+  );
+
+  assert.equal(result.failures[0]?.code, "REGISTRY_ACCESS_DENIED");
+  assert.match(result.failures[0]?.message ?? "", /Недостатньо прав/u);
+  assert.doesNotMatch(result.failures[0]?.message ?? "", /private database details/u);
+});
+
 test("sync fails open to the legacy viewer when resolver validation fails", async () => {
   let saveCalls = 0;
   const result = await syncDocumentSourcesForDocument(

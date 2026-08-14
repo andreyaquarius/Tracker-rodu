@@ -2905,8 +2905,11 @@ export default function App() {
           })
             .then((result) => {
               if (!result.failures.length) return;
+              const reasons = [...new Set(result.failures.map((failure) => failure.message))]
+                .slice(0, 2)
+                .join(" ");
               notify(
-                `Документ збережено, але ${result.failures.length} зовнішніх PDF-джерел не вдалося додати до нового реєстру. Старий перегляд залишається доступним.`,
+                `Документ збережено, але ${result.failures.length} зовнішніх PDF-джерел не вдалося додати до реєстру. ${reasons}`,
                 true,
               );
             })

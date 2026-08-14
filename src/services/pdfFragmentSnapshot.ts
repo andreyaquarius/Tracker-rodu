@@ -119,7 +119,6 @@ export async function renderPdfFragmentSnapshot(
   try {
     const renderTask = page.render({
       canvas: renderCanvas as unknown as HTMLCanvasElement,
-      canvasContext: renderContext as unknown as CanvasRenderingContext2D,
       viewport,
       background: options.background ?? "rgb(255,255,255)",
     });

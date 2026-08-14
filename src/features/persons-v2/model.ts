@@ -142,6 +142,20 @@ export function personLifeYears(person: Person): string {
   return "";
 }
 
+/** Reads the canonical cause of death while retaining imported non-canonical events as a fallback. */
+export function personDeathCause(person: Pick<Person, "events">): string {
+  const events = person.events ?? [];
+  const canonicalCause = events
+    .find((event) => event.id === "death")
+    ?.cause
+    ?.trim();
+  if (canonicalCause) return canonicalCause;
+  return events
+    .find((event) => event.type === "death" && event.cause?.trim())
+    ?.cause
+    ?.trim() ?? "";
+}
+
 /** Collects the places useful to profile summaries and map tabs, deduplicated in source order. */
 export function personMainPlaces(person: Person): PersonMainPlaces {
   const birth = collapseWhitespace(person.birthPlace);
@@ -331,6 +345,12 @@ export function buildPersonTimeline(person: Person): PersonTimelineItem[] {
   }
 
   for (const event of person.events ?? []) {
+    // Person editors retain empty canonical placeholders so their date, place,
+    // address and map controls can be edited without recreating the event.
+    // Those placeholders are editor state, not facts in a person's life, and
+    // must not appear as unknown-date timeline entries.
+    if (!isMeaningfulEvent(event)) continue;
+
     const duplicateIndex = CORE_EVENT_TYPES.has(event.type)
       ? staged.findIndex((candidate) => (
           candidate.source === "core"
@@ -765,11 +785,26 @@ function percentage(completed: number, total: number): number {
 }
 
 function isMeaningfulEvent(event: PersonEvent): boolean {
+  const title = collapseWhitespace(event.title ?? "");
+  const defaultTitle = collapseWhitespace(personEventLabel(event.type));
+  const hasCustomTitle = event.id !== event.type
+    && Boolean(title)
+    && normalizeSearchText(title) !== normalizeSearchText(defaultTitle);
+  const hasCoordinates = event.geo !== null && event.geo !== undefined && (
+    Boolean(collapseWhitespace(event.geo.displayName ?? ""))
+    || (typeof event.geo.latitude === "number" && Number.isFinite(event.geo.latitude))
+    || (typeof event.geo.longitude === "number" && Number.isFinite(event.geo.longitude))
+  );
   return Boolean(
     collapseWhitespace(event.date ?? "")
     || collapseWhitespace(event.placeName ?? "")
     || collapseWhitespace(event.value ?? "")
-    || collapseWhitespace(event.notes ?? ""),
+    || collapseWhitespace(event.age ?? "")
+    || collapseWhitespace(event.cause ?? "")
+    || collapseWhitespace(event.address ?? "")
+    || collapseWhitespace(event.notes ?? "")
+    || hasCoordinates
+    || hasCustomTitle
   );
 }
 

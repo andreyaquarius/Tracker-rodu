@@ -1265,6 +1265,18 @@ export function PersonEditorV2({
                     />
                     <FieldError message={validationErrors.deathYearTo} />
                   </label>
+                  <label>
+                    <span>Причина смерті</span>
+                    <input
+                      value={personEvents.find((event) => event.id === "death")?.cause ?? ""}
+                      placeholder="Наприклад: запалення легень"
+                      onChange={(event) => patchEvent(
+                        "death",
+                        { cause: event.target.value || null },
+                        "death",
+                      )}
+                    />
+                  </label>
                   <ScanAttachmentsEditor
                     title="Документи про смерть"
                     driveFolderPath={["Особи", drivePersonName, "Смерть"]}

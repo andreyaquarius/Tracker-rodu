@@ -1,11 +1,15 @@
 import type { DocumentRecord, ScanAttachment } from "../types";
 import type { StoredDocumentSource } from "./document-sources/contracts.ts";
 import type { SaveDocumentSourceInput } from "./documentSources.ts";
+import type { DocumentSourceErrorCode } from "./document-sources/errors.ts";
 import type {
   DocumentSourceAddContext,
   DocumentSourceAddResolution,
 } from "./documentSourceAddFlow.ts";
-import { DocumentSourceError } from "./document-sources/errors.ts";
+import {
+  DocumentSourceError,
+  toPublicDocumentSourceError,
+} from "./document-sources/errors.ts";
 import { normalizeExternalDocumentUrl } from "../utils/documentSourceUrlSecurity.ts";
 
 export const EXTERNAL_PDF_VIEWER_V2_FLAG = "external_pdf_viewer_v2";
@@ -13,10 +17,19 @@ export const EXTERNAL_PDF_VIEWER_V2_FLAG = "external_pdf_viewer_v2";
 type AttachmentSourceCandidate = {
   attachmentId: string;
   source: SaveDocumentSourceInput;
+  validatedAt?: string;
 };
+
+export type DocumentSourceSyncFailureCode =
+  | DocumentSourceErrorCode
+  | "SOURCE_VALIDATION_REQUIRED"
+  | "REGISTRY_ACCESS_DENIED"
+  | "REGISTRY_VALIDATION_FAILED"
+  | "REGISTRY_WRITE_FAILED";
 
 export interface DocumentSourceSyncFailure {
   attachmentId: string;
+  code: DocumentSourceSyncFailureCode;
   message: string;
 }
 
@@ -154,10 +167,18 @@ export async function syncDocumentSourcesForDocument(
   const existing = await listDocumentSources(projectId, document.id);
   const candidates: AttachmentSourceCandidate[] = [];
   const skippedAttachmentIds: string[] = [];
+  const syncStartedAt = options?.now?.() ?? new Date();
 
   for (const attachment of document.scans) {
     const source = documentSourceFromAttachment(document.id, attachment);
-    if (source) candidates.push({ attachmentId: attachment.id, source });
+    if (source) {
+      const validatedAt = recentAttachmentValidationTimestamp(attachment, syncStartedAt);
+      candidates.push({
+        attachmentId: attachment.id,
+        source,
+        ...(validatedAt ? { validatedAt } : {}),
+      });
+    }
     else if (isPdfAttachment(attachment)) skippedAttachmentIds.push(attachment.id);
   }
 
@@ -173,12 +194,32 @@ export async function syncDocumentSourcesForDocument(
     // A validated registry row is authoritative. Legacy attachment JSON can be
     // stale and must never roll confirmed/pending/changed state backwards.
     if (matched) return { source: matched, failure: null };
+    // The add dialog has already resolved and validated this source. Persist
+    // that bounded, non-secret metadata directly instead of probing a remote
+    // host for a second time after the document has been saved.
+    if (candidate.validatedAt) {
+      try {
+        return {
+          source: await saveDocumentSource(projectId, {
+            ...candidate.source,
+            lastValidatedAt: candidate.validatedAt,
+          }),
+          failure: null,
+        };
+      } catch (error) {
+        return {
+          source: null,
+          failure: safeSyncFailure(candidate.attachmentId, error, "persistence"),
+        };
+      }
+    }
     if (!resolveSource || !options?.userId.trim()) {
       return {
         source: null,
         failure: {
           attachmentId: candidate.attachmentId,
-          message: "SOURCE_VALIDATION_REQUIRED",
+          code: "SOURCE_VALIDATION_REQUIRED" as const,
+          message: "Потрібно повторно перевірити зовнішнє PDF-джерело.",
         },
       };
     }
@@ -195,17 +236,14 @@ export async function syncDocumentSourcesForDocument(
         source: await saveDocumentSource(projectId, {
           ...validated,
           documentId: document.id,
-          lastValidatedAt: (options.now?.() ?? new Date()).toISOString(),
+          lastValidatedAt: syncStartedAt.toISOString(),
         }),
         failure: null,
       };
     } catch (error) {
       return {
         source: null,
-        failure: {
-          attachmentId: candidate.attachmentId,
-          message: safeSyncErrorMessage(error),
-        },
+        failure: safeSyncFailure(candidate.attachmentId, error, "resolution"),
       };
     }
   }));
@@ -272,7 +310,61 @@ function comparableSourceUrl(value: string): string {
   }
 }
 
-function safeSyncErrorMessage(error: unknown): string {
-  if (error instanceof DocumentSourceError) return error.code;
-  return "Не вдалося синхронізувати зовнішнє джерело PDF.";
+const SOURCE_VALIDATION_FRESHNESS_MS = 10 * 60 * 1_000;
+const SOURCE_VALIDATION_CLOCK_SKEW_MS = 60 * 1_000;
+
+function recentAttachmentValidationTimestamp(
+  attachment: ScanAttachment,
+  now: Date,
+): string | undefined {
+  if (!attachment.sourceProvider || !attachment.sourceAccessMode) return undefined;
+  const validatedAt = Date.parse(attachment.sourceValidatedAt ?? "");
+  const currentTime = now.getTime();
+  if (!Number.isFinite(validatedAt) || !Number.isFinite(currentTime)) return undefined;
+  if (validatedAt > currentTime + SOURCE_VALIDATION_CLOCK_SKEW_MS) return undefined;
+  if (currentTime - validatedAt > SOURCE_VALIDATION_FRESHNESS_MS) return undefined;
+  return new Date(validatedAt).toISOString();
+}
+
+function safeSyncFailure(
+  attachmentId: string,
+  error: unknown,
+  stage: "resolution" | "persistence",
+): DocumentSourceSyncFailure {
+  if (error instanceof DocumentSourceError) {
+    const publicError = toPublicDocumentSourceError(error);
+    return { attachmentId, code: publicError.code, message: publicError.message };
+  }
+
+  if (stage === "resolution") {
+    const publicError = toPublicDocumentSourceError(error, "NETWORK_ERROR");
+    return { attachmentId, code: publicError.code, message: publicError.message };
+  }
+
+  const databaseCode = safeErrorCode(error);
+  if (databaseCode === "42501" || databaseCode.startsWith("PGRST3")) {
+    return {
+      attachmentId,
+      code: "REGISTRY_ACCESS_DENIED",
+      message: "Недостатньо прав для запису PDF-джерела в цьому проєкті.",
+    };
+  }
+  if (databaseCode === "23514" || databaseCode === "22023") {
+    return {
+      attachmentId,
+      code: "REGISTRY_VALIDATION_FAILED",
+      message: "Метадані PDF-джерела не пройшли безпечну перевірку реєстру.",
+    };
+  }
+  return {
+    attachmentId,
+    code: "REGISTRY_WRITE_FAILED",
+    message: "Не вдалося записати перевірене PDF-джерело в реєстр.",
+  };
+}
+
+function safeErrorCode(error: unknown): string {
+  if (!error || typeof error !== "object" || !("code" in error)) return "";
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code.trim().toUpperCase() : "";
 }

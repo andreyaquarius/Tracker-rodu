@@ -7,6 +7,7 @@ import {
   calculatePersonProfileCompleteness,
   filterAndSortPersons,
   personAvatar,
+  personDeathCause,
   personDisplayName,
   personInitials,
   personLifeYears,
@@ -98,6 +99,16 @@ function relation(overrides: Partial<PersonRelation> = {}): PersonRelation {
     ...overrides,
   };
 }
+
+test("reads the cause of death from canonical and imported death events", () => {
+  assert.equal(personDeathCause(person({
+    events: [event({ id: "death", type: "death", cause: "Хвороба" })],
+  })), "Хвороба");
+  assert.equal(personDeathCause(person({
+    events: [event({ id: "imported-death", type: "death", cause: "Поранення" })],
+  })), "Поранення");
+  assert.equal(personDeathCause(person()), "");
+});
 
 test("person summary helpers preserve ranges, deduplicate places, and select an available avatar", () => {
   const unavailable = photo("missing", { availability: "missing-local" });
@@ -262,6 +273,42 @@ test("timeline keeps genuinely conflicting core facts instead of hiding them as 
   }));
 
   assert.deepEqual(timeline.map((item) => item.id), ["person-1:core:birth", "alternative-birth"]);
+});
+
+test("timeline omits empty editor placeholders that were never saved as life facts", () => {
+  const timeline = buildPersonTimeline(person({
+    isLiving: true,
+    events: [
+      event({ id: "birth", type: "birth", title: undefined }),
+      event({ id: "marriage", type: "marriage", title: undefined }),
+      event({ id: "death", type: "death", title: undefined }),
+      event({ id: "residence", type: "residence", title: undefined }),
+    ],
+  }));
+
+  assert.deepEqual(timeline, []);
+});
+
+test("timeline keeps undated events when another meaningful fact was saved", () => {
+  const timeline = buildPersonTimeline(person({
+    events: [
+      event({ id: "marriage", type: "marriage", title: undefined, address: "27-A" }),
+      event({
+        id: "residence-map",
+        type: "residence",
+        title: undefined,
+        geo: {
+          displayName: "",
+          latitude: 49.84,
+          longitude: 24.03,
+          source: "map_click",
+        },
+      }),
+      event({ id: "journey", type: "other", title: "Подорож" }),
+    ],
+  }));
+
+  assert.deepEqual(timeline.map((item) => item.id), ["marriage", "residence-map", "journey"]);
 });
 
 test("catalog model combines query, status, gender, life-state, and saved-segment filters", () => {

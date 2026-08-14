@@ -69,6 +69,7 @@ test("validated source bridge preserves page, access, warning, and fingerprint m
   assert.equal(attachment.initialPage, 25);
   assert.equal(attachment.sourcePageCount, 800);
   assert.equal(attachment.sourceAccessMode, "secure_proxy");
+  assert.ok(Number.isFinite(Date.parse(attachment.sourceValidatedAt ?? "")));
   assert.deepEqual(attachment.sourceWarnings, ["Metadata warning"]);
   assert.deepEqual(attachment.sourceFingerprint, resolved.fingerprint);
 });

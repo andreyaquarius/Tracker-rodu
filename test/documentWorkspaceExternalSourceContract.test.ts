@@ -179,6 +179,38 @@ test("the document workspace streams remote PDFs with bounded PDF.js range reque
   assert.match(loaderSource, /rangeChunkSize:\s*PDF_VIEWER_RANGE_CHUNK_SIZE/u);
 });
 
+test("every PDF.js loading path disables document scripting and eval", () => {
+  assert.match(
+    viewerSource,
+    /const PDFJS_SECURITY_OPTIONS = Object\.freeze\(\{[\s\S]*?enableScripting:\s*false,[\s\S]*?isEvalSupported:\s*false,[\s\S]*?\}\)/u,
+  );
+
+  const loaderStart = viewerSource.indexOf("const loadPdfDocument");
+  const loaderEnd = viewerSource.indexOf("const preloadPage", loaderStart);
+  assert.ok(loaderStart >= 0 && loaderEnd > loaderStart);
+  const loaderSource = viewerSource.slice(loaderStart, loaderEnd);
+  const getDocumentCalls = loaderSource.match(/pdfJs\.getDocument\(\{/gu) ?? [];
+  const securedCalls = loaderSource.match(/pdfJs\.getDocument\(\{\s*\.\.\.PDFJS_SECURITY_OPTIONS,/gu) ?? [];
+
+  assert.equal(getDocumentCalls.length, 2, "expected the blob and URL PDF loading paths");
+  assert.equal(
+    securedCalls.length,
+    getDocumentCalls.length,
+    "all PDF.js loading paths must spread the locked-down security options first",
+  );
+});
+
+test("PDF pages never fall back to the browser's native iframe viewer", () => {
+  assert.doesNotMatch(viewerSource, /pdfNativeFallback/u);
+  assert.doesNotMatch(
+    viewerSource,
+    /kind === "pdf" && blobUrl[^?]*\?\s*\(\s*<iframe/u,
+  );
+  assert.doesNotMatch(viewerSource, /isCanvasEffectivelyBlank/u);
+  assert.match(viewerSource, /page\.render\(\{\s*canvas,\s*viewport,/u);
+  assert.doesNotMatch(viewerSource, /page\.render\(\{[^}]*canvasContext/u);
+});
+
 test("the viewer honors an initial page resolved from a Wikisource Page link", () => {
   assert.match(
     viewerSource,

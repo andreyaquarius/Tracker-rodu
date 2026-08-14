@@ -16,6 +16,7 @@ import type {
 } from "../../types";
 import {
   buildPersonTimeline,
+  personDeathCause,
   personDisplayName as previewPersonNameV2,
   personInitials as previewInitialsV2,
   personLifeYears,
@@ -181,6 +182,7 @@ export function PersonPreviewDrawerV2({
     ...linkedHypotheses.flatMap((hypothesis) => hypothesis.documentIds),
   ].filter(Boolean));
   const eventCount = previewEventCountV2(person);
+  const deathCause = personDeathCause(person);
   const notesCount = [
     person.notes,
     ...linkedRelations.map((relation) => relation.notes),
@@ -269,10 +271,13 @@ export function PersonPreviewDrawerV2({
           term="Смерть"
           value={person.isLiving
             ? "Жива особа"
-            : previewFactV2(
-              person.deathDate || previewYearRangeV2(person.deathYearFrom, person.deathYearTo),
-              person.deathPlace,
-            )}
+            : [
+              previewFactV2(
+                person.deathDate || previewYearRangeV2(person.deathYearFrom, person.deathYearTo),
+                person.deathPlace,
+              ),
+              deathCause ? `Причина: ${deathCause}` : "",
+            ].filter(Boolean).join(" · ")}
         />
         {keyRelation ? (
           <PreviewFactV2

@@ -275,7 +275,7 @@ async function renderLoadedPdfPageImage(
   const canvas = documentCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Браузер не зміг підготувати сторінку для експорту.");
-  const task = page.render({ canvasContext: context, viewport, canvas, background: "rgb(255,255,255)" });
+  const task = page.render({ canvas, viewport, background: "rgb(255,255,255)" });
   try {
     await waitForRenderTask(task, signal);
     throwIfAborted(signal);

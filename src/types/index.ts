@@ -47,6 +47,8 @@ export interface ScanAttachment {
   /** Validated PDF page count retained until document_sources is persisted. */
   sourcePageCount?: number;
   sourceAccessMode?: "direct_cors" | "secure_proxy" | "google_drive_api";
+  /** Time when the add flow successfully validated this exact PDF source. */
+  sourceValidatedAt?: string;
   sourceWarnings?: string[];
   sourceFingerprint?: {
     sha1?: string;

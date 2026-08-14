@@ -65,6 +65,70 @@ test("converts GEDCOM people and family links into app records", () => {
   assert.equal(result.relations.some((relation) => relation.relationType === "дружина"), true);
 });
 
+test("projects FAM marriage facts into both partner cards without duplicating an INDI copy", () => {
+  let id = 0;
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Vasyl /Kalenskyi/",
+    "1 SEX M",
+    "1 MARR",
+    "2 DATE 29 MAY 1889",
+    "2 PLAC Trubiivka",
+    "0 @I2@ INDI",
+    "1 NAME Yelyzaveta /Kuzminska/",
+    "1 SEX F",
+    "0 @I3@ INDI",
+    "1 NAME Hanna /Second/",
+    "1 SEX F",
+    "0 @F1@ FAM",
+    "1 HUSB @I1@",
+    "1 WIFE @I2@",
+    "1 MARR",
+    "2 DATE 29 MAY 1889",
+    "2 PLAC Trubiivka",
+    "2 SOUR @S1@",
+    "3 PAGE Fund 1, inventory 77, file 601, page 751",
+    "0 @F2@ FAM",
+    "1 HUSB @I1@",
+    "1 WIFE @I3@",
+    "1 MARR",
+    "2 DATE 1901",
+    "2 PLAC Kyiv",
+    "0 @S1@ SOUR",
+    "1 TITL Marriage register",
+    "0 TRLR",
+  ].join("\n"));
+
+  const result = buildGedcomAppImport(draft, {
+    idFactory: () => `id-${++id}`,
+    nowFactory: () => "2026-08-14T00:00:00.000Z",
+  });
+  const vasyl = result.people.find((person) => person.givenName === "Vasyl");
+  const yelyzaveta = result.people.find((person) => person.givenName === "Yelyzaveta");
+  const hanna = result.people.find((person) => person.givenName === "Hanna");
+
+  assert.equal(vasyl?.marriageDate, "1889-05-29");
+  assert.equal(vasyl?.marriagePlace, "Trubiivka");
+  assert.equal(yelyzaveta?.marriageDate, "1889-05-29");
+  assert.equal(yelyzaveta?.marriagePlace, "Trubiivka");
+  assert.equal(hanna?.marriageDate, "1901");
+  assert.equal(hanna?.marriagePlace, "Kyiv");
+
+  const vasylMarriages = vasyl?.events.filter((event) => event.type === "marriage") ?? [];
+  assert.equal(vasylMarriages.length, 2);
+  assert.equal(vasylMarriages.filter((event) => event.date === "1889-05-29").length, 1);
+  assert.match(vasylMarriages[0]?.notes ?? "", /@S1@: Fund 1, inventory 77, file 601, page 751/);
+  assert.equal(yelyzaveta?.events.filter((event) => event.type === "marriage").length, 1);
+  assert.equal(hanna?.events.filter((event) => event.type === "marriage").length, 1);
+
+  assert.equal(result.findings.some((finding) => (
+    finding.eventDate === "1889-05-29"
+    && finding.personIds.includes(vasyl?.id ?? "")
+    && finding.personIds.includes(yelyzaveta?.id ?? "")
+  )), true);
+});
+
 test("keeps adoptive parent imports separate from biological parent semantics", () => {
   let id = 0;
   const draft = buildGedcomImportDraft([

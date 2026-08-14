@@ -25,6 +25,7 @@ import { normalizeCustomFieldValues } from "../../utils/customFields";
 import {
   buildPersonTimeline,
   calculatePersonProfileCompleteness,
+  personDeathCause,
   personDisplayName,
   personInitials,
   personLifeYears,
@@ -539,6 +540,7 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
             <ProfileFactV2 label="Дата смерті" value={person.isLiving ? "Жива особа" : person.deathDate || yearRangeV2(person.deathYearFrom, person.deathYearTo)} />
             <ProfileFactV2 label="По батькові" value={person.patronymic} />
             <ProfileFactV2 label="Місце смерті" value={person.isLiving ? "—" : person.deathPlace} />
+            <ProfileFactV2 label="Причина смерті" value={person.isLiving ? "—" : personDeathCause(person)} />
           </dl>
         </ProfileSectionV2>
 

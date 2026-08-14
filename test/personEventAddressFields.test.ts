@@ -69,3 +69,41 @@ test("a canonical life event preserves the entered house number", () => {
     "буд. 27-А",
   );
 });
+
+test("the person editor exposes and preserves a canonical cause of death", () => {
+  assert.match(personEditorSource, /<span>Причина смерті<\/span>/u);
+  assert.match(
+    personEditorSource,
+    /event\.id === "death"\)\?\.cause \?\? ""/u,
+  );
+  assert.match(
+    personEditorSource,
+    /patchEvent\(\s*"death",\s*\{ cause: event\.target\.value \|\| null \},\s*"death"/u,
+  );
+
+  const normalized = normalizePersonEvents([{
+    id: "death",
+    personId: "person-1",
+    type: "death",
+    title: "Смерть",
+    date: "1983-02-23",
+    placeName: "Вербівка",
+    cause: "запалення легень",
+    geo: null,
+    notes: null,
+  }], {
+    id: "person-1",
+    birthDate: "1922",
+    birthPlace: "",
+    marriageDate: "",
+    marriagePlace: "",
+    deathDate: "1983-02-23",
+    deathPlace: "Вербівка",
+    residencePlaces: "",
+  });
+
+  assert.equal(
+    normalized.find((event) => event.id === "death")?.cause,
+    "запалення легень",
+  );
+});

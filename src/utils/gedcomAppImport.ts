@@ -78,9 +78,17 @@ export function buildGedcomAppImport(
   const preservedPersonByXref = new Map((draft.preservedRecords ?? [])
     .filter((record) => record.tag === "INDI" && record.pointer)
     .map((record) => [record.pointer ?? "", record]));
-  const people = draft.people.map((person) =>
-    personFromGedcomDraft(
-      person,
+  const familyEventsByPartnerXref = buildFamilyEventsByPartnerXref(draft);
+  const people = draft.people.map((person) => {
+    const personWithFamilyEvents = {
+      ...person,
+      events: mergePersonAndFamilyEvents(
+        person.events,
+        familyEventsByPartnerXref.get(person.xref) ?? [],
+      ),
+    };
+    return personFromGedcomDraft(
+      personWithFamilyEvents,
       personIdByXref.get(person.xref) ?? idFactory(),
       createdAt,
       options.defaultResearchId ?? "",
@@ -88,8 +96,8 @@ export function buildGedcomAppImport(
       preservedPersonByXref.get(person.xref),
       importSourceKey,
       options.sourceFileName?.trim() ?? "",
-    ),
-  );
+    );
+  });
   const peopleByXref = new Map(draft.people.map((person) => [person.xref, person]));
   // GEDCOM SOUR records are evidence metadata, not uploaded working documents.
   // Keep the field in the orchestration payload for backward compatibility,
@@ -159,6 +167,114 @@ export function buildGedcomAppImport(
     preservedRecords: draft.preservedRecords ?? [],
     importSourceKey,
   };
+}
+
+/**
+ * GEDCOM stores marriage and divorce facts on FAM records rather than INDI
+ * records. Project them into both partners' life events so the facts are
+ * available in each person card as well as on the relationship edge.
+ */
+function buildFamilyEventsByPartnerXref(
+  draft: GedcomImportDraft,
+): Map<string, GedcomImportEventDraft[]> {
+  const result = new Map<string, GedcomImportEventDraft[]>();
+  for (const family of draft.families) {
+    const visibleEvents = family.events.filter((event) => (
+      event.eventType === "marriage" || event.eventType === "divorce"
+    ));
+    if (!visibleEvents.length) continue;
+    for (const partnerXref of new Set(family.partnerXrefs)) {
+      const current = result.get(partnerXref) ?? [];
+      current.push(...visibleEvents);
+      result.set(partnerXref, current);
+    }
+  }
+  return result;
+}
+
+function mergePersonAndFamilyEvents(
+  personEvents: readonly GedcomImportEventDraft[],
+  familyEvents: readonly GedcomImportEventDraft[],
+): GedcomImportEventDraft[] {
+  const originalEvents = [...personEvents];
+  const result = [...originalEvents];
+  const claimedOriginalIndexes = new Set<number>();
+
+  for (const familyEvent of familyEvents) {
+    const matchingIndex = originalEvents.findIndex((personEvent, index) => (
+      !claimedOriginalIndexes.has(index)
+      && gedcomEventsDescribeSameOccurrence(personEvent, familyEvent)
+    ));
+    if (matchingIndex < 0) {
+      result.push(familyEvent);
+      continue;
+    }
+    claimedOriginalIndexes.add(matchingIndex);
+    result[matchingIndex] = mergeGedcomEventDrafts(originalEvents[matchingIndex], familyEvent);
+  }
+
+  return result;
+}
+
+function gedcomEventsDescribeSameOccurrence(
+  personEvent: GedcomImportEventDraft,
+  familyEvent: GedcomImportEventDraft,
+): boolean {
+  if (personEvent.eventType !== familyEvent.eventType) return false;
+  const personDate = normalizedGedcomEventText(personEvent.eventDate || personEvent.dateText);
+  const familyDate = normalizedGedcomEventText(familyEvent.eventDate || familyEvent.dateText);
+  if (personDate && familyDate && personDate !== familyDate) return false;
+  const personPlace = normalizedGedcomEventText(personEvent.placeName);
+  const familyPlace = normalizedGedcomEventText(familyEvent.placeName);
+  if (personPlace && familyPlace && personPlace !== familyPlace) return false;
+  const personValue = normalizedGedcomEventText(personEvent.value ?? "");
+  const familyValue = normalizedGedcomEventText(familyEvent.value ?? "");
+  if (personValue && familyValue && personValue !== familyValue) return false;
+  return true;
+}
+
+function mergeGedcomEventDrafts(
+  personEvent: GedcomImportEventDraft,
+  familyEvent: GedcomImportEventDraft,
+): GedcomImportEventDraft {
+  return {
+    ...familyEvent,
+    ...personEvent,
+    tag: personEvent.tag || familyEvent.tag,
+    value: personEvent.value || familyEvent.value,
+    title: personEvent.title || familyEvent.title,
+    eventDate: personEvent.eventDate || familyEvent.eventDate,
+    dateText: personEvent.dateText || familyEvent.dateText,
+    placeName: personEvent.placeName || familyEvent.placeName,
+    geo: personEvent.geo ?? familyEvent.geo,
+    notes: mergeGedcomEventText(personEvent.notes, familyEvent.notes),
+    age: personEvent.age || familyEvent.age,
+    cause: personEvent.cause || familyEvent.cause,
+    address: personEvent.address || familyEvent.address,
+    citations: mergeGedcomEventArrays(personEvent.citations, familyEvent.citations),
+    media: mergeGedcomEventArrays(personEvent.media, familyEvent.media),
+  };
+}
+
+function mergeGedcomEventText(first = "", second = ""): string {
+  return Array.from(new Set([first.trim(), second.trim()].filter(Boolean))).join("\n\n");
+}
+
+function mergeGedcomEventArrays<T>(
+  first: readonly T[] | undefined,
+  second: readonly T[] | undefined,
+): T[] {
+  const seen = new Set<string>();
+  return [...(first ?? []), ...(second ?? [])].filter((item) => {
+    const key = JSON.stringify(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizedGedcomEventText(value: string): string {
+  return value.trim().toLocaleLowerCase("uk-UA").replace(/\s+/g, " ");
 }
 
 function uniqueImportedRelations(relations: PersonRelation[]): PersonRelation[] {

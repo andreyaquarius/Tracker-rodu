@@ -39,7 +39,9 @@
 
 **Рівень: критичний для контексту застосунку.**
 
-Обидва lock-файли фіксують уразливі версії `pdfjs-dist`: `6.0.227` у `package-lock.json` та `6.1.200` у `pnpm-lock.yaml`. Вони входять у діапазон `< 6.2.108` для [GHSA-hq66-cqwq-w95j](https://github.com/advisories/GHSA-hq66-cqwq-w95j), який описує виконання JavaScript під час відкриття спеціально сформованого PDF.
+**Статус: закрито в робочій версії 14 серпня 2026 року.** `pdfjs-dist` оновлено до `6.2.108` в обох lock-файлах, обидва шляхи `getDocument()` примусово використовують `enableScripting: false` та `isEvalSupported: false`, додано регресійний тест. Production-збірка і 63 профільні тести переглядача пройшли; `npm audit --omit=dev` більше не містить `GHSA-hq66-cqwq-w95j`.
+
+На момент аудиту обидва lock-файли фіксували уразливі версії `pdfjs-dist`: `6.0.227` у `package-lock.json` та `6.1.200` у `pnpm-lock.yaml`. Вони входили в діапазон `< 6.2.108` для [GHSA-hq66-cqwq-w95j](https://github.com/advisories/GHSA-hq66-cqwq-w95j), який описує виконання JavaScript під час відкриття спеціально сформованого PDF.
 
 Ризик тут підвищений, бо переглядач навмисно відкриває зовнішні й завантажені користувачами архівні PDF. У викликах `pdfJs.getDocument()` у `src/components/DocumentWorkspaceViewer.tsx:551` та `:564` немає захисних параметрів `enableScripting: false` і `isEvalSupported: false`.
 
@@ -175,7 +177,7 @@ Workflow-и використовують `actions/checkout@v6`, `actions/setup-n
 
 ### P0 — до наступного production-деплою
 
-1. Оновити PDF.js і примусово вимкнути scripting/eval.
+1. ✅ Оновити PDF.js і примусово вимкнути scripting/eval — виконано 14 серпня 2026 року.
 2. Гарантовано очищати всі локальні приватні кеші незалежно від успіху server sign-out.
 3. Очищати/ізолювати IndexedDB документів за користувачем і проєктом.
 4. Повторити повний security regression suite та ручний тест зміни облікового запису на одному пристрої.

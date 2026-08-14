@@ -266,6 +266,12 @@ const PDF_VIEWER_MAX_CANVAS_SIDE = Math.max(1, Math.floor(positiveViewerSetting(
   8_192,
 )));
 const PDFJS_WASM_URL = `${import.meta.env.BASE_URL}pdfjs-wasm/`;
+// Documents opened here can come from arbitrary external archives. Keep both
+// PDF.js execution paths locked down even when the upstream defaults change.
+const PDFJS_SECURITY_OPTIONS = Object.freeze({
+  enableScripting: false,
+  isEvalSupported: false,
+});
 const PDF_CANVAS_RESOURCE_LIMIT_MESSAGE =
   "Не вдалося безпечно відобразити PDF-сторінку: її розміри перевищують ресурсний ліміт переглядача.";
 
@@ -380,7 +386,6 @@ export function DocumentWorkspaceViewer({
   const [pdfRendering, setPdfRendering] = useState(false);
   const [pdfPageReady, setPdfPageReady] = useState(false);
   const [fastPagePreview, setFastPagePreview] = useState<MediaWikiPdfPagePreview | null>(null);
-  const [pdfNativeFallback, setPdfNativeFallback] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [fitScale, setFitScale] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -441,7 +446,7 @@ export function DocumentWorkspaceViewer({
     ? "changed"
     : viewer?.sourceVersionStatus ?? currentPreview?.sourceVersionStatus ?? "unknown";
   const pageCount = pages.length;
-  const isInteractivePdf = kind === "pdf" && !pdfNativeFallback;
+  const isInteractivePdf = kind === "pdf";
   const navigationPageCount = isInteractivePdf ? pdfPageCount : pageCount;
   const navigationPageNumber = isInteractivePdf ? pdfPageNumber : Math.min(currentIndex + 1, Math.max(1, pageCount));
   const sourceContext = viewer?.context && externalPdfViewerV2
@@ -549,6 +554,7 @@ export function DocumentWorkspaceViewer({
         throwIfViewerOperationAborted(loadController.signal);
         const loadingTask = preview.blob
           ? pdfJs.getDocument({
+              ...PDFJS_SECURITY_OPTIONS,
               data: new Uint8Array(await waitForViewerPromise(
                 preview.blob.arrayBuffer(),
                 loadController.signal,
@@ -562,6 +568,7 @@ export function DocumentWorkspaceViewer({
               canvasMaxAreaInBytes: PDF_VIEWER_MAX_CANVAS_PIXELS * 4,
             })
           : pdfJs.getDocument({
+              ...PDFJS_SECURITY_OPTIONS,
               url: preview.url,
               ...(preview.httpHeaders ? { httpHeaders: preview.httpHeaders } : {}),
               withCredentials: false,
@@ -685,7 +692,6 @@ export function DocumentWorkspaceViewer({
     setFastPagePreview(null);
     setPdfPageLabel("");
     setPdfRendering(false);
-    setPdfNativeFallback(false);
     setZoom(1);
     setFitScale(1);
     fitModeRef.current = "page";
@@ -805,7 +811,6 @@ export function DocumentWorkspaceViewer({
     setPdfPageReady(false);
     setPdfPageLabel("");
     setPdfRendering(false);
-    setPdfNativeFallback(false);
     setExternalSourceReason(null);
     cropInteractionRef.current = null;
     panStartRef.current = null;
@@ -934,7 +939,7 @@ export function DocumentWorkspaceViewer({
     const canvas = pdfCanvasRef.current;
     const renderController = mainPdfRenderRef.current;
 
-    if (!currentScan || kind !== "pdf" || pdfNativeFallback || !canvas || !renderController) {
+    if (!currentScan || kind !== "pdf" || !canvas || !renderController) {
       return undefined;
     }
     const lease = renderController.begin();
@@ -1001,26 +1006,20 @@ export function DocumentWorkspaceViewer({
 
         try {
           const result = await lease.track(page.render({
-            canvasContext: context,
-            viewport,
             canvas,
+            viewport,
             background: "rgb(255,255,255)",
           }));
           if (result.status === "completed" && lease.isCurrent()) {
-            if (isCanvasEffectivelyBlank(canvas)) {
-              setPdfNativeFallback(true);
-              setSelectionMode(false);
-              setCropRect(null);
-            } else {
-              setPdfPageReady(true);
-              const fitKey = `${currentScan.id}:${safePageNumber}:${normalizeDegrees(rotation)}`;
-              if (fittedPdfKeyRef.current !== fitKey || fitPendingRef.current) {
-                fittedPdfKeyRef.current = fitKey;
-                fitPendingRef.current = true;
-                requestFitDocumentView(fitModeRef.current ?? "page", rotation);
-              }
-              const preview = previewCacheRef.current.get(currentScan.id);
-              emitViewerTelemetryOnce(
+            setPdfPageReady(true);
+            const fitKey = `${currentScan.id}:${safePageNumber}:${normalizeDegrees(rotation)}`;
+            if (fittedPdfKeyRef.current !== fitKey || fitPendingRef.current) {
+              fittedPdfKeyRef.current = fitKey;
+              fitPendingRef.current = true;
+              requestFitDocumentView(fitModeRef.current ?? "page", rotation);
+            }
+            const preview = previewCacheRef.current.get(currentScan.id);
+            emitViewerTelemetryOnce(
                 `first-render:${viewer?.openedAt ?? 0}:${currentScan.id}`,
                 {
                   event: "pdf_first_page_rendered",
@@ -1036,30 +1035,29 @@ export function DocumentWorkspaceViewer({
                     preview?.documentSource?.fileSizeBytes ?? currentScan.size,
                   ),
                 },
-              );
-              const restore = viewerV2Enabled ? viewer?.restore : undefined;
-              const restoreRotation = restore?.selection?.rotation;
-              const restoreKey = restore?.selection && restore.pageIndex === safePageNumber
-                ? `${viewer?.openedAt ?? 0}:${currentScan.id}:${safePageNumber}:${effectivePdfRotation}`
-                : "";
-              if (
-                restore?.selection &&
-                restoreKey &&
-                restoredFindingSelectionRef.current !== restoreKey &&
-                normalizeQuarterRotation(effectivePdfRotation) === normalizeQuarterRotation(restoreRotation ?? 0)
-              ) {
-                const restoredRect = findingDocumentSelectionViewportRect(
+            );
+            const restore = viewerV2Enabled ? viewer?.restore : undefined;
+            const restoreRotation = restore?.selection?.rotation;
+            const restoreKey = restore?.selection && restore.pageIndex === safePageNumber
+              ? `${viewer?.openedAt ?? 0}:${currentScan.id}:${safePageNumber}:${effectivePdfRotation}`
+              : "";
+            if (
+              restore?.selection &&
+              restoreKey &&
+              restoredFindingSelectionRef.current !== restoreKey &&
+              normalizeQuarterRotation(effectivePdfRotation) === normalizeQuarterRotation(restoreRotation ?? 0)
+            ) {
+              const restoredRect = findingDocumentSelectionViewportRect(
                   { restore },
                   {
                     width: viewport.width / canvasBudget.scale,
                     height: viewport.height / canvasBudget.scale,
                   },
-                );
-                if (restoredRect) {
-                  setSelectionMode(false);
-                  setCropRect(restoredRect);
-                  restoredFindingSelectionRef.current = restoreKey;
-                }
+              );
+              if (restoredRect) {
+                setSelectionMode(false);
+                setCropRect(restoredRect);
+                restoredFindingSelectionRef.current = restoreKey;
               }
             }
           }
@@ -1070,14 +1068,17 @@ export function DocumentWorkspaceViewer({
       .catch((renderError: unknown) => {
         if (!lease.isCurrent()) return;
         if (renderError instanceof PdfCanvasBudgetError) {
-          setPdfNativeFallback(false);
           setError(PDF_CANVAS_RESOURCE_LIMIT_MESSAGE);
           setSelectionMode(false);
           setCropRect(null);
           return;
         }
-        setPdfNativeFallback(true);
-        setPdfPageCount(0);
+        setPdfPageReady(false);
+        setError(
+          renderError instanceof Error && renderError.message.trim()
+            ? renderError.message
+            : "Не вдалося відобразити сторінку PDF. Спробуйте ще раз.",
+        );
         setSelectionMode(false);
         setCropRect(null);
       })
@@ -1091,7 +1092,6 @@ export function DocumentWorkspaceViewer({
     currentScan?.id,
     kind,
     pdfPageNumber,
-    pdfNativeFallback,
     effectivePdfRotation,
     pdfRenderZoom,
     viewer?.openedAt,
@@ -1104,7 +1104,6 @@ export function DocumentWorkspaceViewer({
       !viewerV2Enabled
       || !currentScan
       || kind !== "pdf"
-      || pdfNativeFallback
       || pdfPageCount < 1
       || !queue
       || !cache
@@ -1171,7 +1170,6 @@ export function DocumentWorkspaceViewer({
     viewerV2Enabled,
     currentScan?.id,
     kind,
-    pdfNativeFallback,
     pdfPageCount,
     pdfPageNumber,
     pdfRendering,
@@ -1491,6 +1489,18 @@ export function DocumentWorkspaceViewer({
     setExternalSourceReason(null);
     disposePreviewForScan(activeScan.id);
     await reconnectGoogleDrive();
+    setBlobUrl("");
+    setKind(null);
+    setPreviewReloadKey((value) => value + 1);
+  };
+
+  const retryCurrentPreview = () => {
+    setError("");
+    setExternalSourceReason(null);
+    setPdfPageReady(false);
+    mainPdfRenderRef.current?.cancel();
+    thumbnailQueueRef.current?.cancelAll();
+    disposePreviewForScan(activeScan.id);
     setBlobUrl("");
     setKind(null);
     setPreviewReloadKey((value) => value + 1);
@@ -2688,6 +2698,9 @@ export function DocumentWorkspaceViewer({
                   Підключити Google Drive
                 </button>
               ) : null}
+              <button type="button" className="button button-primary" onClick={retryCurrentPreview}>
+                Спробувати ще раз
+              </button>
               <button type="button" className="button button-secondary" onClick={() => void run(() => openScan(activeScan))}>
                 Відкрити джерело
               </button>
@@ -2745,8 +2758,6 @@ export function DocumentWorkspaceViewer({
               ) : null}
             </div>
           </>
-        ) : kind === "pdf" && blobUrl && pdfNativeFallback ? (
-          <iframe title={activeScan.name} src={blobUrl} />
         ) : kind === "pdf" && blobUrl ? (
           <div className={`workspace-pdf-layout ${viewerV2Enabled ? "" : "without-thumbnails"}`}>
             {viewerV2Enabled ? (
@@ -3600,7 +3611,7 @@ async function renderPdfThumbnail(
     page.cleanup();
     throw new Error("Браузер не зміг підготувати мініатюру PDF.");
   }
-  const task = page.render({ canvasContext: context, viewport, canvas, background: "rgb(255,255,255)" });
+  const task = page.render({ canvas, viewport, background: "rgb(255,255,255)" });
   const cancel = () => task.cancel();
   signal.addEventListener("abort", cancel, { once: true });
   try {
@@ -3627,38 +3638,6 @@ function cachedPreviewNeedsRefresh(preview: CachedPreview, safetyWindowMs = 30_0
   if (!preview.expiresAt) return false;
   const expiresAt = Date.parse(preview.expiresAt);
   return !Number.isFinite(expiresAt) || expiresAt <= Date.now() + safetyWindowMs;
-}
-
-function isCanvasEffectivelyBlank(canvas: HTMLCanvasElement): boolean {
-  if (!canvas.width || !canvas.height) return true;
-
-  const sampleSize = 64;
-  const sampleCanvas = document.createElement("canvas");
-  sampleCanvas.width = sampleSize;
-  sampleCanvas.height = sampleSize;
-  const sampleContext = sampleCanvas.getContext("2d", { willReadFrequently: true });
-  if (!sampleContext) return false;
-
-  try {
-    sampleContext.drawImage(canvas, 0, 0, sampleSize, sampleSize);
-    const pixels = sampleContext.getImageData(0, 0, sampleSize, sampleSize).data;
-    let visiblePixels = 0;
-
-    for (let index = 0; index < pixels.length; index += 4) {
-      const red = pixels[index] ?? 255;
-      const green = pixels[index + 1] ?? 255;
-      const blue = pixels[index + 2] ?? 255;
-      const alpha = pixels[index + 3] ?? 0;
-      if (alpha > 8 && (red < 245 || green < 245 || blue < 245)) {
-        visiblePixels += 1;
-        if (visiblePixels > 4) return false;
-      }
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function clampZoom(value: number): number {
