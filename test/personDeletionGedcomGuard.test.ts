@@ -56,7 +56,9 @@ test("persons catalogue exposes individual, bulk and GEDCOM-group deletion", () 
   assert.match(moduleSource, /GedcomImportManagerV2/u);
   assert.match(moduleSource, /Перед видаленням перегляньте й за потреби вручну відвʼяжіть важливі записи/u);
   assert.match(moduleSource, /самі файли на Google Drive не видаляються/u);
-  assert.match(moduleSource, /кореневою для поточного родового дерева/u);
+  assert.match(moduleSource, /onListRootRequirements/u);
+  assert.match(moduleSource, /RootPersonDeletionDialogV2/u);
+  assert.match(moduleSource, /onDeletePersonsWithRootReplacements/u);
   assert.match(profile, /onDelete[\s\S]*?Видалити особу/u);
   assert.match(preview, /onDelete[\s\S]*?Видалити особу/u);
 });

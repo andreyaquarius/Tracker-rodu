@@ -674,6 +674,19 @@ export interface ProjectPersonDeletionResult {
   deletedFindings: number;
 }
 
+export interface ProjectPersonRootRequirement {
+  treeId: string;
+  treeTitle: string;
+  rootPersonId: string;
+  remainingMemberCount: number;
+  requiresReplacement: boolean;
+}
+
+export interface ProjectPersonRootReplacement {
+  treeId: string;
+  personId: string;
+}
+
 export async function deleteProjectPersons(
   projectId: string,
   personIds: readonly string[],
@@ -684,6 +697,70 @@ export async function deleteProjectPersons(
     target_project_id: projectId,
     target_person_ids: uniqueIds,
   });
+  if (error) throw projectPersonDeletionError(error);
+  const result = parseProjectPersonDeletionResult(data);
+  if (result.deletedPersons !== uniqueIds.length) {
+    throw new Error("Не всі вибрані особи були видалені. Оновіть сторінку та повторіть спробу.");
+  }
+  return result;
+}
+
+export async function listProjectPersonRootRequirements(
+  projectId: string,
+  personIds: readonly string[],
+): Promise<ProjectPersonRootRequirement[]> {
+  const uniqueIds = [...new Set(personIds.map((id) => id.trim()).filter(Boolean))];
+  if (!uniqueIds.length) return [];
+  const { data, error } = await getSupabaseClient().rpc(
+    "list_project_person_root_requirements",
+    {
+      target_project_id: projectId,
+      target_person_ids: uniqueIds,
+    },
+  );
+  if (error) throw projectPersonDeletionError(error);
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const record = value as Record<string, unknown>;
+    const treeId = typeof record.treeId === "string" ? record.treeId.trim() : "";
+    const rootPersonId = typeof record.rootPersonId === "string"
+      ? record.rootPersonId.trim()
+      : "";
+    if (!treeId || !rootPersonId) return [];
+    const remainingMemberCount = Number(record.remainingMemberCount ?? 0);
+    return [{
+      treeId,
+      treeTitle: typeof record.treeTitle === "string" ? record.treeTitle.trim() : "",
+      rootPersonId,
+      remainingMemberCount: Number.isFinite(remainingMemberCount) && remainingMemberCount > 0
+        ? Math.floor(remainingMemberCount)
+        : 0,
+      requiresReplacement: record.requiresReplacement === true,
+    }];
+  });
+}
+
+export async function replaceTreeRootsAndDeleteProjectPersons(
+  projectId: string,
+  personIds: readonly string[],
+  replacements: readonly ProjectPersonRootReplacement[],
+): Promise<ProjectPersonDeletionResult> {
+  const uniqueIds = [...new Set(personIds.map((id) => id.trim()).filter(Boolean))];
+  if (!uniqueIds.length) return { deletedPersons: 0, deletedRelations: 0, deletedFindings: 0 };
+  const rootReplacements = Object.fromEntries(
+    replacements
+      .map((replacement) => [replacement.treeId.trim(), replacement.personId.trim()] as const)
+      .filter(([treeId, personId]) => treeId && personId),
+  );
+  const { data, error } = await getSupabaseClient().rpc(
+    "replace_tree_roots_and_delete_project_persons",
+    {
+      target_project_id: projectId,
+      target_person_ids: uniqueIds,
+      root_replacements: rootReplacements,
+    },
+  );
   if (error) throw projectPersonDeletionError(error);
   const result = parseProjectPersonDeletionResult(data);
   if (result.deletedPersons !== uniqueIds.length) {
@@ -736,6 +813,16 @@ function projectPersonDeletionError(error: unknown): Error {
     return new Error(
       "Ця особа є кореневою в одному з родових дерев. Спочатку виберіть для цього дерева іншу кореневу особу або видаліть саме дерево.",
     );
+  }
+  if (message.includes("ROOT_REPLACEMENT_REQUIRED")) {
+    return new Error("Для кожного дерева потрібно вибрати нову кореневу особу.");
+  }
+  if (
+    message.includes("ROOT_REPLACEMENT_INVALID") ||
+    message.includes("ROOT_REPLACEMENT_IS_BEING_DELETED") ||
+    message.includes("ROOT_REPLACEMENT_NOT_IN_PROJECT")
+  ) {
+    return new Error("Обрана коренева особа більше недоступна. Оновіть список і виберіть іншу особу.");
   }
   if (message.includes("PROJECT_GEDCOM_OPERATION_ACTIVE")) {
     return new Error("Зачекайте завершення поточного GEDCOM-імпорту або відкату та повторіть дію.");

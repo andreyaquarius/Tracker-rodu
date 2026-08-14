@@ -309,27 +309,11 @@ export async function setFamilyTreeRoot(input: {
   treeId: EntityId;
   personId: EntityId;
 }): Promise<void> {
-  const client = getSupabaseClient();
-  await ensureTreeMember({
-    projectId: input.projectId,
-    treeId: input.treeId,
-    personId: input.personId,
-    memberRole: "root",
+  const { error } = await getSupabaseClient().rpc("set_family_tree_root", {
+    target_project_id: input.projectId,
+    target_tree_id: input.treeId,
+    target_person_id: input.personId,
   });
-  const clearRoots = await client
-    .from("family_tree_persons")
-    .update({ member_role: "member" })
-    .eq("project_id", input.projectId)
-    .eq("tree_id", input.treeId)
-    .eq("member_role", "root")
-    .neq("person_id", input.personId);
-  if (clearRoots.error) throw clearRoots.error;
-
-  const { error } = await client
-    .from("family_trees")
-    .update({ root_person_id: input.personId })
-    .eq("project_id", input.projectId)
-    .eq("id", input.treeId);
   if (error) throw error;
 }
 

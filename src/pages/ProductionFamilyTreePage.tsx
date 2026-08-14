@@ -247,6 +247,20 @@ export function ProductionFamilyTreePage({
     persistedGedcomPhotoPlan.candidates.length +
     persistedGedcomPhotoPlan.missingLocalCount +
     persistedGedcomPhotoPlan.unsupportedHttpCount;
+  const treeRootCandidates = useMemo(
+    () => persons
+      .map((person) => ({
+        personId: person.id,
+        label: personLabel(person),
+        detail: [
+          formatDateForDisplay(person.birthDate) || person.birthYearFrom,
+          formatDateForDisplay(person.deathDate) || person.deathYearFrom,
+          person.birthPlace,
+        ].filter(Boolean).join(" · "),
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, "uk")),
+    [persons],
+  );
 
   useEffect(() => {
     setGedcomPhotoRecovery(null);
@@ -386,6 +400,21 @@ export function ProductionFamilyTreePage({
   function openTreeTools() {
     setTreeToolsNotice("");
     setTreeToolsOpen(true);
+  }
+
+  async function setActiveTreeRoot(personId: string): Promise<boolean> {
+    if (!projectId || !selectedEntry?.id || readOnly) return false;
+    const result = await mutations.setFamilyTreeRoot({
+      projectId,
+      treeId: selectedEntry.id,
+      personId,
+    });
+    if (result === null) return false;
+    preferredTreeIdRef.current = selectedEntry.id;
+    setReloadRevision((value) => value + 1);
+    setTreeToolsNotice("Кореневу особу дерева змінено.");
+    onSubscriptionChanged?.();
+    return true;
   }
 
   function openGedcomPhotoRecovery() {
@@ -642,6 +671,9 @@ export function ProductionFamilyTreePage({
           appearance={treeAppearance}
           appearanceSyncState={treeAppearanceSyncState}
           notice={treeToolsNotice}
+          rootCandidates={treeRootCandidates}
+          canEditTreeRoot={!readOnly && Boolean(selectedEntry?.id)}
+          savingTreeRoot={mutations.isMutating}
           onSelectTree={setSelectedTreeId}
           onSelectResearch={setGedcomResearchId}
           onImportGedcom={selectGedcomFile}
@@ -658,6 +690,7 @@ export function ProductionFamilyTreePage({
             onOpenStatistics?.(selectedEntry.id);
           }}
           onAppearanceChange={updateTreeAppearance}
+          onSetTreeRoot={setActiveTreeRoot}
           onClose={() => setTreeToolsOpen(false)}
         />
       ) : null}
@@ -1044,6 +1077,10 @@ function LoadedFamilyTree({
           graph: rootLineageSourceGraph,
           rootPersonId: homePersonId,
           connectPersonId: layoutFocusPersonId,
+          // A temporary focus owns the visible pedigree. Keep only the narrow
+          // route back to the persisted root; rendering the root's complete
+          // ancestor closure beside it splits partner trees across the canvas.
+          includeRootAncestorClosure: false,
         })
       : undefined,
     [
@@ -1053,7 +1090,8 @@ function LoadedFamilyTree({
       rootLineageSourceGraph,
     ],
   );
-  // A corridor may need the persisted root closure as a structural bridge.
+  // A corridor may need the persisted root neighborhood as a source for its
+  // structural bridge. The projection above exposes only that narrow bridge.
   // All-descendants is intentionally different: its selected person is the
   // oldest visible generation, so it must never receive an ancestor overlay.
   // Keep the explicit branch here as a second boundary against a future
@@ -1157,6 +1195,9 @@ function LoadedFamilyTree({
     collateralDepth: MAX_RENDERED_FAMILY_TREE_NODES,
     maxVisibleNodes: logicalSceneNodeBudget,
     lineageTargetPersonId,
+    // The home/root card remains visible as the focus person's partner, but a
+    // temporary focus must not reopen the home person's complete parent tree.
+    expandLineageTargetPartner: !homeLineageOverlayActive,
     ...(rootLineageProjection?.bridgePersonIds.length
       ? { lineageBridgePersonIds: rootLineageProjection.bridgePersonIds }
       : {}),
@@ -1177,6 +1218,7 @@ function LoadedFamilyTree({
     appearance.directLineageGrouping,
     directAncestorMode,
     geometryLineagePersonIds,
+    homeLineageOverlayActive,
     layoutFocusPersonId,
     lineageTargetPersonId,
     logicalSceneNodeBudget,

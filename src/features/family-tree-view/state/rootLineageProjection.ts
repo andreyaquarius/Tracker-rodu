@@ -11,6 +11,12 @@ export interface RootLineageProjectionInput {
   rootPersonId: PersonId;
   /** Optional visual focus connected to the root through a narrow family path. */
   connectPersonId?: PersonId;
+  /**
+   * Whether the projection should expose every loaded ancestor of the root.
+   * Temporary focus views disable this and retain only the structural bridge
+   * back to the persisted root, while direct-pedigree views keep the closure.
+   */
+  includeRootAncestorClosure?: boolean;
 }
 
 export interface RootLineageProjectionResult {
@@ -106,15 +112,16 @@ function emptyProjectionGraph(graph: FamilyGraphData): FamilyGraphData {
 }
 
 /**
- * Keeps the persisted root, its complete loaded ancestor closure, and one
- * deterministic structural bridge to the temporary visual focus. The bridge
- * makes the root branch reachable by the occurrence builder without turning
+ * Keeps the persisted root, optionally its complete loaded ancestor closure,
+ * and one deterministic structural bridge to the temporary visual focus. The
+ * bridge makes the root reachable by the occurrence builder without turning
  * the temporary focus into the lineage owner.
  */
 export function buildRootLineageProjection({
   graph,
   rootPersonId,
   connectPersonId,
+  includeRootAncestorClosure = true,
 }: RootLineageProjectionInput): RootLineageProjectionResult {
   const personIds = new Set(graph.persons.map(person => person.id));
   if (!personIds.has(rootPersonId)) {
@@ -176,16 +183,18 @@ export function buildRootLineageProjection({
     }
   };
 
-  const ancestorQueue: PersonId[] = [rootPersonId];
-  for (let offset = 0; offset < ancestorQueue.length; offset += 1) {
-    const childId = ancestorQueue[offset]!;
-    if (lineagePersonIds.has(childId)) continue;
-    lineagePersonIds.add(childId);
-    includedPersonIds.add(childId);
-    for (const relation of relationsByChild.get(childId) ?? []) {
-      includeRelationFamily(relationFamilyKey(relation));
-      if (!lineagePersonIds.has(relation.parentId)) {
-        ancestorQueue.push(relation.parentId);
+  lineagePersonIds.add(rootPersonId);
+  if (includeRootAncestorClosure) {
+    const ancestorQueue: PersonId[] = [rootPersonId];
+    for (let offset = 0; offset < ancestorQueue.length; offset += 1) {
+      const childId = ancestorQueue[offset]!;
+      includedPersonIds.add(childId);
+      for (const relation of relationsByChild.get(childId) ?? []) {
+        includeRelationFamily(relationFamilyKey(relation));
+        if (!lineagePersonIds.has(relation.parentId)) {
+          lineagePersonIds.add(relation.parentId);
+          ancestorQueue.push(relation.parentId);
+        }
       }
     }
   }

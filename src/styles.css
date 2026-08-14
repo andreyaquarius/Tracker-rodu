@@ -1834,6 +1834,53 @@ tbody tr:hover { background: #fbfaf5; }
   font-size: 13px;
   font-weight: 800;
 }
+.family-tree-root-current {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #c9ddd5;
+  border-radius: 10px;
+  padding: 11px 12px;
+  background: #edf5f1;
+}
+.family-tree-root-current span,
+.family-tree-root-editor label > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.family-tree-root-current strong {
+  color: var(--green-950);
+  font-size: 14px;
+}
+.family-tree-root-current small,
+.family-tree-root-editor small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.family-tree-root-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+.family-tree-root-editor label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.family-tree-root-editor .button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+.family-tree-root-save-message {
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--green-800) !important;
+  background: #edf5f1;
+  font-weight: 700;
+}
 .family-tree-lineage-swatches {
   display: flex;
   flex-wrap: wrap;
@@ -2935,6 +2982,13 @@ tbody tr:hover { background: #fbfaf5; }
   .family-tree-lineage-palettes,
   .family-tree-lineage-branches {
     grid-template-columns: 1fr;
+  }
+  .family-tree-root-editor {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .family-tree-root-editor .button {
+    width: 100%;
   }
   .modal.circular-ancestor-modal {
     width: calc(100vw - 16px);
@@ -9560,6 +9614,52 @@ tbody tr:hover { background: #fbfaf5; }
   max-width: 100%;
   min-width: 0;
   margin: 0 auto;
+}
+
+.modal.persons-v2-root-delete-modal {
+  width: min(760px, 100%);
+}
+
+.persons-v2-root-delete-dialog {
+  display: grid;
+  gap: 14px;
+  padding: 20px 24px 24px;
+}
+
+.persons-v2-root-delete-field {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 12px;
+  background: #fffdfa;
+}
+
+.persons-v2-root-delete-field > span {
+  display: grid;
+  gap: 3px;
+}
+
+.persons-v2-root-delete-field strong {
+  color: var(--green-950);
+}
+
+.persons-v2-root-delete-field small {
+  color: var(--muted);
+}
+
+.persons-v2-root-delete-dialog .alert-warning {
+  border: 1px solid #e7cda7;
+  color: #70470f;
+  background: #fff7e8;
+}
+
+.persons-v2-root-delete-dialog .alert-warning p {
+  margin: 0;
+}
+
+.persons-v2-root-delete-actions {
+  margin-top: 2px;
 }
 
 .persons-v2-page {

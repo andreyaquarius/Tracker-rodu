@@ -13,6 +13,7 @@ import type {
   TaskRecord,
 } from "../../types";
 import type { PageKey } from "../../components/Sidebar";
+import { Modal } from "../../components/Modal";
 import { TableDataImportButton } from "../../components/TableDataImportButton";
 import { GedcomImportButton } from "../../components/GedcomImportButton";
 import { exportPersonsToExcel } from "../../utils/excelExport";
@@ -68,7 +69,11 @@ import {
   type GedcomImportGroup,
 } from "../../utils/gedcomImportGroups.ts";
 import { GedcomImportManagerV2 } from "./GedcomImportManagerV2.tsx";
-import { listProjectGedcomImportDatasets } from "../../services/projectPeople.ts";
+import {
+  listProjectGedcomImportDatasets,
+  type ProjectPersonRootReplacement,
+  type ProjectPersonRootRequirement,
+} from "../../services/projectPeople.ts";
 import {
   personKinshipLabel,
   type PersonKinshipDescriptor,
@@ -92,6 +97,13 @@ export interface PersonsModuleV2Props {
   onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[]) => void;
   onSavePerson: PersonSaveHandler;
   onDeletePersons?: (personIds: readonly string[]) => Promise<void>;
+  onListRootRequirements?: (
+    personIds: readonly string[],
+  ) => Promise<ProjectPersonRootRequirement[]>;
+  onDeletePersonsWithRootReplacements?: (
+    personIds: readonly string[],
+    replacements: readonly ProjectPersonRootReplacement[],
+  ) => Promise<void>;
   onDeleteGedcomImport?: (group: GedcomImportGroup) => Promise<void>;
   onImportRecords: (collection: "persons", records: AppEntity[]) => Promise<void>;
   onImportGedcom?: (
@@ -163,6 +175,8 @@ export function PersonsModuleV2({
   onOpenPhoto,
   onSavePerson,
   onDeletePersons,
+  onListRootRequirements,
+  onDeletePersonsWithRootReplacements,
   onDeleteGedcomImport,
   onImportRecords,
   onImportGedcom,
@@ -190,6 +204,10 @@ export function PersonsModuleV2({
 }: PersonsModuleV2Props) {
   const [previewPersonId, setPreviewPersonId] = useState("");
   const [deletingPersons, setDeletingPersons] = useState(false);
+  const [rootDeletionRequest, setRootDeletionRequest] = useState<{
+    persons: Person[];
+    requirements: ProjectPersonRootRequirement[];
+  } | null>(null);
   const [gedcomDatasetMarkers, setGedcomDatasetMarkers] = useState<GedcomImportDatasetMarker[]>([]);
   const detailPersonId = target.personId || previewPersonId;
   const detailPerson = persons.find((person) => person.id === detailPersonId) ?? null;
@@ -552,12 +570,6 @@ export function PersonsModuleV2({
 
   async function deleteOnePerson(person: Person) {
     if (!onDeletePersons || deletingPersons) return;
-    if (pedigreeRootPersonId === person.id) {
-      window.alert(
-        "Ця особа є кореневою для поточного родового дерева. Спочатку відкрийте налаштування дерева та виберіть іншу кореневу особу.",
-      );
-      return;
-    }
     const summary = summaries.get(person.id);
     const impact = {
       relations: summary?.relationCount ?? relations.filter((relation) => (
@@ -601,11 +613,15 @@ export function PersonsModuleV2({
     if (!confirmed) return;
     setDeletingPersons(true);
     try {
-      await onDeletePersons([person.id]);
-      if (previewPersonId === person.id) setPreviewPersonId("");
-      if (target.personId === person.id) {
-        onNavigate({ mode: "list" }, { replace: true });
+      const rootRequirements = onListRootRequirements
+        ? await onListRootRequirements([person.id])
+        : [];
+      if (rootRequirements.length) {
+        setRootDeletionRequest({ persons: [person], requirements: rootRequirements });
+        return;
       }
+      await onDeletePersons([person.id]);
+      finishDeletedPersons([person.id]);
     } catch {
       // The application-level handler already shows the actionable error.
     } finally {
@@ -615,12 +631,6 @@ export function PersonsModuleV2({
 
   const deleteSelectedPersons = async (selected: readonly Person[]) => {
     if (!onDeletePersons || deletingPersons || !selected.length) return;
-    if (pedigreeRootPersonId && selected.some((person) => person.id === pedigreeRootPersonId)) {
-      window.alert(
-        "Серед вибраних є коренева особа поточного родового дерева. Спочатку виберіть іншу кореневу особу в налаштуваннях дерева.",
-      );
-      return;
-    }
     const selectedIds = new Set(selected.map((person) => person.id));
     const impact = {
       relations: relations.filter((relation) => (
@@ -649,7 +659,16 @@ export function PersonsModuleV2({
     if (!confirmed) return;
     setDeletingPersons(true);
     try {
-      await onDeletePersons(selected.map((person) => person.id));
+      const selectedPersonIds = selected.map((person) => person.id);
+      const rootRequirements = onListRootRequirements
+        ? await onListRootRequirements(selectedPersonIds)
+        : [];
+      if (rootRequirements.length) {
+        setRootDeletionRequest({ persons: [...selected], requirements: rootRequirements });
+        return;
+      }
+      await onDeletePersons(selectedPersonIds);
+      finishDeletedPersons(selectedPersonIds);
     } catch {
       // The application-level handler already shows the actionable error.
     } finally {
@@ -657,11 +676,37 @@ export function PersonsModuleV2({
     }
   };
 
+  function finishDeletedPersons(personIds: readonly string[]) {
+    const removedIds = new Set(personIds);
+    if (removedIds.has(previewPersonId)) setPreviewPersonId("");
+    if (target.personId && removedIds.has(target.personId)) {
+      onNavigate({ mode: "list" }, { replace: true });
+    }
+  }
+
+  async function confirmRootAwareDeletion(
+    replacements: readonly ProjectPersonRootReplacement[],
+  ) {
+    if (!rootDeletionRequest || !onDeletePersonsWithRootReplacements || deletingPersons) return;
+    const personIds = rootDeletionRequest.persons.map((person) => person.id);
+    setDeletingPersons(true);
+    try {
+      await onDeletePersonsWithRootReplacements(personIds, replacements);
+      setRootDeletionRequest(null);
+      finishDeletedPersons(personIds);
+    } catch {
+      // The application-level handler already shows the actionable error.
+    } finally {
+      setDeletingPersons(false);
+    }
+  }
+
   return (
-    <div className="persons-v2-catalog-shell">
-      <div className={`persons-v2-catalog-layout${detailPerson ? " has-preview" : ""}`}>
-        <div className="persons-v2-catalog-main">
-          <PersonsCatalogV2
+    <>
+      <div className="persons-v2-catalog-shell">
+        <div className={`persons-v2-catalog-layout${detailPerson ? " has-preview" : ""}`}>
+          <div className="persons-v2-catalog-main">
+            <PersonsCatalogV2
             persons={persons}
             initialQuery={initialSearch}
             directAncestorIds={effectiveDirectAncestorIds}
@@ -695,33 +740,156 @@ export function PersonsModuleV2({
                 );
               }
             }}
+            />
+          </div>
+          <PersonPreviewDrawerV2
+            person={detailPerson}
+            persons={persons}
+            relations={relations}
+            research={researches.find((item) => item.id === detailPerson?.researchId) ?? null}
+            findings={detail.findings}
+            tasks={detail.tasks}
+            hypotheses={detail.hypotheses}
+            archiveRequests={detail.archiveRequests}
+            photoUrl={selectedPhotoUrl}
+            kinshipLabel={detailPerson
+              ? kinshipLabels.get(detailPerson.id) ?? "Зв’язок не визначено"
+              : undefined}
+            onClose={() => setPreviewPersonId("")}
+            onOpenProfile={(person) => onNavigate({ mode: "profile", personId: person.id })}
+            onOpenPhoto={onOpenPhoto}
+            onShowInTree={onShowInTree}
+            onEdit={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
+            onDelete={!readOnly && onDeletePersons && !deletingPersons
+              ? (person) => void deleteOnePerson(person)
+              : undefined}
+            onAddEvent={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
           />
         </div>
-        <PersonPreviewDrawerV2
-          person={detailPerson}
-          persons={persons}
-          relations={relations}
-          research={researches.find((item) => item.id === detailPerson?.researchId) ?? null}
-          findings={detail.findings}
-          tasks={detail.tasks}
-          hypotheses={detail.hypotheses}
-          archiveRequests={detail.archiveRequests}
-          photoUrl={selectedPhotoUrl}
-          kinshipLabel={detailPerson
-            ? kinshipLabels.get(detailPerson.id) ?? "Зв’язок не визначено"
-            : undefined}
-          onClose={() => setPreviewPersonId("")}
-          onOpenProfile={(person) => onNavigate({ mode: "profile", personId: person.id })}
-          onOpenPhoto={onOpenPhoto}
-          onShowInTree={onShowInTree}
-          onEdit={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
-          onDelete={!readOnly && onDeletePersons && !deletingPersons
-            ? (person) => void deleteOnePerson(person)
-            : undefined}
-          onAddEvent={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
-        />
       </div>
-    </div>
+      {rootDeletionRequest ? (
+        <RootPersonDeletionDialogV2
+          persons={rootDeletionRequest.persons}
+          requirements={rootDeletionRequest.requirements}
+          candidates={persons}
+          busy={deletingPersons}
+          onCancel={() => setRootDeletionRequest(null)}
+          onConfirm={confirmRootAwareDeletion}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function RootPersonDeletionDialogV2({
+  persons,
+  requirements,
+  candidates,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  persons: readonly Person[];
+  requirements: readonly ProjectPersonRootRequirement[];
+  candidates: readonly Person[];
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (replacements: readonly ProjectPersonRootReplacement[]) => void | Promise<void>;
+}) {
+  const removedIds = useMemo(() => new Set(persons.map((person) => person.id)), [persons]);
+  const availableCandidates = useMemo(
+    () => candidates
+      .filter((person) => !removedIds.has(person.id))
+      .map((person) => ({
+        personId: person.id,
+        label: personDisplayNameForDeleteV2(person),
+        detail: [person.birthYearFrom, person.birthPlace].filter(Boolean).join(" · "),
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, "uk")),
+    [candidates, removedIds],
+  );
+  const [selectedRoots, setSelectedRoots] = useState<Record<string, string>>({});
+  const replacementRequirements = requirements.filter((requirement) => requirement.requiresReplacement);
+  const deletedTreeRequirements = requirements.filter((requirement) => !requirement.requiresReplacement);
+  const ready = replacementRequirements.every((requirement) => selectedRoots[requirement.treeId]);
+
+  return (
+    <Modal
+      title={persons.length === 1 ? "Заміна кореня перед видаленням" : "Корені дерев для вибраних осіб"}
+      onClose={busy ? () => undefined : onCancel}
+      className="persons-v2-root-delete-modal"
+      minimizable={false}
+    >
+      <div className="persons-v2-root-delete-dialog">
+        <div className="alert alert-notice">
+          {persons.length === 1
+            ? `Особа «${personDisplayNameForDeleteV2(persons[0]!)}» є кореневою.`
+            : `Серед вибраних осіб (${persons.length}) є кореневі особи.`}
+          {" "}Корінь — постійна початкова точка дерева, тому перед видаленням його потрібно замінити.
+        </div>
+
+        {replacementRequirements.map((requirement) => (
+          <label key={requirement.treeId} className="persons-v2-root-delete-field">
+            <span>
+              <strong>{requirement.treeTitle || "Родове дерево"}</strong>
+              <small>
+                Після видалення в дереві залишиться осіб: {requirement.remainingMemberCount.toLocaleString("uk-UA")}.
+              </small>
+            </span>
+            <select
+              value={selectedRoots[requirement.treeId] ?? ""}
+              disabled={busy}
+              onChange={(event) => setSelectedRoots((current) => ({
+                ...current,
+                [requirement.treeId]: event.target.value,
+              }))}
+            >
+              <option value="">Оберіть нову кореневу особу</option>
+              {availableCandidates.map((candidate) => (
+                <option key={candidate.personId} value={candidate.personId}>
+                  {candidate.label}{candidate.detail ? ` · ${candidate.detail}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+
+        {deletedTreeRequirements.length ? (
+          <div className="alert alert-warning">
+            {deletedTreeRequirements.map((requirement) => (
+              <p key={requirement.treeId}>
+                Дерево «{requirement.treeTitle || "Без назви"}» не має інших осіб і буде видалене разом із кореневою особою.
+              </p>
+            ))}
+          </div>
+        ) : null}
+
+        {!availableCandidates.length && replacementRequirements.length ? (
+          <div className="alert alert-error">
+            У проєкті немає іншої особи для нового кореня. Спочатку створіть особу або скасуйте видалення.
+          </div>
+        ) : null}
+
+        <div className="modal-actions persons-v2-root-delete-actions">
+          <button type="button" className="button button-secondary" disabled={busy} onClick={onCancel}>
+            Скасувати
+          </button>
+          <button
+            type="button"
+            className="button button-danger"
+            disabled={busy || !ready}
+            onClick={() => void onConfirm(
+              replacementRequirements.map((requirement) => ({
+                treeId: requirement.treeId,
+                personId: selectedRoots[requirement.treeId]!,
+              })),
+            )}
+          >
+            {busy ? "Видаляємо…" : "Змінити корінь і видалити"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

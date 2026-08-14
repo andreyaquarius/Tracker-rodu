@@ -75,6 +75,7 @@ interface NormalizedOptions {
   focusPersonId: PersonId;
   lineageTargetPersonId: PersonId;
   lineageBridgePersonIds: ReadonlySet<PersonId>;
+  expandLineageTargetPartner: boolean;
   ancestorDepth: number;
   descendantDepth: number;
   collateralDepth: number;
@@ -139,6 +140,7 @@ function normalizeOptions(options: FamilyTreeLayoutOptions): NormalizedOptions {
     lineageTargetPersonId:
       options.lineageTargetPersonId ?? options.focusPersonId,
     lineageBridgePersonIds: new Set(options.lineageBridgePersonIds ?? []),
+    expandLineageTargetPartner: options.expandLineageTargetPartner ?? true,
     ancestorDepth: finiteInteger(options.ancestorDepth, 7),
     descendantDepth: finiteInteger(options.descendantDepth, 0),
     collateralDepth: finiteInteger(options.collateralDepth, 0),
@@ -749,9 +751,9 @@ function addUnionFamilies(state: SceneBuilderState, current: QueueItem): void {
         // A temporary visual focus may reach the persisted root through one
         // or more partnerships. Expand only people on that narrow bridge;
         // ordinary partner satellites stay intentionally closed.
-        expandable:
-          memberId === state.options.lineageTargetPersonId ||
-          state.options.lineageBridgePersonIds.has(memberId),
+        expandable: memberId === state.options.lineageTargetPersonId
+          ? state.options.expandLineageTargetPartner
+          : state.options.lineageBridgePersonIds.has(memberId),
       });
       if (!occurrenceId && state.budgetReached) {
         localContinuation(

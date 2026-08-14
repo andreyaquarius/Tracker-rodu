@@ -217,6 +217,11 @@ export interface FamilyTreeLayoutOptions {
   lineageBridgePersonIds?: readonly PersonId[];
   /** Stable person relative to whom highlighted cards are direct ancestors. */
   lineageTargetPersonId?: PersonId;
+  /**
+   * Whether a lineage target reached as the focus person's partner may expand
+   * its own parents. Temporary focus views disable this at the bridge endpoint.
+   */
+  expandLineageTargetPartner?: boolean;
   /** 0 = one fill; 1/2/3 = branches split at parents/grandparents/great-grandparents. */
   lineageGroupDepth?: FamilyTreeLineageGroupDepth;
   collapsedPersonIds?: readonly PersonId[];

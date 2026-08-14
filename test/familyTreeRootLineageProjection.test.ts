@@ -196,6 +196,57 @@ test("a spouse bridge uses the partnership without changing the root closure", (
   }
 });
 
+test("a bridge-only spouse focus hides the root ancestor closure", () => {
+  const source = fixture();
+  const result = buildRootLineageProjection({
+    graph: source,
+    rootPersonId: "home",
+    connectPersonId: "spouse",
+    includeRootAncestorClosure: false,
+  });
+
+  assert.equal(result.hasRoot, true);
+  assert.equal(result.hasCompleteBridge, true);
+  assert.deepEqual(result.lineagePersonIds, ["home"]);
+  assert.deepEqual(result.bridgePersonIds, ["home", "spouse"]);
+  assert.equal(result.graph.persons.some(value => value.id === "home"), true);
+  assert.equal(result.graph.persons.some(value => value.id === "spouse"), true);
+  assert.equal(result.graph.unions.some(value => value.id === "home-spouse"), true);
+  assert.equal(result.graph.persons.some(value => value.id === "father"), false);
+  assert.equal(result.graph.persons.some(value => value.id === "mother"), false);
+  assert.equal(
+    result.graph.persons.some(value => value.id === "maternal-grandmother"),
+    false,
+  );
+
+  // The ordinary focus neighborhood may already contain both partners' parent
+  // records. The renderer must still stop at the persisted root partner.
+  const displayed = mergeRootLineageOverlay(source, result.graph);
+  const layout = layoutFamilyGraph({
+    graph: displayed,
+    options: {
+      focusPersonId: "spouse",
+      lineageTargetPersonId: "home",
+      lineageBridgePersonIds: result.bridgePersonIds,
+      expandLineageTargetPartner: false,
+      ancestorDepth: 20,
+      descendantDepth: 20,
+      collateralDepth: 20,
+      maxVisibleNodes: 100,
+      showAllParentSets: true,
+      showUnknownParentPlaceholders: false,
+    },
+  });
+  assert.equal(layout.nodes.some(node => node.personId === "spouse"), true);
+  assert.equal(layout.nodes.some(node => node.personId === "home"), true);
+  assert.equal(layout.nodes.some(node => node.personId === "father"), false);
+  assert.equal(layout.nodes.some(node => node.personId === "mother"), false);
+  assert.equal(
+    layout.nodes.some(node => node.personId === "maternal-grandmother"),
+    false,
+  );
+});
+
 test("missing or disconnected focus never replaces the persisted root", () => {
   const result = buildRootLineageProjection({
     graph: fixture(),

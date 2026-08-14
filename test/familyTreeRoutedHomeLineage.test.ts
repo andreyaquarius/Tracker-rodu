@@ -296,7 +296,13 @@ test("production keeps the stable root overlay out of the strict all-descendants
   );
   assert.match(
     production,
-    /buildRootLineageProjection\(\{[\s\S]*?rootPersonId:\s*homePersonId,[\s\S]*?connectPersonId:\s*layoutFocusPersonId/,
+    /buildRootLineageProjection\(\{[\s\S]*?rootPersonId:\s*homePersonId,[\s\S]*?connectPersonId:\s*layoutFocusPersonId,[\s\S]*?includeRootAncestorClosure:\s*false/,
+    "temporary focus views must keep only the root bridge, not the full home pedigree",
+  );
+  assert.match(
+    production,
+    /expandLineageTargetPartner:\s*!homeLineageOverlayActive/,
+    "the persisted root may stay visible as a partner without reopening its parents",
   );
   assert.match(
     production,

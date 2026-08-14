@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal } from "../Modal";
 import type { FamilyTreeAppearanceSyncState } from "../../hooks/useFamilyTreeAppearancePreferences.ts";
 import {
@@ -15,7 +15,14 @@ import {
 export interface FamilyTreeToolEntry {
   id: string;
   title: string;
+  rootPersonId?: string | null;
   isDefault?: boolean;
+}
+
+export interface FamilyTreeRootCandidate {
+  personId: string;
+  label: string;
+  detail?: string;
 }
 
 export type FamilyTreeDisplayMode = "classic" | "direct-ancestors";
@@ -35,6 +42,9 @@ interface FamilyTreeToolsWindowProps {
   appearance: FamilyTreeAppearancePreferences;
   appearanceSyncState?: FamilyTreeAppearanceSyncState;
   notice?: string;
+  rootCandidates: readonly FamilyTreeRootCandidate[];
+  canEditTreeRoot: boolean;
+  savingTreeRoot: boolean;
   onSelectTree: (treeId: string) => void;
   onSelectResearch: (researchId: string) => void;
   onImportGedcom: () => void;
@@ -44,6 +54,7 @@ interface FamilyTreeToolsWindowProps {
   onOpenCircularChart: () => void;
   onOpenStatistics: () => void;
   onAppearanceChange: (value: FamilyTreeAppearancePreferences) => void;
+  onSetTreeRoot: (personId: string) => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -149,6 +160,9 @@ export function FamilyTreeToolsWindow({
   appearance,
   appearanceSyncState = "idle",
   notice,
+  rootCandidates,
+  canEditTreeRoot,
+  savingTreeRoot,
   onSelectTree,
   onSelectResearch,
   onImportGedcom,
@@ -158,9 +172,13 @@ export function FamilyTreeToolsWindow({
   onOpenCircularChart,
   onOpenStatistics,
   onAppearanceChange,
+  onSetTreeRoot,
   onClose,
 }: FamilyTreeToolsWindowProps) {
   const [view, setView] = useState<ToolsView>("main");
+  const [rootSearch, setRootSearch] = useState("");
+  const [rootCandidateId, setRootCandidateId] = useState("");
+  const [rootSaveMessage, setRootSaveMessage] = useState("");
   const selectedTree = useMemo(
     () => trees.find((tree) => tree.id === selectedTreeId) ?? trees[0],
     [selectedTreeId, trees],
@@ -174,6 +192,24 @@ export function FamilyTreeToolsWindow({
     2 ** directLineageGroupingDepth(appearance.directLineageGrouping),
   );
   const lineageBranchLabels = BRANCH_LABELS[appearance.directLineageGrouping];
+  const currentRoot = useMemo(
+    () => rootCandidates.find((candidate) => candidate.personId === selectedTree?.rootPersonId) ?? null,
+    [rootCandidates, selectedTree?.rootPersonId],
+  );
+  const visibleRootCandidates = useMemo(() => {
+    const normalizedSearch = rootSearch.trim().toLocaleLowerCase("uk");
+    const matches = rootCandidates.filter((candidate) => (
+      !normalizedSearch || `${candidate.label} ${candidate.detail ?? ""}`
+        .toLocaleLowerCase("uk")
+        .includes(normalizedSearch)
+    ));
+    const limited = matches.slice(0, 80);
+    const selected = rootCandidates.find((candidate) => candidate.personId === rootCandidateId);
+    if (selected && !limited.some((candidate) => candidate.personId === selected.personId)) {
+      return [selected, ...limited];
+    }
+    return limited;
+  }, [rootCandidateId, rootCandidates, rootSearch]);
   const explicitBranchColors = appearance.directLineageBranchColors.length === 8;
   const selectBaseColor = (color: string) => onAppearanceChange({
     ...appearance,
@@ -203,6 +239,23 @@ export function FamilyTreeToolsWindow({
       ...appearance,
       directLineageBranchColors: colors,
     });
+  };
+
+  useEffect(() => {
+    setRootCandidateId(selectedTree?.rootPersonId ?? "");
+    setRootSearch("");
+    setRootSaveMessage("");
+  }, [selectedTree?.id, selectedTree?.rootPersonId]);
+
+  const saveTreeRoot = async () => {
+    if (!rootCandidateId || rootCandidateId === selectedTree?.rootPersonId) return;
+    setRootSaveMessage("");
+    const saved = await onSetTreeRoot(rootCandidateId);
+    setRootSaveMessage(
+      saved
+        ? "Кореневу особу змінено. Сортування, статистика й прямі гілки перебудовано."
+        : "Не вдалося змінити кореневу особу. Спробуйте ще раз.",
+    );
   };
 
   return (
@@ -434,6 +487,72 @@ export function FamilyTreeToolsWindow({
                 </p>
               ) : null}
             </div>
+
+            <fieldset className="family-tree-lineage-fieldset family-tree-root-settings">
+              <legend>Коренева особа</legend>
+              <p>
+                Це постійна початкова особа дерева. Вона визначає сортування
+                списку осіб, спорідненість, статистику та прямі гілки й не
+                змінюється від звичайного переміщення фокусу на полотні.
+              </p>
+              <div className="family-tree-root-current">
+                <span>Поточна коренева особа</span>
+                <strong>{currentRoot?.label || "Не визначено"}</strong>
+                {currentRoot?.detail ? <small>{currentRoot.detail}</small> : null}
+              </div>
+              {canEditTreeRoot ? (
+                <div className="family-tree-root-editor">
+                  <label>
+                    <span>Знайти іншу особу в проєкті</span>
+                    <input
+                      type="search"
+                      value={rootSearch}
+                      placeholder="Ім’я, прізвище, рік або місце"
+                      onChange={(event) => setRootSearch(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Нова коренева особа</span>
+                    <select
+                      value={rootCandidateId}
+                      onChange={(event) => {
+                        setRootCandidateId(event.target.value);
+                        setRootSaveMessage("");
+                      }}
+                    >
+                      <option value="">Оберіть особу</option>
+                      {visibleRootCandidates.map((candidate) => (
+                        <option key={candidate.personId} value={candidate.personId}>
+                          {candidate.label}{candidate.detail ? ` · ${candidate.detail}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {rootCandidates.length > visibleRootCandidates.length ? (
+                      <small>Введіть кілька літер, щоб звузити список.</small>
+                    ) : null}
+                  </label>
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={
+                      savingTreeRoot ||
+                      !rootCandidateId ||
+                      rootCandidateId === selectedTree?.rootPersonId
+                    }
+                    onClick={() => void saveTreeRoot()}
+                  >
+                    {savingTreeRoot ? "Зберігаємо…" : "Змінити кореневу особу"}
+                  </button>
+                </div>
+              ) : (
+                <small>Змінювати кореневу особу можуть власник і редактори проєкту.</small>
+              )}
+              {rootSaveMessage ? (
+                <p className="family-tree-root-save-message" role="status">
+                  {rootSaveMessage}
+                </p>
+              ) : null}
+            </fieldset>
 
             <fieldset className="family-tree-lineage-fieldset">
               <legend>Відображення імен</legend>

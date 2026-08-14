@@ -128,6 +128,7 @@ import {
   getProjectPerson,
   getProjectPersonRelation,
   importProjectPeople,
+  listProjectPersonRootRequirements,
   listProjectPersonRelationsForPerson,
   listProjectPersonRelationsBetween,
   listProjectPeople,
@@ -136,6 +137,8 @@ import {
   saveProjectPerson,
   saveProjectPersonPhotoBackups,
   saveProjectPersonRelation,
+  replaceTreeRootsAndDeleteProjectPersons,
+  type ProjectPersonRootReplacement,
 } from "./services/projectPeople";
 import { mergeProjectPersonSnapshot } from "./utils/projectPersonSnapshot.ts";
 import type { DeleteRelationshipResult } from "./services/familyTreeMutationService";
@@ -4534,6 +4537,22 @@ export default function App() {
     }
   };
 
+  const finishRemotePersonDeletion = (
+    projectId: string,
+    personIds: readonly string[],
+    deletedPersons: number,
+  ) => {
+    removePersonIdsFromLoadedProject(projectId, personIds);
+    invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
+    setPersonPedigreeRevision((current) => current + 1);
+    void subscriptionAccess.refreshSubscription();
+    notify(
+      deletedPersons === 1
+        ? "Особу видалено. Пов’язані записи відв’язано."
+        : `Видалено осіб: ${deletedPersons}. Пов’язані записи відв’язано.`,
+    );
+  };
+
   const deletePersons = async (personIds: readonly string[]): Promise<void> => {
     const uniqueIds = [...new Set(personIds.map((id) => id.trim()).filter(Boolean))];
     if (!uniqueIds.length) return;
@@ -4573,17 +4592,53 @@ export default function App() {
     const projectId = workspace.projectId;
     try {
       const result = await deleteProjectPersons(projectId, uniqueIds);
-      removePersonIdsFromLoadedProject(projectId, uniqueIds);
-      invalidateProjectPersonPedigreeOrder(projectId, account?.id ?? "");
-      setPersonPedigreeRevision((current) => current + 1);
-      void subscriptionAccess.refreshSubscription();
-      notify(
-        result.deletedPersons === 1
-          ? "Особу видалено. Пов’язані записи відв’язано."
-          : `Видалено осіб: ${result.deletedPersons}. Пов’язані записи відв’язано.`,
-      );
+      finishRemotePersonDeletion(projectId, uniqueIds, result.deletedPersons);
     } catch (error) {
       const message = describeError(error, "Не вдалося видалити особу або її зв’язки.");
+      notify(message, true);
+      throw new Error(message);
+    }
+  };
+
+  const listPersonRootRequirements = async (personIds: readonly string[]) => {
+    if (!workspace) return [];
+    try {
+      return await listProjectPersonRootRequirements(workspace.projectId, personIds);
+    } catch (error) {
+      const message = describeError(
+        error,
+        "Не вдалося перевірити, чи є особа кореневою в родовому дереві.",
+      );
+      notify(message, true);
+      throw new Error(message);
+    }
+  };
+
+  const deletePersonsWithRootReplacements = async (
+    personIds: readonly string[],
+    replacements: readonly ProjectPersonRootReplacement[],
+  ): Promise<void> => {
+    const uniqueIds = [...new Set(personIds.map((id) => id.trim()).filter(Boolean))];
+    if (!uniqueIds.length) return;
+    if (!workspace || workspace.role === "viewer") {
+      const message = "У цьому проєкті у вас немає права змінювати корінь і видаляти осіб.";
+      notify(message, true);
+      throw new Error(message);
+    }
+    const projectId = workspace.projectId;
+    try {
+      const result = await replaceTreeRootsAndDeleteProjectPersons(
+        projectId,
+        uniqueIds,
+        replacements,
+      );
+      finishRemotePersonDeletion(projectId, uniqueIds, result.deletedPersons);
+      handleFamilyTreeDataChanged();
+    } catch (error) {
+      const message = describeError(
+        error,
+        "Не вдалося змінити корінь дерева та видалити особу.",
+      );
       notify(message, true);
       throw new Error(message);
     }
@@ -5554,6 +5609,10 @@ export default function App() {
                 onOpenPhoto={(photo, photos) => openScanViewer(photo, undefined, [...photos])}
                 onSavePerson={savePerson}
                 onDeletePersons={deletePersons}
+                onListRootRequirements={workspace ? listPersonRootRequirements : undefined}
+                onDeletePersonsWithRootReplacements={
+                  workspace ? deletePersonsWithRootReplacements : undefined
+                }
                 onDeleteGedcomImport={deleteGedcomImport}
                 onImportRecords={importTableRecords}
                 onImportGedcom={importGedcomRecords}
