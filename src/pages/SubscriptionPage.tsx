@@ -359,7 +359,7 @@ const emptyAnnouncementDraft: AdminAnnouncementInput = {
   emailStatus: "not_planned",
 };
 
-function AdminAnnouncements({ announcements, loadError, onChanged }: {
+export function AdminAnnouncements({ announcements, loadError, onChanged }: {
   announcements: AppAnnouncement[];
   loadError: string;
   onChanged: () => Promise<void>;
@@ -596,7 +596,7 @@ function AdminAnnouncements({ announcements, loadError, onChanged }: {
   );
 }
 
-function AdminFeatureFlags({ flags, loadError, onChanged }: {
+export function AdminFeatureFlags({ flags, loadError, onChanged }: {
   flags: AppFeatureFlag[];
   loadError: string;
   onChanged: () => Promise<void>;
@@ -651,7 +651,7 @@ function AdminFeatureFlags({ flags, loadError, onChanged }: {
   );
 }
 
-function AdminSubscriptions({ rows, onChanged }: {
+export function AdminSubscriptions({ rows, onChanged }: {
   rows: AdminSubscriptionRow[];
   onChanged: () => Promise<void>;
 }) {

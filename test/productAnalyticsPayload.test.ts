@@ -18,6 +18,10 @@ function validPayload() {
       occurredAt: new Date().toISOString(),
       pageCode: "person_profile",
       activeSeconds: 0,
+      actionCode: null,
+      outcome: null,
+      durationBucket: null,
+      countBucket: null,
     }],
   };
 }
@@ -56,4 +60,42 @@ test("rejects dynamic page codes and invalid active-time values", () => {
     activeSeconds: 301,
   };
   assert.equal(parseProductAnalyticsPayload(invalidTiming).ok, false);
+});
+
+test("accepts allowlisted semantic actions without private metadata", () => {
+  const actionPayload = validPayload();
+  actionPayload.events[0] = {
+    ...actionPayload.events[0]!,
+    name: "action_invoked",
+    actionCode: "tree_branch_expand",
+  };
+  assert.equal(parseProductAnalyticsPayload(actionPayload).ok, true);
+
+  const operationPayload = validPayload();
+  operationPayload.events[0] = {
+    ...operationPayload.events[0]!,
+    name: "operation_finished",
+    actionCode: "gedcom_import_start",
+    outcome: "success",
+    durationBucket: "10_30s",
+    countBucket: "501_2000",
+  };
+  assert.equal(parseProductAnalyticsPayload(operationPayload).ok, true);
+});
+
+test("rejects arbitrary action codes and inconsistent semantic fields", () => {
+  const arbitraryAction = validPayload();
+  arbitraryAction.events[0] = {
+    ...arbitraryAction.events[0]!,
+    name: "action_invoked",
+    actionCode: "open_person_private-id",
+  };
+  assert.equal(parseProductAnalyticsPayload(arbitraryAction).ok, false);
+
+  const leakedOutcome = validPayload();
+  leakedOutcome.events[0] = {
+    ...leakedOutcome.events[0]!,
+    outcome: "success",
+  };
+  assert.equal(parseProductAnalyticsPayload(leakedOutcome).ok, false);
 });

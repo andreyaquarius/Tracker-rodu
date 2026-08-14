@@ -16,6 +16,10 @@ import type {
   FeedbackThread,
 } from "../types/feedback";
 import { formatDateTimeForDisplay } from "../utils/dateHelpers";
+import {
+  trackProductAnalyticsAction,
+  trackProductAnalyticsOperation,
+} from "../services/productAnalytics.ts";
 
 interface FeedbackPageProps {
   account: SupabaseAccount;
@@ -127,6 +131,8 @@ export function FeedbackPage({ account, isAdmin }: FeedbackPageProps) {
       setError("Вкажіть тему щонайменше з 3 символів і напишіть повідомлення.");
       return;
     }
+    const analyticsStartedAt = Date.now();
+    trackProductAnalyticsAction("feedback_create");
     setBusy(true);
     setError("");
     setNotice("");
@@ -142,7 +148,9 @@ export function FeedbackPage({ account, isAdmin }: FeedbackPageProps) {
       setShowComposer(false);
       setNotice("Звернення надіслано. Відповідь з’явиться в цій приватній скриньці.");
       await refreshThreads(threadId);
+      trackProductAnalyticsOperation("feedback_create", "success", Date.now() - analyticsStartedAt, 1);
     } catch (submitError) {
+      trackProductAnalyticsOperation("feedback_create", "failure", Date.now() - analyticsStartedAt, 1);
       setError(feedbackErrorMessage(submitError));
     } finally {
       setBusy(false);

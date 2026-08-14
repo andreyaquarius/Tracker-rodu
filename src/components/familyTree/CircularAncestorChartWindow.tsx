@@ -31,6 +31,10 @@ import {
 } from "../../features/family-tree-view/circular/circularAncestorChartExport.ts";
 import { createTrackerNeighborhoodClient } from "../../services/familyTreeNeighborhoodService";
 import {
+  trackProductAnalyticsAction,
+  trackProductAnalyticsOperation,
+} from "../../services/productAnalytics.ts";
+import {
   applyFamilyTreeNameDisplay,
   type FamilyTreeNameDisplayPreferences,
   type FamilyTreeNameProfile,
@@ -221,6 +225,8 @@ export function CircularAncestorChartWindow({
     const sourceSvg = svgRef.current;
     if (!sourceSvg || !model.occurrences.length || exportPending) return;
 
+    const analyticsStartedAt = performance.now();
+    trackProductAnalyticsAction("ancestor_chart_export");
     setExportPending(true);
     setExportFeedback("");
     setExportError("");
@@ -238,11 +244,23 @@ export function CircularAncestorChartWindow({
         }).format(new Date()),
       });
       setExportFeedback(message);
+      trackProductAnalyticsOperation(
+        "ancestor_chart_export",
+        "success",
+        performance.now() - analyticsStartedAt,
+        model.occurrences.length,
+      );
     } catch (error) {
       setExportError(
         error instanceof Error
           ? error.message
           : "Не вдалося зберегти кругову діаграму.",
+      );
+      trackProductAnalyticsOperation(
+        "ancestor_chart_export",
+        "failure",
+        performance.now() - analyticsStartedAt,
+        model.occurrences.length,
       );
     } finally {
       setExportPending(false);

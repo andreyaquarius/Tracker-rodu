@@ -11704,6 +11704,7 @@ button.persons-v2-timeline__event:focus-visible {
   padding: 1.5rem 1rem;
   background: #0d3b34;
   color: #f9f3e8;
+  overflow-y: auto;
 }
 
 .admin-brand {
@@ -11784,8 +11785,60 @@ button.persons-v2-timeline__event:focus-visible {
 .admin-metric-grid strong { font-family: Georgia, serif; font-size: clamp(1.55rem, 3vw, 2.5rem); }
 .admin-panel-card { padding: 1.25rem; }
 .admin-panel-card h2 { margin-top: 0; font-family: Georgia, serif; }
-.admin-card-heading { display: flex; justify-content: space-between; gap: 1rem; }
+.admin-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .admin-card-heading p { margin-top: 0.25rem; color: #65736e; }
+.admin-card-heading > input,
+.admin-card-heading > select {
+  min-width: min(280px, 100%);
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #cbd4ce;
+  border-radius: 10px;
+  background: #fff;
+}
+.admin-report-stack { display: grid; gap: 1rem; }
+.admin-shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 1.25rem;
+}
+.admin-shortcut-grid button {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 108px;
+  padding: 1rem;
+  border: 1px solid #d9d9d0;
+  border-radius: 13px;
+  background: #f8faf7;
+  color: #123c35;
+  text-align: left;
+  cursor: pointer;
+}
+.admin-shortcut-grid button:hover { border-color: #7ca69a; background: #eef5f1; }
+.admin-shortcut-grid strong { font-size: 1rem; }
+.admin-shortcut-grid span { color: #65736e; font-size: 0.84rem; }
+.admin-health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+.admin-health-grid article {
+  display: grid;
+  gap: 0.4rem;
+  padding: 1rem;
+  border: 1px solid #e1e2db;
+  border-radius: 13px;
+  background: #f8faf7;
+}
+.admin-health-grid span,
+.admin-health-grid small { color: #65736e; }
+.admin-health-grid strong { font-family: Georgia, serif; font-size: 2rem; }
+.admin-funnel { display: grid; gap: 0.9rem; }
+.admin-funnel article { display: grid; gap: 0.45rem; }
+.admin-funnel article > div:first-child { display: flex; justify-content: space-between; gap: 1rem; }
+.admin-funnel article > div:first-child span { color: #65736e; white-space: nowrap; }
+.admin-funnel-track { height: 12px; overflow: hidden; border-radius: 999px; background: #e4e8e3; }
+.admin-funnel-track span { display: block; height: 100%; border-radius: inherit; background: #176f63; }
 .admin-table-wrap { width: 100%; overflow-x: auto; }
 .admin-analytics-table { width: 100%; border-collapse: collapse; }
 .admin-analytics-table th,
@@ -11803,6 +11856,8 @@ button.persons-v2-timeline__event:focus-visible {
   .admin-sidebar nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-sidebar-footer { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 1rem; }
   .admin-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-shortcut-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 640px) {
@@ -11810,4 +11865,7 @@ button.persons-v2-timeline__event:focus-visible {
   .product-analytics-preferences { align-items: flex-start; flex-direction: column; }
   .admin-header { align-items: flex-start; flex-direction: column; }
   .admin-metric-grid { grid-template-columns: 1fr; }
+  .admin-card-heading { align-items: stretch; flex-direction: column; }
+  .admin-shortcut-grid,
+  .admin-health-grid { grid-template-columns: 1fr; }
 }

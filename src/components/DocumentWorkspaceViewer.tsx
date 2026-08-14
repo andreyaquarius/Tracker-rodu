@@ -31,6 +31,10 @@ import {
   createDocumentSourceViewerSession,
   exportDocumentSourcePdfPages,
 } from "../services/documentSourceViewerAccess.ts";
+import {
+  trackProductAnalyticsAction,
+  trackProductAnalyticsOperation,
+} from "../services/productAnalytics.ts";
 import { confirmDocumentSourceVersion } from "../services/documentSourceRevalidation.ts";
 import {
   resolveMediaWikiPdfPagePreview,
@@ -469,13 +473,16 @@ export function DocumentWorkspaceViewer({
   const emitViewerTelemetryOnce = (
     key: string,
     input: Omit<Parameters<typeof emitPdfOperationalEvent>[1], "requestId">,
-  ) => {
-    if (!sourceContext || pdfTelemetryEventKeysRef.current.has(key)) return;
+  ): boolean => {
+    if (pdfTelemetryEventKeysRef.current.has(key)) return false;
     pdfTelemetryEventKeysRef.current.add(key);
-    void emitPdfOperationalEvent(sourceContext.projectId, {
-      ...input,
-      requestId: pdfTelemetryRequestIdRef.current,
-    });
+    if (sourceContext) {
+      void emitPdfOperationalEvent(sourceContext.projectId, {
+        ...input,
+        requestId: pdfTelemetryRequestIdRef.current,
+      });
+    }
+    return true;
   };
 
   const disposePreviewForScan = (scanId: string) => {
@@ -595,17 +602,24 @@ export function DocumentWorkspaceViewer({
           const pageLabels = document.getPageLabels().catch(() => null);
           const cache = { document, loadingTask, pageLabels };
           pdfCacheRef.current.set(scan.id, cache);
-          emitViewerTelemetryOnce(`opened:${viewer?.openedAt ?? 0}:${scan.id}`, {
+          const viewerOpenedDuration = Math.max(
+            0,
+            Math.round(performance.now() - pdfTelemetryStartedAtRef.current),
+          );
+          const firstViewerOpen = emitViewerTelemetryOnce(`opened:${viewer?.openedAt ?? 0}:${scan.id}`, {
             event: "pdf_viewer_opened",
             provider: preview.documentSource?.provider ?? "unknown",
             ...(preview.accessMode ? { accessMode: preview.accessMode } : {}),
             statusCode: 200,
-            durationMs: Math.max(0, Math.round(performance.now() - pdfTelemetryStartedAtRef.current)),
+            durationMs: viewerOpenedDuration,
             pageCount: document.numPages,
             fileSizeBucket: pdfFileSizeBucket(
               preview.documentSource?.fileSizeBytes ?? scan.size,
             ),
           });
+          if (firstViewerOpen) {
+            trackProductAnalyticsAction("document_viewer_open");
+          }
           return cache;
         } finally {
           loadController.signal.removeEventListener("abort", destroyOnAbort);
@@ -1019,23 +1033,32 @@ export function DocumentWorkspaceViewer({
               requestFitDocumentView(fitModeRef.current ?? "page", rotation);
             }
             const preview = previewCacheRef.current.get(currentScan.id);
-            emitViewerTelemetryOnce(
+            const firstRenderDuration = Math.max(
+              0,
+              Math.round(performance.now() - pdfTelemetryStartedAtRef.current),
+            );
+            const firstPageRender = emitViewerTelemetryOnce(
                 `first-render:${viewer?.openedAt ?? 0}:${currentScan.id}`,
                 {
                   event: "pdf_first_page_rendered",
                   provider: preview?.documentSource?.provider ?? "unknown",
                   ...(preview?.accessMode ? { accessMode: preview.accessMode } : {}),
                   statusCode: 200,
-                  durationMs: Math.max(
-                    0,
-                    Math.round(performance.now() - pdfTelemetryStartedAtRef.current),
-                  ),
+                  durationMs: firstRenderDuration,
                   pageCount: document.numPages,
                   fileSizeBucket: pdfFileSizeBucket(
                     preview?.documentSource?.fileSizeBytes ?? currentScan.size,
                   ),
                 },
             );
+            if (firstPageRender) {
+              trackProductAnalyticsOperation(
+                "document_first_page_render",
+                "success",
+                firstRenderDuration,
+                document.numPages,
+              );
+            }
             const restore = viewerV2Enabled ? viewer?.restore : undefined;
             const restoreRotation = restore?.selection?.rotation;
             const restoreKey = restore?.selection && restore.pageIndex === safePageNumber
@@ -1263,6 +1286,7 @@ export function DocumentWorkspaceViewer({
 
   const createFinding = async () => {
     if (!sourceDocument) return;
+    trackProductAnalyticsAction("finding_create_from_document");
     const documentReferenceDraft = findingReferenceDraft();
     await minimizeViewerForRecordAction();
     onCreateFinding({
@@ -1396,6 +1420,7 @@ export function DocumentWorkspaceViewer({
       setFindingCaptureMode("fragment");
       await minimizeViewerForRecordAction();
       throwIfViewerOperationAborted(abortController.signal);
+      trackProductAnalyticsAction("finding_create_from_document");
       onCreateFinding({
         researchId: sourceDocument.researchId,
         documentId: sourceDocument.id,
@@ -1748,6 +1773,7 @@ export function DocumentWorkspaceViewer({
 
   const exportPdfPages = async () => {
     if (!currentScan || !sourceDocument || !isInteractivePdf || pdfPageCount < 1) return;
+    trackProductAnalyticsAction("document_page_export");
     const telemetryRequestId = createPdfOperationalRequestId();
     const telemetryStartedAt = performance.now();
     let exportedPageCount: number | undefined;
@@ -1943,6 +1969,12 @@ export function DocumentWorkspaceViewer({
           ...(exportedBytes === undefined ? {} : { transferredBytes: exportedBytes }),
         });
       }
+      trackProductAnalyticsOperation(
+        "document_page_export",
+        "success",
+        performance.now() - telemetryStartedAt,
+        exportedPageCount,
+      );
     } catch (exportError) {
       if (!isViewerOperationAbort(exportError)) {
         if (sourceContext) {
@@ -1963,6 +1995,19 @@ export function DocumentWorkspaceViewer({
           });
         }
         setExportMessage(exportError instanceof Error ? exportError.message : "Не вдалося експортувати сторінки.");
+        trackProductAnalyticsOperation(
+          "document_page_export",
+          "failure",
+          performance.now() - telemetryStartedAt,
+          exportedPageCount,
+        );
+      } else {
+        trackProductAnalyticsOperation(
+          "document_page_export",
+          "cancelled",
+          performance.now() - telemetryStartedAt,
+          exportedPageCount,
+        );
       }
     } finally {
       if (exportOperationAbortRef.current === abortController) {

@@ -29,6 +29,87 @@ export const PRODUCT_ANALYTICS_PAGE_CODES = [
 
 export type ProductAnalyticsPageCode = typeof PRODUCT_ANALYTICS_PAGE_CODES[number];
 
+export const PRODUCT_ANALYTICS_ACTION_CODES = [
+  "project_open",
+  "project_create",
+  "person_create",
+  "person_edit",
+  "person_delete",
+  "tree_open",
+  "tree_mode_change",
+  "tree_branch_expand",
+  "tree_search",
+  "ancestor_chart_build",
+  "ancestor_chart_export",
+  "tree_statistics_open",
+  "tree_statistics_export",
+  "gedcom_import_start",
+  "gedcom_import_complete",
+  "gedcom_import_fail",
+  "gedcom_export_start",
+  "gedcom_export_complete",
+  "gedcom_export_fail",
+  "document_create",
+  "document_viewer_open",
+  "document_first_page_render",
+  "document_page_export",
+  "finding_create_from_document",
+  "search_use",
+  "filter_apply",
+  "table_export",
+  "ai_hypothesis_check",
+  "ai_document_recognition",
+  "feedback_create",
+  "subscription_page_open",
+] as const;
+
+export type ProductAnalyticsActionCode = typeof PRODUCT_ANALYTICS_ACTION_CODES[number];
+
+export const PRODUCT_ANALYTICS_ACTION_LABELS: Record<ProductAnalyticsActionCode, string> = {
+  project_open: "Відкриття проєкту",
+  project_create: "Створення проєкту",
+  person_create: "Створення особи",
+  person_edit: "Редагування особи",
+  person_delete: "Видалення особи",
+  tree_open: "Відкриття дерева",
+  tree_mode_change: "Зміна режиму дерева",
+  tree_branch_expand: "Розгортання гілки дерева",
+  tree_search: "Пошук у дереві",
+  ancestor_chart_build: "Побудова діаграми предків",
+  ancestor_chart_export: "Експорт діаграми предків",
+  tree_statistics_open: "Відкриття статистики дерева",
+  tree_statistics_export: "Експорт статистики дерева",
+  gedcom_import_start: "Початок імпорту GEDCOM",
+  gedcom_import_complete: "Успішний імпорт GEDCOM",
+  gedcom_import_fail: "Помилка імпорту GEDCOM",
+  gedcom_export_start: "Початок експорту GEDCOM",
+  gedcom_export_complete: "Успішний експорт GEDCOM",
+  gedcom_export_fail: "Помилка експорту GEDCOM",
+  document_create: "Створення документа",
+  document_viewer_open: "Відкриття переглядача документа",
+  document_first_page_render: "Перша сторінка документа показана",
+  document_page_export: "Експорт сторінки документа",
+  finding_create_from_document: "Знахідка з документа",
+  search_use: "Використання пошуку",
+  filter_apply: "Застосування фільтра",
+  table_export: "Експорт таблиці",
+  ai_hypothesis_check: "Перевірка гіпотези ШІ",
+  ai_document_recognition: "Розпізнавання документа ШІ",
+  feedback_create: "Створення звернення",
+  subscription_page_open: "Відкриття тарифів",
+};
+
+export const PRODUCT_ANALYTICS_PAGE_ACTIONS: Partial<
+  Record<ProductAnalyticsPageCode, ProductAnalyticsActionCode>
+> = {
+  dashboard: "project_open",
+  family_tree: "tree_open",
+  family_tree_pedigree: "tree_open",
+  tree_statistics: "tree_statistics_open",
+  document_viewer: "document_viewer_open",
+  subscription: "subscription_page_open",
+};
+
 export const PRODUCT_ANALYTICS_PAGE_LABELS: Record<ProductAnalyticsPageCode, string> = {
   projects: "Проєкти",
   dashboard: "Панель проєкту",

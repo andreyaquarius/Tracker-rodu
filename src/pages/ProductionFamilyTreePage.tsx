@@ -38,6 +38,7 @@ import { attachTrackerPersonPhotos } from "../features/family-tree-view/adapters
 import { applyFamilyTreeNameDisplay } from "../features/family-tree-view/adapters/familyTreeNameDisplay.ts";
 import { MAX_RENDERED_FAMILY_TREE_NODES } from "../features/family-tree-view/react/renderLimits";
 import { MAX_CIRCULAR_ANCESTOR_OCCURRENCES } from "../features/family-tree-view/circular/circularAncestorChartLayout.ts";
+import { trackProductAnalyticsAction } from "../services/productAnalytics.ts";
 import {
   useFamilyTreeNeighborhood,
 } from "../features/family-tree-view/react/useFamilyTreeNeighborhood";
@@ -446,6 +447,7 @@ export function ProductionFamilyTreePage({
   function openCircularAncestorChart() {
     const focusPersonId = activeTreeFocusPersonId || selectedEntry?.rootPersonId || "";
     if (!focusPersonId) return;
+    trackProductAnalyticsAction("ancestor_chart_build");
     setTreeToolsOpen(false);
     setCircularChartFocusPersonId(focusPersonId);
   }
@@ -680,6 +682,9 @@ export function ProductionFamilyTreePage({
           onOpenGedcomPhotoBackup={openGedcomPhotoRecovery}
           onExportGedcom={() => void exportGedcom()}
           onSelectDisplayMode={(mode) => {
+            if (mode !== treeDisplayMode) {
+              trackProductAnalyticsAction("tree_mode_change");
+            }
             setTreeDisplayMode(mode);
             setTreeToolsOpen(false);
           }}

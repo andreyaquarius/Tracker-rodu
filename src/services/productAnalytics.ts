@@ -5,17 +5,42 @@ import {
   PRODUCT_ANALYTICS_CONSENT_VERSION,
   productAnalyticsConsentGranted,
 } from "./productAnalyticsConsent.ts";
-import type { ProductAnalyticsPageCode } from "../utils/productAnalyticsRegistry.ts";
+import {
+  PRODUCT_ANALYTICS_PAGE_ACTIONS,
+  type ProductAnalyticsActionCode,
+  type ProductAnalyticsPageCode,
+} from "../utils/productAnalyticsRegistry.ts";
+import {
+  productAnalyticsCountBucket,
+  productAnalyticsDurationBucket,
+  type ProductAnalyticsCountBucket,
+  type ProductAnalyticsDurationBucket,
+} from "../utils/productAnalyticsBuckets.ts";
+
+export {
+  productAnalyticsCountBucket,
+  productAnalyticsDurationBucket,
+} from "../utils/productAnalyticsBuckets.ts";
 
 export const PRODUCT_ANALYTICS_FUNCTION_NAME = "collect-product-analytics";
 
-type ProductAnalyticsEventName = "session_started" | "page_viewed" | "page_active_time";
+type ProductAnalyticsEventName =
+  | "session_started"
+  | "page_viewed"
+  | "page_active_time"
+  | "action_invoked"
+  | "operation_finished";
+export type ProductAnalyticsOutcome = "success" | "failure" | "cancelled";
 type ProductAnalyticsEvent = {
   eventId: string;
   name: ProductAnalyticsEventName;
   occurredAt: string;
   pageCode: ProductAnalyticsPageCode;
   activeSeconds: number;
+  actionCode: ProductAnalyticsActionCode | null;
+  outcome: ProductAnalyticsOutcome | null;
+  durationBucket: ProductAnalyticsDurationBucket | null;
+  countBucket: ProductAnalyticsCountBucket | null;
 };
 
 const FLUSH_INTERVAL_MS = 60_000;
@@ -79,7 +104,29 @@ function enqueueActiveTime(): void {
   const seconds = Math.min(300, Math.floor(activeMilliseconds / 1_000));
   if (seconds < 1) return;
   activeMilliseconds -= seconds * 1_000;
-  enqueue({ name: "page_active_time", pageCode: currentPage, activeSeconds: seconds });
+  enqueue({
+    name: "page_active_time",
+    pageCode: currentPage,
+    activeSeconds: seconds,
+    actionCode: null,
+    outcome: null,
+    durationBucket: null,
+    countBucket: null,
+  });
+}
+
+function enqueuePageAction(pageCode: ProductAnalyticsPageCode): void {
+  const actionCode = PRODUCT_ANALYTICS_PAGE_ACTIONS[pageCode];
+  if (!actionCode) return;
+  enqueue({
+    name: "action_invoked",
+    pageCode,
+    activeSeconds: 0,
+    actionCode,
+    outcome: null,
+    durationBucket: null,
+    countBucket: null,
+  });
 }
 
 function handleInteraction(): void {
@@ -174,8 +221,25 @@ function startSession(): void {
   }
   lastTickAt = Date.now();
   lastInteractionAt = Date.now();
-  enqueue({ name: "session_started", pageCode: currentPage, activeSeconds: 0 });
-  enqueue({ name: "page_viewed", pageCode: currentPage, activeSeconds: 0 });
+  enqueue({
+    name: "session_started",
+    pageCode: currentPage,
+    activeSeconds: 0,
+    actionCode: null,
+    outcome: null,
+    durationBucket: null,
+    countBucket: null,
+  });
+  enqueue({
+    name: "page_viewed",
+    pageCode: currentPage,
+    activeSeconds: 0,
+    actionCode: null,
+    outcome: null,
+    durationBucket: null,
+    countBucket: null,
+  });
+  enqueuePageAction(currentPage);
 }
 
 export function setProductAnalyticsEnabled(nextEnabled: boolean): void {
@@ -198,8 +262,55 @@ export function setProductAnalyticsPage(pageCode: ProductAnalyticsPageCode): voi
   currentPage = pageCode;
   lastTickAt = Date.now();
   if (enabled && sessionId && productAnalyticsConsentGranted()) {
-    enqueue({ name: "page_viewed", pageCode, activeSeconds: 0 });
+    enqueue({
+      name: "page_viewed",
+      pageCode,
+      activeSeconds: 0,
+      actionCode: null,
+      outcome: null,
+      durationBucket: null,
+      countBucket: null,
+    });
+    enqueuePageAction(pageCode);
   }
+}
+
+function mayTrackAction(): boolean {
+  return browserAvailable()
+    && enabled
+    && Boolean(sessionId)
+    && productAnalyticsConsentGranted();
+}
+
+export function trackProductAnalyticsAction(actionCode: ProductAnalyticsActionCode): void {
+  if (!mayTrackAction()) return;
+  enqueue({
+    name: "action_invoked",
+    pageCode: currentPage,
+    activeSeconds: 0,
+    actionCode,
+    outcome: null,
+    durationBucket: null,
+    countBucket: null,
+  });
+}
+
+export function trackProductAnalyticsOperation(
+  actionCode: ProductAnalyticsActionCode,
+  outcome: ProductAnalyticsOutcome,
+  durationMs: number,
+  count?: number | null,
+): void {
+  if (!mayTrackAction()) return;
+  enqueue({
+    name: "operation_finished",
+    pageCode: currentPage,
+    activeSeconds: 0,
+    actionCode,
+    outcome,
+    durationBucket: productAnalyticsDurationBucket(durationMs),
+    countBucket: productAnalyticsCountBucket(count),
+  });
 }
 
 async function transmit(): Promise<void> {

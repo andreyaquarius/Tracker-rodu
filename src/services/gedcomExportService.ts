@@ -1,3 +1,8 @@
+import {
+  trackDeferredProductAnalyticsAction,
+  trackDeferredProductAnalyticsOperation,
+} from "./productAnalyticsBridge.ts";
+
 export type GedcomExportState =
   | "queued"
   | "running"
@@ -173,7 +178,15 @@ export async function requestGedcomExport(
   if (!projectId.trim()) throw new Error("Не вказано проєкт для експорту GEDCOM.");
   if (!treeId.trim()) throw new Error("Не вибрано дерево для експорту GEDCOM.");
 
-  const status = await operations.start(projectId, treeId);
+  const analyticsStartedAt = Date.now();
+  trackDeferredProductAnalyticsAction("gedcom_export_start");
+  let status: GedcomExportStatus;
+  try {
+    status = await operations.start(projectId, treeId);
+  } catch (error) {
+    trackDeferredProductAnalyticsOperation("gedcom_export_fail", "failure", Date.now() - analyticsStartedAt);
+    throw error;
+  }
   if (
     status.status === "queued" ||
     status.status === "running" ||
@@ -187,6 +200,13 @@ export async function requestGedcomExport(
       console.warn("GEDCOM export worker wake-up failed; cron will retry", error);
     }
   }
+  const failed = status.status === "failed" || status.status === "expired";
+  const completed = status.status === "completed";
+  trackDeferredProductAnalyticsOperation(
+    failed ? "gedcom_export_fail" : completed ? "gedcom_export_complete" : "gedcom_export_start",
+    failed ? "failure" : "success",
+    Date.now() - analyticsStartedAt,
+  );
   return status;
 }
 

@@ -7,6 +7,10 @@ const migration = readFileSync(
   resolve("supabase/migrations/202608150001_product_analytics_foundation.sql"),
   "utf8",
 );
+const actionsMigration = readFileSync(
+  resolve("supabase/migrations/202608150002_product_analytics_actions_reports.sql"),
+  "utf8",
+);
 const edgeFunction = readFileSync(
   resolve("supabase/functions/collect-product-analytics/index.ts"),
   "utf8",
@@ -26,6 +30,15 @@ function tableDefinition(name: string): string {
   return match[1] ?? "";
 }
 
+function migrationFunction(source: string, name: string): string {
+  const match = source.match(new RegExp(
+    `create or replace function ${name.replaceAll(".", "\\.")}\\([\\s\\S]*?\\$function\\$;`,
+    "i",
+  ));
+  assert.ok(match, `${name} function must exist`);
+  return match[0] ?? "";
+}
+
 test("analytics fact tables never store a raw user id", () => {
   assert.doesNotMatch(tableDefinition("product_analytics_sessions"), /\buser_id\b/i);
   assert.doesNotMatch(tableDefinition("product_analytics_events"), /\buser_id\b/i);
@@ -39,6 +52,41 @@ test("database contracts enforce admin-only aggregates, cohort privacy and reten
   assert.match(migration, /last_seen_at < now\(\) - interval '13 months'/i);
   assert.match(migration, /request_count > 120/i);
   assert.match(migration, /enable row level security/i);
+  assert.match(actionsMigration, /has_admin_permission_v1\('analytics\.view'\)/i);
+  assert.match(
+    migrationFunction(actionsMigration, "security_private.admin_get_product_analytics_overview_v1"),
+    /has_admin_permission_v1\('analytics\.view'\)/i,
+  );
+  assert.match(
+    migrationFunction(actionsMigration, "security_private.admin_get_product_analytics_pages_v1"),
+    /has_admin_permission_v1\('analytics\.view'\)/i,
+  );
+  assert.match(actionsMigration, /having count\(distinct event\.actor_key\) >= 5/i);
+  assert.match(actionsMigration, /having count\(\*\) >= 5/i);
+  assert.doesNotMatch(actionsMigration, /select[\s\S]{0,80}\b(session_id|actor_key)\b[\s\S]{0,80}return/i);
+});
+
+test("semantic event storage remains a closed allowlist", () => {
+  assert.match(actionsMigration, /jsonb_object_length\(event_value\) <> 9/i);
+  assert.match(actionsMigration, /allowed_actions constant text\[\]/i);
+  assert.match(actionsMigration, /action_code_value = any\(allowed_actions\)/i);
+  assert.doesNotMatch(actionsMigration, /project_id|person_id|search_text|file_name/i);
+  assert.match(
+    actionsMigration,
+    /'gedcom_import',\s*2,\s*'operation_finished',\s*'gedcom_import_complete',\s*'success'/i,
+  );
+});
+
+test("admin analytics preferences and storage health expose aggregates only", () => {
+  assert.match(actionsMigration, /create table if not exists public\.admin_analytics_preferences/i);
+  assert.match(actionsMigration, /get_my_admin_analytics_preferences_v1/i);
+  assert.match(actionsMigration, /set_my_admin_analytics_preferences_v1/i);
+  assert.match(actionsMigration, /count\(\*\)::integer as object_count/i);
+  assert.match(actionsMigration, /::bigint as total_bytes/i);
+  assert.doesNotMatch(
+    migrationFunction(actionsMigration, "security_private.admin_get_system_health_v1"),
+    /storage\.objects[\s\S]*?select[\s\S]*?\b(name|owner|path)\b/i,
+  );
 });
 
 test("admin foundation preserves existing admins and keeps roles plus audit service-controlled", () => {
@@ -58,6 +106,11 @@ test("admin foundation preserves existing admins and keeps roles plus audit serv
   assert.doesNotMatch(
     migration,
     /grant execute on function security_private\.write_admin_audit_v1\([^;]+\) to authenticated/i,
+  );
+  assert.match(actionsMigration, /create trigger app_admins_sync_super_role/i);
+  assert.match(
+    actionsMigration,
+    /after insert or update of granted_by on public\.app_admins/i,
   );
 });
 

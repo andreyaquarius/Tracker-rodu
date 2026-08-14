@@ -13,6 +13,10 @@ import {
   type AiFindingParticipantCandidate,
 } from "../services/findingAiIndexing";
 import { sortFindingParticipants } from "../utils/findingParticipants";
+import {
+  trackDeferredProductAnalyticsAction,
+  trackDeferredProductAnalyticsOperation,
+} from "../services/productAnalyticsBridge";
 
 const consentStorageKey = "tracker-rodu-ai-finding-indexing-consent";
 
@@ -56,6 +60,8 @@ export function FindingAiIndexingPanel({
       return;
     }
     localStorage.setItem(consentStorageKey, "yes");
+    const startedAt = Date.now();
+    trackDeferredProductAnalyticsAction("ai_document_recognition");
     setLoading(true);
     try {
       const response = await analyzeFindingFragmentWithAi({
@@ -63,9 +69,20 @@ export function FindingAiIndexingPanel({
         documents,
         consent: true,
       });
+      trackDeferredProductAnalyticsOperation(
+        "ai_document_recognition",
+        "success",
+        Date.now() - startedAt,
+        response.result.participants.length,
+      );
       setResult(response);
       setSelected(new Set(response.result.participants.map((participant) => participant.tempId)));
     } catch (caught) {
+      trackDeferredProductAnalyticsOperation(
+        "ai_document_recognition",
+        "failure",
+        Date.now() - startedAt,
+      );
       setError(caught instanceof Error ? caught.message : "Не вдалося розпізнати фрагмент.");
     } finally {
       setLoading(false);

@@ -52,6 +52,7 @@ import {
 } from "./components/DocumentWorkspaceViewer";
 import { isHierarchyPage } from "./utils/sectionHierarchy";
 import {
+  adminPath,
   canonicalRouteLocation,
   familyTreePath,
   familyTreeStatisticsPath,
@@ -97,6 +98,8 @@ import {
   flushAndStopProductAnalytics,
   setProductAnalyticsEnabled,
   setProductAnalyticsPage,
+  trackProductAnalyticsAction,
+  trackProductAnalyticsOperation,
 } from "./services/productAnalytics.ts";
 import { loadMyProductAnalyticsConsent } from "./services/productAnalyticsConsent.ts";
 import { ProductAnalyticsConsentPrompt } from "./components/ProductAnalyticsConsentPrompt.tsx";
@@ -3015,6 +3018,8 @@ export default function App() {
     const previous = projectDocuments;
     const previousEntity = previous.find((item) => item.id === document.id);
     if (!previousEntity && !ensureCanCreateProjectRecord("Новий документ")) return;
+    const analyticsStartedAt = Date.now();
+    if (!previousEntity) trackProductAnalyticsAction("document_create");
     const optimistic = previous.some((item) => item.id === document.id)
       ? previous.map((item) => (item.id === document.id ? document : item))
       : [document, ...previous];
@@ -3033,6 +3038,14 @@ export default function App() {
         new Set(projectResearches.map((research) => research.id)),
       ))
       .then((saved) => {
+        if (!previousEntity) {
+          trackProductAnalyticsOperation(
+            "document_create",
+            "success",
+            Date.now() - analyticsStartedAt,
+            1,
+          );
+        }
         refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("documents", previousEntity, saved);
         syncEntityAttachmentMetadata("documents", saved);
@@ -3072,6 +3085,14 @@ export default function App() {
         });
       })
       .catch((error: unknown) => {
+        if (!previousEntity) {
+          trackProductAnalyticsOperation(
+            "document_create",
+            "failure",
+            Date.now() - analyticsStartedAt,
+            1,
+          );
+        }
         const cached = loadProjectDocumentsCache(projectId);
         saveProjectDocumentsCache(projectId, previous, cached.yearMatrix);
         if (activeWorkspaceIdRef.current === projectId) setProjectDocuments(previous);
@@ -4478,19 +4499,33 @@ export default function App() {
       notify(describeError(error, "Оберіть дослідження для цієї особи."), true);
       return Promise.resolve(null);
     }
+    const previousEntity = (workspace ? projectPersons : activeDb.persons)
+      .find((item) => item.id === person.id);
+    const analyticsAction = previousEntity ? "person_edit" : "person_create";
+    const analyticsStartedAt = Date.now();
+    trackProductAnalyticsAction(analyticsAction);
     if (!workspace) {
-      app.saveEntity("persons", person);
-      return Promise.resolve(person);
+      try {
+        app.saveEntity("persons", person);
+        trackProductAnalyticsOperation(analyticsAction, "success", Date.now() - analyticsStartedAt, 1);
+        return Promise.resolve(person);
+      } catch (error) {
+        trackProductAnalyticsOperation(analyticsAction, "failure", Date.now() - analyticsStartedAt, 1);
+        throw error;
+      }
     }
     if (workspace.role === "viewer") {
+      trackProductAnalyticsOperation(analyticsAction, "cancelled", Date.now() - analyticsStartedAt, 1);
       notify("У цьому проєкті у вас є лише право перегляду.", true);
       return Promise.resolve(null);
     }
 
     const projectId = workspace.projectId;
     const previous = projectPersons;
-    const previousEntity = previous.find((item) => item.id === person.id);
-    if (!previousEntity && !ensureCanCreatePerson()) return Promise.resolve(null);
+    if (!previousEntity && !ensureCanCreatePerson()) {
+      trackProductAnalyticsOperation(analyticsAction, "cancelled", Date.now() - analyticsStartedAt, 1);
+      return Promise.resolve(null);
+    }
     const optimistic = previous.some((item) => item.id === person.id)
       ? previous.map((item) => (item.id === person.id ? person : item))
       : [person, ...previous];
@@ -4504,6 +4539,7 @@ export default function App() {
       baseUpdatedAt(person) ?? previousEntity?.updatedAt,
     )
       .then((saved) => {
+        trackProductAnalyticsOperation(analyticsAction, "success", Date.now() - analyticsStartedAt, 1);
         refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("persons", previousEntity, saved);
         syncEntityAttachmentMetadata("persons", saved);
@@ -4521,6 +4557,7 @@ export default function App() {
         return saved;
       })
       .catch((error: unknown) => {
+        trackProductAnalyticsOperation(analyticsAction, "failure", Date.now() - analyticsStartedAt, 1);
         const cached = loadProjectPeopleCache(projectId);
         saveProjectPeopleCache(projectId, previous, cached.relations);
         if (activeWorkspaceIdRef.current === projectId) setProjectPersons(previous);
@@ -5888,9 +5925,9 @@ export default function App() {
         page={route.page}
         allowed={subscriptionAccess.isAdmin}
         accessLoading={subscriptionAccess.loading}
-        accountName={account?.name ?? "Адміністратор"}
+        account={account}
         onNavigate={(adminPage) => {
-          routerNavigate(adminPage === "overview" ? "/admin" : "/admin/analytics");
+          routerNavigate(adminPath(adminPage));
         }}
         onBack={() => routerNavigate("/projects")}
         onSignOut={() => void signOutAccount()}

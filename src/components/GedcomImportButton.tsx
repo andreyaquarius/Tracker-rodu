@@ -33,6 +33,10 @@ import {
   type GedcomPhotoBackupProgress,
   type GedcomPhotoBackupResult,
 } from "../services/gedcomPhotoBackup.ts";
+import {
+  trackProductAnalyticsAction,
+  trackProductAnalyticsOperation,
+} from "../services/productAnalytics.ts";
 
 export interface GedcomImportArchivePayload {
   gedcomVersion: string;
@@ -206,6 +210,9 @@ export function GedcomImportButton({
 
   const confirmImport = async () => {
     if (!preview || disabled) return;
+    const analyticsStartedAt = Date.now();
+    const analyticsPersonCount = preview.people.length;
+    trackProductAnalyticsAction("gedcom_import_start");
     setBusy(true);
     setProgress({
       step: "Зберігаємо осіб і звʼязки",
@@ -311,9 +318,21 @@ export function GedcomImportButton({
           "Не вдалося підготувати пакетне копіювання фото. Дані імпорту збережені; фото можна додати пізніше з профілів осіб.",
         ].join("\n"));
       }
+      trackProductAnalyticsOperation(
+        "gedcom_import_complete",
+        "success",
+        Date.now() - analyticsStartedAt,
+        analyticsPersonCount,
+      );
       setPreview(null);
       setRootSearchQuery("");
     } catch (error) {
+      trackProductAnalyticsOperation(
+        "gedcom_import_fail",
+        "failure",
+        Date.now() - analyticsStartedAt,
+        analyticsPersonCount,
+      );
       if (importOperationId) {
         try {
           const rollback = await rollbackGedcomImportOperationToCompletion(importOperationId);

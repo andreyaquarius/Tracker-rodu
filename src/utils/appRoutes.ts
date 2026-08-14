@@ -26,11 +26,35 @@ const segmentPages = new Map(
   Object.entries(pageSegments).map(([page, segment]) => [segment, page as PageKey]),
 );
 
+export type AdminPage =
+  | "overview"
+  | "analytics"
+  | "subscriptions"
+  | "features"
+  | "announcements"
+  | "feedback"
+  | "operations"
+  | "security";
+
+const adminPageSegments: Record<Exclude<AdminPage, "overview">, string> = {
+  analytics: "analytics",
+  subscriptions: "subscriptions",
+  features: "features",
+  announcements: "announcements",
+  feedback: "feedback",
+  operations: "operations",
+  security: "security",
+};
+
+const adminSegmentPages = new Map(
+  Object.entries(adminPageSegments).map(([page, segment]) => [segment, page as AdminPage]),
+);
+
 export type AppRoute =
   | { kind: "root" }
   | { kind: "public"; page: "privacy" | "terms" | "features" | "pricing" | "faq" }
   | { kind: "projects" }
-  | { kind: "admin"; page: "overview" | "analytics" }
+  | { kind: "admin"; page: AdminPage }
   | { kind: "settings"; page: "settings" | "subscription" | "feedback" }
   | {
       kind: "project";
@@ -147,8 +171,9 @@ export function parseAppRoute(
   if (parts.length === 1 && parts[0] === "admin") {
     return { kind: "admin", page: "overview" };
   }
-  if (parts.length === 2 && parts[0] === "admin" && parts[1] === "analytics") {
-    return { kind: "admin", page: "analytics" };
+  if (parts.length === 2 && parts[0] === "admin") {
+    const adminPage = adminSegmentPages.get(parts[1] ?? "");
+    return adminPage ? { kind: "admin", page: adminPage } : { kind: "unknown" };
   }
   if (parts.length === 1 && parts[0] === "settings") {
     return { kind: "settings", page: "settings" };
@@ -268,6 +293,10 @@ export function pagePath(
 
 export function projectDashboardPath(projectSlug: string): string {
   return pagePath(projectSlug, "dashboard");
+}
+
+export function adminPath(page: AdminPage): string {
+  return page === "overview" ? "/admin" : `/admin/${adminPageSegments[page]}`;
 }
 
 export interface FamilyTreeRouteFocus {

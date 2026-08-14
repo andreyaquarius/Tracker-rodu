@@ -10,6 +10,10 @@ import {
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import { formatDateTime } from "../utils/dateHelpers";
+import {
+  trackDeferredProductAnalyticsAction,
+  trackDeferredProductAnalyticsOperation,
+} from "../services/productAnalyticsBridge";
 
 const costWarning =
   "На тарифі «Старт» запит використовує ваш API-ключ Google AI Studio. На платних тарифах спочатку використовується включений місячний ліміт, а після його вичерпання — ваш API-ключ, якщо він збережений.";
@@ -56,16 +60,30 @@ export function HypothesisAiAgent({
   }, [hypothesis.id, open]);
 
   const run = async () => {
+    const startedAt = Date.now();
+    trackDeferredProductAnalyticsAction("ai_hypothesis_check");
     setBusy(true);
     setError("");
     try {
       const completed = await reviewHypothesisWithAi(hypothesis.id, mode);
+      trackDeferredProductAnalyticsOperation(
+        "ai_hypothesis_check",
+        "success",
+        Date.now() - startedAt,
+        1,
+      );
       setReview(completed);
       setHistory((current) => [
         completed,
         ...current.filter((item) => item.reviewId !== completed.reviewId),
       ]);
     } catch (reason) {
+      trackDeferredProductAnalyticsOperation(
+        "ai_hypothesis_check",
+        "failure",
+        Date.now() - startedAt,
+        1,
+      );
       setError(reason instanceof Error ? reason.message : "Не вдалося виконати аналіз.");
     } finally {
       setBusy(false);
