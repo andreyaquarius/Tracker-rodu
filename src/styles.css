@@ -9499,6 +9499,80 @@ tbody tr:hover { background: #fbfaf5; }
   border: 1px dashed #cfcec5;
 }
 
+.person-editor-v2-section-notice.is-error {
+  color: #7d2926;
+  background: #fbebea;
+  border-color: #ebc4c1;
+}
+
+.person-editor-v2-marriages {
+  display: grid;
+  gap: 12px;
+}
+
+.person-editor-v2-marriages-heading,
+.person-editor-v2-marriage-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.person-editor-v2-marriages-heading > div,
+.person-editor-v2-marriage-card > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.person-editor-v2-marriages-heading small,
+.person-editor-v2-marriage-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.person-editor-v2-marriage-list {
+  display: grid;
+  gap: 12px;
+}
+
+.person-editor-v2-marriage-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  background: #fbfaf6;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.person-editor-v2-marriage-card > header {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.person-editor-v2-marriage-remove {
+  color: var(--red);
+}
+
+.person-editor-v2-marriage-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.person-editor-v2-marriage-fields label {
+  min-width: 0;
+}
+
+.person-editor-v2-marriage-empty {
+  margin: 0;
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+  background: #f8f7f2;
+  border: 1px dashed var(--line);
+  border-radius: 11px;
+}
+
 .person-editor-v2 .life-status-toggle {
   display: grid;
   gap: 8px;
@@ -9590,6 +9664,14 @@ tbody tr:hover { background: #fbfaf5; }
   }
   .person-editor-v2-fields > * {
     grid-column: 1 !important;
+  }
+  .person-editor-v2-marriages-heading,
+  .person-editor-v2-marriage-card > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .person-editor-v2-marriage-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
   .person-editor-v2-actions,
   .person-editor-v2-actions > div {
@@ -10827,6 +10909,11 @@ button.persons-v2-profile__relative-card:hover {
   border: 1px solid #d8dfda;
   border-radius: 9px;
   text-align: left;
+}
+
+.persons-v2-profile__marriages {
+  display: grid;
+  gap: 8px;
 }
 
 button.persons-v2-profile__overview-record,

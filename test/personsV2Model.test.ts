@@ -275,6 +275,45 @@ test("timeline keeps genuinely conflicting core facts instead of hiding them as 
   assert.deepEqual(timeline.map((item) => item.id), ["person-1:core:birth", "alternative-birth"]);
 });
 
+test("timeline renders every shared marriage for either partner and replaces the legacy singleton", () => {
+  const sharedMarriages = [
+    {
+      id: "marriage-1",
+      partnerId: "partner-1",
+      partnerName: "Олена Петрина",
+      date: "1898-05-12",
+      place: "Біла Церква",
+      address: "буд. 27-А",
+    },
+    {
+      id: "marriage-2",
+      partnerId: "partner-2",
+      partnerName: "Марія Царенко",
+      date: "1905",
+      place: "Київ",
+      address: "",
+    },
+  ];
+  const timeline = buildPersonTimeline(person({
+    marriageDate: "1800",
+    marriagePlace: "Застаріле місце",
+    events: [event({
+      id: "marriage",
+      type: "marriage",
+      date: "1800",
+      placeName: "Застаріле місце",
+    })],
+  }), { marriages: sharedMarriages });
+
+  assert.deepEqual(
+    timeline.map((item) => item.id),
+    ["person-1:marriage:marriage-1", "person-1:marriage:marriage-2"],
+  );
+  assert.equal(timeline[0]?.title, "Шлюб з Олена Петрина");
+  assert.equal(timeline[0]?.placeName, "Біла Церква");
+  assert.equal(timeline[0]?.address, "буд. 27-А");
+});
+
 test("timeline omits empty editor placeholders that were never saved as life facts", () => {
   const timeline = buildPersonTimeline(person({
     isLiving: true,

@@ -102,6 +102,19 @@ export interface PersonTimelineItem extends PersonEvent {
   deduplicatedEventIds: string[];
 }
 
+export interface PersonMarriageTimelineFact {
+  id: string;
+  partnerId: string;
+  partnerName: string;
+  date: string;
+  place: string;
+  address: string;
+}
+
+export interface PersonTimelineOptions {
+  marriages?: readonly PersonMarriageTimelineFact[];
+}
+
 const CORE_EVENT_TYPES = new Set<PersonEvent["type"]>([
   "birth",
   "marriage",
@@ -336,11 +349,15 @@ export function calculatePersonProfileCompleteness(person: Person): PersonProfil
  * Builds a single chronological feed from scalar vital fields and saved PersonEvent values.
  * Synthetic copies created by the legacy editor are folded into their corresponding core item.
  */
-export function buildPersonTimeline(person: Person): PersonTimelineItem[] {
+export function buildPersonTimeline(
+  person: Person,
+  options: PersonTimelineOptions = {},
+): PersonTimelineItem[] {
   const staged: Array<PersonTimelineItem & { sourceIndex: number }> = [];
   let sourceIndex = 0;
+  const marriages = options.marriages ?? [];
 
-  for (const event of coreTimelineEvents(person)) {
+  for (const event of coreTimelineEvents(person, marriages)) {
     staged.push(withTimelineSort(event, "core", sourceIndex++));
   }
 
@@ -350,6 +367,7 @@ export function buildPersonTimeline(person: Person): PersonTimelineItem[] {
     // Those placeholders are editor state, not facts in a person's life, and
     // must not appear as unknown-date timeline entries.
     if (!isMeaningfulEvent(event)) continue;
+    if (marriages.length && event.type === "marriage" && event.id === "marriage") continue;
 
     const duplicateIndex = CORE_EVENT_TYPES.has(event.type)
       ? staged.findIndex((candidate) => (
@@ -481,7 +499,10 @@ export function filterAndSortPersons(
     .map(({ person }) => person);
 }
 
-function coreTimelineEvents(person: Person): PersonEvent[] {
+function coreTimelineEvents(
+  person: Person,
+  marriages: readonly PersonMarriageTimelineFact[] = [],
+): PersonEvent[] {
   const events: PersonEvent[] = [];
   const add = (
     type: PersonEvent["type"],
@@ -506,7 +527,23 @@ function coreTimelineEvents(person: Person): PersonEvent[] {
   };
 
   add("birth", person.birthDate, person.birthPlace, person.birthYearFrom, person.birthYearTo);
-  add("marriage", person.marriageDate, person.marriagePlace);
+  if (marriages.length) {
+    for (const marriage of marriages) {
+      events.push({
+        id: `${person.id}:marriage:${marriage.id}`,
+        personId: person.id,
+        type: "marriage",
+        title: marriage.partnerName ? `Шлюб з ${marriage.partnerName}` : personEventLabel("marriage"),
+        date: collapseWhitespace(marriage.date) || null,
+        placeName: collapseWhitespace(marriage.place) || null,
+        address: collapseWhitespace(marriage.address) || null,
+        geo: null,
+        notes: null,
+      });
+    }
+  } else {
+    add("marriage", person.marriageDate, person.marriagePlace);
+  }
   add("death", person.deathDate, person.deathPlace, person.deathYearFrom, person.deathYearTo);
   const residenceEvents = (person.events ?? []).filter((event) => event.type === "residence");
   if (!residenceEvents.length || residenceEvents.some((event) => event.id === "residence")) {

@@ -17,6 +17,7 @@ import type {
   PersonEventType,
   PersonGender,
   PersonPrivacyStatus,
+  PersonRelation,
   PersonStatus,
   Research,
 } from "../../types";
@@ -52,6 +53,10 @@ import type { PersonSaveHandler } from "./contracts";
 import { PERSON_STATUSES } from "../../utils/personStatus.ts";
 import { PersonAvatarFramingEditorV2 } from "./PersonAvatarFramingEditorV2.tsx";
 import { usePersonPhotoPreviewSource } from "./PersonPhotoAlbumV2.tsx";
+import type {
+  ProjectPersonMarriage,
+  ProjectPersonMarriageDraft,
+} from "../../services/projectPersonMarriages.ts";
 
 const genders: PersonGender[] = ["невідомо", "чоловік", "жінка"];
 const CORE_MAP_EVENT_TYPES = new Set<PersonEventType>(["birth", "marriage", "death", "residence"]);
@@ -66,6 +71,16 @@ type PersonDraft = Omit<Person, "id" | "createdAt" | "updatedAt">;
 type PersonDateFieldKey = "birthDate" | "marriageDate" | "deathDate";
 type ValidationErrors = Record<string, string>;
 type SaveIntent = "stay" | "profile";
+
+interface MarriageEditorDraft extends ProjectPersonMarriageDraft {
+  localId: string;
+}
+
+type SaveMarriagesHandler = (input: {
+  personId: string;
+  marriages: readonly ProjectPersonMarriageDraft[];
+  deletedRelationshipIds: readonly string[];
+}) => Promise<ProjectPersonMarriage[]>;
 
 const personDateFields: Array<{ key: PersonDateFieldKey; label: string }> = [
   { key: "birthDate", label: "Дата народження" },
@@ -104,6 +119,12 @@ const validationLabels: Record<string, string> = {
 export interface PersonEditorV2Props {
   db: AppDatabase;
   person: Person | null;
+  persons?: readonly Person[];
+  relations?: readonly PersonRelation[];
+  marriages?: readonly ProjectPersonMarriage[];
+  marriagesLoading?: boolean;
+  marriageLoadError?: string;
+  onSaveMarriages?: SaveMarriagesHandler;
   researches: Research[];
   researchRequired?: boolean;
   initialFullName?: string;
@@ -211,6 +232,78 @@ function dateDraftsFromDraft(draft: PersonDraft): Record<PersonDateFieldKey, str
     marriageDate: formatFlexibleDateForDisplay(draft.marriageDate),
     deathDate: formatFlexibleDateForDisplay(draft.deathDate),
   };
+}
+
+const SPOUSE_RELATION_TYPES = new Set([
+  "чоловік",
+  "дружина",
+  "подружжя",
+]);
+
+function personOptionName(person: Person): string {
+  return [person.surname, person.givenName, person.patronymic]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ") || person.fullName.trim() || "Особа без імені";
+}
+
+function marriageDraftsForPerson(
+  person: Person | null,
+  marriages: readonly ProjectPersonMarriage[],
+  relations: readonly PersonRelation[],
+): MarriageEditorDraft[] {
+  if (!person) return [];
+  const shared = marriages
+    .filter((marriage) => marriage.personAId === person.id || marriage.personBId === person.id)
+    .map((marriage) => ({
+      localId: marriage.id,
+      relationshipId: marriage.id,
+      partnerId: marriage.personAId === person.id ? marriage.personBId : marriage.personAId,
+      date: formatFlexibleDateForDisplay(marriage.date),
+      place: marriage.place,
+      address: marriage.address,
+    }));
+  if (shared.length) return shared;
+
+  const legacyAddress = person.events?.find((event) => event.id === "marriage")?.address ?? "";
+  if (!person.marriageDate && !person.marriagePlace && !legacyAddress) return [];
+
+  const legacyPartners = new Set<string>();
+  for (const relation of relations) {
+    if (!SPOUSE_RELATION_TYPES.has(relation.relationType)) continue;
+    if (relation.personId === person.id) legacyPartners.add(relation.relatedPersonId);
+    if (relation.relatedPersonId === person.id) legacyPartners.add(relation.personId);
+  }
+  return [{
+    localId: `legacy:${person.id}`,
+    partnerId: legacyPartners.size === 1 ? [...legacyPartners][0] ?? "" : "",
+    date: formatFlexibleDateForDisplay(person.marriageDate),
+    place: person.marriagePlace,
+    address: legacyAddress,
+  }];
+}
+
+function emptyMarriageDraft(): MarriageEditorDraft {
+  return {
+    localId: createId(),
+    partnerId: "",
+    date: "",
+    place: "",
+    address: "",
+  };
+}
+
+function marriageDraftSnapshot(
+  marriages: readonly MarriageEditorDraft[],
+  deletedRelationshipIds: readonly string[],
+): string {
+  return JSON.stringify({ marriages, deletedRelationshipIds });
+}
+
+function validationLabel(key: string): string {
+  if (key.startsWith("marriage:") && key.endsWith(":partner")) return "Партнер у шлюбі";
+  if (key.startsWith("marriage:") && key.endsWith(":date")) return "Дата шлюбу";
+  return validationLabels[key] ?? "Поле";
 }
 
 function draftSnapshot(
@@ -411,6 +504,12 @@ function EditorSection({
 export function PersonEditorV2({
   db,
   person,
+  persons = [],
+  relations = [],
+  marriages = [],
+  marriagesLoading = false,
+  marriageLoadError = "",
+  onSaveMarriages,
   researches,
   researchRequired = false,
   initialFullName = "",
@@ -433,11 +532,23 @@ export function PersonEditorV2({
     [],
   );
   const firstDates = useMemo(() => dateDraftsFromDraft(firstDraft), [firstDraft]);
+  const firstMarriageDrafts = useMemo(
+    () => marriageDraftsForPerson(person, marriages, relations),
+    // Initial state is rehydrated by the effects below when the async marriage
+    // list arrives or the editor switches to another person.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   const [form, setForm] = useState<PersonDraft>(firstDraft);
   const [educationDraft, setEducationDraft] = useState(() => personEducation(firstDraft).join("\n"));
   const [persistedPerson, setPersistedPerson] = useState<Person | null>(person);
   const [dateDrafts, setDateDrafts] = useState(firstDates);
   const [baseline, setBaseline] = useState(() => draftSnapshot(firstDraft, firstDates));
+  const [marriageDrafts, setMarriageDrafts] = useState<MarriageEditorDraft[]>(firstMarriageDrafts);
+  const [deletedMarriageIds, setDeletedMarriageIds] = useState<string[]>([]);
+  const [marriageBaseline, setMarriageBaseline] = useState(() => (
+    marriageDraftSnapshot(firstMarriageDrafts, [])
+  ));
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
   const [saveError, setSaveError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
@@ -454,7 +565,12 @@ export function PersonEditorV2({
     () => draftSnapshot(form, dateDrafts),
     [dateDrafts, form],
   );
-  const dirty = currentSnapshot !== baseline;
+  const currentMarriageSnapshot = useMemo(
+    () => marriageDraftSnapshot(marriageDrafts, deletedMarriageIds),
+    [deletedMarriageIds, marriageDrafts],
+  );
+  const marriageDirty = currentMarriageSnapshot !== marriageBaseline;
+  const dirty = currentSnapshot !== baseline || marriageDirty;
 
   unstable_usePrompt({
     message: "Вийти з редактора? Незбережені зміни буде втрачено.",
@@ -473,16 +589,30 @@ export function PersonEditorV2({
     editorIdentityRef.current = nextIdentity;
     const nextDraft = draftFromPerson(person, initialFullName, initialResearchId);
     const nextDates = dateDraftsFromDraft(nextDraft);
+    const nextMarriages = marriageDraftsForPerson(person, marriages, relations);
     setForm(nextDraft);
     setEducationDraft(personEducation(nextDraft).join("\n"));
     setPersistedPerson(person);
     setDateDrafts(nextDates);
     setBaseline(draftSnapshot(nextDraft, nextDates));
+    setMarriageDrafts(nextMarriages);
+    setDeletedMarriageIds([]);
+    setMarriageBaseline(marriageDraftSnapshot(nextMarriages, []));
     setValidationErrors({});
     setSaveError("");
     setSaveMessage("");
     setActiveSection("main");
-  }, [initialFullName, initialResearchId, person]);
+  }, [initialFullName, initialResearchId, marriages, person, relations]);
+
+  useEffect(() => {
+    if (marriagesLoading || marriageDirty) return;
+    const nextMarriages = marriageDraftsForPerson(person, marriages, relations);
+    const nextSnapshot = marriageDraftSnapshot(nextMarriages, []);
+    if (nextSnapshot === marriageBaseline) return;
+    setMarriageDrafts(nextMarriages);
+    setDeletedMarriageIds([]);
+    setMarriageBaseline(nextSnapshot);
+  }, [marriageBaseline, marriageDirty, marriages, marriagesLoading, person, relations]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -608,6 +738,59 @@ export function PersonEditorV2({
       [key]: formatFlexibleDateForDisplay(parsed.value),
     }));
     clearValidationErrors(key);
+  };
+
+  const marriagePartnerOptions = useMemo(() => persons
+    .filter((candidate) => candidate.id !== persistedPerson?.id)
+    .slice()
+    .sort((left, right) => personOptionName(left).localeCompare(personOptionName(right), "uk")),
+  [persistedPerson?.id, persons]);
+
+  const updateMarriageDraft = (
+    localId: string,
+    patch: Partial<Pick<MarriageEditorDraft, "partnerId" | "date" | "place" | "address">>,
+  ) => {
+    markEdited();
+    clearValidationErrors(`marriage:${localId}:partner`, `marriage:${localId}:date`);
+    setMarriageDrafts((current) => current.map((marriage) => (
+      marriage.localId === localId ? { ...marriage, ...patch } : marriage
+    )));
+  };
+
+  const commitMarriageDate = (localId: string) => {
+    const marriage = marriageDrafts.find((item) => item.localId === localId);
+    if (!marriage) return;
+    const parsed = normalizeFlexibleDateInput(marriage.date);
+    const errorKey = `marriage:${localId}:date`;
+    if (parsed.error) {
+      setValidationErrors((current) => ({ ...current, [errorKey]: parsed.error ?? "" }));
+      return;
+    }
+    setMarriageDrafts((current) => current.map((item) => (
+      item.localId === localId
+        ? { ...item, date: formatFlexibleDateForDisplay(parsed.value) }
+        : item
+    )));
+    clearValidationErrors(errorKey);
+  };
+
+  const addMarriageDraft = () => {
+    markEdited();
+    setMarriageDrafts((current) => [...current, emptyMarriageDraft()]);
+  };
+
+  const removeMarriageDraft = (localId: string) => {
+    const marriage = marriageDrafts.find((item) => item.localId === localId);
+    if (!marriage) return;
+    if (marriage.relationshipId && !window.confirm(
+      "Прибрати цей шлюб у обох партнерів? Дата й місце зникнуть з обох карток, але самі особи залишаться.",
+    )) return;
+    markEdited();
+    clearValidationErrors(`marriage:${localId}:partner`, `marriage:${localId}:date`);
+    if (marriage.relationshipId) {
+      setDeletedMarriageIds((current) => [...new Set([...current, marriage.relationshipId!])]);
+    }
+    setMarriageDrafts((current) => current.filter((item) => item.localId !== localId));
   };
 
   const photoState = normalizePersonPhotoState(form.photos, form.primaryPhotoId);
@@ -748,7 +931,10 @@ export function PersonEditorV2({
     setSaveError("");
     setSaveMessage("");
 
-    const dates = normalizeDateDrafts(dateDrafts, form.isLiving);
+    const dates = normalizeDateDrafts(
+      { ...dateDrafts, marriageDate: "" },
+      form.isLiving,
+    );
     const errors: ValidationErrors = { ...dates.errors };
     if (researchRequired && !form.researchId.trim()) {
       errors.researchId = "Оберіть дослідження для цієї особи.";
@@ -777,19 +963,50 @@ export function PersonEditorV2({
       form.birthYearFrom,
       form.birthYearTo,
     );
-    const marriageYear = firstYear(dates.normalized.marriageDate);
+    const normalizedMarriageDrafts: ProjectPersonMarriageDraft[] = [];
+    const selectedPartnerIds = new Set<string>();
+    for (const marriage of marriageDrafts) {
+      const partnerErrorKey = `marriage:${marriage.localId}:partner`;
+      const dateErrorKey = `marriage:${marriage.localId}:date`;
+      if (!marriage.partnerId) {
+        errors[partnerErrorKey] = "Оберіть, з ким укладено цей шлюб.";
+      } else if (selectedPartnerIds.has(marriage.partnerId)) {
+        errors[partnerErrorKey] = "Цього партнера вже вибрано в іншому записі шлюбу.";
+      } else {
+        selectedPartnerIds.add(marriage.partnerId);
+      }
+      const parsedMarriageDate = normalizeFlexibleDateInput(marriage.date);
+      if (parsedMarriageDate.error) {
+        errors[dateErrorKey] = parsedMarriageDate.error;
+      } else if (
+        birthYear !== null
+        && firstYear(parsedMarriageDate.value) !== null
+        && firstYear(parsedMarriageDate.value)! < birthYear
+      ) {
+        errors[dateErrorKey] = "Дата шлюбу не може бути раніше народження.";
+      }
+      normalizedMarriageDrafts.push({
+        relationshipId: marriage.relationshipId,
+        partnerId: marriage.partnerId,
+        date: parsedMarriageDate.error ? marriage.date : parsedMarriageDate.value,
+        place: marriage.place.trim(),
+        address: marriage.address.trim(),
+      });
+    }
     const deathYear = firstYear(
       dates.normalized.deathDate,
       form.deathYearTo,
       form.deathYearFrom,
     );
-    if (birthYear !== null && marriageYear !== null && marriageYear < birthYear) {
-      errors.marriageDate = "Дата шлюбу не може бути раніше народження.";
-    }
     if (!form.isLiving && birthYear !== null && deathYear !== null && deathYear < birthYear) {
       errors.deathDate = "Дата смерті не може бути раніше народження.";
     }
-    setDateDrafts(dates.formatted);
+    const primaryMarriage = normalizedMarriageDrafts[0];
+    const formattedDates = {
+      ...dates.formatted,
+      marriageDate: formatFlexibleDateForDisplay(primaryMarriage?.date ?? ""),
+    };
+    setDateDrafts(formattedDates);
     setValidationErrors(errors);
     if (Object.keys(errors).length) {
       setSaveError("Перевірте позначені поля перед збереженням.");
@@ -804,6 +1021,8 @@ export function PersonEditorV2({
     const normalizedForm: PersonDraft = {
       ...form,
       ...dates.normalized,
+      marriageDate: primaryMarriage?.date ?? "",
+      marriagePlace: primaryMarriage?.place ?? "",
       fullName: displayedFullName,
       ...(form.isLiving
         ? {
@@ -814,9 +1033,29 @@ export function PersonEditorV2({
           }
         : {}),
     };
-    const eventsForSave = form.isLiving
+    let eventsForSave = form.isLiving
       ? form.events.filter((item) => item.type !== "death")
       : form.events;
+    const marriageEventIndex = eventsForSave.findIndex((item) => (
+      item.type === "marriage" && item.id === "marriage"
+    ));
+    if (marriageEventIndex >= 0) {
+      eventsForSave = eventsForSave.map((item, index) => index === marriageEventIndex
+        ? { ...item, address: primaryMarriage?.address || null }
+        : item);
+    } else if (primaryMarriage?.address) {
+      eventsForSave = [...eventsForSave, {
+        id: "marriage",
+        personId,
+        type: "marriage",
+        title: personEventLabel("marriage"),
+        date: primaryMarriage.date || null,
+        placeName: primaryMarriage.place || null,
+        address: primaryMarriage.address,
+        geo: null,
+        notes: null,
+      }];
+    }
     const finalPerson = {
       ...normalizedForm,
       id: personId,
@@ -837,6 +1076,19 @@ export function PersonEditorV2({
       // handler completed without returning a server-normalized record.
       const savedPerson = result ?? finalPerson;
       const wasNewPerson = persistedPerson === null;
+      let savedMarriageDrafts = normalizedMarriageDrafts.map((marriage, index) => ({
+        ...marriage,
+        localId: marriage.relationshipId ?? marriageDrafts[index]?.localId ?? createId(),
+        date: formatFlexibleDateForDisplay(marriage.date),
+      }));
+      if (onSaveMarriages && !marriageLoadError) {
+        const savedMarriages = await onSaveMarriages({
+          personId: savedPerson.id,
+          marriages: normalizedMarriageDrafts,
+          deletedRelationshipIds: deletedMarriageIds,
+        });
+        savedMarriageDrafts = marriageDraftsForPerson(savedPerson, savedMarriages, relations);
+      }
       setPersistedPerson(savedPerson);
       const savedDraft = draftFromPerson(savedPerson);
       const savedDates = dateDraftsFromDraft(savedDraft);
@@ -844,6 +1096,9 @@ export function PersonEditorV2({
       setEducationDraft(personEducation(savedDraft).join("\n"));
       setDateDrafts(savedDates);
       setBaseline(draftSnapshot(savedDraft, savedDates));
+      setMarriageDrafts(savedMarriageDrafts);
+      setDeletedMarriageIds([]);
+      setMarriageBaseline(marriageDraftSnapshot(savedMarriageDrafts, []));
       setValidationErrors({});
       setSaveMessage("Зміни збережено.");
       if (intent === "profile" && onOpenProfile) {
@@ -944,7 +1199,7 @@ export function PersonEditorV2({
                   <ul>
                     {validationEntries.map(([key, message]) => (
                       <li key={key}>
-                        <strong>{validationLabels[key] ?? "Поле"}:</strong> {message}
+                        <strong>{validationLabel(key)}:</strong> {message}
                       </li>
                     ))}
                   </ul>
@@ -1176,36 +1431,153 @@ export function PersonEditorV2({
               />
             </EditorSection>
 
-            <EditorSection id={`${editorPrefix}-marriage`} title="Шлюб">
-              <PersonDateInput
-                label="Дата шлюбу"
-                value={dateDrafts.marriageDate}
-                error={validationErrors.marriageDate}
-                onChange={(value) => updateDateDraft("marriageDate", value)}
-                onBlur={() => commitDateDraft("marriageDate")}
-              />
-              <label>
-                <span>Місце шлюбу</span>
-                <input
-                  value={form.marriagePlace}
-                  onChange={(event) => update("marriagePlace", event.target.value)}
-                />
-              </label>
-              <label>
-                <span>Номер будинку / точна адреса</span>
-                <input
-                  value={personEvents.find((event) => event.id === "marriage")?.address ?? ""}
-                  placeholder="Наприклад: буд. 27-А"
-                  onChange={(event) => patchEvent(
-                    "marriage",
-                    { address: event.target.value || null },
-                    "marriage",
-                  )}
-                />
-              </label>
+            <EditorSection
+              id={`${editorPrefix}-marriage`}
+              title="Шлюби"
+              description="Кожен запис є спільним для двох партнерів і відображається в обох картках. Можна додати кілька шлюбів."
+            >
+              <div className="person-editor-v2-marriages field-wide">
+                <div className="person-editor-v2-marriages-heading">
+                  <div>
+                    <strong>Записи про шлюби</strong>
+                    <small>{marriageDrafts.length
+                      ? `Додано: ${marriageDrafts.length}`
+                      : "Записів поки немає"}</small>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={marriagesLoading || !onSaveMarriages || Boolean(marriageLoadError)}
+                    onClick={addMarriageDraft}
+                  >
+                    + Додати шлюб
+                  </button>
+                </div>
+
+                {marriagesLoading ? (
+                  <p className="person-editor-v2-section-notice" role="status">
+                    Завантажуємо спільні записи шлюбів…
+                  </p>
+                ) : null}
+                {marriageLoadError ? (
+                  <p className="person-editor-v2-section-notice is-error" role="alert">
+                    Не вдалося завантажити спільні записи: {marriageLoadError} Старі поля залишено без змін.
+                  </p>
+                ) : null}
+                {!onSaveMarriages && !marriageLoadError && !marriagesLoading ? (
+                  <p className="person-editor-v2-section-notice">
+                    Спільні шлюби доступні лише в активному проєкті з родовим деревом.
+                  </p>
+                ) : null}
+
+                {marriageDrafts.length ? (
+                  <div className="person-editor-v2-marriage-list">
+                    {marriageDrafts.map((marriage, index) => {
+                      const partner = persons.find((candidate) => candidate.id === marriage.partnerId);
+                      const selectedElsewhere = new Set(marriageDrafts
+                        .filter((item) => item.localId !== marriage.localId)
+                        .map((item) => item.partnerId)
+                        .filter(Boolean));
+                      return (
+                        <article className="person-editor-v2-marriage-card" key={marriage.localId}>
+                          <header>
+                            <div>
+                              <strong>Шлюб {index + 1}</strong>
+                              {partner ? <small>з {personOptionName(partner)}</small> : null}
+                            </div>
+                            <button
+                              type="button"
+                              className="button button-ghost person-editor-v2-marriage-remove"
+                              onClick={() => removeMarriageDraft(marriage.localId)}
+                            >
+                              Прибрати
+                            </button>
+                          </header>
+                          <div className="person-editor-v2-marriage-fields">
+                            <label>
+                              <span>Партнер *</span>
+                              <select
+                                value={marriage.partnerId}
+                                disabled={Boolean(marriage.relationshipId)}
+                                aria-invalid={validationErrors[`marriage:${marriage.localId}:partner`] ? "true" : undefined}
+                                onChange={(event) => updateMarriageDraft(
+                                  marriage.localId,
+                                  { partnerId: event.target.value },
+                                )}
+                              >
+                                <option value="">Оберіть партнера</option>
+                                {marriage.partnerId && !partner ? (
+                                  <option value={marriage.partnerId}>Недоступна особа ({marriage.partnerId})</option>
+                                ) : null}
+                                {marriagePartnerOptions.map((candidate) => (
+                                  <option
+                                    key={candidate.id}
+                                    value={candidate.id}
+                                    disabled={selectedElsewhere.has(candidate.id)}
+                                  >
+                                    {personOptionName(candidate)}
+                                  </option>
+                                ))}
+                              </select>
+                              {marriage.relationshipId ? (
+                                <small>Щоб змінити партнера, приберіть цей запис і додайте новий.</small>
+                              ) : null}
+                              <FieldError message={validationErrors[`marriage:${marriage.localId}:partner`]} />
+                            </label>
+                            <PersonDateInput
+                              label="Дата шлюбу"
+                              value={marriage.date}
+                              error={validationErrors[`marriage:${marriage.localId}:date`]}
+                              onChange={(value) => updateMarriageDraft(
+                                marriage.localId,
+                                { date: value },
+                              )}
+                              onBlur={() => commitMarriageDate(marriage.localId)}
+                            />
+                            <label>
+                              <span>Місце шлюбу</span>
+                              <input
+                                value={marriage.place}
+                                onChange={(event) => updateMarriageDraft(
+                                  marriage.localId,
+                                  { place: event.target.value },
+                                )}
+                              />
+                            </label>
+                            <label>
+                              <span>Номер будинку / точна адреса</span>
+                              <input
+                                value={marriage.address}
+                                placeholder="Наприклад: буд. 27-А"
+                                onChange={(event) => {
+                                  updateMarriageDraft(
+                                    marriage.localId,
+                                    { address: event.target.value },
+                                  );
+                                  if (marriage.localId === marriageDrafts[0]?.localId) {
+                                    patchEvent(
+                                      "marriage",
+                                      { address: event.target.value || null },
+                                      "marriage",
+                                    );
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : !marriagesLoading ? (
+                  <p className="person-editor-v2-marriage-empty">
+                    Додайте шлюб і виберіть партнера — дата та місце автоматично з’являться в обох профілях.
+                  </p>
+                ) : null}
+              </div>
               <ScanAttachmentsEditor
-                title="Документи про шлюб"
-                driveFolderPath={["Особи", drivePersonName, "Шлюб"]}
+                title="Документи про шлюби"
+                driveFolderPath={["Особи", drivePersonName, "Шлюби"]}
                 scans={form.marriageScans}
                 onChange={(scans) => update("marriageScans", scans)}
               />

@@ -176,6 +176,23 @@ export interface AttachExistingPartnerToPersonInput extends FamilyTreeMutationBa
   evidenceStatus: EvidenceStatus;
 }
 
+export interface SavePersonMarriageInput {
+  projectId: EntityId;
+  treeId?: EntityId;
+  relationshipId?: EntityId;
+  personId: EntityId;
+  partnerId: EntityId;
+  startDate?: string;
+  startPlace?: string;
+  address?: string;
+  evidenceStatus?: EvidenceStatus;
+}
+
+export interface SavePersonMarriageResult {
+  relationshipId: EntityId;
+  treeId: EntityId;
+}
+
 export interface AttachExistingChildToPersonInput extends FamilyTreeMutationBaseInput {
   parentId: EntityId;
   childId: EntityId;
@@ -258,6 +275,10 @@ type PartnerRelationshipRow = {
   person_a_id: string;
   person_b_id: string;
 };
+type MarriageRelationshipRow = PartnerRelationshipRow & {
+  relationship_type: string;
+  metadata: unknown;
+};
 type DetachableParentRelationshipRow = ParentRelationshipRow & {
   id: string;
   relationship_type: string;
@@ -279,6 +300,8 @@ const PERSON_SELECT = "id";
 const PARENT_SET_SELECT = "id, family_group_id, set_type, is_preferred_for_display, is_default_for_pedigree, display_order";
 const PARENT_RELATIONSHIP_SELECT = "parent_id, child_id, parent_set_id, family_group_id";
 const PARTNER_RELATIONSHIP_SELECT = "id, family_group_id, person_a_id, person_b_id";
+const MARRIAGE_RELATIONSHIP_SELECT =
+  "id, family_group_id, person_a_id, person_b_id, relationship_type, metadata";
 const FAMILY_GROUP_SELECT = "id, primary_partner_1_id, primary_partner_2_id";
 const DETACHABLE_PARENT_RELATIONSHIP_SELECT =
   "id, parent_id, child_id, parent_set_id, family_group_id, relationship_type, parent_role_label, evidence_status";
@@ -1549,6 +1572,135 @@ async function ensureTreeMember(input: {
   if (error) throw error;
 }
 
+/**
+ * Creates or updates the canonical marriage shared by both partners.
+ *
+ * A marriage is stored once in partner_relationships. Person.marriageDate and
+ * Person.marriagePlace remain compatibility fields only; callers should read
+ * the relationship when they need every marriage of a person.
+ */
+export async function savePersonMarriage(
+  input: SavePersonMarriageInput,
+): Promise<SavePersonMarriageResult> {
+  assertNotSelfRelationship(input.personId, input.partnerId);
+  const treeId = await findOrCreateFamilyTree(input.projectId, input.treeId);
+  const client = getSupabaseClient();
+  let relationship: MarriageRelationshipRow | null = null;
+
+  if (input.relationshipId) {
+    const { data, error } = await client
+      .from("partner_relationships")
+      .select(MARRIAGE_RELATIONSHIP_SELECT)
+      .eq("project_id", input.projectId)
+      .eq("tree_id", treeId)
+      .eq("id", input.relationshipId)
+      .maybeSingle();
+    if (error) throw error;
+    relationship = data as MarriageRelationshipRow | null;
+    if (!relationship) {
+      throw new Error("Запис шлюбу не знайдено або він уже видалений.");
+    }
+    if (!sameUnorderedPair(
+      relationship.person_a_id,
+      relationship.person_b_id,
+      input.personId,
+      input.partnerId,
+    )) {
+      throw new Error("Для збереженого шлюбу не можна непомітно замінити партнера. Видаліть запис і додайте правильний шлюб.");
+    }
+  } else {
+    relationship = await readMarriageRelationship({
+      projectId: input.projectId,
+      treeId,
+      personAId: input.personId,
+      personBId: input.partnerId,
+    });
+    if (!relationship) {
+      relationship = await readAnyPartnerRelationship({
+        projectId: input.projectId,
+        treeId,
+        personAId: input.personId,
+        personBId: input.partnerId,
+      });
+    }
+  }
+
+  const evidenceStatus = input.evidenceStatus ?? "proven";
+  if (relationship) {
+    const metadata = {
+      ...objectRecord(relationship.metadata),
+      source: "person_marriage_editor",
+      address: input.address?.trim() ?? "",
+    };
+    const { error } = await client
+      .from("partner_relationships")
+      .update({
+        relationship_type: "marriage" satisfies PartnerRelationshipType,
+        status: statusForPartnerType("marriage"),
+        start_date: input.startDate?.trim() ?? "",
+        start_place: input.startPlace?.trim() ?? "",
+        evidence_status: evidenceStatus,
+        confidence: confidenceForEvidence(evidenceStatus),
+        metadata,
+      })
+      .eq("project_id", input.projectId)
+      .eq("tree_id", treeId)
+      .eq("id", relationship.id);
+    if (error) throw error;
+    await ensureTreeMember({ projectId: input.projectId, treeId, personId: input.personId });
+    await ensureTreeMember({ projectId: input.projectId, treeId, personId: input.partnerId });
+    if (relationship.family_group_id) {
+      await upsertFamilyGroupMember(input.projectId, relationship.family_group_id, input.personId, "partner", 0);
+      await upsertFamilyGroupMember(input.projectId, relationship.family_group_id, input.partnerId, "partner", 1);
+    }
+  } else {
+    const familyGroupId = await findOrCreateCoupleFamilyGroup({
+      projectId: input.projectId,
+      treeId,
+      personAId: input.personId,
+      personBId: input.partnerId,
+    });
+    relationship = await createPartnerRelationship({
+      projectId: input.projectId,
+      treeId,
+      familyGroupId,
+      personAId: input.personId,
+      personBId: input.partnerId,
+      relationshipType: "marriage",
+      evidenceStatus,
+      startDate: input.startDate?.trim() ?? "",
+      startPlace: input.startPlace?.trim() ?? "",
+      metadata: {
+        source: "person_marriage_editor",
+        address: input.address?.trim() ?? "",
+      },
+    });
+  }
+
+  const relatedGender = await readPersonGender(input.projectId, input.partnerId);
+  await upsertLegacyPersonRelation({
+    projectId: input.projectId,
+    personId: input.personId,
+    relatedPersonId: input.partnerId,
+    relationType: legacySpouseRelationType(relatedGender),
+    evidenceStatus,
+  });
+  return { relationshipId: relationship.id, treeId };
+}
+
+export async function deletePersonMarriage(input: {
+  projectId: EntityId;
+  treeId: EntityId;
+  relationshipId: EntityId;
+}): Promise<void> {
+  await deleteRelationship({
+    projectId: input.projectId,
+    treeId: input.treeId,
+    kind: "partner",
+    relationshipId: input.relationshipId,
+  });
+}
+
 async function ensureTreeMembers(inputs: Array<{
   projectId: EntityId;
   treeId: EntityId;
@@ -1938,15 +2090,21 @@ async function createPartnerRelationship(input: {
   endPlace?: string;
   notes?: string;
   metadata?: Record<string, unknown>;
-}): Promise<void> {
+}): Promise<MarriageRelationshipRow> {
   assertNotSelfRelationship(input.personAId, input.personBId);
   if (input.ensureMembers !== false) {
     await ensureTreeMember({ projectId: input.projectId, treeId: input.treeId, personId: input.personAId });
     await ensureTreeMember({ projectId: input.projectId, treeId: input.treeId, personId: input.personBId });
   }
   const existing = await readPartnerRelationship(input);
-  if (existing) return;
-  const { error } = await getSupabaseClient()
+  if (existing) {
+    return {
+      ...existing,
+      relationship_type: input.relationshipType,
+      metadata: input.metadata ?? {},
+    };
+  }
+  const { data, error } = await getSupabaseClient()
     .from("partner_relationships")
     .insert({
       project_id: input.projectId,
@@ -1966,10 +2124,55 @@ async function createPartnerRelationship(input: {
       end_place: input.endPlace ?? "",
       notes: input.notes ?? "",
       metadata: input.metadata ?? { source: "family_tree_builder" },
-    });
+    })
+    .select(MARRIAGE_RELATIONSHIP_SELECT)
+    .single();
   if (error) throw error;
   await upsertFamilyGroupMember(input.projectId, input.familyGroupId, input.personAId, "partner", 0);
   await upsertFamilyGroupMember(input.projectId, input.familyGroupId, input.personBId, "partner", 1);
+  return data as MarriageRelationshipRow;
+}
+
+async function readMarriageRelationship(input: {
+  projectId: EntityId;
+  treeId: EntityId;
+  personAId: EntityId;
+  personBId: EntityId;
+}): Promise<MarriageRelationshipRow | null> {
+  return readFullPartnerRelationship(input, "marriage");
+}
+
+async function readAnyPartnerRelationship(input: {
+  projectId: EntityId;
+  treeId: EntityId;
+  personAId: EntityId;
+  personBId: EntityId;
+}): Promise<MarriageRelationshipRow | null> {
+  return readFullPartnerRelationship(input);
+}
+
+async function readFullPartnerRelationship(
+  input: {
+    projectId: EntityId;
+    treeId: EntityId;
+    personAId: EntityId;
+    personBId: EntityId;
+  },
+  relationshipType?: PartnerRelationshipType,
+): Promise<MarriageRelationshipRow | null> {
+  let request = getSupabaseClient()
+    .from("partner_relationships")
+    .select(MARRIAGE_RELATIONSHIP_SELECT)
+    .eq("project_id", input.projectId)
+    .eq("tree_id", input.treeId)
+    .or(
+      `and(person_a_id.eq.${input.personAId},person_b_id.eq.${input.personBId}),and(person_a_id.eq.${input.personBId},person_b_id.eq.${input.personAId})`,
+    )
+    .limit(1);
+  if (relationshipType) request = request.eq("relationship_type", relationshipType);
+  const { data, error } = await request;
+  if (error) throw error;
+  return (data as MarriageRelationshipRow[])[0] ?? null;
 }
 
 async function readPartnerRelationship(input: {
@@ -1992,6 +2195,22 @@ async function readPartnerRelationship(input: {
   const { data, error } = await request;
   if (error) throw error;
   return (data as PartnerRelationshipRow[])[0] ?? null;
+}
+
+function sameUnorderedPair(
+  firstA: EntityId,
+  firstB: EntityId,
+  secondA: EntityId,
+  secondB: EntityId,
+): boolean {
+  return (firstA === secondA && firstB === secondB)
+    || (firstA === secondB && firstB === secondA);
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 async function upsertFamilyGroupMember(

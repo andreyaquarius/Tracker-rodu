@@ -45,6 +45,8 @@ import {
   primaryPersonPhoto,
 } from "../../utils/personPhotos.ts";
 import { PersonPhotoAlbumV2 } from "./PersonPhotoAlbumV2.tsx";
+import type { ProjectPersonMarriage } from "../../services/projectPersonMarriages.ts";
+import { formatFlexibleDateForDisplay } from "../../utils/dateHelpers.ts";
 
 export type PersonProfileTabV2 =
   | "overview"
@@ -81,6 +83,9 @@ export interface PersonProfileV2Props {
   research?: Research | null;
   persons?: readonly Person[];
   relations?: readonly PersonRelation[];
+  marriages?: readonly ProjectPersonMarriage[];
+  marriagesLoading?: boolean;
+  marriageLoadError?: string;
   documents?: readonly DocumentRecord[];
   personDocumentIds?: readonly string[];
   findings?: readonly Finding[];
@@ -150,6 +155,9 @@ export function PersonProfileV2({
   research,
   persons = [],
   relations = [],
+  marriages = [],
+  marriagesLoading = false,
+  marriageLoadError = "",
   documents = [],
   personDocumentIds = [],
   findings = [],
@@ -201,12 +209,32 @@ export function PersonProfileV2({
     setPhotoFailed(false);
   }, [person.id, photoUrl]);
 
-  const completeness = useMemo(() => calculatePersonProfileCompleteness(person), [person]);
-  const places = useMemo(() => personMainPlaces(person), [person]);
-  const timeline = useMemo(() => buildPersonTimeline(person), [person]);
   const personsById = useMemo(
     () => new Map(persons.map((item) => [item.id, item])),
     [persons],
+  );
+  const personMarriages = useMemo(() => marriages.filter((marriage) => (
+    marriage.personAId === person.id || marriage.personBId === person.id
+  )), [marriages, person.id]);
+  const marriageTimelineFacts = useMemo(() => personMarriages.map((marriage) => {
+    const partnerId = marriage.personAId === person.id
+      ? marriage.personBId
+      : marriage.personAId;
+    const partner = personsById.get(partnerId);
+    return {
+      id: marriage.id,
+      partnerId,
+      partnerName: partner ? personDisplayName(partner) : "",
+      date: marriage.date,
+      place: marriage.place,
+      address: marriage.address,
+    };
+  }), [person.id, personMarriages, personsById]);
+  const completeness = useMemo(() => calculatePersonProfileCompleteness(person), [person]);
+  const places = useMemo(() => personMainPlaces(person), [person]);
+  const timeline = useMemo(
+    () => buildPersonTimeline(person, { marriages: marriageTimelineFacts }),
+    [marriageTimelineFacts, person],
   );
   const linkedRelations = useMemo<LinkedRelationV2[]>(() => relations
     .filter((relation) => relation.personId === person.id || relation.relatedPersonId === person.id)
@@ -425,6 +453,10 @@ export function PersonProfileV2({
               completeness={completeness}
               timeline={timeline}
               relations={linkedRelations}
+              marriages={personMarriages}
+              marriagesLoading={marriagesLoading}
+              marriageLoadError={marriageLoadError}
+              personsById={personsById}
               documents={linkedDocuments}
               findings={linkedFindings}
               tasks={linkedTasks}
@@ -460,6 +492,10 @@ interface PersonProfilePanelV2Props {
   completeness: ReturnType<typeof calculatePersonProfileCompleteness>;
   timeline: readonly PersonTimelineItem[];
   relations: readonly LinkedRelationV2[];
+  marriages: readonly ProjectPersonMarriage[];
+  marriagesLoading: boolean;
+  marriageLoadError: string;
+  personsById: ReadonlyMap<string, Person>;
   documents: readonly DocumentRecord[];
   findings: readonly Finding[];
   tasks: readonly TaskRecord[];
@@ -518,6 +554,10 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
     completeness,
     timeline,
     relations,
+    marriages,
+    marriagesLoading,
+    marriageLoadError,
+    personsById,
     documents,
     findings,
     onSelectTab,
@@ -542,6 +582,65 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
             <ProfileFactV2 label="Місце смерті" value={person.isLiving ? "—" : person.deathPlace} />
             <ProfileFactV2 label="Причина смерті" value={person.isLiving ? "—" : personDeathCause(person)} />
           </dl>
+        </ProfileSectionV2>
+
+        <ProfileSectionV2 title={`Шлюби (${marriages.length || (person.marriageDate || person.marriagePlace ? 1 : 0)})`}>
+          {marriagesLoading ? <p role="status">Завантажуємо спільні записи шлюбів…</p> : null}
+          {marriageLoadError ? (
+            <p className="persons-v2-detail-notice is-error" role="alert">
+              Не вдалося завантажити спільні записи шлюбів: {marriageLoadError}
+            </p>
+          ) : null}
+          {marriages.length ? (
+            <div className="persons-v2-profile__marriages">
+              {marriages.map((marriage) => {
+                const partnerId = marriage.personAId === person.id
+                  ? marriage.personBId
+                  : marriage.personAId;
+                const partner = personsById.get(partnerId);
+                const details = [
+                  formatFlexibleDateForDisplay(marriage.date),
+                  marriage.place,
+                  marriage.address,
+                ].filter(Boolean).join(" · ");
+                const content = (
+                  <>
+                    <span>
+                      <strong>{partner ? personDisplayName(partner) : "Партнер недоступний"}</strong>
+                      <small>{details || "Дата й місце не вказані"}</small>
+                    </span>
+                    {partner && onOpenPerson ? <span aria-hidden="true">Відкрити →</span> : null}
+                  </>
+                );
+                return partner && onOpenPerson ? (
+                  <button
+                    type="button"
+                    className="persons-v2-profile__overview-record"
+                    key={marriage.id}
+                    onClick={() => onOpenPerson(partner)}
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div className="persons-v2-profile__overview-record" key={marriage.id}>
+                    {content}
+                  </div>
+                );
+              })}
+            </div>
+          ) : !marriagesLoading && (person.marriageDate || person.marriagePlace) ? (
+            <div className="persons-v2-profile__overview-record">
+              <span>
+                <strong>Шлюб</strong>
+                <small>{[
+                  formatFlexibleDateForDisplay(person.marriageDate),
+                  person.marriagePlace,
+                ].filter(Boolean).join(" · ")}</small>
+              </span>
+            </div>
+          ) : !marriagesLoading ? (
+            <EmptyBlockV2 title="Шлюбів ще немає" text="Додайте шлюб у редакторі й виберіть партнера." />
+          ) : null}
         </ProfileSectionV2>
 
         <ProfileSectionV2

@@ -78,6 +78,12 @@ import {
   personKinshipLabel,
   type PersonKinshipDescriptor,
 } from "../../utils/personKinship.ts";
+import {
+  listProjectPersonMarriages,
+  saveProjectPersonMarriages,
+  type ProjectPersonMarriage,
+  type ProjectPersonMarriageDraft,
+} from "../../services/projectPersonMarriages.ts";
 
 export interface PersonsModuleV2Props {
   db: AppDatabase;
@@ -209,6 +215,20 @@ export function PersonsModuleV2({
     requirements: ProjectPersonRootRequirement[];
   } | null>(null);
   const [gedcomDatasetMarkers, setGedcomDatasetMarkers] = useState<GedcomImportDatasetMarker[]>([]);
+  const marriageRequestKey = `${projectId ?? ""}\u001f${pedigreeContext?.treeId ?? ""}`;
+  const [marriageLoad, setMarriageLoad] = useState<{
+    requestKey: string;
+    status: "loading" | "ready" | "error";
+    treeId: string;
+    marriages: ProjectPersonMarriage[];
+    error: string;
+  }>({
+    requestKey: marriageRequestKey,
+    status: projectId ? "loading" : "ready",
+    treeId: pedigreeContext?.treeId ?? "",
+    marriages: [],
+    error: "",
+  });
   const detailPersonId = target.personId || previewPersonId;
   const detailPerson = persons.find((person) => person.id === detailPersonId) ?? null;
   const routePerson = persons.find((person) => person.id === target.personId) ?? null;
@@ -282,6 +302,15 @@ export function PersonsModuleV2({
     : currentPedigreeLoad?.status === "unavailable" || currentPedigreeLoad?.status === "ready"
       ? "unavailable"
       : "loading";
+  const currentMarriageLoad = marriageLoad.requestKey === marriageRequestKey
+    ? marriageLoad
+    : {
+        requestKey: marriageRequestKey,
+        status: "loading" as const,
+        treeId: pedigreeContext?.treeId ?? "",
+        marriages: [] as ProjectPersonMarriage[],
+        error: "",
+      };
 
   const loadGedcomDatasetMarkers = useCallback(async (): Promise<GedcomImportDatasetMarker[]> => {
     if (!projectId || !canUseGedcom) {
@@ -305,6 +334,85 @@ export function PersonsModuleV2({
       active = false;
     };
   }, [loadGedcomDatasetMarkers]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setMarriageLoad({
+        requestKey: marriageRequestKey,
+        status: "ready",
+        treeId: "",
+        marriages: [],
+        error: "",
+      });
+      return;
+    }
+    let active = true;
+    setMarriageLoad({
+      requestKey: marriageRequestKey,
+      status: "loading",
+      treeId: pedigreeContext?.treeId ?? "",
+      marriages: [],
+      error: "",
+    });
+    void listProjectPersonMarriages(projectId, pedigreeContext?.treeId)
+      .then((snapshot) => {
+        if (!active) return;
+        setMarriageLoad({
+          requestKey: marriageRequestKey,
+          status: "ready",
+          treeId: snapshot.treeId,
+          marriages: snapshot.marriages,
+          error: "",
+        });
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setMarriageLoad({
+          requestKey: marriageRequestKey,
+          status: "error",
+          treeId: pedigreeContext?.treeId ?? "",
+          marriages: [],
+          error: error instanceof Error
+            ? error.message
+            : "Не вдалося завантажити спільні записи шлюбів.",
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [marriageRequestKey, pedigreeContext?.treeId, projectId]);
+
+  const persistPersonMarriages = useCallback(async (input: {
+    personId: string;
+    marriages: readonly ProjectPersonMarriageDraft[];
+    deletedRelationshipIds: readonly string[];
+  }): Promise<ProjectPersonMarriage[]> => {
+    if (!projectId) {
+      throw new Error("Неможливо зберегти спільний шлюб без активного проєкту.");
+    }
+    const snapshot = await saveProjectPersonMarriages({
+      projectId,
+      treeId: currentMarriageLoad.treeId || pedigreeContext?.treeId,
+      personId: input.personId,
+      marriages: input.marriages,
+      deletedRelationshipIds: input.deletedRelationshipIds,
+    });
+    setMarriageLoad({
+      requestKey: marriageRequestKey,
+      status: "ready",
+      treeId: snapshot.treeId,
+      marriages: snapshot.marriages,
+      error: "",
+    });
+    onSubscriptionChanged?.();
+    return snapshot.marriages;
+  }, [
+    currentMarriageLoad.treeId,
+    marriageRequestKey,
+    onSubscriptionChanged,
+    pedigreeContext?.treeId,
+    projectId,
+  ]);
 
   useEffect(() => {
     if (previewPersonId && !persons.some((person) => person.id === previewPersonId)) {
@@ -435,6 +543,14 @@ export function PersonsModuleV2({
       <PersonEditorV2
         db={db}
         person={target.mode === "new" ? null : routePerson}
+        persons={persons}
+        relations={relations}
+        marriages={currentMarriageLoad.marriages}
+        marriagesLoading={currentMarriageLoad.status === "loading"}
+        marriageLoadError={currentMarriageLoad.error}
+        onSaveMarriages={projectId && currentMarriageLoad.status !== "error"
+          ? persistPersonMarriages
+          : undefined}
         researches={researches}
         researchRequired={researchRequired}
         customFieldDefinitions={customFieldDefinitions}
@@ -471,6 +587,9 @@ export function PersonsModuleV2({
           research={research}
           persons={persons}
           relations={relations}
+          marriages={currentMarriageLoad.marriages}
+          marriagesLoading={currentMarriageLoad.status === "loading"}
+          marriageLoadError={currentMarriageLoad.error}
           documents={detail.documents}
           findings={detail.findings}
           tasks={detail.tasks}
