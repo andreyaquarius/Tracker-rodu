@@ -47,6 +47,8 @@ const FLUSH_INTERVAL_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 1_000;
 const IDLE_AFTER_MS = 5 * 60_000;
 const MAX_QUEUE = 100;
+const MAX_EVENT_AGE_MS = 23 * 60 * 60_000;
+const RETRY_DELAYS_MS = [60_000, 2 * 60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000] as const;
 
 let enabled = false;
 let currentPage: ProductAnalyticsPageCode = "unknown";
@@ -59,6 +61,8 @@ let heartbeatTimer: number | null = null;
 let flushTimer: number | null = null;
 let listenersAttached = false;
 let inFlight: Promise<void> | null = null;
+let consecutiveFailures = 0;
+let nextRetryAt = 0;
 
 function browserAvailable(): boolean {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -144,6 +148,8 @@ function handleConsentChange(): void {
   if (!productAnalyticsConsentGranted()) {
     queue = [];
     activeMilliseconds = 0;
+    consecutiveFailures = 0;
+    nextRetryAt = 0;
   } else if (enabled && !sessionId) {
     startSession();
   }
@@ -314,6 +320,13 @@ export function trackProductAnalyticsOperation(
 }
 
 async function transmit(): Promise<void> {
+  const now = Date.now();
+  if (now < nextRetryAt) return;
+  queue = queue.filter((event) => {
+    const occurredAt = Date.parse(event.occurredAt);
+    return Number.isFinite(occurredAt) && occurredAt >= now - MAX_EVENT_AGE_MS;
+  });
+
   while (queue.length > 0 && sessionId && productAnalyticsConsentGranted()) {
     const batch = queue.slice(0, 50);
     try {
@@ -326,7 +339,12 @@ async function transmit(): Promise<void> {
         events: batch,
       });
       queue.splice(0, batch.length);
+      consecutiveFailures = 0;
+      nextRetryAt = 0;
     } catch {
+      const retryDelay = RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)];
+      consecutiveFailures += 1;
+      nextRetryAt = Date.now() + retryDelay;
       return;
     }
   }
@@ -357,5 +375,7 @@ export async function flushAndStopProductAnalytics(): Promise<void> {
   queue = [];
   sessionId = null;
   activeMilliseconds = 0;
+  consecutiveFailures = 0;
+  nextRetryAt = 0;
   lastTickAt = Date.now();
 }

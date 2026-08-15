@@ -142,9 +142,12 @@ Deno.serve(async (request) => {
     return json(request, { error: "Analytics consent is not active." }, 403);
   }
 
-  const { data: context } = await userClient.rpc("get_my_subscription_context", {
-    p_project_id: null,
+  const { data: context, error: contextError } = await userClient.rpc("get_my_subscription_context", {
+    target_project_id: null,
   });
+  if (contextError) {
+    return json(request, { error: "Analytics context is temporarily unavailable." }, 503);
+  }
   const contextRecord = context && typeof context === "object" && !Array.isArray(context)
     ? context as Record<string, unknown>
     : {};
@@ -176,7 +179,11 @@ Deno.serve(async (request) => {
   });
   if (error) {
     const rateLimited = String(error.message || "").includes("ANALYTICS_RATE_LIMIT");
-    return json(request, { error: rateLimited ? "Too many requests." : "Analytics event was not accepted." }, rateLimited ? 429 : 400);
+    return json(
+      request,
+      { error: rateLimited ? "Too many requests." : "Analytics service is temporarily unavailable." },
+      rateLimited ? 429 : 503,
+    );
   }
 
   return json(request, { accepted: true, result: data });

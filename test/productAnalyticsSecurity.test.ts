@@ -11,8 +11,16 @@ const actionsMigration = readFileSync(
   resolve("supabase/migrations/202608150002_product_analytics_actions_reports.sql"),
   "utf8",
 );
+const ingestHotfixMigration = readFileSync(
+  resolve("supabase/migrations/202608150003_product_analytics_ingest_hotfix.sql"),
+  "utf8",
+);
 const edgeFunction = readFileSync(
   resolve("supabase/functions/collect-product-analytics/index.ts"),
+  "utf8",
+);
+const analyticsService = readFileSync(
+  resolve("src/services/productAnalytics.ts"),
   "utf8",
 );
 const consentService = readFileSync(
@@ -67,10 +75,11 @@ test("database contracts enforce admin-only aggregates, cohort privacy and reten
 });
 
 test("semantic event storage remains a closed allowlist", () => {
-  assert.match(actionsMigration, /jsonb_object_length\(event_value\) <> 9/i);
-  assert.match(actionsMigration, /allowed_actions constant text\[\]/i);
-  assert.match(actionsMigration, /action_code_value = any\(allowed_actions\)/i);
-  assert.doesNotMatch(actionsMigration, /project_id|person_id|search_text|file_name/i);
+  assert.match(ingestHotfixMigration, /select count\(\*\) from jsonb_object_keys\(event_value\)/i);
+  assert.doesNotMatch(ingestHotfixMigration, /jsonb_object_length/i);
+  assert.match(ingestHotfixMigration, /allowed_actions constant text\[\]/i);
+  assert.match(ingestHotfixMigration, /action_code_value = any\(allowed_actions\)/i);
+  assert.doesNotMatch(ingestHotfixMigration, /project_id|person_id|search_text|file_name/i);
   assert.match(
     actionsMigration,
     /'gedcom_import',\s*2,\s*'operation_finished',\s*'gedcom_import_complete',\s*'success'/i,
@@ -122,7 +131,16 @@ test("collector requires JWT, independent consent and HMAC pseudonymization", ()
   assert.match(edgeFunction, /get_my_product_analytics_consent/);
   assert.match(edgeFunction, /name: "HMAC", hash: "SHA-256"/);
   assert.match(edgeFunction, /contextRecord\.isAdmin === true/);
+  assert.match(edgeFunction, /target_project_id:\s*null/);
+  assert.doesNotMatch(edgeFunction, /p_project_id:\s*null/);
+  assert.match(edgeFunction, /if \(contextError\)[\s\S]*?503/i);
   assert.match(edgeFunction, /new TextEncoder\(\)\.encode\(rawBody\)\.byteLength > MAX_REQUEST_BYTES/);
   assert.match(consentService, /product-analytics-consent-v2/);
   assert.doesNotMatch(consentService, /tracker-rodu-analytics-consent-v1/);
+});
+
+test("analytics collector backs off after transient failures and discards expired telemetry", () => {
+  assert.match(analyticsService, /RETRY_DELAYS_MS/);
+  assert.match(analyticsService, /now < nextRetryAt/);
+  assert.match(analyticsService, /occurredAt >= now - MAX_EVENT_AGE_MS/);
 });
