@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 
@@ -11,6 +11,7 @@ interface TopBarProps {
   onToggleSidebar: () => void;
   onSignInAccount: () => void;
   onSignOutAccount: () => void;
+  onDeleteAccount: () => void;
   onSwitchWorkspace: (projectId: string) => void;
   onCreateWorkspace: () => void;
   onRenameWorkspace: (projectId: string) => void;
@@ -39,6 +40,7 @@ export function TopBar({
   onToggleSidebar,
   onSignInAccount,
   onSignOutAccount,
+  onDeleteAccount,
   onSwitchWorkspace,
   onCreateWorkspace,
   onRenameWorkspace,
@@ -51,6 +53,7 @@ export function TopBar({
   isCreatingWorkspace,
   helpAction,
 }: TopBarProps) {
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const accountMenuRef = useDismissibleDetails();
   const initials = account?.name
     .split(/\s+/)
@@ -62,6 +65,7 @@ export function TopBar({
 
   const closeAccountMenu = () => {
     if (accountMenuRef.current) accountMenuRef.current.open = false;
+    setIsDeleteConfirmOpen(false);
   };
 
   return (
@@ -105,7 +109,13 @@ export function TopBar({
       </div>
       {helpAction}
       {account ? (
-        <details className="account-menu" ref={accountMenuRef}>
+        <details
+          className="account-menu"
+          ref={accountMenuRef}
+          onToggle={(event) => {
+            if (!event.currentTarget.open) setIsDeleteConfirmOpen(false);
+          }}
+        >
           <summary aria-label="Відкрити меню профілю">
             {account.picture ? (
               <img src={account.picture} alt="" referrerPolicy="no-referrer" />
@@ -229,12 +239,12 @@ export function TopBar({
                   onOpenAdmin();
                 }}
                 type="button"
-              >
-                Адмін-панель
-              </button>
+            >
+              Адмін-панель
+            </button>
             ) : null}
             <button
-              className="button button-secondary"
+              className="button button-secondary account-signout-button"
               onClick={() => {
                 closeAccountMenu();
                 onSignOutAccount();
@@ -242,6 +252,54 @@ export function TopBar({
             >
               Вийти з облікового запису
             </button>
+            {!isAdmin ? (
+              <div className="account-delete-zone">
+                <span className="account-delete-divider" aria-hidden="true" />
+                {isDeleteConfirmOpen ? (
+                  <div className="account-delete-confirm">
+                    <strong>Ви впевнені?</strong>
+                    <p>
+                      Видалення акаунта призведе до безповоротного видалення всіх ваших
+                      проєктів, осіб і пов’язаних даних. Повернути ці дані буде неможливо.
+                    </p>
+                    <p>
+                      Перед видаленням бажано створити резервну копію з розділу{" "}
+                      <strong>«Резервні копії»</strong>.
+                    </p>
+                    <div className="account-delete-confirm-actions">
+                      <button
+                        type="button"
+                        className="button button-danger account-delete-confirm-button"
+                        onClick={() => {
+                          setIsDeleteConfirmOpen(false);
+                          closeAccountMenu();
+                          onDeleteAccount();
+                        }}
+                      >
+                        Видалити безповоротно
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary account-delete-cancel-button"
+                        onClick={() => setIsDeleteConfirmOpen(false)}
+                      >
+                        Скасувати
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className="button button-danger account-delete-button account-delete-trigger"
+                    onClick={() => {
+                      setIsDeleteConfirmOpen(true);
+                    }}
+                    type="button"
+                  >
+                    Видалити акаунт
+                  </button>
+                )}
+              </div>
+            ) : null}
           </div>
         </details>
       ) : (

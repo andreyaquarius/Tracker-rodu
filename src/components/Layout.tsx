@@ -29,6 +29,7 @@ interface LayoutProps {
   workspaces: SupabaseWorkspace[];
   onSignInAccount: () => void;
   onSignOutAccount: () => void;
+  onDeleteAccount: () => void;
   onSwitchWorkspace: (projectId: string) => void;
   onCreateWorkspace: () => void;
   onRenameWorkspace: (projectId: string) => void;
@@ -110,6 +111,7 @@ export function Layout(props: LayoutProps) {
             onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
             onSignInAccount={props.onSignInAccount}
             onSignOutAccount={props.onSignOutAccount}
+            onDeleteAccount={props.onDeleteAccount}
             onSwitchWorkspace={props.onSwitchWorkspace}
             onCreateWorkspace={props.onCreateWorkspace}
             onRenameWorkspace={props.onRenameWorkspace}

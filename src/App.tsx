@@ -83,6 +83,7 @@ import {
   type SupabaseAccount,
   type SupabaseWorkspace,
 } from "./services/supabaseAuth";
+import { deleteAccount } from "./services/accountDeletion";
 import {
   activatePublicAnalyticsPage,
   beginAnalyticsAuth,
@@ -2531,6 +2532,39 @@ export default function App() {
       } else {
         notify(message, true);
       }
+    }
+  };
+
+  const deleteMyAccount = async () => {
+    if (!account) {
+      notify("Щоб видалити акаунт, увійдіть у свій профіль.", true);
+      return;
+    }
+
+    const deletingUserId = account.id;
+    try {
+      await flushAndStopAuthenticatedEngagement().catch(() => undefined);
+      await flushAndStopProductAnalytics().catch(() => undefined);
+      await deleteAccount();
+      await signOutLocallyFromSupabase();
+      await clearSensitiveBrowserState({
+        userId: deletingUserId,
+        includeLegacyDocumentCache: true,
+        clearAllDocumentCaches: false,
+      });
+      setAccount(null);
+      setWorkspace(null);
+      setWorkspaces([]);
+      setAuthReady(true);
+      lastPreparedUserRef.current = null;
+      workspaceSetupRef.current = null;
+      setOnboarded(false);
+      setLoginError("");
+      setIsAccountSigningIn(false);
+      routerNavigate("/", { replace: true });
+      notify("Акаунт видалено.");
+    } catch (error) {
+      notify(describeError(error, "Не вдалося видалити акаунт."), true);
     }
   };
 
@@ -5984,6 +6018,7 @@ export default function App() {
         workspaces={workspaces}
         onSignInAccount={() => void signIn()}
         onSignOutAccount={() => void signOutAccount()}
+        onDeleteAccount={() => void deleteMyAccount()}
         onSwitchWorkspace={switchWorkspace}
         onCreateWorkspace={() => void createWorkspace()}
         onRenameWorkspace={(projectId) => void renameWorkspace(projectId)}

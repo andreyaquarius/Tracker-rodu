@@ -536,6 +536,74 @@ p { color: var(--muted); line-height: 1.7; }
 }
 .account-popover .button { width: 100%; }
 .account-team-button { margin-bottom: 8px; }
+.account-delete-zone {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #ece4d7;
+}
+
+.account-delete-divider {
+  display: block;
+  width: 100%;
+  height: 0;
+}
+
+.account-delete-trigger {
+  width: auto;
+  align-self: flex-start;
+  min-height: 34px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.account-delete-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #f2d1cd;
+  background: #fdf4f1;
+}
+
+.account-delete-confirm strong {
+  color: #7a3c37;
+}
+
+.account-delete-confirm p {
+  margin: 0;
+  color: #66423f;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.account-delete-confirm-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.account-delete-confirm-actions .button {
+  width: auto;
+}
+
+.account-delete-confirm-button {
+  min-height: 34px;
+  font-size: 11px;
+}
+
+.account-delete-cancel-button {
+  min-height: 34px;
+  font-size: 11px;
+}
+
+.account-popover .account-delete-zone .button,
+.account-popover .account-delete-confirm .button {
+  width: auto;
+}
 .local-account-actions { display: flex; align-items: center; gap: 10px; }
 .local-account-label { color: var(--muted); font-size: 11px; font-weight: 700; }
 .mobile-menu { display: none; border: 0; background: transparent; font-size: 22px; }
