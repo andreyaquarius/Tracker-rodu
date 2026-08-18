@@ -11,7 +11,7 @@ interface TopBarProps {
   onToggleSidebar: () => void;
   onSignInAccount: () => void;
   onSignOutAccount: () => void;
-  onDeleteAccount: () => void;
+  onDeleteAccount: () => void | Promise<void>;
   onSwitchWorkspace: (projectId: string) => void;
   onCreateWorkspace: () => void;
   onRenameWorkspace: (projectId: string) => void;
@@ -54,6 +54,7 @@ export function TopBar({
   helpAction,
 }: TopBarProps) {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [deleteConfirmationValue, setDeleteConfirmationValue] = useState("");
   const accountMenuRef = useDismissibleDetails();
   const initials = account?.name
     .split(/\s+/)
@@ -66,6 +67,7 @@ export function TopBar({
   const closeAccountMenu = () => {
     if (accountMenuRef.current) accountMenuRef.current.open = false;
     setIsDeleteConfirmOpen(false);
+    setDeleteConfirmationValue("");
   };
 
   return (
@@ -113,7 +115,10 @@ export function TopBar({
           className="account-menu"
           ref={accountMenuRef}
           onToggle={(event) => {
-            if (!event.currentTarget.open) setIsDeleteConfirmOpen(false);
+            if (!event.currentTarget.open) {
+              setIsDeleteConfirmOpen(false);
+              setDeleteConfirmationValue("");
+            }
           }}
         >
           <summary aria-label="Відкрити меню профілю">
@@ -266,12 +271,24 @@ export function TopBar({
                       Перед видаленням бажано створити резервну копію з розділу{" "}
                       <strong>«Резервні копії»</strong>.
                     </p>
+                    <label className="account-delete-confirm-label">
+                      Для підтвердження введіть <strong>ВИДАЛИТИ</strong>
+                      <input
+                        type="text"
+                        value={deleteConfirmationValue}
+                        onChange={(event) => setDeleteConfirmationValue(event.target.value)}
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-label="Введіть ВИДАЛИТИ для підтвердження"
+                      />
+                    </label>
                     <div className="account-delete-confirm-actions">
                       <button
                         type="button"
                         className="button button-danger account-delete-confirm-button"
+                        disabled={deleteConfirmationValue.trim() !== "ВИДАЛИТИ"}
                         onClick={() => {
-                          setIsDeleteConfirmOpen(false);
+                          if (deleteConfirmationValue.trim() !== "ВИДАЛИТИ") return;
                           closeAccountMenu();
                           onDeleteAccount();
                         }}
@@ -281,7 +298,10 @@ export function TopBar({
                       <button
                         type="button"
                         className="button button-secondary account-delete-cancel-button"
-                        onClick={() => setIsDeleteConfirmOpen(false)}
+                        onClick={() => {
+                          setIsDeleteConfirmOpen(false);
+                          setDeleteConfirmationValue("");
+                        }}
                       >
                         Скасувати
                       </button>
@@ -292,6 +312,7 @@ export function TopBar({
                     className="button button-danger account-delete-button account-delete-trigger"
                     onClick={() => {
                       setIsDeleteConfirmOpen(true);
+                      setDeleteConfirmationValue("");
                     }}
                     type="button"
                   >

@@ -580,6 +580,31 @@ p { color: var(--muted); line-height: 1.7; }
   line-height: 1.4;
 }
 
+.account-delete-confirm-label {
+  display: grid;
+  gap: 5px;
+  color: #66423f;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.account-delete-confirm-label input {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid #d9b4ae;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.account-delete-confirm-label input:focus {
+  border-color: #a34740;
+  outline: 2px solid rgba(163, 71, 64, .16);
+  outline-offset: 1px;
+}
+
 .account-delete-confirm-actions {
   display: flex;
   gap: 8px;

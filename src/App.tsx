@@ -2546,26 +2546,43 @@ export default function App() {
       await flushAndStopAuthenticatedEngagement().catch(() => undefined);
       await flushAndStopProductAnalytics().catch(() => undefined);
       await deleteAccount();
-      await signOutLocallyFromSupabase();
-      await clearSensitiveBrowserState({
+    } catch (error) {
+      notify(describeError(error, "Не вдалося видалити акаунт."), true);
+      return;
+    }
+
+    // Once the server confirms deletion, always tear down the in-memory
+    // workspace even if an individual browser cache cannot be opened/cleared.
+    // This prevents a deleted account from remaining visible on a shared PC.
+    await signOutLocallyFromSupabase().catch(() => undefined);
+    const localCleanup = await clearSensitiveBrowserState({
         userId: deletingUserId,
         includeLegacyDocumentCache: true,
         clearAllDocumentCaches: false,
-      });
-      setAccount(null);
-      setWorkspace(null);
-      setWorkspaces([]);
-      setAuthReady(true);
-      lastPreparedUserRef.current = null;
-      workspaceSetupRef.current = null;
-      setOnboarded(false);
-      setLoginError("");
-      setIsAccountSigningIn(false);
-      routerNavigate("/", { replace: true });
-      notify("Акаунт видалено.");
-    } catch (error) {
-      notify(describeError(error, "Не вдалося видалити акаунт."), true);
+      }).catch(() => null);
+    setAccount(null);
+    setWorkspace(null);
+    setWorkspaces([]);
+    setAuthReady(true);
+    lastPreparedUserRef.current = null;
+    workspaceSetupRef.current = null;
+    setOnboarded(false);
+    setLoginError("");
+    setIsAccountSigningIn(false);
+    routerNavigate("/", { replace: true });
+
+    if (!localCleanup || localCleanup.errors.length > 0) {
+      const message =
+        "Акаунт видалено. Для завершення очищення локальної сесії сторінку буде перезавантажено.";
+      if (typeof window !== "undefined") {
+        window.alert(message);
+        window.location.replace(new URL(import.meta.env.BASE_URL, window.location.href).toString());
+      } else {
+        notify(message);
+      }
+      return;
     }
+    notify("Акаунт і локальні дані видалено.");
   };
 
   const switchWorkspace = (projectId: string) => {
