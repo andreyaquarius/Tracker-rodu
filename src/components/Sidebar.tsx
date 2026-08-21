@@ -201,6 +201,7 @@ function NavigationIcon({ icon }: { icon: NavigationIconName }) {
 interface SidebarProps {
   page: PageKey | null;
   onNavigate: (page: PageKey) => void;
+  onOpenZagulyaky: () => void;
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
   showGeneHelp: boolean;
@@ -216,6 +217,7 @@ interface SidebarProps {
 export function Sidebar({
   page,
   onNavigate,
+  onOpenZagulyaky,
   onOpenProjects,
   onOpenGeneHelp,
   showGeneHelp,
@@ -255,6 +257,10 @@ export function Sidebar({
   };
   const openProjects = () => {
     onOpenProjects();
+    onClose();
+  };
+  const openZagulyaky = () => {
+    onOpenZagulyaky();
     onClose();
   };
   const openGeneHelp = () => {
@@ -382,6 +388,17 @@ export function Sidebar({
               </div>
             );
           })}
+
+          <button
+            type="button"
+            className="zagulyaky-nav-action"
+            onClick={openZagulyaky}
+            aria-label="Відкрити мої записи Загуляк"
+            title="Відкрити мої записи Загуляк"
+          >
+            <span className="nav-icon"><NavigationIcon icon="users" /></span>
+            Загуляки
+          </button>
 
           {rootCustomSections.length ? (
             <div className="custom-nav-group">

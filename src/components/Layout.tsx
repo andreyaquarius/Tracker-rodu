@@ -19,6 +19,7 @@ interface LayoutProps {
   page: PageKey | null;
   familyTreeView?: "tree" | "statistics";
   onNavigate: (page: PageKey) => void;
+  onOpenZagulyaky: () => void;
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
   showGeneHelp: boolean;
@@ -82,6 +83,7 @@ export function Layout(props: LayoutProps) {
         <Sidebar
           page={props.page}
           onNavigate={props.onNavigate}
+          onOpenZagulyaky={props.onOpenZagulyaky}
           onOpenProjects={props.onOpenProjects}
           onOpenGeneHelp={props.onOpenGeneHelp}
           showGeneHelp={props.showGeneHelp}

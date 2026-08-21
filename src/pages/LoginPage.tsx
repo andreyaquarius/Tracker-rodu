@@ -143,6 +143,7 @@ export function LoginPage({
           </div>
           <nav className="login-public-nav" aria-label="Публічна навігація">
             <a href="/" aria-current="page">Головна</a>
+            <a href="/zahuliaky">Загуляки</a>
             <a href="/features">Можливості</a>
             <a href="/pricing">Тарифи</a>
             <a href="/faq">FAQ</a>

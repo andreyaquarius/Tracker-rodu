@@ -39,9 +39,15 @@ export type AiSettingsRow = {
   mode: AiMode;
 };
 
+type GeminiSafeProviderReason = "API_KEY_INVALID" | "FAILED_PRECONDITION";
+
 type GeminiResponseBody = {
   error?: {
     message?: string;
+    status?: string;
+    details?: Array<{
+      reason?: string;
+    }>;
   };
   promptFeedback?: {
     blockReason?: string;
@@ -57,6 +63,43 @@ type GeminiResponseBody = {
     };
   }>;
 };
+
+/**
+ * Retains only the HTTP class of a Gemini rejection for server-side callers.
+ *
+ * The human-readable message remains available to the existing interactive
+ * AI functions, but queue workers must not infer an authentication failure
+ * merely because a 400 message happens to mention an API key or model.
+ */
+export class GeminiHttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+    /**
+     * A deliberately tiny allow-list from Google's machine-readable error
+     * details. It is never a provider message, request fragment, key, or
+     * staged source text, so queue workers can safely decide whether a
+     * platform-key fallback is warranted.
+     */
+    readonly providerReason: GeminiSafeProviderReason | null = null,
+  ) {
+    super(message);
+    this.name = "GeminiHttpError";
+  }
+}
+
+function geminiSafeProviderReason(body: GeminiResponseBody): GeminiSafeProviderReason | null {
+  // API-key failures are normally an HTTP 400 INVALID_ARGUMENT with an
+  // ErrorInfo reason, while a blocked billing/region/project state is exposed
+  // by Google as FAILED_PRECONDITION. Do not retain arbitrary provider detail
+  // values: they may contain sensitive operational context.
+  const status = String(body.error?.status ?? "").trim();
+  if (status === "FAILED_PRECONDITION") return "FAILED_PRECONDITION";
+  const reasons = Array.isArray(body.error?.details)
+    ? body.error!.details.map((detail) => String(detail?.reason ?? "").trim())
+    : [];
+  return reasons.includes("API_KEY_INVALID") ? "API_KEY_INVALID" : null;
+}
 
 export type GeminiInlineImageInput = {
   mimeType: string;
@@ -190,6 +233,76 @@ export async function readAiSettings(
   return data as AiSettingsRow;
 }
 
+function geminiHttpError(
+  status: number,
+  body: GeminiResponseBody,
+  rawBody: string,
+): GeminiHttpError {
+  const providerMessage = String(body.error?.message ?? rawBody ?? "").trim();
+  const providerReason = geminiSafeProviderReason(body);
+  if (status === 400) {
+    return new GeminiHttpError(
+      status,
+      `Google Gemini відхилив параметри запиту або налаштування моделі. ${providerMessage}`.trim(),
+      providerReason,
+    );
+  }
+  if (status === 401 || status === 403) {
+    return new GeminiHttpError(
+      status,
+      `Google відхилив API-ключ Gemini. ${providerMessage}`.trim(),
+      providerReason,
+    );
+  }
+  if (status === 404) {
+    return new GeminiHttpError(
+      status,
+      `Google Gemini не знайшов налаштовану модель. ${providerMessage}`.trim(),
+      providerReason,
+    );
+  }
+  if (status === 429) {
+    return new GeminiHttpError(status, "Вичерпано квоту Gemini або перевищено ліміт запитів.", providerReason);
+  }
+  return new GeminiHttpError(status, providerMessage || "Google Gemini не зміг виконати запит.", providerReason);
+}
+
+function geminiSchemaType(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toUpperCase();
+  // Google Generative Language API serializes Schema.Type as an enum.  Our
+  // application schemas deliberately use concise JSON-Schema-like lowercase
+  // names, so normalize only the known primitives at the API boundary.
+  return new Set([
+    "STRING",
+    "NUMBER",
+    "INTEGER",
+    "BOOLEAN",
+    "ARRAY",
+    "OBJECT",
+    "NULL",
+  ]).has(normalized)
+    ? normalized
+    : value;
+}
+
+/**
+ * `Schema.minItems` and `Schema.maxItems` are int64 fields in the legacy
+ * GenerateContent responseSchema protobuf. Its JSON mapping requires a
+ * decimal string, not a JSON number. Keep ordinary numeric JSON Schema
+ * constraints such as minimum/maximum as numbers.
+ */
+function geminiSchemaInt64(value: unknown): unknown {
+  const normalized = typeof value === "number"
+    ? value
+    : typeof value === "string" && /^\d+$/u.test(value.trim())
+    ? Number(value.trim())
+    : Number.NaN;
+  return Number.isSafeInteger(normalized) && normalized >= 0
+    ? String(normalized)
+    : value;
+}
+
 function toGeminiResponseSchema(schema: unknown, parentKey?: string): unknown {
   if (Array.isArray(schema)) {
     return schema.map((item) => toGeminiResponseSchema(item, parentKey));
@@ -224,7 +337,11 @@ function toGeminiResponseSchema(schema: unknown, parentKey?: string): unknown {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
     if (!allowedKeys.has(key)) continue;
-    result[key] = toGeminiResponseSchema(value, key);
+    result[key] = key === "type"
+      ? geminiSchemaType(value)
+      : key === "maxItems" || key === "minItems"
+      ? geminiSchemaInt64(value)
+      : toGeminiResponseSchema(value, key);
   }
   return result;
 }
@@ -279,14 +396,7 @@ export async function callGeminiWithInlineImage(
     body = {};
   }
   if (!response.ok) {
-    const providerMessage = String(body.error?.message ?? rawBody ?? "");
-    if (response.status === 400 || response.status === 401 || response.status === 403) {
-      throw new Error(`Google відхилив API-ключ або налаштування моделі. ${providerMessage}`.trim());
-    }
-    if (response.status === 429) {
-      throw new Error("Вичерпано квоту Gemini або перевищено ліміт запитів.");
-    }
-    throw new Error(providerMessage || "Google Gemini не зміг виконати запит.");
+    throw geminiHttpError(response.status, body, rawBody);
   }
   const candidate = body.candidates?.[0];
   const text = candidate?.content?.parts
@@ -350,14 +460,7 @@ export async function callGemini(
     body = {};
   }
   if (!response.ok) {
-    const providerMessage = String(body.error?.message ?? rawBody ?? "");
-    if (response.status === 400 || response.status === 401 || response.status === 403) {
-      throw new Error(`Google відхилив API-ключ або налаштування моделі. ${providerMessage}`.trim());
-    }
-    if (response.status === 429) {
-      throw new Error("Вичерпано квоту Gemini або перевищено ліміт запитів.");
-    }
-    throw new Error(providerMessage || "Google Gemini не зміг виконати запит.");
+    throw geminiHttpError(response.status, body, rawBody);
   }
   const text = body.candidates?.[0]?.content?.parts
     ?.map((part: { text?: string }) => part.text ?? "")

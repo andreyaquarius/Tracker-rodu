@@ -1,0 +1,226 @@
+{
+  "sheets": [
+    {
+      "name": "00_README",
+      "usedRowCount": 28,
+      "usedColumnCount": 2,
+      "tableInfo": []
+    },
+    {
+      "name": "01_SourcePosts",
+      "usedRowCount": 2118,
+      "usedColumnCount": 16,
+      "tableInfo": [
+        {
+          "name": "SourcePostsTable",
+          "headers": [
+            "import_batch_id",
+            "post_key",
+            "source_platform",
+            "facebook_post_url_private",
+            "source_collection_url_private",
+            "source_author_label_private",
+            "source_date_text",
+            "source_published_at",
+            "source_date_precision",
+            "post_original_text",
+            "post_text_complete",
+            "source_content_sha256",
+            "source_file_name",
+            "source_row_number",
+            "source_status",
+            "source_notes_private"
+          ],
+          "dataRowCount": 0
+        }
+      ]
+    },
+    {
+      "name": "02_Events",
+      "usedRowCount": 1423,
+      "usedColumnCount": 25,
+      "tableInfo": [
+        {
+          "name": "EventsTable",
+          "headers": [
+            "import_batch_id",
+            "event_key",
+            "post_key",
+            "event_no_in_post",
+            "event_group_key",
+            "event_type",
+            "event_type_original",
+            "event_date_text",
+            "event_year_from",
+            "event_year_to",
+            "event_month",
+            "event_day",
+            "date_precision",
+            "calendar_style",
+            "event_place_original",
+            "event_place_normalized",
+            "church_or_parish_original",
+            "record_number",
+            "document_language",
+            "record_types",
+            "event_original_text",
+            "event_summary",
+            "event_confidence",
+            "event_status",
+            "event_notes"
+          ],
+          "dataRowCount": 0
+        }
+      ]
+    },
+    {
+      "name": "03_Participants",
+      "usedRowCount": 2091,
+      "usedColumnCount": 32,
+      "tableInfo": [
+        {
+          "name": "ParticipantsTable",
+          "headers": [
+            "import_batch_id",
+            "participant_key",
+            "person_card_key",
+            "event_key",
+            "post_key",
+            "participant_sort_order",
+            "structural_role",
+            "event_role_code",
+            "event_role_custom",
+            "original_full_name",
+            "normalized_uk_full_name",
+            "surname",
+            "given_name",
+            "patronymic",
+            "maiden_name",
+            "sex",
+            "age_text",
+            "age_years",
+            "origin_text",
+            "residence_text",
+            "social_estate_text",
+            "occupation_or_rank_text",
+            "marital_status_text",
+            "relation_original",
+            "participant_original_text",
+            "person_evidence_excerpt",
+            "field_confidence",
+            "possible_living_person",
+            "participant_status",
+            "potential_duplicate_key",
+            "participant_notes",
+            "private_search_text"
+          ],
+          "dataRowCount": 0
+        }
+      ]
+    },
+    {
+      "name": "04_EventSources",
+      "usedRowCount": 828,
+      "usedColumnCount": 19,
+      "tableInfo": [
+        {
+          "name": "EventSourcesTable",
+          "headers": [
+            "import_batch_id",
+            "event_source_key",
+            "event_key",
+            "is_primary",
+            "source_type",
+            "source_title",
+            "archive_name",
+            "fond",
+            "inventory",
+            "file_number",
+            "page_from",
+            "page_to",
+            "citation",
+            "source_url_public_candidate",
+            "source_platform",
+            "external_id",
+            "access_date",
+            "permission_status",
+            "source_notes"
+          ],
+          "dataRowCount": 0
+        }
+      ]
+    },
+    {
+      "name": "05_Cards",
+      "usedRowCount": 2091,
+      "usedColumnCount": 18,
+      "tableInfo": [
+        {
+          "name": "CardsTable",
+          "headers": [
+            "import_batch_id",
+            "card_key",
+            "event_key",
+            "post_key",
+            "kind",
+            "primary_participant_key",
+            "title",
+            "card_original_text",
+            "normalized_text",
+            "summary",
+            "classification_reason",
+            "verification_status",
+            "privacy_review_state",
+            "publication_status",
+            "card_status",
+            "copy_event_participants",
+            "duplicate_review_status",
+            "card_notes"
+          ],
+          "dataRowCount": 0
+        }
+      ]
+    },
+    {
+      "name": "06_QC",
+      "usedRowCount": 2170,
+      "usedColumnCount": 10,
+      "tableInfo": [
+        {
+          "name": "QcTable",
+          "headers": [
+            "import_batch_id",
+            "post_key",
+            "event_key",
+            "participant_key",
+            "severity",
+            "qc_code",
+            "field_name",
+            "original_excerpt",
+            "note",
+            "review_status"
+          ],
+          "dataRowCount": 0
+        }
+      ]
+    },
+    {
+      "name": "07_Довідники",
+      "usedRowCount": 38,
+      "usedColumnCount": 8,
+      "tableInfo": []
+    },
+    {
+      "name": "08_Приклад",
+      "usedRowCount": 23,
+      "usedColumnCount": 10,
+      "tableInfo": []
+    },
+    {
+      "name": "09_GeminiPrompt",
+      "usedRowCount": 16,
+      "usedColumnCount": 1,
+      "tableInfo": []
+    }
+  ]
+}

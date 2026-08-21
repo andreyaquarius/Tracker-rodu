@@ -1,0 +1,56 @@
+name: Process private Zagulyaky structuring
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zagulyaky-private-structuring
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    # One service invocation processes at most five leased tasks serially.
+    # This leaves headroom above the Edge model timeout without starting a
+    # second overlapping worker.
+    timeout-minutes: 6
+    steps:
+      - name: Verify structuring worker secrets
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+        run: |
+          if [ -z "$PROJECT_REF" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::SUPABASE_PROJECT_REF and TASK_REMINDER_CRON_SECRET are required."
+            exit 1
+          fi
+
+      - name: Process a bounded private structuring queue slice
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+        run: |
+          if ! response="$(curl --fail-with-body --retry 2 --retry-all-errors --max-time 280 \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            --data '{"action":"process_queue","limit":5}' \
+            "https://${PROJECT_REF}.supabase.co/functions/v1/zagulyaky-structure")"; then
+            echo "::error::Zagulyaky private structuring request failed."
+            exit 1
+          fi
+
+          # The Edge response is intentionally aggregate-only: no source text,
+          # candidate payloads, keys, or provider diagnostics reach GitHub logs.
+          echo "$response"
+          {
+            echo "### Private Zagulyaky structuring"
+            echo '```json'
+            echo "$response"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

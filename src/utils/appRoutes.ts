@@ -33,6 +33,7 @@ export type AdminPage =
   | "features"
   | "announcements"
   | "feedback"
+  | "zagulyaky"
   | "operations"
   | "security";
 
@@ -42,6 +43,7 @@ const adminPageSegments: Record<Exclude<AdminPage, "overview">, string> = {
   features: "features",
   announcements: "announcements",
   feedback: "feedback",
+  zagulyaky: "zagulyaky",
   operations: "operations",
   security: "security",
 };
@@ -53,6 +55,12 @@ const adminSegmentPages = new Map(
 export type AppRoute =
   | { kind: "root" }
   | { kind: "public"; page: "privacy" | "terms" | "features" | "pricing" | "faq" }
+  | {
+      kind: "zagulyaky";
+      tab: "people" | "documents" | "mine";
+      recordKind?: "person" | "document";
+      recordSlug?: string;
+    }
   | { kind: "projects" }
   | { kind: "admin"; page: AdminPage }
   | { kind: "settings"; page: "settings" | "subscription" | "feedback" }
@@ -166,6 +174,34 @@ export function parseAppRoute(
   }
   if (parts.length === 1 && parts[0] === "faq") {
     return { kind: "public", page: "faq" };
+  }
+  if (parts[0] === "zahuliaky") {
+    if (parts.length === 1) {
+      return { kind: "zagulyaky", tab: "people" };
+    }
+    if (parts.length === 2 && parts[1] === "documents") {
+      return { kind: "zagulyaky", tab: "documents" };
+    }
+    if (parts.length === 2 && parts[1] === "my") {
+      return { kind: "zagulyaky", tab: "mine" };
+    }
+    if (parts.length === 3 && parts[2] && parts[1] === "people") {
+      return {
+        kind: "zagulyaky",
+        tab: "people",
+        recordKind: "person",
+        recordSlug: parts[2],
+      };
+    }
+    if (parts.length === 3 && parts[2] && parts[1] === "documents") {
+      return {
+        kind: "zagulyaky",
+        tab: "documents",
+        recordKind: "document",
+        recordSlug: parts[2],
+      };
+    }
+    return { kind: "unknown" };
   }
   if (parts.length === 1 && parts[0] === "projects") return { kind: "projects" };
   if (parts.length === 1 && parts[0] === "admin") {

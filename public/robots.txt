@@ -9,3 +9,4 @@ Disallow: /subscription
 Disallow: /auth
 
 Sitemap: https://trekerrodu.com.ua/sitemap.xml
+Sitemap: https://trekerrodu.com.ua/sitemap-zagulyaky.xml

@@ -15,10 +15,12 @@ import {
   type AdminAnalyticsRetentionRow,
 } from "../services/adminAnalyticsService.ts";
 import {
+  ADMIN_PERMISSION_CODES,
   loadAdminCapabilities,
   loadAdminSecurityAudit,
   loadAdminSystemHealth,
   type AdminCapabilities,
+  type AdminPermissionCode,
   type AdminSecurityAuditRow,
   type AdminSystemHealth,
 } from "../services/adminConsoleService.ts";
@@ -42,6 +44,7 @@ import {
   AdminSubscriptions,
 } from "./SubscriptionPage.tsx";
 import { FeedbackPage } from "./FeedbackPage.tsx";
+import { ZagulyakyModerationPanel } from "../components/admin/ZagulyakyModerationPanel.tsx";
 
 interface AdminPanelPageProps {
   page: AdminPage;
@@ -69,6 +72,7 @@ const ADMIN_PAGE_TITLES: Record<AdminPage, string> = {
   features: "Функції",
   announcements: "Оголошення",
   feedback: "Звернення",
+  zagulyaky: "Модерація загуляк",
   operations: "Фонові операції",
   security: "Безпека й аудит",
 };
@@ -76,16 +80,17 @@ const ADMIN_PAGE_TITLES: Record<AdminPage, string> = {
 const ADMIN_NAVIGATION: Array<{
   page: AdminPage;
   label: string;
-  permission?: string;
+  permission?: AdminPermissionCode;
 }> = [
   { page: "overview", label: "Огляд" },
-  { page: "analytics", label: "Аналітика", permission: "analytics.view" },
-  { page: "subscriptions", label: "Тарифи й підписки", permission: "billing.manage" },
-  { page: "features", label: "Функції", permission: "features.manage" },
-  { page: "announcements", label: "Оголошення", permission: "content.manage" },
-  { page: "feedback", label: "Звернення", permission: "support.manage" },
-  { page: "operations", label: "Фонові операції", permission: "operations.manage" },
-  { page: "security", label: "Безпека й аудит", permission: "security.view" },
+  { page: "analytics", label: "Аналітика", permission: ADMIN_PERMISSION_CODES.analyticsView },
+  { page: "subscriptions", label: "Тарифи й підписки", permission: ADMIN_PERMISSION_CODES.billingManage },
+  { page: "features", label: "Функції", permission: ADMIN_PERMISSION_CODES.featuresManage },
+  { page: "announcements", label: "Оголошення", permission: ADMIN_PERMISSION_CODES.contentManage },
+  { page: "feedback", label: "Звернення", permission: ADMIN_PERMISSION_CODES.supportManage },
+  { page: "zagulyaky", label: "Загуляки", permission: ADMIN_PERMISSION_CODES.zagulyakyModerate },
+  { page: "operations", label: "Фонові операції", permission: ADMIN_PERMISSION_CODES.operationsManage },
+  { page: "security", label: "Безпека й аудит", permission: ADMIN_PERMISSION_CODES.securityView },
 ];
 
 const FUNNEL_LABELS: Record<AdminAnalyticsFunnelCode, string> = {
@@ -160,6 +165,8 @@ function downloadAggregateCsv(
 }
 
 export function AdminPanelPage(props: AdminPanelPageProps) {
+  const currentPage = props.page;
+  const navigateAdmin = props.onNavigate;
   const [days, setDays] = useState<AdminAnalyticsPeriodDays>(30);
   const [funnelCode, setFunnelCode] = useState<AdminAnalyticsFunnelCode>("onboarding");
   const [overview, setOverview] = useState(EMPTY_OVERVIEW);
@@ -185,11 +192,13 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
     const previousFrom = new Date(from.getTime() - days * 24 * 60 * 60 * 1_000);
     return { from, to, previousFrom };
   }, [days]);
-  const requiredPermission = ADMIN_NAVIGATION.find((item) => item.page === props.page)?.permission;
-  const canSee = (permission?: string) => !permission
+  const requiredPermission = ADMIN_NAVIGATION.find((item) => item.page === currentPage)?.permission;
+  const canSee = (permission?: AdminPermissionCode) => !permission
     || capabilities?.permissions.includes(permission) === true;
   const hasPagePermission = canSee(requiredPermission);
-  const hasAnalyticsPermission = canSee("analytics.view");
+  const hasAnalyticsPermission = canSee(ADMIN_PERMISSION_CODES.analyticsView);
+  const hasZagulyakyModeratePermission = canSee(ADMIN_PERMISSION_CODES.zagulyakyModerate);
+  const hasZagulyakyImportPermission = canSee(ADMIN_PERMISSION_CODES.zagulyakyImport);
 
   const refreshSubscriptions = useCallback(async () => {
     setSubscriptions(await loadAdminSubscriptions());
@@ -281,7 +290,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   }, [analyticsPreferencesResolved, funnelCode, hasAnalyticsPermission, props.allowed, props.page, range]);
 
   useEffect(() => {
-    if (!props.allowed || !hasPagePermission || ["overview", "analytics"].includes(props.page)) return;
+    if (!props.allowed || !hasPagePermission || ["overview", "analytics", "zagulyaky"].includes(currentPage)) return;
     let active = true;
     setLoading(true);
     setError("");
@@ -298,7 +307,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [hasPagePermission, props.allowed, props.page, refreshAnnouncements, refreshFeatures, refreshSubscriptions, refreshSystemHealth]);
+  }, [currentPage, hasPagePermission, props.allowed, props.page, refreshAnnouncements, refreshFeatures, refreshSubscriptions, refreshSystemHealth]);
 
   if (props.accessLoading) {
     return <main className="admin-access-state"><strong>Перевіряємо права адміністратора…</strong></main>;
@@ -329,7 +338,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
       <main className="admin-access-state">
         <h1>Недостатньо дозволів</h1>
         <p>Ваша адміністративна роль не має доступу до цього розділу.</p>
-        <button type="button" className="button button-primary" onClick={() => props.onNavigate("overview")}>До огляду адмін-панелі</button>
+        <button type="button" className="button button-primary" onClick={() => navigateAdmin("overview")}>До огляду адмін-панелі</button>
       </main>
     );
   }
@@ -452,26 +461,32 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   );
 
   let pageContent: React.ReactNode;
-  if (props.page === "overview") {
+  if (currentPage === "overview") {
     pageContent = (
       <section className="admin-panel-card">
         <h2>Центр керування</h2>
         <p>Аналітика, підтримка, підписки, оголошення, безпека та стан фонових процесів зібрані в одному місці.</p>
         <div className="admin-shortcut-grid">
           {ADMIN_NAVIGATION.filter((item) => item.page !== "overview" && canSee(item.permission)).map((item) => (
-            <button type="button" key={item.page} onClick={() => props.onNavigate(item.page)}>
+            <button type="button" key={item.page} onClick={() => navigateAdmin(item.page)}>
               <strong>{item.label}</strong><span>Відкрити розділ →</span>
             </button>
           ))}
         </div>
       </section>
     );
-  } else if (props.page === "analytics") pageContent = analyticsReport;
-  else if (props.page === "subscriptions") pageContent = <AdminSubscriptions rows={subscriptions} onChanged={refreshSubscriptions} />;
-  else if (props.page === "features") pageContent = <AdminFeatureFlags flags={featureFlags} loadError="" onChanged={refreshFeatures} />;
-  else if (props.page === "announcements") pageContent = <AdminAnnouncements announcements={announcements} loadError="" onChanged={refreshAnnouncements} />;
-  else if (props.page === "feedback") pageContent = props.account ? <FeedbackPage account={props.account} isAdmin /> : <div className="admin-alert">Обліковий запис недоступний.</div>;
-  else if (props.page === "operations") {
+  } else if (currentPage === "analytics") pageContent = analyticsReport;
+  else if (currentPage === "subscriptions") pageContent = <AdminSubscriptions rows={subscriptions} onChanged={refreshSubscriptions} />;
+  else if (currentPage === "features") pageContent = <AdminFeatureFlags flags={featureFlags} loadError="" onChanged={refreshFeatures} />;
+  else if (currentPage === "announcements") pageContent = <AdminAnnouncements announcements={announcements} loadError="" onChanged={refreshAnnouncements} />;
+  else if (currentPage === "feedback") pageContent = props.account ? <FeedbackPage account={props.account} isAdmin /> : <div className="admin-alert">Обліковий запис недоступний.</div>;
+  else if (currentPage === "zagulyaky") pageContent = (
+    <ZagulyakyModerationPanel
+      canImportStage0={hasZagulyakyImportPermission}
+      canModerateZagulyaky={hasZagulyakyModeratePermission}
+    />
+  );
+  else if (currentPage === "operations") {
     pageContent = (
       <section className="admin-panel-card">
         <div className="admin-card-heading"><div><h2>Стан фонових операцій</h2><p>Без вмісту файлів, імен користувачів або проєктних даних.</p></div><button type="button" className="button button-secondary" onClick={() => void refreshSystemHealth()}>Оновити</button></div>
@@ -521,14 +536,14 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   }
 
   const showMetrics = hasAnalyticsPermission
-    && (props.page === "overview" || props.page === "analytics");
+    && (currentPage === "overview" || currentPage === "analytics");
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar">
         <div className="admin-brand"><span>Трекер Роду</span><strong>Адмін-панель</strong></div>
         <nav aria-label="Розділи адмін-панелі">
           {ADMIN_NAVIGATION.filter((item) => canSee(item.permission)).map((item) => (
-            <button key={item.page} className={props.page === item.page ? "active" : ""} onClick={() => props.onNavigate(item.page)}>{item.label}</button>
+            <button key={item.page} className={currentPage === item.page ? "active" : ""} onClick={() => navigateAdmin(item.page)}>{item.label}</button>
           ))}
         </nav>
         <div className="admin-sidebar-footer">
@@ -538,7 +553,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
       </aside>
       <main className="admin-main">
         <header className="admin-header">
-          <div><span className="eyebrow">Приватна зона адміністратора</span><h1>{ADMIN_PAGE_TITLES[props.page]}</h1><p>{props.account?.name ?? "Адміністратор"}</p></div>
+          <div><span className="eyebrow">Приватна зона адміністратора</span><h1>{ADMIN_PAGE_TITLES[currentPage]}</h1><p>{props.account?.name ?? "Адміністратор"}</p></div>
           {showMetrics ? (
             <label>Період<select value={days} onChange={(event) => setDays(Number(event.target.value) as AdminAnalyticsPeriodDays)}><option value={7}>7 днів</option><option value={30}>30 днів</option><option value={90}>90 днів</option></select></label>
           ) : null}
@@ -548,7 +563,9 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
         {showMetrics && !overview.suppressed ? metricCards : null}
         {loading ? <div className="admin-loading">Завантажуємо дані…</div> : null}
         {pageContent}
-        <footer className="admin-privacy-note">Аналітика не містить персональних, родинних чи документних даних. Малі вибірки приховуються.</footer>
+        <footer className="admin-privacy-note">{currentPage === "zagulyaky"
+          ? "Модерація охоплює лише записи публічного каталогу. Приватні родові дерева користувачів не відкриваються."
+          : "Аналітика не містить персональних, родинних чи документних даних. Малі вибірки приховуються."}</footer>
       </main>
     </div>
   );

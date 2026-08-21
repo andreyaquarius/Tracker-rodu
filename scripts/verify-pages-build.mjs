@@ -43,16 +43,18 @@ const publicPages = [
   },
 ];
 
-const privatePatterns = [
-  "/projects",
-  "/settings",
-  "/documents",
-  "/persons",
-  "/findings",
-  "/hypotheses",
-  "/archive-requests",
-  "/year-matrix",
-  "/tasks",
+const privateSitemapUrls = [
+  "https://trekerrodu.com.ua/projects",
+  "https://trekerrodu.com.ua/settings",
+  "https://trekerrodu.com.ua/documents",
+  "https://trekerrodu.com.ua/persons",
+  "https://trekerrodu.com.ua/findings",
+  "https://trekerrodu.com.ua/hypotheses",
+  "https://trekerrodu.com.ua/archive-requests",
+  "https://trekerrodu.com.ua/year-matrix",
+  "https://trekerrodu.com.ua/tasks",
+  "https://trekerrodu.com.ua/zahuliaky/my",
+  "https://trekerrodu.com.ua/admin/zagulyaky",
 ];
 
 function fail(message) {
@@ -104,16 +106,22 @@ for (const path of [
   expectIncludes(robots, `Disallow: ${path}\n`, "robots.txt");
 }
 expectIncludes(robots, "Sitemap: https://trekerrodu.com.ua/sitemap.xml", "robots.txt");
+expectIncludes(robots, "Sitemap: https://trekerrodu.com.ua/sitemap-zagulyaky.xml", "robots.txt");
 expectNotIncludes(robots, "Disallow: /\n", "robots.txt");
 
 const sitemap = readDistFile("sitemap.xml");
 const sitemapUrls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
-const expectedUrls = publicPages.map((page) => page.url);
+const expectedUrls = [
+  ...publicPages.slice(0, 4).map((page) => page.url),
+  "https://trekerrodu.com.ua/zahuliaky",
+  "https://trekerrodu.com.ua/zahuliaky/documents",
+  ...publicPages.slice(4).map((page) => page.url),
+];
 if (JSON.stringify(sitemapUrls) !== JSON.stringify(expectedUrls)) {
   fail(`Unexpected sitemap URLs: ${JSON.stringify(sitemapUrls)}`);
 }
-for (const pattern of privatePatterns) {
-  expectNotIncludes(sitemap, pattern, "sitemap.xml");
+for (const url of privateSitemapUrls) {
+  expectNotIncludes(sitemap, `<loc>${url}</loc>`, "sitemap.xml");
 }
 
 for (const page of publicPages) {

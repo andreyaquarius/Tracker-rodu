@@ -1,9 +1,30 @@
 import { getSupabaseClient } from "./supabaseAuth.ts";
 
+export const ADMIN_PERMISSION_CODES = {
+  analyticsView: "analytics.view",
+  billingManage: "billing.manage",
+  featuresManage: "features.manage",
+  contentManage: "content.manage",
+  supportManage: "support.manage",
+  operationsManage: "operations.manage",
+  securityView: "security.view",
+  zagulyakyModerate: "zagulyaky.moderate",
+  zagulyakyImport: "zagulyaky.import",
+} as const;
+
+export type AdminPermissionCode = typeof ADMIN_PERMISSION_CODES[keyof typeof ADMIN_PERMISSION_CODES];
+
 export interface AdminCapabilities {
   isAdmin: boolean;
   roles: string[];
   permissions: string[];
+}
+
+export function hasAdminPermission(
+  capabilities: AdminCapabilities | null,
+  permission: AdminPermissionCode,
+): boolean {
+  return capabilities?.isAdmin === true && capabilities.permissions.includes(permission);
 }
 
 export interface AdminSystemHealth {

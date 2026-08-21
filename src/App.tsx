@@ -36,6 +36,7 @@ import { AdminPanelPage } from "./pages/AdminPanelPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { FaqPage, FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
+import { ZagulyakyPage } from "./pages/ZagulyakyPage";
 import { MapPage } from "./pages/MapPage";
 import { FamilyTreePage } from "./pages/FamilyTreePage";
 import { FamilyTreeStatisticsPage } from "./pages/FamilyTreeStatisticsPage.tsx";
@@ -316,6 +317,7 @@ type AppDocumentScanViewer = ActiveDocumentScanViewer & {
 
 const ACCOUNT_ONBOARDING_KEY = "tracker-rodu-account-onboarded";
 const ACTIVE_WORKSPACE_KEY = "tracker-rodu-active-workspace";
+const POST_AUTH_RETURN_KEY = "tracker-rodu:post-auth-return";
 const SITE_ORIGIN = "https://trekerrodu.com.ua";
 const SITE_IMAGE_URL = `${SITE_ORIGIN}/tracker-rodu-logo.png`;
 
@@ -421,6 +423,62 @@ function applyPublicSeo(page: PublicPageKey): void {
   upsertMetaName("twitter:title", seo.title);
   upsertMetaName("twitter:description", seo.description);
   upsertMetaName("twitter:image", SITE_IMAGE_URL);
+}
+
+function applyZagulyakySeo(route: Extract<ReturnType<typeof parseAppRoute>, { kind: "zagulyaky" }>): void {
+  const documents = route.tab === "documents" || route.recordKind === "document";
+  const personal = route.tab === "mine";
+  const title = personal
+    ? "Мої загуляки — Трекер Роду"
+    : documents
+      ? "Загуляки документів — публічний генеалогічний каталог"
+      : "Загуляки людей — публічний генеалогічний каталог";
+  const description = documents
+    ? "Документи та справи, у яких дослідники знайшли записи інших населених пунктів або неочікуваних періодів."
+    : "Люди, знайдені в генеалогічних документах поза очікуваним місцем пошуку, із перевірюваними посиланнями на джерела.";
+  const canonicalPath = route.recordSlug && route.recordKind
+    ? `/zahuliaky/${route.recordKind === "person" ? "people" : "documents"}/${encodeURIComponent(route.recordSlug)}`
+    : route.tab === "documents"
+      ? "/zahuliaky/documents"
+      : route.tab === "mine"
+        ? "/zahuliaky/my"
+        : "/zahuliaky";
+  const canonical = `${SITE_ORIGIN}${canonicalPath}`;
+
+  document.title = title;
+  upsertMetaName("description", description);
+  upsertMetaName("robots", personal ? "noindex, nofollow, noarchive" : "index, follow");
+  upsertCanonical(canonical);
+  upsertMetaProperty("og:title", title);
+  upsertMetaProperty("og:description", description);
+  upsertMetaProperty("og:type", "website");
+  upsertMetaProperty("og:url", canonical);
+  upsertMetaProperty("og:site_name", "Трекер Роду");
+  upsertMetaProperty("og:locale", "uk_UA");
+  upsertMetaProperty("og:image", SITE_IMAGE_URL);
+  upsertMetaProperty("og:image:alt", "Трекер Роду — Загуляки");
+  upsertMetaName("twitter:card", "summary");
+  upsertMetaName("twitter:title", title);
+  upsertMetaName("twitter:description", description);
+  upsertMetaName("twitter:image", SITE_IMAGE_URL);
+}
+
+function consumeZagulyakyPostAuthReturn(): string | null {
+  try {
+    const path = window.sessionStorage.getItem(POST_AUTH_RETURN_KEY)?.trim() ?? "";
+    window.sessionStorage.removeItem(POST_AUTH_RETURN_KEY);
+    return /^\/zahuliaky(?:\/|$)/.test(path) ? path : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberZagulyakyPostAuthReturn(path: string): void {
+  try {
+    window.sessionStorage.setItem(POST_AUTH_RETURN_KEY, path);
+  } catch {
+    // A blocked sessionStorage must not prevent the sign-in screen from opening.
+  }
 }
 
 function applyHomeSeo(): void {
@@ -696,6 +754,15 @@ export default function App() {
     () => parseAppRoute(location.pathname, projectCustomSections),
     [location.pathname, projectCustomSections],
   );
+  const isZagulyakyRoute = route.kind === "zagulyaky";
+  const isPrivateZagulyakyRoute = isZagulyakyRoute && route.tab === "mine";
+  const isPublicContentRoute = route.kind === "public" || (
+    isZagulyakyRoute && !isPrivateZagulyakyRoute
+  );
+  // All Zagulyaky screens are standalone from a workspace perspective. The
+  // private "mine" route differs only in authentication/analytics treatment;
+  // it must not trigger unrelated project dashboard data loads.
+  const skipsWorkspaceState = route.kind === "public" || isZagulyakyRoute;
   const familyTreeRouteFocus = useMemo(
     () => parseFamilyTreeRouteFocus(location.search),
     [location.search],
@@ -760,7 +827,7 @@ export default function App() {
   }, [workspace?.projectId]);
   const subscriptionAccess = useSubscription(
     workspace?.projectId,
-    Boolean(account) && route.kind !== "public",
+    Boolean(account) && !skipsWorkspaceState,
     account?.id ?? "",
   );
   const handleFamilyTreeDataChanged = useCallback(() => {
@@ -772,7 +839,7 @@ export default function App() {
   }, [account?.id, subscriptionAccess.refreshSubscription, workspace?.projectId]);
   useEffect(() => {
     let active = true;
-    if (!account || route.kind === "public") {
+    if (!account || skipsWorkspaceState) {
       setFeatureFlags({});
       return () => {
         active = false;
@@ -788,7 +855,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [account?.id, route.kind]);
+  }, [account?.id, skipsWorkspaceState]);
 
   // Family Tree and Persons V2 are core authenticated modules. Subscription
   // limits still control creation capacity; project RLS still controls which
@@ -904,15 +971,20 @@ export default function App() {
       ]);
   const researchRequiredByPlan = projectCapacityPlan !== "professional";
   const requestedDataGroups = useMemo(() => dataGroupsForPage(page), [page]);
-  const shouldLoadResearches = route.kind !== "admin" && requestedDataGroups.has("researches");
-  const shouldLoadPeople = route.kind !== "admin" && requestedDataGroups.has("people");
-  const shouldLoadDocuments = route.kind !== "admin" && requestedDataGroups.has("documents");
-  const shouldLoadWork = route.kind !== "admin" && requestedDataGroups.has("work");
-  const shouldLoadAnalysis = route.kind !== "admin" && requestedDataGroups.has("analysis");
+  const shouldLoadResearches = route.kind !== "admin" && !skipsWorkspaceState && requestedDataGroups.has("researches");
+  const shouldLoadPeople = route.kind !== "admin" && !skipsWorkspaceState && requestedDataGroups.has("people");
+  const shouldLoadDocuments = route.kind !== "admin" && !skipsWorkspaceState && requestedDataGroups.has("documents");
+  const shouldLoadWork = route.kind !== "admin" && !skipsWorkspaceState && requestedDataGroups.has("work");
+  const shouldLoadAnalysis = route.kind !== "admin" && !skipsWorkspaceState && requestedDataGroups.has("analysis");
 
   useEffect(() => {
     if (route.kind === "public") {
       applyPublicSeo(route.page);
+      return;
+    }
+
+    if (route.kind === "zagulyaky") {
+      applyZagulyakySeo(route);
       return;
     }
 
@@ -933,7 +1005,7 @@ export default function App() {
       suspendPublicAnalytics();
       return;
     }
-    if (route.kind === "public") {
+    if (isPublicContentRoute) {
       activatePublicAnalyticsPage(location.pathname);
       return;
     }
@@ -942,16 +1014,16 @@ export default function App() {
       return;
     }
     suspendPublicAnalytics();
-  }, [account, authReady, location.pathname, passwordRecovery, route.kind]);
+  }, [account, authReady, isPublicContentRoute, location.pathname, passwordRecovery, route.kind]);
 
   useEffect(() => {
     const privateAuthenticatedSession = Boolean(account) &&
       !passwordRecovery &&
       route.kind !== "root" &&
-      route.kind !== "public" &&
+      !isPublicContentRoute &&
       route.kind !== "admin";
     setAuthenticatedEngagementEnabled(privateAuthenticatedSession);
-  }, [account, passwordRecovery, route.kind]);
+  }, [account, isPublicContentRoute, passwordRecovery, route.kind]);
 
   const productAnalyticsPage = useMemo(() => productAnalyticsPageCode(route), [route]);
 
@@ -985,11 +1057,12 @@ export default function App() {
       && !subscriptionAccess.loading
       && !subscriptionAccess.isAdmin
       && route.kind !== "root"
-      && route.kind !== "public"
+      && !isPublicContentRoute
       && route.kind !== "admin";
     setProductAnalyticsEnabled(productAnalyticsAllowed);
   }, [
     account,
+    isPublicContentRoute,
     productAnalyticsConsentOwnerId,
     passwordRecovery,
     route.kind,
@@ -1066,6 +1139,11 @@ export default function App() {
     if (!account || isAccountSigningIn || passwordRecovery) return;
 
     if (route.kind === "root") {
+      const postAuthReturn = consumeZagulyakyPostAuthReturn();
+      if (postAuthReturn) {
+        routerNavigate(postAuthReturn, { replace: true });
+        return;
+      }
       const privatePath = workspace
         ? projectDashboardPath(workspace.projectSlug)
         : "/projects";
@@ -1141,9 +1219,24 @@ export default function App() {
 
   useEffect(() => {
     if (!authReady || account || passwordRecovery) return;
-    if (route.kind === "root" || route.kind === "public") return;
+    if (route.kind === "zagulyaky" && route.tab === "mine") {
+      rememberZagulyakyPostAuthReturn(
+        `${location.pathname}${location.search}${location.hash}`,
+      );
+    }
+    if (route.kind === "root" || isPublicContentRoute) return;
     routerNavigate("/", { replace: true });
-  }, [account, authReady, passwordRecovery, route.kind, routerNavigate]);
+  }, [
+    account,
+    authReady,
+    isPublicContentRoute,
+    location.hash,
+    location.pathname,
+    location.search,
+    passwordRecovery,
+    route,
+    routerNavigate,
+  ]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -2887,6 +2980,19 @@ export default function App() {
     if (route.page === "features") return <FeaturesPage />;
     if (route.page === "pricing") return <PricingPage />;
     return <FaqPage />;
+  }
+
+  if (route.kind === "zagulyaky") {
+    return (
+      <ZagulyakyPage
+        account={account}
+        initialTab={route.tab}
+        initialRecordKind={route.recordKind}
+        initialRecordSlug={route.recordSlug}
+        onNavigate={(path) => routerNavigate(path)}
+        onRequestSignIn={() => routerNavigate("/")}
+      />
+    );
   }
 
   if (!account) {
@@ -6023,6 +6129,7 @@ export default function App() {
             : undefined
         }
         onNavigate={navigate}
+        onOpenZagulyaky={() => routerNavigate("/zahuliaky/my")}
         onOpenProjects={openProjects}
         onOpenGeneHelp={() => {
           if (canOpenGeneHelp) setGeneHelpOpen(true);

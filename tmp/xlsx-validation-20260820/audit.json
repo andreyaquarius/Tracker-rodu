@@ -1,0 +1,1080 @@
+{
+  "workbook": {
+    "sheetNames": [
+      "00_README",
+      "01_SourcePosts",
+      "02_Events",
+      "03_Participants",
+      "04_EventSources",
+      "05_Cards",
+      "06_QC",
+      "07_Довідники",
+      "08_Приклад",
+      "09_GeminiPrompt"
+    ],
+    "tables": [
+      {
+        "worksheet": "01_SourcePosts",
+        "name": "SourcePostsTable",
+        "headerCount": 16
+      },
+      {
+        "worksheet": "02_Events",
+        "name": "EventsTable",
+        "headerCount": 25
+      },
+      {
+        "worksheet": "03_Participants",
+        "name": "ParticipantsTable",
+        "headerCount": 32
+      },
+      {
+        "worksheet": "04_EventSources",
+        "name": "EventSourcesTable",
+        "headerCount": 19
+      },
+      {
+        "worksheet": "05_Cards",
+        "name": "CardsTable",
+        "headerCount": 18
+      },
+      {
+        "worksheet": "06_QC",
+        "name": "QcTable",
+        "headerCount": 10
+      }
+    ],
+    "totalPopulatedRecords": 10685,
+    "formulaErrorCount": 0,
+    "formulaErrorLocations": []
+  },
+  "recordCounts": {
+    "01_SourcePosts": 2112,
+    "02_Events": 1417,
+    "03_Participants": 2085,
+    "04_EventSources": 822,
+    "05_Cards": 2085,
+    "06_QC": 2164
+  },
+  "batchIntegrity": {
+    "distinctBatchIdCountBySheet": {
+      "01_SourcePosts": 1,
+      "02_Events": 1,
+      "03_Participants": 1,
+      "04_EventSources": 1,
+      "05_Cards": 1,
+      "06_QC": 1
+    },
+    "sourcePosts_missing_batch_id": 0,
+    "events_missing_batch_id": 0,
+    "participants_missing_batch_id": 0,
+    "eventSources_missing_batch_id": 0,
+    "cards_missing_batch_id": 0,
+    "qc_missing_batch_id": 0,
+    "allSheetsShareOneSameBatchId": true
+  },
+  "headers": {
+    "01_SourcePosts": [
+      "import_batch_id",
+      "post_key",
+      "source_platform",
+      "facebook_post_url_private",
+      "source_collection_url_private",
+      "source_author_label_private",
+      "source_date_text",
+      "source_published_at",
+      "source_date_precision",
+      "post_original_text",
+      "post_text_complete",
+      "source_content_sha256",
+      "source_file_name",
+      "source_row_number",
+      "source_status",
+      "source_notes_private"
+    ],
+    "02_Events": [
+      "import_batch_id",
+      "event_key",
+      "post_key",
+      "event_no_in_post",
+      "event_group_key",
+      "event_type",
+      "event_type_original",
+      "event_date_text",
+      "event_year_from",
+      "event_year_to",
+      "event_month",
+      "event_day",
+      "date_precision",
+      "calendar_style",
+      "event_place_original",
+      "event_place_normalized",
+      "church_or_parish_original",
+      "record_number",
+      "document_language",
+      "record_types",
+      "event_original_text",
+      "event_summary",
+      "event_confidence",
+      "event_status",
+      "event_notes"
+    ],
+    "03_Participants": [
+      "import_batch_id",
+      "participant_key",
+      "person_card_key",
+      "event_key",
+      "post_key",
+      "participant_sort_order",
+      "structural_role",
+      "event_role_code",
+      "event_role_custom",
+      "original_full_name",
+      "normalized_uk_full_name",
+      "surname",
+      "given_name",
+      "patronymic",
+      "maiden_name",
+      "sex",
+      "age_text",
+      "age_years",
+      "origin_text",
+      "residence_text",
+      "social_estate_text",
+      "occupation_or_rank_text",
+      "marital_status_text",
+      "relation_original",
+      "participant_original_text",
+      "person_evidence_excerpt",
+      "field_confidence",
+      "possible_living_person",
+      "participant_status",
+      "potential_duplicate_key",
+      "participant_notes",
+      "private_search_text"
+    ],
+    "04_EventSources": [
+      "import_batch_id",
+      "event_source_key",
+      "event_key",
+      "is_primary",
+      "source_type",
+      "source_title",
+      "archive_name",
+      "fond",
+      "inventory",
+      "file_number",
+      "page_from",
+      "page_to",
+      "citation",
+      "source_url_public_candidate",
+      "source_platform",
+      "external_id",
+      "access_date",
+      "permission_status",
+      "source_notes"
+    ],
+    "05_Cards": [
+      "import_batch_id",
+      "card_key",
+      "event_key",
+      "post_key",
+      "kind",
+      "primary_participant_key",
+      "title",
+      "card_original_text",
+      "normalized_text",
+      "summary",
+      "classification_reason",
+      "verification_status",
+      "privacy_review_state",
+      "publication_status",
+      "card_status",
+      "copy_event_participants",
+      "duplicate_review_status",
+      "card_notes"
+    ],
+    "06_QC": [
+      "import_batch_id",
+      "post_key",
+      "event_key",
+      "participant_key",
+      "severity",
+      "qc_code",
+      "field_name",
+      "original_excerpt",
+      "note",
+      "review_status"
+    ]
+  },
+  "identifiers": {
+    "sourcePosts_post_key": {
+      "blankCount": 0,
+      "duplicateGroupCount": 0,
+      "duplicateRowCount": 0,
+      "firstDuplicateRows": []
+    },
+    "events_event_key": {
+      "blankCount": 0,
+      "duplicateGroupCount": 0,
+      "duplicateRowCount": 0,
+      "firstDuplicateRows": []
+    },
+    "participants_participant_key": {
+      "blankCount": 0,
+      "duplicateGroupCount": 0,
+      "duplicateRowCount": 0,
+      "firstDuplicateRows": []
+    },
+    "cards_card_key": {
+      "blankCount": 0,
+      "duplicateGroupCount": 0,
+      "duplicateRowCount": 0,
+      "firstDuplicateRows": []
+    },
+    "eventSources_event_source_key": {
+      "blankCount": 0,
+      "duplicateGroupCount": 0,
+      "duplicateRowCount": 0,
+      "firstDuplicateRows": []
+    },
+    "events_post_key_event_no_in_post": {
+      "blankCount": 0,
+      "duplicateGroupCount": 0,
+      "duplicateRowCount": 0,
+      "firstDuplicateRows": []
+    },
+    "participants_event_key_participant_sort_order": {
+      "blankCount": 0,
+      "duplicateGroupCount": 0,
+      "duplicateRowCount": 0,
+      "firstDuplicateRows": []
+    },
+    "source_content_sha256": {
+      "blankCount": 260,
+      "duplicateGroupCount": 5,
+      "duplicateRowCount": 12,
+      "firstDuplicateRows": [
+        [
+          40,
+          41
+        ],
+        [
+          47,
+          48,
+          49
+        ],
+        [
+          50,
+          51
+        ],
+        [
+          127,
+          128
+        ],
+        [
+          129,
+          176,
+          179
+        ]
+      ]
+    },
+    "facebook_post_url_private": {
+      "blankCount": 0,
+      "duplicateGroupCount": 0,
+      "duplicateRowCount": 0,
+      "firstDuplicateRows": []
+    }
+  },
+  "referenceIntegrity": {
+    "events_post_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "participants_event_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "participants_post_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "cards_event_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "cards_post_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "cards_primary_participant_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "eventSources_event_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "qc_post_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "qc_event_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "qc_participant_key": {
+      "missingReferenceCount": 0,
+      "firstRows": []
+    },
+    "participant_event_post_match": {
+      "count": 0,
+      "firstRows": []
+    },
+    "card_event_post_match": {
+      "count": 0,
+      "firstRows": []
+    },
+    "events_without_participant_count": 148,
+    "events_without_card_count": 148,
+    "events_without_event_source_count": 613,
+    "sourcePosts_without_event_count": 1136,
+    "sourcePosts_with_event_but_missing_original_text": 0,
+    "participants_without_card_count": 0,
+    "person_card_key_and_card_key_mismatch_count": 0,
+    "person_card_key_and_card_key_mismatch_first_rows": [],
+    "person_card_key_reused_across_participant_rows": {
+      "groups": 0,
+      "rows": 0,
+      "firstRows": []
+    }
+  },
+  "requiredDataQuality": {
+    "sourcePosts_missing_private_facebook_url": 0,
+    "sourcePosts_missing_original_text": 260,
+    "sourcePosts_incomplete_text_flag_values": {
+      "count": 2,
+      "values": [
+        "no",
+        "yes"
+      ],
+      "truncated": false
+    },
+    "sourcePosts_post_text_complete_counts": {
+      "entries": [
+        {
+          "value": "yes",
+          "count": 1844
+        },
+        {
+          "value": "no",
+          "count": 268
+        }
+      ],
+      "truncated": false
+    },
+    "sourcePosts_status_counts": {
+      "entries": [
+        {
+          "value": "ready",
+          "count": 833
+        },
+        {
+          "value": "needs_ocr",
+          "count": 604
+        },
+        {
+          "value": "no_zagulyaka",
+          "count": 370
+        },
+        {
+          "value": "needs_review",
+          "count": 188
+        },
+        {
+          "value": "needs_refetch",
+          "count": 117
+        }
+      ],
+      "truncated": false
+    },
+    "sourcePosts_invalid_sha256_format_count": 0,
+    "events_missing_type": 0,
+    "events_missing_original_text": 0,
+    "events_missing_place": 309,
+    "events_status_counts": {
+      "entries": [
+        {
+          "value": "ready",
+          "count": 1265
+        },
+        {
+          "value": "needs_review",
+          "count": 152
+        }
+      ],
+      "truncated": false
+    },
+    "events_without_participants_status_counts": {
+      "entries": [
+        {
+          "value": "needs_review",
+          "count": 148
+        }
+      ],
+      "truncated": false
+    },
+    "events_year_outside_1400_2100": 0,
+    "events_month_outside_1_12": 0,
+    "events_day_outside_1_31": 0,
+    "participants_missing_name": 0,
+    "participants_missing_role": 0,
+    "participants_missing_original_text": 0,
+    "cards_missing_title": 0,
+    "cards_missing_original_text": 0,
+    "person_cards_missing_primary_participant": 0,
+    "document_cards_with_primary_participant": 0,
+    "longTextCells": {
+      "source_post_max_characters": 14432,
+      "event_original_max_characters": 12173,
+      "participant_original_max_characters": 497,
+      "card_original_max_characters": 497,
+      "cells_over_excel_32767_character_limit": 0
+    }
+  },
+  "privacyAndPublicationSafety": {
+    "eventSources_with_facebook_in_public_candidate_url": {
+      "count": 0,
+      "firstRows": []
+    },
+    "eventSources_with_shortener_in_public_candidate_url": {
+      "count": 25,
+      "firstRows": [
+        394,
+        436,
+        438,
+        439,
+        440,
+        441,
+        442,
+        443,
+        444,
+        445,
+        446,
+        447,
+        454,
+        455,
+        457,
+        458,
+        459,
+        460,
+        461,
+        462,
+        463,
+        465,
+        466,
+        467,
+        468
+      ]
+    },
+    "eventSources_missing_public_candidate_url": 271,
+    "eventSources_permission_status_counts": {
+      "entries": [
+        {
+          "value": "not_reviewed",
+          "count": 822
+        }
+      ],
+      "truncated": false
+    },
+    "cards_with_facebook_url_in_public_text_fields": {
+      "count": 0,
+      "firstRows": []
+    },
+    "public_or_published_cards": {
+      "count": 0,
+      "firstRows": []
+    },
+    "possible_living_participant_count": 136,
+    "possible_living_card_count": 136,
+    "possible_living_person_cards_marked_public": {
+      "count": 0,
+      "firstRows": []
+    }
+  },
+  "categoricalValues": {
+    "source_platform": {
+      "count": 17,
+      "values": [
+        "FamilySearch",
+        "tsdea.archives.gov.ua",
+        "gwar.mil.ru",
+        "szukajwarchiwach.pl",
+        "www.familysearch.org",
+        "uk.wikipedia.org",
+        "youtu.be",
+        "www.szukajwarchiwach.gov.pl",
+        "cdiak.archives.gov.ua",
+        "archium.cdiak.archives.gov.ua",
+        "archium.krop.archives.gov.ua",
+        "upload.wikimedia.org",
+        "rv.archives.gov.ua",
+        "maps.app.goo.gl",
+        "uk.wikisource.org",
+        "drive.google.com",
+        "surl.li"
+      ],
+      "truncated": false
+    },
+    "source_status": {
+      "count": 5,
+      "values": [
+        "needs_refetch",
+        "no_zagulyaka",
+        "needs_review",
+        "ready",
+        "needs_ocr"
+      ],
+      "truncated": false
+    },
+    "event_type": {
+      "count": 9,
+      "values": [
+        "marriage",
+        "death",
+        "baptism",
+        "birth",
+        "residence_record",
+        "unspecified",
+        "birth_and_baptism",
+        "military_service",
+        "divorce"
+      ],
+      "truncated": false
+    },
+    "date_precision": {
+      "count": 5,
+      "values": [
+        "day",
+        "unknown",
+        "year",
+        "range",
+        "month"
+      ],
+      "truncated": false
+    },
+    "calendar_style": {
+      "count": 0,
+      "values": [],
+      "truncated": false
+    },
+    "event_status": {
+      "count": 2,
+      "values": [
+        "ready",
+        "needs_review"
+      ],
+      "truncated": false
+    },
+    "structural_role": {
+      "count": 6,
+      "values": [
+        "spouse",
+        "witness",
+        "subject",
+        "godparent",
+        "parent",
+        "mentioned"
+      ],
+      "truncated": false
+    },
+    "event_role_code": {
+      "count": 12,
+      "values": [
+        "groom",
+        "bride",
+        "pledger",
+        "deceased",
+        "migrant",
+        "godparent",
+        "newborn",
+        "father",
+        "mother",
+        "military_person",
+        "other",
+        "baptized"
+      ],
+      "truncated": false
+    },
+    "sex": {
+      "count": 2,
+      "values": [
+        "male",
+        "female"
+      ],
+      "truncated": false
+    },
+    "possible_living_person": {
+      "count": 2,
+      "values": [
+        "no",
+        "yes"
+      ],
+      "truncated": false
+    },
+    "participant_status": {
+      "count": 2,
+      "values": [
+        "needs_review",
+        "ready"
+      ],
+      "truncated": false
+    },
+    "is_primary": {
+      "count": 2,
+      "values": [
+        "yes",
+        "no"
+      ],
+      "truncated": false
+    },
+    "source_type": {
+      "count": 3,
+      "values": [
+        "archive_record",
+        "online_reference",
+        "online_document"
+      ],
+      "truncated": false
+    },
+    "permission_status": {
+      "count": 1,
+      "values": [
+        "not_reviewed"
+      ],
+      "truncated": false
+    },
+    "kind": {
+      "count": 1,
+      "values": [
+        "person"
+      ],
+      "truncated": false
+    },
+    "verification_status": {
+      "count": 1,
+      "values": [
+        "unverified"
+      ],
+      "truncated": false
+    },
+    "privacy_review_state": {
+      "count": 2,
+      "values": [
+        "not_reviewed",
+        "possible_living"
+      ],
+      "truncated": false
+    },
+    "publication_status": {
+      "count": 1,
+      "values": [
+        "draft"
+      ],
+      "truncated": false
+    },
+    "card_status": {
+      "count": 2,
+      "values": [
+        "needs_review",
+        "ready"
+      ],
+      "truncated": false
+    },
+    "copy_event_participants": {
+      "count": 1,
+      "values": [
+        "yes"
+      ],
+      "truncated": false
+    },
+    "duplicate_review_status": {
+      "count": 1,
+      "values": [
+        "not_reviewed"
+      ],
+      "truncated": false
+    },
+    "severity": {
+      "count": 2,
+      "values": [
+        "warning",
+        "info"
+      ],
+      "truncated": false
+    },
+    "qc_code": {
+      "count": 10,
+      "values": [
+        "UNREADABLE_TEXT",
+        "NO_EXTRACTABLE_EVENT",
+        "PARTIAL_NAME",
+        "AMBIGUOUS_DATE",
+        "NO_NAMED_PERSON",
+        "AMBIGUOUS_EVENT_BOUNDARY",
+        "POSSIBLE_DUPLICATE",
+        "AMBIGUOUS_NAME",
+        "AMBIGUOUS_DOCUMENT_LINK",
+        "AMBIGUOUS_PLACE"
+      ],
+      "truncated": false
+    },
+    "review_status": {
+      "count": 1,
+      "values": [
+        "open"
+      ],
+      "truncated": false
+    }
+  },
+  "enumViolationsAgainstProvidedDictionary": {
+    "event_type": {
+      "count": 0,
+      "values": []
+    },
+    "event_role_code": {
+      "count": 0,
+      "values": []
+    },
+    "structural_role": {
+      "count": 0,
+      "values": []
+    },
+    "source_status": {
+      "count": 0,
+      "values": []
+    },
+    "event_status": {
+      "count": 0,
+      "values": []
+    },
+    "participant_status": {
+      "count": 0,
+      "values": []
+    },
+    "card_status": {
+      "count": 0,
+      "values": []
+    },
+    "privacy_review_state": {
+      "count": 0,
+      "values": []
+    },
+    "qc_code": {
+      "count": 0,
+      "values": []
+    }
+  },
+  "duplicateReviewSignals": {
+    "participant_potential_duplicate_key_nonblank": 0,
+    "cards_duplicate_review_status_counts": {
+      "entries": [
+        {
+          "value": "not_reviewed",
+          "count": 2085
+        }
+      ],
+      "truncated": false
+    }
+  },
+  "categoricalCounts": {
+    "event_type": {
+      "entries": [
+        {
+          "value": "marriage",
+          "count": 545
+        },
+        {
+          "value": "death",
+          "count": 419
+        },
+        {
+          "value": "birth",
+          "count": 253
+        },
+        {
+          "value": "birth_and_baptism",
+          "count": 137
+        },
+        {
+          "value": "baptism",
+          "count": 19
+        },
+        {
+          "value": "unspecified",
+          "count": 14
+        },
+        {
+          "value": "military_service",
+          "count": 14
+        },
+        {
+          "value": "residence_record",
+          "count": 13
+        },
+        {
+          "value": "divorce",
+          "count": 3
+        }
+      ],
+      "truncated": false
+    },
+    "event_role_code": {
+      "entries": [
+        {
+          "value": "groom",
+          "count": 484
+        },
+        {
+          "value": "bride",
+          "count": 389
+        },
+        {
+          "value": "deceased",
+          "count": 385
+        },
+        {
+          "value": "newborn",
+          "count": 335
+        },
+        {
+          "value": "father",
+          "count": 187
+        },
+        {
+          "value": "mother",
+          "count": 164
+        },
+        {
+          "value": "pledger",
+          "count": 70
+        },
+        {
+          "value": "godparent",
+          "count": 52
+        },
+        {
+          "value": "baptized",
+          "count": 7
+        },
+        {
+          "value": "migrant",
+          "count": 6
+        },
+        {
+          "value": "other",
+          "count": 4
+        },
+        {
+          "value": "military_person",
+          "count": 2
+        }
+      ],
+      "truncated": false
+    },
+    "source_status": {
+      "entries": [
+        {
+          "value": "ready",
+          "count": 833
+        },
+        {
+          "value": "needs_ocr",
+          "count": 604
+        },
+        {
+          "value": "no_zagulyaka",
+          "count": 370
+        },
+        {
+          "value": "needs_review",
+          "count": 188
+        },
+        {
+          "value": "needs_refetch",
+          "count": 117
+        }
+      ],
+      "truncated": false
+    },
+    "event_status": {
+      "entries": [
+        {
+          "value": "ready",
+          "count": 1265
+        },
+        {
+          "value": "needs_review",
+          "count": 152
+        }
+      ],
+      "truncated": false
+    },
+    "participant_status": {
+      "entries": [
+        {
+          "value": "needs_review",
+          "count": 1057
+        },
+        {
+          "value": "ready",
+          "count": 1028
+        }
+      ],
+      "truncated": false
+    },
+    "card_status": {
+      "entries": [
+        {
+          "value": "needs_review",
+          "count": 1057
+        },
+        {
+          "value": "ready",
+          "count": 1028
+        }
+      ],
+      "truncated": false
+    },
+    "qc_code": {
+      "entries": [
+        {
+          "value": "UNREADABLE_TEXT",
+          "count": 713
+        },
+        {
+          "value": "PARTIAL_NAME",
+          "count": 529
+        },
+        {
+          "value": "NO_EXTRACTABLE_EVENT",
+          "count": 423
+        },
+        {
+          "value": "NO_NAMED_PERSON",
+          "count": 148
+        },
+        {
+          "value": "AMBIGUOUS_DATE",
+          "count": 134
+        },
+        {
+          "value": "AMBIGUOUS_NAME",
+          "count": 68
+        },
+        {
+          "value": "POSSIBLE_DUPLICATE",
+          "count": 64
+        },
+        {
+          "value": "AMBIGUOUS_PLACE",
+          "count": 39
+        },
+        {
+          "value": "AMBIGUOUS_EVENT_BOUNDARY",
+          "count": 29
+        },
+        {
+          "value": "AMBIGUOUS_DOCUMENT_LINK",
+          "count": 17
+        }
+      ],
+      "truncated": false
+    }
+  },
+  "dictionaryValues": [
+    "07 · Довідники кодів",
+    "Використовуйте коди з цих списків. За потреби залишайте поле порожнім і додавайте QC-запис, а не вигадуйте новий код.",
+    "event_type",
+    "event_role_code",
+    "structural_role",
+    "source_status",
+    "event_status/card_status",
+    "privacy_review_state",
+    "QC codes",
+    "Пояснення",
+    "birth",
+    "subject",
+    "ready",
+    "not_reviewed",
+    "NO_EXTRACTABLE_EVENT",
+    "witness — один код для свідка незалежно від статі",
+    "baptism",
+    "newborn",
+    "spouse",
+    "no_zagulyaka",
+    "needs_review",
+    "possible_living",
+    "NO_NAMED_PERSON",
+    "event_place_original ≠ origin_text ≠ residence_text",
+    "birth_and_baptism",
+    "baptized",
+    "parent",
+    "needs_ocr",
+    "quarantined",
+    "cleared_for_review",
+    "AMBIGUOUS_EVENT_BOUNDARY",
+    "social_estate_text — козак, селянин, міщанин тощо",
+    "marriage",
+    "groom",
+    "child",
+    "needs_refetch",
+    "skip",
+    "blocked",
+    "AMBIGUOUS_NAME",
+    "source_post URL — тільки приватне походження даних",
+    "death",
+    "bride",
+    "witness",
+    "PARTIAL_NAME",
+    "burial",
+    "groom_father",
+    "godparent",
+    "AMBIGUOUS_ROLE",
+    "divorce",
+    "groom_mother",
+    "official",
+    "AMBIGUOUS_DATE",
+    "military_service",
+    "bride_father",
+    "relative",
+    "AMBIGUOUS_PLACE",
+    "residence_record",
+    "bride_mother",
+    "mentioned",
+    "AMBIGUOUS_DOCUMENT_LINK",
+    "court_record",
+    "deceased",
+    "other",
+    "POSSIBLE_DUPLICATE",
+    "property_record",
+    "resident",
+    "UNREADABLE_TEXT",
+    "household_head",
+    "MISSING_SOURCE_URL",
+    "unspecified",
+    "household_member",
+    "military_person",
+    "migrant",
+    "godchild",
+    "father",
+    "mother",
+    "pledger",
+    "officiant",
+    "registrar",
+    "midwife",
+    "informant",
+    "owner",
+    "commander"
+  ]
+}

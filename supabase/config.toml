@@ -94,6 +94,37 @@ verify_jwt = false
 # worker secret. The function validates both paths before service-role work.
 verify_jwt = false
 
+[functions.zagulyaky-stage0-import]
+# Browser CORS preflight requests contain no user JWT. The function validates
+# the JWT itself and requires the dedicated zagulyaky.import permission before
+# it can use the server key for the private staging import.
+verify_jwt = false
+
+[functions.zagulyaky-tabular-event-import]
+# Browser CORS preflight requests contain no user JWT. The handler verifies the
+# caller JWT itself, then the database `zagulyaky.import` capability, before it
+# parses the workbook or uses server-only ingestion/materialization RPCs.
+verify_jwt = false
+
+[functions.zagulyaka-attachment]
+# The public delivery action and browser CORS preflight have no JWT. Preview,
+# publish and revoke validate a JWT in code, then re-check moderator permission
+# through protected database RPCs before touching private Storage.
+verify_jwt = false
+
+[functions.zagulyaky-storage-cleanup]
+# Browser cleanup requests validate their JWT in code and can claim only the
+# caller's durable outbox rows. The queue-wide service action instead requires
+# ZAGULYAKY_STORAGE_CLEANUP_SECRET (or the existing scheduled-worker secret).
+# CORS preflight has no JWT.
+verify_jwt = false
+
+[functions.zagulyaky-structure]
+# Browser CORS preflight has no JWT. The Edge code authenticates start/resume
+# and process_mine itself, while process_queue requires a dedicated worker
+# secret (or the existing scheduled-worker secret) before service-role work.
+verify_jwt = false
+
 [edge_runtime]
 # Keep the local Edge worker alive after a 202 response so waitUntil background
 # export, email and cleanup work can finish during localhost testing.
