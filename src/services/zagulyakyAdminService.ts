@@ -1,4 +1,8 @@
 import { getSupabaseClient } from "./supabaseAuth.ts";
+import {
+  markZagulyakaRecordFresh,
+  runZagulyakaVersionedMutation,
+} from "../utils/zagulyakyMutationCircuitBreaker";
 
 export type ZagulyakaModerationStatus =
   | "draft"
@@ -921,8 +925,10 @@ export async function loadAdminZagulyakyQueue(
   });
   if (error) throw error;
   const payload = record(data);
+  const items = records(payload.items).map(queueItem);
+  for (const item of items) markZagulyakaRecordFresh("admin", item.id);
   return {
-    items: records(payload.items).map(queueItem),
+    items,
     total: Math.max(0, integer(payload.total)),
   };
 }
@@ -935,7 +941,7 @@ export async function loadAdminZagulyakaDetail(recordId: string): Promise<AdminZ
   });
   if (error) throw error;
   const payload = record(data);
-  return {
+  const detail = {
     record: record(payload.record),
     sources: records(payload.sources),
     privateImportOrigins: records(payload.privateImportOrigins).map(privateImportOrigin),
@@ -947,6 +953,8 @@ export async function loadAdminZagulyakaDetail(recordId: string): Promise<AdminZ
     adminAudit: records(payload.adminAudit).map(auditItem),
     claims: records(payload.claims),
   };
+  markZagulyakaRecordFresh("admin", recordId);
+  return detail;
 }
 
 export async function loadAdminZagulyakaPrivacyClearance(recordId: string): Promise<AdminZagulyakaPrivacyClearance> {
@@ -994,17 +1002,23 @@ export async function revokeAdminZagulyakaAttachment(attachmentId: string): Prom
 }
 
 export async function reviewAdminZagulyaka(input: ReviewZagulyakaInput): Promise<AdminZagulyakaQueueItem> {
-  const { data, error } = await getSupabaseClient().rpc("admin_review_zagulyaka_v1", {
-    p_record_id: input.recordId,
-    p_expected_lock_version: input.expectedLockVersion,
-    p_action: input.action,
-    p_note: input.note?.trim() ?? "",
-    p_verification_status: input.verificationStatus ?? null,
-    p_privacy_status: input.privacyStatus ?? null,
-    p_public_slug: input.publicSlug?.trim() || null,
+  return runZagulyakaVersionedMutation({
+    scope: "admin",
+    recordIds: [input.recordId],
+    action: "review_record",
+  }, async () => {
+    const { data, error } = await getSupabaseClient().rpc("admin_review_zagulyaka_v1", {
+      p_record_id: input.recordId,
+      p_expected_lock_version: input.expectedLockVersion,
+      p_action: input.action,
+      p_note: input.note?.trim() ?? "",
+      p_verification_status: input.verificationStatus ?? null,
+      p_privacy_status: input.privacyStatus ?? null,
+      p_public_slug: input.publicSlug?.trim() || null,
+    });
+    if (error) throw error;
+    return queueItem(data);
   });
-  if (error) throw error;
-  return queueItem(data);
 }
 
 export async function loadAdminZagulyakyClaims(
@@ -1055,8 +1069,13 @@ export async function loadAdminZagulyakaDuplicateCandidates(
   });
   if (error) throw error;
   const payload = record(data);
+  const items = records(payload.items).map(duplicateCandidateItem);
+  for (const item of items) {
+    markZagulyakaRecordFresh("admin", item.recordId);
+    markZagulyakaRecordFresh("admin", item.candidateRecordId);
+  }
   return {
-    items: records(payload.items).map(duplicateCandidateItem),
+    items,
     total: Math.max(0, integer(payload.total)),
   };
 }
@@ -1090,19 +1109,25 @@ export async function resolveAdminZagulyakaDuplicateCandidate(
 export async function mergeAdminZagulyakaDuplicate(
   input: MergeAdminZagulyakaDuplicateInput,
 ): Promise<AdminZagulyakaDuplicateMergeResult> {
-  const { data, error } = await getSupabaseClient().rpc("admin_merge_zagulyaka_duplicate_v1", {
-    p_survivor_record_id: input.survivorRecordId,
-    p_merged_record_id: input.mergedRecordId,
-    p_survivor_expected_lock_version: Math.max(1, Math.trunc(input.survivorExpectedLockVersion)),
-    p_merged_expected_lock_version: Math.max(1, Math.trunc(input.mergedExpectedLockVersion)),
-    p_note: input.note.trim(),
+  return runZagulyakaVersionedMutation({
+    scope: "admin",
+    recordIds: [input.survivorRecordId, input.mergedRecordId],
+    action: "merge_duplicate",
+  }, async () => {
+    const { data, error } = await getSupabaseClient().rpc("admin_merge_zagulyaka_duplicate_v1", {
+      p_survivor_record_id: input.survivorRecordId,
+      p_merged_record_id: input.mergedRecordId,
+      p_survivor_expected_lock_version: Math.max(1, Math.trunc(input.survivorExpectedLockVersion)),
+      p_merged_expected_lock_version: Math.max(1, Math.trunc(input.mergedExpectedLockVersion)),
+      p_note: input.note.trim(),
+    });
+    if (error) throw error;
+    const payload = record(data);
+    return {
+      survivor: record(payload.survivor),
+      merged: record(payload.merged),
+    };
   });
-  if (error) throw error;
-  const payload = record(data);
-  return {
-    survivor: record(payload.survivor),
-    merged: record(payload.merged),
-  };
 }
 
 /**

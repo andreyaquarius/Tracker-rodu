@@ -17,6 +17,10 @@ import type {
 } from "../types/zagulyaky";
 import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest";
 import { normalizeZagulyakaEventRoleCode } from "../utils/zagulyakyEventRoles";
+import {
+  markZagulyakaRecordFresh,
+  runZagulyakaVersionedMutation,
+} from "../utils/zagulyakyMutationCircuitBreaker";
 import { invokeEdgeFunction } from "./edgeFunctions";
 import { getSupabaseClient } from "./supabaseAuth";
 
@@ -119,7 +123,7 @@ export async function loadMyZagulyaky(expectedUserId?: string): Promise<Zagulyak
     expectedUserId,
   );
   if (error) throw error;
-  return records(data).map((row) => ({
+  const items: ZagulyakaDraftSummary[] = records(data).map((row) => ({
     id: text(value(row, "id")),
     kind: text(value(row, "kind")) === "document" ? "document" : "person",
     title: text(value(row, "title"), "Без назви"),
@@ -131,6 +135,8 @@ export async function loadMyZagulyaky(expectedUserId?: string): Promise<Zagulyak
     publishedSlug: nullableString(value(row, "public_slug", "publishedSlug", "published_slug", "slug")),
     lockVersion: naturalNumber(value(row, "lock_version", "lockVersion")),
   }));
+  for (const item of items) markZagulyakaRecordFresh("author", item.id);
+  return items;
 }
 
 export async function loadMyZagulyakaDraft(
@@ -149,7 +155,9 @@ export async function loadMyZagulyakaDraft(
     expectedUserId,
   );
   if (error) throw error;
-  return mapEditableDraft(firstRecord(data));
+  const draft = mapEditableDraft(firstRecord(data));
+  markZagulyakaRecordFresh("author", recordId);
+  return draft;
 }
 
 export async function createZagulyakaDraft(
@@ -179,87 +187,111 @@ export async function saveZagulyakaDraft(
   expectedUserId?: string,
   rightsConfirmed = false,
 ): Promise<ZagulyakaDraftHandle> {
-  const client = getSupabaseClient();
-  const { data, error } = await runAuthenticatedSupabaseRequest(
-    client,
-    async () => {
-      const result = await client.rpc("update_my_zagulyaka_draft_v1", {
-        p_record_id: handle.id,
-        p_expected_lock_version: handle.lockVersion,
-        p_patch: recordPatch(input, rightsConfirmed),
-      });
-      return { data: result.data, error: result.error };
-    },
-    expectedUserId,
-  );
-  if (error) throw error;
-  return replaceDraftDetails(draftHandle(data), input, expectedUserId);
+  return runZagulyakaVersionedMutation({
+    scope: "author",
+    recordIds: [handle.id],
+    action: "save_draft",
+  }, async () => {
+    const client = getSupabaseClient();
+    const { data, error } = await runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        const result = await client.rpc("update_my_zagulyaka_draft_v1", {
+          p_record_id: handle.id,
+          p_expected_lock_version: handle.lockVersion,
+          p_patch: recordPatch(input, rightsConfirmed),
+        });
+        return { data: result.data, error: result.error };
+      },
+      expectedUserId,
+    );
+    if (error) throw error;
+    return replaceDraftDetails(draftHandle(data), input, expectedUserId);
+  });
 }
 
 export async function submitZagulyakaDraft(
   handle: ZagulyakaDraftHandle,
   expectedUserId?: string,
 ): Promise<void> {
-  const client = getSupabaseClient();
-  const { error } = await runAuthenticatedSupabaseRequest(
-    client,
-    async () => {
-      const result = await client.rpc("submit_zagulyaka_v1", {
-        p_record_id: handle.id,
-        p_expected_lock_version: handle.lockVersion,
-      });
-      return { data: result.data, error: result.error };
-    },
-    expectedUserId,
-  );
-  if (error) throw error;
+  return runZagulyakaVersionedMutation({
+    scope: "author",
+    recordIds: [handle.id],
+    action: "submit_draft",
+  }, async () => {
+    const client = getSupabaseClient();
+    const { error } = await runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        const result = await client.rpc("submit_zagulyaka_v1", {
+          p_record_id: handle.id,
+          p_expected_lock_version: handle.lockVersion,
+        });
+        return { data: result.data, error: result.error };
+      },
+      expectedUserId,
+    );
+    if (error) throw error;
+  });
 }
 
 export async function withdrawZagulyakaDraft(
   handle: ZagulyakaDraftHandle,
   expectedUserId?: string,
 ): Promise<ZagulyakaDraftHandle> {
-  const client = getSupabaseClient();
-  const { data, error } = await runAuthenticatedSupabaseRequest(
-    client,
-    async () => {
-      const result = await client.rpc("withdraw_zagulyaka_v1", {
-        p_record_id: handle.id,
-        p_expected_lock_version: handle.lockVersion,
-      });
-      return { data: result.data, error: result.error };
-    },
-    expectedUserId,
-  );
-  if (error) throw error;
-  return draftHandle(data);
+  return runZagulyakaVersionedMutation({
+    scope: "author",
+    recordIds: [handle.id],
+    action: "withdraw_draft",
+  }, async () => {
+    const client = getSupabaseClient();
+    const { data, error } = await runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        const result = await client.rpc("withdraw_zagulyaka_v1", {
+          p_record_id: handle.id,
+          p_expected_lock_version: handle.lockVersion,
+        });
+        return { data: result.data, error: result.error };
+      },
+      expectedUserId,
+    );
+    if (error) throw error;
+    return draftHandle(data);
+  });
 }
 
 export async function deleteMyZagulyakaDraft(
   handle: ZagulyakaDraftHandle,
   expectedUserId?: string,
 ): Promise<{ storageCleanupWakeSucceeded: boolean }> {
-  const client = getSupabaseClient();
-  const { data, error } = await runAuthenticatedSupabaseRequest(
-    client,
-    async () => {
-      const result = await client.rpc("delete_my_zagulyaka_draft_v3", {
-        p_record_id: handle.id,
-        p_expected_lock_version: handle.lockVersion,
-      });
-      return { data: result.data, error: result.error };
-    },
-    expectedUserId,
-  );
-  if (error) throw error;
-  const storageCleanup = record(value(firstRecord(data), "storageCleanup", "storage_cleanup"));
-  const queuedTaskCount = naturalNumber(value(storageCleanup, "queuedTaskCount", "queued_task_count"));
-  // The database transaction has already committed a durable outbox task
-  // before this best-effort wake-up. A temporary Edge/Storage outage must not
-  // turn a successful deletion back into a client-visible failure.
-  return {
-    storageCleanupWakeSucceeded: queuedTaskCount === 0 || await wakeMyZagulyakyStorageCleanup(),
-  };
+  return runZagulyakaVersionedMutation({
+    scope: "author",
+    recordIds: [handle.id],
+    action: "delete_draft",
+  }, async () => {
+    const client = getSupabaseClient();
+    const { data, error } = await runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        const result = await client.rpc("delete_my_zagulyaka_draft_v3", {
+          p_record_id: handle.id,
+          p_expected_lock_version: handle.lockVersion,
+        });
+        return { data: result.data, error: result.error };
+      },
+      expectedUserId,
+    );
+    if (error) throw error;
+    const storageCleanup = record(value(firstRecord(data), "storageCleanup", "storage_cleanup"));
+    const queuedTaskCount = naturalNumber(value(storageCleanup, "queuedTaskCount", "queued_task_count"));
+    // The database transaction has already committed a durable outbox task
+    // before this best-effort wake-up. A temporary Edge/Storage outage must not
+    // turn a successful deletion back into a client-visible failure.
+    return {
+      storageCleanupWakeSucceeded: queuedTaskCount === 0 || await wakeMyZagulyakyStorageCleanup(),
+    };
+  });
 }
 
 export async function uploadZagulyakaDraftAttachment(
@@ -267,54 +299,60 @@ export async function uploadZagulyakaDraftAttachment(
   file: File,
   expectedUserId: string,
 ): Promise<{ handle: ZagulyakaDraftHandle; attachment: ZagulyakaDraftAttachment }> {
-  validateAttachmentFile(file);
-  const client = getSupabaseClient();
-  const userId = expectedUserId.trim();
-  if (!userId) throw new Error("Потрібна активна сесія для завантаження вкладення.");
-  const storagePath = `${userId}/${handle.id}/${safeUploadId()}`;
-  const sha256 = await sha256Hex(file);
-  const { error: uploadError } = await runAuthenticatedSupabaseRequest(
-    client,
-    async () => {
-      const result = await client.storage.from("zagulyaky-private").upload(storagePath, file, {
-        cacheControl: "3600",
-        contentType: file.type,
-        upsert: false,
-      });
-      return { data: result.data, error: result.error };
-    },
-    userId,
-  );
-  if (uploadError) throw uploadError;
+  return runZagulyakaVersionedMutation({
+    scope: "author",
+    recordIds: [handle.id],
+    action: "attach_file",
+  }, async () => {
+    validateAttachmentFile(file);
+    const client = getSupabaseClient();
+    const userId = expectedUserId.trim();
+    if (!userId) throw new Error("Потрібна активна сесія для завантаження вкладення.");
+    const storagePath = `${userId}/${handle.id}/${safeUploadId()}`;
+    const sha256 = await sha256Hex(file);
+    const { error: uploadError } = await runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        const result = await client.storage.from("zagulyaky-private").upload(storagePath, file, {
+          cacheControl: "3600",
+          contentType: file.type,
+          upsert: false,
+        });
+        return { data: result.data, error: result.error };
+      },
+      userId,
+    );
+    if (uploadError) throw uploadError;
 
-  const { data, error } = await runAuthenticatedSupabaseRequest(
-    client,
-    async () => {
-      const result = await client.rpc("attach_my_zagulyaka_file_v1", {
-        p_record_id: handle.id,
-        p_expected_lock_version: handle.lockVersion,
-        p_storage_path: storagePath,
-        p_file_name: file.name,
-        p_mime_type: file.type,
-        p_byte_size: file.size,
-        p_sha256: sha256,
-      });
-      return { data: result.data, error: result.error };
-    },
-    userId,
-  );
-  if (error) {
-    await client.storage.from("zagulyaky-private").remove([storagePath]).catch(() => undefined);
-    throw error;
-  }
-  const payload = firstRecord(data);
-  return {
-    handle: {
-      id: text(value(payload, "recordId", "record_id"), handle.id),
-      lockVersion: naturalNumber(value(payload, "lockVersion", "lock_version"), handle.lockVersion),
-    },
-    attachment: mapDraftAttachment(record(value(payload, "attachment"))),
-  };
+    const { data, error } = await runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        const result = await client.rpc("attach_my_zagulyaka_file_v1", {
+          p_record_id: handle.id,
+          p_expected_lock_version: handle.lockVersion,
+          p_storage_path: storagePath,
+          p_file_name: file.name,
+          p_mime_type: file.type,
+          p_byte_size: file.size,
+          p_sha256: sha256,
+        });
+        return { data: result.data, error: result.error };
+      },
+      userId,
+    );
+    if (error) {
+      await client.storage.from("zagulyaky-private").remove([storagePath]).catch(() => undefined);
+      throw error;
+    }
+    const payload = firstRecord(data);
+    return {
+      handle: {
+        id: text(value(payload, "recordId", "record_id"), handle.id),
+        lockVersion: naturalNumber(value(payload, "lockVersion", "lock_version"), handle.lockVersion),
+      },
+      attachment: mapDraftAttachment(record(value(payload, "attachment"))),
+    };
+  });
 }
 
 export async function deleteZagulyakaDraftAttachment(
@@ -322,28 +360,34 @@ export async function deleteZagulyakaDraftAttachment(
   attachmentId: string,
   expectedUserId?: string,
 ): Promise<ZagulyakaDraftHandle & { storageCleanupWakeSucceeded: boolean }> {
-  const client = getSupabaseClient();
-  const { data, error } = await runAuthenticatedSupabaseRequest(
-    client,
-    async () => {
-      const result = await client.rpc("delete_my_zagulyaka_attachment_v2", {
-        p_record_id: handle.id,
-        p_attachment_id: attachmentId,
-        p_expected_lock_version: handle.lockVersion,
-      });
-      return { data: result.data, error: result.error };
-    },
-    expectedUserId,
-  );
-  if (error) throw error;
-  const payload = firstRecord(data);
-  const storageCleanup = record(value(payload, "storageCleanup", "storage_cleanup"));
-  const cleanupTaskId = text(value(storageCleanup, "taskId", "task_id"));
-  return {
-    id: text(value(payload, "recordId", "record_id"), handle.id),
-    lockVersion: naturalNumber(value(payload, "lockVersion", "lock_version"), handle.lockVersion),
-    storageCleanupWakeSucceeded: !cleanupTaskId || await wakeMyZagulyakyStorageCleanup(),
-  };
+  return runZagulyakaVersionedMutation({
+    scope: "author",
+    recordIds: [handle.id],
+    action: "delete_attachment",
+  }, async () => {
+    const client = getSupabaseClient();
+    const { data, error } = await runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        const result = await client.rpc("delete_my_zagulyaka_attachment_v2", {
+          p_record_id: handle.id,
+          p_attachment_id: attachmentId,
+          p_expected_lock_version: handle.lockVersion,
+        });
+        return { data: result.data, error: result.error };
+      },
+      expectedUserId,
+    );
+    if (error) throw error;
+    const payload = firstRecord(data);
+    const storageCleanup = record(value(payload, "storageCleanup", "storage_cleanup"));
+    const cleanupTaskId = text(value(storageCleanup, "taskId", "task_id"));
+    return {
+      id: text(value(payload, "recordId", "record_id"), handle.id),
+      lockVersion: naturalNumber(value(payload, "lockVersion", "lock_version"), handle.lockVersion),
+      storageCleanupWakeSucceeded: !cleanupTaskId || await wakeMyZagulyakyStorageCleanup(),
+    };
+  });
 }
 
 async function wakeMyZagulyakyStorageCleanup(): Promise<boolean> {
@@ -390,23 +434,29 @@ async function replaceDraftDetails(
   input: ZagulyakaDraftInput,
   expectedUserId?: string,
 ): Promise<ZagulyakaDraftHandle> {
-  const client = getSupabaseClient();
-  const { data, error } = await runAuthenticatedSupabaseRequest(
-    client,
-    async () => {
-      const result = await client.rpc("replace_my_zagulyaka_details_v1", {
-        p_record_id: handle.id,
-        p_expected_lock_version: handle.lockVersion,
-        p_sources: [sourcePayload(input)],
-        p_participants: input.kind === "person" ? [participantPayload(input)] : [],
-        p_document_discoveries: input.kind === "document" ? [documentDiscoveryPayload(input)] : [],
-      });
-      return { data: result.data, error: result.error };
-    },
-    expectedUserId,
-  );
-  if (error) throw error;
-  return draftHandle(record(value(firstRecord(data), "record")));
+  return runZagulyakaVersionedMutation({
+    scope: "author",
+    recordIds: [handle.id],
+    action: "replace_details",
+  }, async () => {
+    const client = getSupabaseClient();
+    const { data, error } = await runAuthenticatedSupabaseRequest(
+      client,
+      async () => {
+        const result = await client.rpc("replace_my_zagulyaka_details_v1", {
+          p_record_id: handle.id,
+          p_expected_lock_version: handle.lockVersion,
+          p_sources: [sourcePayload(input)],
+          p_participants: input.kind === "person" ? [participantPayload(input)] : [],
+          p_document_discoveries: input.kind === "document" ? [documentDiscoveryPayload(input)] : [],
+        });
+        return { data: result.data, error: result.error };
+      },
+      expectedUserId,
+    );
+    if (error) throw error;
+    return draftHandle(record(value(firstRecord(data), "record")));
+  });
 }
 
 function recordPatch(input: ZagulyakaDraftInput, rightsConfirmed: boolean): Record<string, unknown> {
