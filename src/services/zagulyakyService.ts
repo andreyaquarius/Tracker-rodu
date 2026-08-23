@@ -16,6 +16,7 @@ import type {
   ZagulyakyStats,
 } from "../types/zagulyaky";
 import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest";
+import { normalizeGeo } from "../utils/geo";
 import { normalizeZagulyakaEventRoleCode } from "../utils/zagulyakyEventRoles";
 import {
   markZagulyakaRecordFresh,
@@ -487,7 +488,26 @@ function recordPatch(input: ZagulyakaDraftInput, rightsConfirmed: boolean): Reco
       eventRoleCustomText: input.eventRoleCode === "other"
         ? input.eventRoleCustomText.trim() || null
         : null,
+      // These transient keys are removed and canonicalised into protected
+      // record columns by the database trigger.  Do not place map data into
+      // the general, unbounded record payload.
+      originGeo: mapPointPayload(input.originGeo),
+      foundGeo: mapPointPayload(input.foundGeo),
     },
+  };
+}
+
+function mapPointPayload(input: ZagulyakaDraftInput["originGeo"]): Record<string, unknown> | null {
+  const point = normalizeGeo(input);
+  if (!point) return null;
+  return {
+    displayName: point.displayName?.trim() || null,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    source: point.source,
+    precision: point.precision ?? "unknown",
+    provider: point.provider?.trim() || null,
+    externalId: point.externalId?.trim() || null,
   };
 }
 
@@ -589,8 +609,16 @@ function mapDetail(row: Record<string, unknown>): ZagulyakaDetail {
     eventYearFrom: nullableInteger(value(row, "eventYearFrom", "event_year_from")),
     eventYearTo: nullableInteger(value(row, "eventYearTo", "event_year_to")),
     datePrecision: datePrecision(value(row, "datePrecision", "date_precision")),
-    originPlace: text(value(row, "sourceLocationNormalized", "sourceLocationText", "source_location_normalized", "source_location_text")),
+    // Initial-base imports may use source_location for a church or archive;
+    // for a person, the participant's origin wording is the better label for
+    // a deliberately confirmed origin pin.
+    originPlace: text(
+      value(subject, "originText", "origin_text"),
+      text(value(row, "sourceLocationNormalized", "sourceLocationText", "source_location_normalized", "source_location_text")),
+    ),
     foundPlace: text(value(row, "foundLocationNormalized", "foundLocationText", "found_location_normalized", "found_location_text")),
+    originGeo: normalizeGeo(value(row, "originGeo", "origin_geo")),
+    foundGeo: normalizeGeo(value(row, "foundGeo", "found_geo")),
     officialPlace: text(value(discovery, "officialLocationText", "official_location_text")),
     documentType: text(value(discovery, "notes"), text(value(row, "summary"))),
     pageRange: [text(value(discovery, "pageFrom", "page_from")), text(value(discovery, "pageTo", "page_to"))].filter(Boolean).join("–"),
@@ -695,8 +723,13 @@ function mapEditableDraft(payload: Record<string, unknown>): ZagulyakaEditableDr
       eventYearFrom: nullableInteger(value(row, "eventYearFrom", "event_year_from")),
       eventYearTo: nullableInteger(value(row, "eventYearTo", "event_year_to")),
       datePrecision: datePrecision(value(row, "datePrecision", "date_precision")),
-      originPlace: text(value(row, "sourceLocationNormalized", "sourceLocationText", "source_location_normalized", "source_location_text"), text(value(subject, "originText", "origin_text"))),
+      originPlace: text(
+        value(subject, "originText", "origin_text"),
+        text(value(row, "sourceLocationNormalized", "sourceLocationText", "source_location_normalized", "source_location_text")),
+      ),
       foundPlace: text(value(row, "foundLocationNormalized", "foundLocationText", "found_location_normalized", "found_location_text"), text(value(discovery, "discoveredLocationText", "discovered_location_text"))),
+      originGeo: normalizeGeo(value(row, "originGeo", "origin_geo")),
+      foundGeo: normalizeGeo(value(row, "foundGeo", "found_geo")),
       officialPlace: text(value(discovery, "officialLocationText", "official_location_text")),
       documentType: text(value(recordPayload, "documentType"), text(value(discovery, "notes"), text(value(row, "summary")))),
       institutionName: text(value(primarySource, "archiveName", "archive_name")),

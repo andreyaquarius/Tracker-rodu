@@ -27,7 +27,9 @@ import {
   zagulyakaDatePrecisionLabels,
   zagulyakaEventLabels,
 } from "../../utils/zagulyakyLabels";
+import { GeoPlaceField } from "../GeoPlaceField";
 import { Modal } from "../Modal";
+import { ZagulyakaRouteMap } from "./ZagulyakaRouteMap";
 
 const steps = ["Тип запису", "Факти і місця", "Джерело", "Перевірка"];
 
@@ -360,6 +362,36 @@ export function ZagulyakaDraftDialog({
                   <span>{draft.kind === "person" ? "Де знайдено *" : "Додатково знайдений населений пункт *"}</span>
                   <input value={draft.foundPlace} onChange={(event) => update("foundPlace", event.target.value)} />
                 </label>
+                <section className="zagulyaky-map-points field-wide" aria-labelledby="zagulyaky-map-points-title">
+                  <div>
+                    <span className="eyebrow">Необов’язково</span>
+                    <h4 id="zagulyaky-map-points-title">Позначки на карті</h4>
+                    <p>Історичний текст вище залишається без змін. Вкажіть точку лише тоді, коли впевнені в її прив’язці.</p>
+                  </div>
+                  <GeoPlaceField
+                    label={draft.kind === "person" ? "Точка: звідки людина" : "Точка: місце документа"}
+                    value={draft.originGeo}
+                    placeName={draft.originGeo?.displayName ?? (draft.kind === "person" ? draft.originPlace : draft.officialPlace)}
+                    onChange={(value) => update("originGeo", value)}
+                    allowMarkerColor={false}
+                  />
+                  <GeoPlaceField
+                    label="Точка: де знайдено запис"
+                    value={draft.foundGeo}
+                    placeName={draft.foundGeo?.displayName ?? draft.foundPlace}
+                    onChange={(value) => update("foundGeo", value)}
+                    allowMarkerColor={false}
+                  />
+                  <ZagulyakaRouteMap
+                    origin={draft.originGeo}
+                    found={draft.foundGeo}
+                    originPlaceLabel={draft.kind === "person" ? draft.originPlace : draft.officialPlace}
+                    foundPlaceLabel={draft.foundPlace}
+                    originRoleLabel={draft.kind === "person" ? "Звідки людина" : "Місце документа"}
+                    title="Попередній перегляд карти"
+                    preview
+                  />
+                </section>
                 <label className="field-wide">
                   <span>Чому це загуляка?</span>
                   <textarea value={draft.reason} onChange={(event) => update("reason", event.target.value)} rows={3} placeholder="Поясніть, де зазвичай шукають цю людину або документ." />

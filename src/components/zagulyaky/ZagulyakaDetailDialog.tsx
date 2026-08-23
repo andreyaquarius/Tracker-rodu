@@ -9,6 +9,7 @@ import {
   zagulyakaEventLabels,
   zagulyakaVerificationLabels,
 } from "../../utils/zagulyakyLabels";
+import { ZagulyakaRouteMap } from "./ZagulyakaRouteMap";
 
 export function ZagulyakaDetailDialog({
   detail,
@@ -104,6 +105,14 @@ export function ZagulyakaDetailDialog({
                 </>
               )}
             </dl>
+
+            <ZagulyakaRouteMap
+              origin={detail.originGeo}
+              found={detail.foundGeo}
+              originPlaceLabel={detail.kind === "person" ? detail.originPlace : detail.officialPlace || detail.originPlace}
+              foundPlaceLabel={detail.foundPlace}
+              originRoleLabel={detail.kind === "person" ? "Звідки людина" : "Місце документа"}
+            />
 
             {detail.reason ? (
               <section className="zagulyaky-detail-section">

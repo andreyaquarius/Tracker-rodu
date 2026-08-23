@@ -48,6 +48,7 @@ export function GeoPlaceField({
   eventType,
   onChange,
   onPlaceNameChange,
+  allowMarkerColor = true,
 }: {
   label: string;
   value: GeoPoint | null;
@@ -55,6 +56,8 @@ export function GeoPlaceField({
   eventType?: PersonEventType;
   onChange: (value: GeoPoint | null) => void;
   onPlaceNameChange?: (value: string) => void;
+  /** A role-specific map can deliberately own its marker colours. */
+  allowMarkerColor?: boolean;
 }) {
   const eventDefaultColor = eventType
     ? personEventVisual(eventType).color
@@ -135,7 +138,7 @@ export function GeoPlaceField({
       <div className="geo-field-heading">
         <span>{label}</span>
         {hasCoordinates(value)
-          ? <small>Точну точку збережено; назву можна змінити</small>
+          ? <small>{onPlaceNameChange ? "Точну точку збережено; назву можна змінити" : "Точну точку збережено; історичний текст місця не змінюється"}</small>
           : <small>Знайдіть місце або поставте точку вручну</small>}
       </div>
       <div className="geo-search-row">
@@ -164,21 +167,23 @@ export function GeoPlaceField({
       ) : null}
       {hasCoordinates(value) ? (
         <>
-          <div className="geo-color-picker">
-            <span>Колір маркера</span>
-            <div>
-              {GEO_MARKER_COLORS.map((color) => (
-                <button
-                  type="button"
-                  key={color}
-                  className={geoMarkerColor(value.markerColor, selectedColor) === color ? "active" : ""}
-                  style={{ "--swatch-color": color } as CSSProperties}
-                  aria-label={`Вибрати колір маркера ${color}`}
-                  onClick={() => updateMarkerColor(color)}
-                />
-              ))}
+          {allowMarkerColor ? (
+            <div className="geo-color-picker">
+              <span>Колір маркера</span>
+              <div>
+                {GEO_MARKER_COLORS.map((color) => (
+                  <button
+                    type="button"
+                    key={color}
+                    className={geoMarkerColor(value.markerColor, selectedColor) === color ? "active" : ""}
+                    style={{ "--swatch-color": color } as CSSProperties}
+                    aria-label={`Вибрати колір маркера ${color}`}
+                    onClick={() => updateMarkerColor(color)}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
           <div
             className="geo-selected"
             aria-label={formatGeoSelectionLabel(query, value)}
@@ -205,7 +210,14 @@ export function GeoPlaceField({
             const nextName = pointName.trim() || query.trim() || geo.displayName || "Точна точка на карті";
             onPlaceNameChange?.(nextName);
             setQuery(nextName);
-            onChange({ ...geo, markerColor: selectedColor });
+            onChange({
+              ...geo,
+              // A standalone geo field owns its display name.  Fields that
+              // also edit a source-place string keep their established
+              // external name synchronisation instead.
+              displayName: onPlaceNameChange ? geo.displayName : nextName,
+              markerColor: selectedColor,
+            });
             setPickerOpen(false);
           }}
         />

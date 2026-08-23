@@ -324,6 +324,33 @@
 .zagulyaky-review-facts dt { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .045em; text-transform: uppercase; }
 .zagulyaky-facts dd,
 .zagulyaky-review-facts dd { margin: 5px 0 0; font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.zagulyaky-route-map {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f6f5ef;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.zagulyaky-route-map > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.zagulyaky-route-map h3 { margin: 0; font-size: 15px; }
+.zagulyaky-route-map .eyebrow { display: block; margin-bottom: 4px; }
+.zagulyaky-route-map ul { margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 12px; list-style: none; }
+.zagulyaky-route-map li { min-width: 120px; max-width: 220px; display: flex; align-items: flex-start; gap: 6px; color: var(--green-950); }
+.zagulyaky-route-map li > span { width: 10px; height: 10px; flex: 0 0 auto; margin-top: 3px; border-radius: 50%; }
+.zagulyaky-route-map__legend-origin > span { background: #c49a32; }
+.zagulyaky-route-map__legend-found > span { background: #0f4a42; }
+.zagulyaky-route-map li strong,
+.zagulyaky-route-map li small { display: block; }
+.zagulyaky-route-map li strong { font-size: 10px; }
+.zagulyaky-route-map li small { margin-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
+.zagulyaky-route-map__canvas { height: 300px; margin-top: 14px; overflow: hidden; border: 1px solid #c8d5ce; border-radius: 10px; background: #e6ede8; }
+.zagulyaky-route-map > p { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.zagulyaky-route-map-preview { margin: 14px 0 0; background: #fff; }
+.zagulyaky-route-map-preview .zagulyaky-route-map__canvas { height: 240px; }
+.zagulyaky-map-points { margin: 2px 0 0; padding: 16px; background: #edf4f0; border: 1px solid #cadfd4; border-radius: 12px; }
+.zagulyaky-map-points > div:first-child h4 { margin: 0 0 5px; font-size: 15px; }
+.zagulyaky-map-points > div:first-child p { margin: 0 0 12px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.zagulyaky-map-points .geo-field { margin-top: 12px; }
 .zagulyaky-detail-section { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }
 .zagulyaky-detail-section h3,
 .zagulyaky-source-card h3 { margin: 0 0 8px; font-size: 15px; }
@@ -512,6 +539,7 @@
   .zagulyaky-cursor-pagination > label { justify-content: space-between; }
   .zagulyaky-my-records article,
   .zagulyaky-detail-heading,
+  .zagulyaky-route-map > header,
   .zagulyaky-source-card,
   .zagulyaky-original-post-card,
   .zagulyaky-form-footer,
@@ -519,6 +547,8 @@
   .zagulyaky-my-records article > div:last-child { justify-content: flex-start; }
   .zagulyaky-my-records article > div:last-child p { text-align: left; }
   .zagulyaky-my-record-actions { justify-content: flex-start; }
+  .zagulyaky-route-map ul { justify-content: flex-start; }
+  .zagulyaky-route-map__canvas { height: 240px; }
   .zagulyaky-form-steps { padding: 10px; grid-template-columns: repeat(4, minmax(42px, 1fr)); }
   .zagulyaky-form-steps button { justify-content: center; }
   .zagulyaky-form-steps button { font-size: 0; }

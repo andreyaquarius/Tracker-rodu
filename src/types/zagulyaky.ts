@@ -1,3 +1,5 @@
+import type { GeoPoint } from "./index";
+
 export type ZagulyakaKind = "person" | "document";
 
 export type ZagulyakaWorkflowStatus =
@@ -172,6 +174,10 @@ export interface ZagulyakaDetail {
   datePrecision: ZagulyakaDatePrecision;
   originPlace: string;
   foundPlace: string;
+  /** Confirmed map point, kept separately from the historical place wording. */
+  originGeo: GeoPoint | null;
+  /** Confirmed map point, kept separately from the historical place wording. */
+  foundGeo: GeoPoint | null;
   officialPlace: string;
   documentType: string;
   pageRange: string;
@@ -283,6 +289,9 @@ export interface ZagulyakaDraftInput {
   datePrecision: ZagulyakaDatePrecision;
   originPlace: string;
   foundPlace: string;
+  /** Optional map pins; they never replace the source wording above. */
+  originGeo: GeoPoint | null;
+  foundGeo: GeoPoint | null;
   officialPlace: string;
   documentType: string;
   institutionName: string;
@@ -315,6 +324,8 @@ export const emptyZagulyakaDraft = (kind: ZagulyakaKind): ZagulyakaDraftInput =>
   datePrecision: "unknown",
   originPlace: "",
   foundPlace: "",
+  originGeo: null,
+  foundGeo: null,
   officialPlace: "",
   documentType: "",
   institutionName: "",
