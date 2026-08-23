@@ -17,6 +17,13 @@ const migration = readFileSync(
   ),
   "utf8",
 );
+const recursionFixMigration = readFileSync(
+  new URL(
+    "../supabase/migrations/202608230001_fix_project_backup_storage_rls_recursion.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("users cannot create an unbounded manual internal backup from the UI", () => {
   assert.doesNotMatch(page, /createInternalBackup/);
@@ -46,10 +53,40 @@ test("all application snapshots use one bounded automatic rotation", () => {
   assert.match(service, /\.slice\(Math\.max\(0, keep\)\)/);
 });
 
-test("Storage rejects manual uploads and guards a client that skipped rotation", () => {
+test("Storage keeps the automatic-backup cap without re-reading its own RLS relation", () => {
   assert.match(migration, /drop policy if exists project_backups_insert_owner/i);
   assert.match(migration, /tracker-rodu-automatic-/i);
   assert.doesNotMatch(migration, /tracker-rodu-manual-/i);
-  assert.match(migration, /select count\(\*\)[\s\S]*?\) < 7/i);
   assert.match(migration, /drop policy if exists project_backups_update_owner/i);
+
+  const policyStart = recursionFixMigration.indexOf(
+    "create policy project_backups_insert_owner",
+  );
+  const policyEnd = recursionFixMigration.indexOf(
+    ");\n\ncommit;",
+    policyStart,
+  );
+  assert.ok(policyStart >= 0 && policyEnd > policyStart);
+  const policy = recursionFixMigration.slice(policyStart, policyEnd);
+  assert.match(policy, /tracker-rodu-automatic-/i);
+  assert.match(policy, /public\.is_project_owner/i);
+  assert.match(policy, /public\.can_edit_project/i);
+  assert.match(policy, /security_private\.project_backup_slot_available_v1/i);
+  assert.doesNotMatch(
+    policy,
+    /from\s+storage\.objects/i,
+    "a policy on storage.objects must not query storage.objects again",
+  );
+  assert.match(
+    recursionFixMigration,
+    /create or replace function security_private\.project_backup_slot_available_v1\(\s*p_project_id uuid\s*\)[\s\S]*?security definer/i,
+  );
+  assert.match(
+    recursionFixMigration,
+    /count\(\*\) < 7[\s\S]*?from\s+storage\.objects existing/i,
+  );
+  assert.match(
+    recursionFixMigration,
+    /revoke all on function security_private\.project_backup_slot_available_v1\(uuid\)[\s\S]*?grant execute on function security_private\.project_backup_slot_available_v1\(uuid\)\s+to authenticated/i,
+  );
 });

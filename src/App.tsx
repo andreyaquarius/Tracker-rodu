@@ -797,7 +797,10 @@ export default function App() {
     projectIds: Set<string>;
   }>({ userId: "", projectIds: new Set() });
   const activeWorkspaceIdRef = useRef<string | null>(null);
-  const automaticProjectBackupRef = useRef<string | null>(null);
+  // An automatic backup can fail for a transient reason. Remember that it was
+  // attempted for this project/day so a render caused by the error UI cannot
+  // immediately retry the same failing Storage request in a loop.
+  const automaticProjectBackupAttemptRef = useRef<string | null>(null);
   const hydratedWorkspaceRef = useRef<string | null>(null);
   const peopleLoadRef = useRef<{
     projectId: string;
@@ -2389,8 +2392,9 @@ export default function App() {
     const projectId = workspace.projectId;
     const today = new Date().toISOString().slice(0, 10);
     if (projectPreferences.lastAutomaticBackupAt?.slice(0, 10) === today) return;
-    if (automaticProjectBackupRef.current === projectId) return;
-    automaticProjectBackupRef.current = projectId;
+    const automaticBackupAttemptKey = `${projectId}:${today}`;
+    if (automaticProjectBackupAttemptRef.current === automaticBackupAttemptKey) return;
+    automaticProjectBackupAttemptRef.current = automaticBackupAttemptKey;
 
     void createProjectBackup(projectId, activeDb)
       .then(async () => {
@@ -2414,11 +2418,6 @@ export default function App() {
           ),
           true,
         );
-      })
-      .finally(() => {
-        if (automaticProjectBackupRef.current === projectId) {
-          automaticProjectBackupRef.current = null;
-        }
       });
   }, [
     activeDb,
