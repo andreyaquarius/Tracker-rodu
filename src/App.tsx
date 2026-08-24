@@ -6077,6 +6077,7 @@ export default function App() {
         return (
           <SettingsPage
             db={activeDb}
+            account={account}
             onChange={changeSettings}
             readOnly={Boolean(workspace && workspace.role !== "owner")}
             canCreateCustomSection={canCreateCustomSection}

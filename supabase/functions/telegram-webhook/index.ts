@@ -689,18 +689,27 @@ async function handleIntentCallback(callback: TelegramIntentCallback): Promise<v
     await removeIntentPicker(callback);
     return;
   }
+  const noteMaterialized = callback.intent === "note" && result.materialized === true;
   await answerIntentCallback(
     callback.callbackId,
-    callback.intent === "zagulyaka" ? "Передано в чернетку Загуляки." : "Передано до Нотаток.",
+    callback.intent === "zagulyaka"
+      ? "Передано в чернетку Загуляки."
+      : noteMaterialized
+      ? "Нотатку збережено."
+      : "Нотатку додано в чергу.",
   );
   await removeIntentPicker(callback);
   if (result.duplicate === true) return;
   await sendBotReply(callback.privateChatId, {
     text: callback.intent === "zagulyaka"
       ? "Матеріал передано на підготовку приватної чернетки Загуляки для вашої перевірки."
+      : noteMaterialized
+      ? result.mediaOmitted === true
+        ? "Нотатку збережено у вашому приватному списку. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках. Відкрийте «Нотатки» у Трекері Роду та натисніть «Оновити»."
+        : "Нотатку збережено у вашому приватному списку. Відкрийте «Нотатки» у Трекері Роду та натисніть «Оновити»."
       : result.mediaOmitted === true
-      ? "Нотатку передано до приватного списку. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках."
-      : "Матеріал передано до вашого приватного списку нотаток.",
+      ? "Нотатку додано в чергу. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках."
+      : "Нотатку додано в чергу до вашого приватного списку.",
   });
 }
 

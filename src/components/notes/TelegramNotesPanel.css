@@ -34,9 +34,9 @@
 .telegram-notes-panel__heading,
 .telegram-notes-list__header,
 .telegram-notes-filters__heading,
-.telegram-note-card__topline,
-.telegram-note-editor__heading,
-.telegram-notes-link {
+.telegram-note-detail__heading,
+.telegram-note-detail__topline,
+.telegram-note-editor__heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -44,18 +44,17 @@
 }
 
 .telegram-notes-panel__heading h2,
-.telegram-notes-link h3,
 .telegram-notes-filters h3,
 .telegram-notes-list h3,
-.telegram-note-card h4,
+.telegram-note-detail h4,
 .telegram-note-editor h4 {
   margin: 0;
 }
 
 .telegram-notes-panel__heading p,
-.telegram-notes-link p,
 .telegram-notes-empty span,
-.telegram-note-card__body {
+.telegram-note-detail__body,
+.telegram-note-detail__empty-body {
   margin: 8px 0 0;
   color: var(--muted);
   line-height: 1.55;
@@ -77,125 +76,6 @@
   margin: 0;
 }
 
-.telegram-notes-link {
-  position: relative;
-  flex-wrap: wrap;
-  padding: 20px;
-}
-
-.telegram-notes-link > div:first-child {
-  min-width: min(100%, 280px);
-}
-
-.telegram-notes-link__actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.telegram-notes-link__code-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.telegram-notes-link__ai-summary {
-  max-width: 680px;
-  font-size: .9rem;
-}
-
-.telegram-notes-link__forwarding-help {
-  max-width: 720px;
-  font-size: .88rem;
-}
-
-.telegram-notes-link__ai-control {
-  display: grid;
-  width: 100%;
-  gap: 7px;
-  padding: 14px;
-  border: 1px solid #b8d7c5;
-  border-radius: 10px;
-  background: #f1f8f4;
-}
-
-.telegram-notes-link__ai-control label {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  color: var(--ink);
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.telegram-notes-link__ai-control input {
-  width: 17px;
-  height: 17px;
-  flex: 0 0 auto;
-  margin: 2px 0 0;
-  accent-color: #285c4d;
-}
-
-.telegram-notes-link__ai-control small,
-.telegram-notes-link__ai-pending {
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.telegram-notes-link__ai-pending {
-  font-size: .86rem;
-  font-weight: 700;
-}
-
-.telegram-notes-link__code,
-.telegram-notes-link__confirm {
-  width: 100%;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--paper) 85%, #eaf4ee);
-}
-
-.telegram-notes-link__code {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.telegram-notes-link__code span,
-.telegram-notes-link__code small {
-  display: block;
-  color: var(--muted);
-}
-
-.telegram-notes-link__code code {
-  display: block;
-  width: fit-content;
-  margin: 5px 0;
-  padding: 4px 7px;
-  border-radius: 5px;
-  color: var(--ink);
-  background: rgba(18, 71, 58, .1);
-  font-size: 1rem;
-  font-weight: 800;
-  letter-spacing: .08em;
-}
-
-.telegram-notes-link__confirm {
-  border-color: #d6aa56;
-  background: #fff8e8;
-}
-
-.telegram-notes-link__confirm p {
-  margin: 0 0 12px;
-  color: var(--ink);
-}
-
-.telegram-notes-link__confirm > div,
 .telegram-note-editor__actions,
 .telegram-notes-filters__actions {
   display: flex;
@@ -205,15 +85,13 @@
 
 .telegram-notes-workspace {
   display: grid;
-  grid-template-columns: minmax(236px, .72fr) minmax(0, 1.55fr);
-  align-items: start;
   gap: 18px;
 }
 
 .telegram-notes-filters {
   display: grid;
-  gap: 12px;
-  padding: 18px;
+  gap: 10px;
+  padding: 14px 16px;
 }
 
 .telegram-notes-filters__heading {
@@ -225,6 +103,13 @@
   color: var(--muted);
   font-size: .9rem;
   white-space: nowrap;
+}
+
+.telegram-notes-filters__controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.8fr) repeat(4, minmax(130px, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
 }
 
 .telegram-notes-filters label,
@@ -247,7 +132,8 @@
 }
 
 .telegram-notes-filters__actions {
-  padding-top: 4px;
+  align-items: center;
+  padding: 0;
 }
 
 .telegram-notes-list {
@@ -266,40 +152,128 @@
   padding: 22px;
 }
 
-.telegram-note-card,
+.telegram-note-detail,
 .telegram-note-editor {
   display: grid;
   gap: 13px;
   padding: 18px;
 }
 
-.telegram-note-card__topline {
-  align-items: center;
+.telegram-note-list {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
 }
 
-.telegram-note-card__badges {
+.telegram-note-list__item + .telegram-note-list__item {
+  border-top: 1px solid var(--line);
+}
+
+.telegram-note-list__button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .16s ease;
+}
+
+.telegram-note-list__button:hover {
+  background: color-mix(in srgb, var(--paper) 76%, #e5f0eb);
+}
+
+.telegram-note-list__button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid #285c4d;
+  outline-offset: -2px;
+}
+
+.telegram-note-list__summary,
+.telegram-note-list__end {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.telegram-note-list__title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telegram-note-list__meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .84rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telegram-note-list__end {
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  justify-items: end;
+  margin-left: 16px;
+}
+
+.telegram-note-list__badges,
+.telegram-note-detail__badges {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
-.telegram-note-card time {
+.telegram-note-list time,
+.telegram-note-detail time {
   color: var(--muted);
   font-size: .82rem;
   white-space: nowrap;
 }
 
-.telegram-note-card h4,
+.telegram-note-list__open {
+  color: #285c4d;
+  font-size: .82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.telegram-note-detail__heading {
+  align-items: center;
+}
+
+.telegram-note-detail__topline {
+  align-items: center;
+}
+
+.telegram-note-detail h4,
 .telegram-note-editor h4 {
   font-size: 1.05rem;
 }
 
-.telegram-note-card__body {
+.telegram-note-detail__body {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.telegram-note-card footer {
+.telegram-note-detail__empty-body {
+  font-style: italic;
+}
+
+.telegram-note-detail__footer {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -309,20 +283,20 @@
   font-size: .86rem;
 }
 
-.telegram-note-card footer .button {
+.telegram-note-detail__footer .button {
   margin-left: auto;
 }
 
-.telegram-note-card footer a,
+.telegram-note-detail__footer a,
 .telegram-note-editor__heading a {
   overflow-wrap: anywhere;
 }
 
-.telegram-note-card__source-label {
+.telegram-note-detail__source-label {
   overflow-wrap: anywhere;
 }
 
-.telegram-note-card__invalid-link {
+.telegram-note-detail__invalid-link {
   color: #8c3e39;
 }
 
@@ -362,16 +336,21 @@
   resize: vertical;
 }
 
-@media (max-width: 840px) {
-  .telegram-notes-workspace {
-    grid-template-columns: 1fr;
+@media (max-width: 1120px) {
+  .telegram-notes-filters__controls {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .telegram-notes-filters {
+  .telegram-notes-filters__search {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 840px) {
+  .telegram-notes-filters__controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .telegram-notes-filters__heading,
   .telegram-notes-filters__search,
   .telegram-notes-filters__actions {
     grid-column: 1 / -1;
@@ -384,9 +363,8 @@
 
 @media (max-width: 560px) {
   .telegram-notes-panel__heading,
-  .telegram-notes-link,
-  .telegram-notes-link__code,
-  .telegram-note-card__topline,
+  .telegram-note-detail__heading,
+  .telegram-note-detail__topline,
   .telegram-note-editor__heading {
     align-items: stretch;
     flex-direction: column;
@@ -394,17 +372,33 @@
 
   .telegram-notes-panel__heading > .button,
   .telegram-notes-panel__actions .button,
-  .telegram-notes-link__actions .button,
-  .telegram-notes-link__code .button {
-    width: 100%;
-  }
-
-  .telegram-notes-filters,
+  .telegram-notes-filters__controls,
   .telegram-note-editor__fields {
     grid-template-columns: 1fr;
   }
 
-  .telegram-note-card footer .button {
+  .telegram-notes-filters__search,
+  .telegram-notes-filters__actions {
+    grid-column: auto;
+  }
+
+  .telegram-note-list__button {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .telegram-note-list__end {
+    grid-template-columns: 1fr;
+    justify-items: start;
+    margin-left: 0;
+  }
+
+  .telegram-note-list__badges,
+  .telegram-note-detail__badges {
+    justify-content: flex-start;
+  }
+
+  .telegram-note-detail__footer .button {
     width: 100%;
     margin-left: 0;
   }

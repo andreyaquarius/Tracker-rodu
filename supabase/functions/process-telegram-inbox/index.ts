@@ -1175,9 +1175,9 @@ async function failTask(client: ReturnType<typeof serverClient>, task: IntakeCla
 async function processTask(client: ReturnType<typeof serverClient>, task: IntakeClaim): Promise<"completed" | "failed"> {
   try {
     if (task.intent === "note") {
-      // Notes are deliberately text/link-only. The enqueue service normally
-      // rejects media in note mode; keep this worker-side guard for any stale
-      // or manually-inserted intake.
+      // New notes materialize synchronously in the choice callback. Keep this
+      // legacy worker branch for rows queued before that rollout or manually
+      // inserted intake, and never allow generic note media.
       if (task.media) throw new WorkerProblem("TELEGRAM_NOTE_MEDIA_UNSUPPORTED", false);
       await completeNote(client, task);
     } else {

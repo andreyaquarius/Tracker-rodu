@@ -15,6 +15,10 @@ const receivedMaterialChoiceMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/202608240003_telegram_classify_received_material.sql",
 );
+const immediateNoteMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/202608240005_telegram_notes_materialize_immediately.sql",
+);
 
 test("Telegram intake is private, account-scoped and does not auto-publish", () => {
   const source = readFileSync(migrationPath, "utf8");
@@ -238,4 +242,30 @@ test("Telegram saves received material privately before choosing its destination
   assert.match(deployWorkflow, /allowed_updates=\["message","callback_query"\]/i);
   assert.match(deployWorkflow, /getWebhookInfo/i);
   assert.match(notesPanel, /Бот спершу\s+збереже матеріал у короткому приватному очікуванні/i);
+});
+
+test("choosing a text note materializes it immediately without waiting for the worker", () => {
+  const migration = readFileSync(immediateNoteMigrationPath, "utf8");
+  const webhook = readFileSync(
+    resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts"),
+    "utf8",
+  );
+  const notesPanel = readFileSync(
+    resolve(process.cwd(), "src/components/notes/TelegramNotesPanel.tsx"),
+    "utf8",
+  );
+
+  assert.match(migration, /if normalized_intent = 'note' then/i);
+  assert.match(migration, /status = 'processing'[\s\S]*?claim_token = note_claim_token/i);
+  assert.match(migration, /service_complete_telegram_note_v1\([\s\S]*?note_claim_token/i);
+  assert.match(migration, /'materialized', true/i);
+  assert.match(migration, /note_metadata := security_private\.telegram_source_metadata_v1\(intake_row\.source_metadata\)/i);
+  assert.match(migration, /note_source_platform := 'telegram'/i);
+  assert.match(migration, /note_source_platform := 'facebook'/i);
+  assert.match(migration, /normalized_intent,\s*status = 'queued'/i, "Only the Zagulyaka branch remains queued.");
+
+  assert.match(webhook, /result\.materialized === true/i);
+  assert.match(webhook, /Нотатку збережено/i);
+  assert.match(notesPanel, /Надішліть або перешліть допис боту, а потім натисніть «Нотатка»/i);
+  assert.doesNotMatch(notesPanel, /Оберіть у боті «Нотатка», а потім перешліть/i);
 });

@@ -2,10 +2,13 @@ import type { AppDatabase, SectionParentKey } from "../types";
 import { CustomSectionBuilder } from "../components/CustomSectionBuilder";
 import { AiAgentSettings } from "../components/AiAgentSettings";
 import { ProductAnalyticsPreferences } from "../components/ProductAnalyticsPreferences";
+import { TelegramBotSettings } from "../components/settings/TelegramBotSettings";
 import { openAnalyticsPreferences } from "../services/siteAnalytics";
+import type { SupabaseAccount } from "../services/supabaseAuth";
 
 export function SettingsPage({
   db,
+  account,
   onChange,
   readOnly = false,
   canCreateCustomSection = true,
@@ -18,6 +21,7 @@ export function SettingsPage({
   onSectionCreateRequestHandled,
 }: {
   db: AppDatabase;
+  account?: SupabaseAccount | null;
   onChange: (db: AppDatabase) => void;
   readOnly?: boolean;
   canCreateCustomSection?: boolean;
@@ -88,6 +92,8 @@ export function SettingsPage({
           />
         </label>
       </section>
+
+      <TelegramBotSettings account={account} />
 
       <AiAgentSettings />
 
