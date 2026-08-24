@@ -95,5 +95,6 @@ test("a blank person title follows Ukrainian normalized name until edited manual
   assert.match(dialog, /const updateNormalizedNameUk/);
   assert.match(dialog, /nextZagulyakaTitleFromNormalizedName/);
   assert.match(dialog, /const updateTitle/);
-  assert.match(dialog, /Назва була порожня, тому вона підставляється з нормалізованого ПІБ/);
+  assert.match(dialog, /Назва автоматично підставляється з нормалізованого ПІБ українською/);
+  assert.match(dialog, /За потреби доповніть її подією, роком чи іншою деталлю/);
 });
