@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_GOOGLE_CLIENT_ID?: string;
   readonly VITE_GOOGLE_PICKER_API_KEY?: string;
   readonly VITE_GOOGLE_DRIVE_APP_ID?: string;
+  /** Public bot username only; never expose a Telegram API token. */
+  readonly VITE_TELEGRAM_BOT_USERNAME?: string;
   readonly VITE_LOCAL_EDGE_FUNCTIONS_URL?: string;
   readonly VITE_EXTERNAL_PDF_VIEWER_V2?: string;
   readonly VITE_EXTERNAL_PDF_SOURCE_REVALIDATE_MINUTES?: string;

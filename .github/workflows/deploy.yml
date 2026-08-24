@@ -41,6 +41,7 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
           VITE_GOOGLE_PICKER_API_KEY: ${{ secrets.VITE_GOOGLE_PICKER_API_KEY }}
           VITE_GOOGLE_DRIVE_APP_ID: ${{ secrets.VITE_GOOGLE_DRIVE_APP_ID }}
+          VITE_TELEGRAM_BOT_USERNAME: ${{ vars.VITE_TELEGRAM_BOT_USERNAME }}
         run: |
           if [ -z "$VITE_SUPABASE_URL" ]; then
             echo "::error::Repository secret VITE_SUPABASE_URL is missing."
@@ -63,6 +64,16 @@ jobs:
             exit 1
           fi
 
+          # The Telegram deep link is optional during staged rollout.  When it
+          # is not configured, the private Notes page still provides a code to
+          # paste into the bot; when present, validate it before embedding it
+          # into the public bundle.
+          if [ -n "$VITE_TELEGRAM_BOT_USERNAME" ] \
+            && ! [[ "$VITE_TELEGRAM_BOT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{4,63}[Bb][Oo][Tt]$ ]]; then
+            echo "::error::Repository variable VITE_TELEGRAM_BOT_USERNAME must contain a valid public Telegram bot username when configured."
+            exit 1
+          fi
+
       - name: Typecheck
         run: npm run lint
 
@@ -74,6 +85,7 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
           VITE_GOOGLE_PICKER_API_KEY: ${{ secrets.VITE_GOOGLE_PICKER_API_KEY }}
           VITE_GOOGLE_DRIVE_APP_ID: ${{ secrets.VITE_GOOGLE_DRIVE_APP_ID }}
+          VITE_TELEGRAM_BOT_USERNAME: ${{ vars.VITE_TELEGRAM_BOT_USERNAME }}
           VITE_EXTERNAL_PDF_VIEWER_V2: ${{ vars.VITE_EXTERNAL_PDF_VIEWER_V2 || 'true' }}
           VITE_EXTERNAL_PDF_SOURCE_REVALIDATE_MINUTES: ${{ vars.VITE_EXTERNAL_PDF_SOURCE_REVALIDATE_MINUTES || '15' }}
           VITE_PDF_CLIENT_EXPORT_MAX_BYTES: ${{ vars.VITE_PDF_CLIENT_EXPORT_MAX_BYTES || '134217728' }}

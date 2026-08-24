@@ -197,6 +197,7 @@ export function ZagulyakyPage({
     return () => { active = false; };
   }, [selectedSlug]);
 
+  const isCatalogTab = activeTab === "people" || activeTab === "documents";
   const currentItemsCount = activeTab === "people" ? people.length : activeTab === "documents" ? documents.length : myRecords.length;
   const searchQuery = activeTab === "documents" ? documentFilters.query : peopleFilters.query;
   const filterCount = activeTab === "people"
@@ -219,7 +220,7 @@ export function ZagulyakyPage({
 
   const setTab = (next: ZagulyakyTab) => {
     if (next === "mine" && !account) {
-      rememberReturnPath("/zahuliaky/my");
+      rememberReturnPath(zagulyakyTabPath(next));
       requestSignIn(onRequestSignIn);
       return;
     }
@@ -352,7 +353,7 @@ export function ZagulyakyPage({
           ) : null}
         </nav>
 
-        {activeTab !== "mine" ? (
+        {isCatalogTab ? (
           <div className="zagulyaky-search-row">
             <label>
               <span className="visually-hidden">Пошук</span>
@@ -376,7 +377,7 @@ export function ZagulyakyPage({
         {showFilters && activeTab === "people" ? <PeopleFilters value={peopleFilters} onChange={(next) => { setPeopleFilters(next); resetPagination(setPage, setCursorHistory, setNextCursor); }} /> : null}
         {showFilters && activeTab === "documents" ? <DocumentFilters value={documentFilters} onChange={(next) => { setDocumentFilters(next); resetPagination(setPage, setCursorHistory, setNextCursor); }} /> : null}
 
-        {activeTab !== "mine" ? (
+        {isCatalogTab ? (
           <div className="zagulyaky-stats-grid" aria-label="Статистика каталогу">
             {statsCards.map((card) => (
               <article key={card.label} className={statsLoading ? "loading" : ""}>
@@ -422,7 +423,7 @@ export function ZagulyakyPage({
           )
         ) : null}
 
-        {!loading && !error && activeTab !== "mine" ? (
+        {!loading && !error && isCatalogTab ? (
           <CursorPagination
             page={page}
             pageSize={pageSize}

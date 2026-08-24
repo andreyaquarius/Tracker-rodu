@@ -14,6 +14,7 @@ on:
       - "src/types/**"
       - "src/utils/**"
       - ".github/workflows/deploy-supabase-functions.yml"
+      - ".github/workflows/telegram-inbox.yml"
   workflow_dispatch:
 
 permissions:
@@ -33,6 +34,9 @@ jobs:
       ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
       PDF_EXPORT_WORKER_URL: ${{ secrets.PDF_EXPORT_WORKER_URL }}
       PDF_EXPORT_WORKER_SECRET: ${{ secrets.PDF_EXPORT_WORKER_SECRET }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+      TELEGRAM_WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
 
     steps:
       - name: Checkout repository
@@ -96,6 +100,18 @@ jobs:
           fi
           if [ "${#PDF_EXPORT_WORKER_SECRET}" -lt 32 ]; then
             echo "::error::Repository secret PDF_EXPORT_WORKER_SECRET must contain at least 32 characters."
+            exit 1
+          fi
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::Repository secret TELEGRAM_BOT_TOKEN is required for Telegram intake."
+            exit 1
+          fi
+          if ! [[ "$TELEGRAM_WEBHOOK_SECRET" =~ ^[A-Za-z0-9_-]{16,256}$ ]]; then
+            echo "::error::Repository secret TELEGRAM_WEBHOOK_SECRET must be 16-256 URL-safe characters."
+            exit 1
+          fi
+          if [ "${#TELEGRAM_WORKER_SECRET}" -lt 32 ]; then
+            echo "::error::Repository secret TELEGRAM_WORKER_SECRET must contain at least 32 characters."
             exit 1
           fi
           node --input-type=module -e '
@@ -175,6 +191,9 @@ jobs:
             ALLOWED_ORIGIN="$ALLOWED_ORIGIN" \
             PDF_EXPORT_WORKER_URL="$PDF_EXPORT_WORKER_URL" \
             PDF_EXPORT_WORKER_SECRET="$PDF_EXPORT_WORKER_SECRET" \
+            TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
+            TELEGRAM_WEBHOOK_SECRET="$TELEGRAM_WEBHOOK_SECRET" \
+            TELEGRAM_WORKER_SECRET="$TELEGRAM_WORKER_SECRET" \
             --project-ref "$SUPABASE_PROJECT_REF"
 
           for function_dir in supabase/functions/*; do
@@ -190,6 +209,23 @@ jobs:
             echo "Deploying $function_name"
             supabase functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF"
           done
+
+      - name: Register Telegram webhook
+        run: |
+          webhook_url="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/telegram-webhook"
+          if ! response="$(curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 30 \
+            --request POST \
+            --data-urlencode "url=$webhook_url" \
+            --data-urlencode "secret_token=$TELEGRAM_WEBHOOK_SECRET" \
+            --data-urlencode 'allowed_updates=["message"]' \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook")"; then
+            echo "::error::Telegram rejected webhook registration. Check TELEGRAM_BOT_TOKEN and function deployment."
+            exit 1
+          fi
+          if ! jq --exit-status '.ok == true' <<<"$response" >/dev/null; then
+            echo "::error::Telegram did not confirm webhook registration."
+            exit 1
+          fi
 
       - name: Verify PDF gateway deployment
         run: |

@@ -24,4 +24,5 @@ test("classifies stable tree and settings routes", () => {
     "tree_statistics",
   );
   assert.equal(productAnalyticsPageCode(parseAppRoute("/settings")), "settings");
+  assert.equal(productAnalyticsPageCode(parseAppRoute("/notes")), "notes");
 });

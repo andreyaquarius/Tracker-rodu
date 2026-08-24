@@ -202,6 +202,8 @@ interface SidebarProps {
   page: PageKey | null;
   onNavigate: (page: PageKey) => void;
   onOpenZagulyaky: () => void;
+  onOpenNotes: () => void;
+  isNotesActive: boolean;
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
   showGeneHelp: boolean;
@@ -218,6 +220,8 @@ export function Sidebar({
   page,
   onNavigate,
   onOpenZagulyaky,
+  onOpenNotes,
+  isNotesActive,
   onOpenProjects,
   onOpenGeneHelp,
   showGeneHelp,
@@ -261,6 +265,10 @@ export function Sidebar({
   };
   const openZagulyaky = () => {
     onOpenZagulyaky();
+    onClose();
+  };
+  const openNotes = () => {
+    onOpenNotes();
     onClose();
   };
   const openGeneHelp = () => {
@@ -398,6 +406,17 @@ export function Sidebar({
           >
             <span className="nav-icon"><NavigationIcon icon="users" /></span>
             Загуляки
+          </button>
+
+          <button
+            type="button"
+            className={`notes-nav-action ${isNotesActive ? "active" : ""}`}
+            onClick={openNotes}
+            aria-label="Відкрити особисті нотатки"
+            title="Відкрити особисті нотатки"
+          >
+            <span className="nav-icon"><NavigationIcon icon="message-square" /></span>
+            Нотатки
           </button>
 
           {rootCustomSections.length ? (

@@ -61,6 +61,7 @@ export type AppRoute =
       recordKind?: "person" | "document";
       recordSlug?: string;
     }
+  | { kind: "notes" }
   | { kind: "projects" }
   | { kind: "admin"; page: AdminPage }
   | { kind: "settings"; page: "settings" | "subscription" | "feedback" }
@@ -175,6 +176,9 @@ export function parseAppRoute(
   if (parts.length === 1 && parts[0] === "faq") {
     return { kind: "public", page: "faq" };
   }
+  if (parts.length === 1 && parts[0] === "notes") {
+    return { kind: "notes" };
+  }
   if (parts[0] === "zahuliaky") {
     if (parts.length === 1) {
       return { kind: "zagulyaky", tab: "people" };
@@ -184,6 +188,11 @@ export function parseAppRoute(
     }
     if (parts.length === 2 && parts[1] === "my") {
       return { kind: "zagulyaky", tab: "mine" };
+    }
+    // Keep existing private bookmarks working, but App immediately replaces
+    // this legacy URL with the standalone account-level Notes route.
+    if (parts.length === 2 && parts[1] === "notes") {
+      return { kind: "notes" };
     }
     if (parts.length === 3 && parts[2] && parts[1] === "people") {
       return {

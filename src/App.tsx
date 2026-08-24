@@ -37,6 +37,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { FaqPage, FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
 import { ZagulyakyPage } from "./pages/ZagulyakyPage";
+import { NotesPage } from "./pages/NotesPage";
 import { MapPage } from "./pages/MapPage";
 import { FamilyTreePage } from "./pages/FamilyTreePage";
 import { FamilyTreeStatisticsPage } from "./pages/FamilyTreeStatisticsPage.tsx";
@@ -463,17 +464,40 @@ function applyZagulyakySeo(route: Extract<ReturnType<typeof parseAppRoute>, { ki
   upsertMetaName("twitter:image", SITE_IMAGE_URL);
 }
 
-function consumeZagulyakyPostAuthReturn(): string | null {
+function applyNotesSeo(): void {
+  const title = "Нотатки — Трекер Роду";
+  const description = "Приватна особиста скринька посилань, дописів і дослідницьких нотаток.";
+  document.title = title;
+  upsertMetaName("description", description);
+  upsertMetaName("robots", "noindex, nofollow, noarchive, nosnippet, noimageindex");
+  upsertCanonical(null);
+  upsertMetaProperty("og:title", title);
+  upsertMetaProperty("og:description", description);
+  upsertMetaProperty("og:type", "website");
+  upsertMetaProperty("og:url", `${SITE_ORIGIN}/notes`);
+  upsertMetaProperty("og:site_name", "Трекер Роду");
+  upsertMetaProperty("og:locale", "uk_UA");
+  upsertMetaProperty("og:image", SITE_IMAGE_URL);
+  upsertMetaProperty("og:image:alt", "Трекер Роду");
+  upsertMetaName("twitter:card", "summary");
+  upsertMetaName("twitter:title", title);
+  upsertMetaName("twitter:description", description);
+  upsertMetaName("twitter:image", SITE_IMAGE_URL);
+}
+
+function consumePrivatePostAuthReturn(): string | null {
   try {
     const path = window.sessionStorage.getItem(POST_AUTH_RETURN_KEY)?.trim() ?? "";
     window.sessionStorage.removeItem(POST_AUTH_RETURN_KEY);
-    return /^\/zahuliaky(?:\/|$)/.test(path) ? path : null;
+    return /^(?:\/notes(?:[?#]|$)|\/zahuliaky\/(?:my|notes)(?:[/?#]|$))/.test(path)
+      ? path
+      : null;
   } catch {
     return null;
   }
 }
 
-function rememberZagulyakyPostAuthReturn(path: string): void {
+function rememberPrivatePostAuthReturn(path: string): void {
   try {
     window.sessionStorage.setItem(POST_AUTH_RETURN_KEY, path);
   } catch {
@@ -759,10 +783,9 @@ export default function App() {
   const isPublicContentRoute = route.kind === "public" || (
     isZagulyakyRoute && !isPrivateZagulyakyRoute
   );
-  // All Zagulyaky screens are standalone from a workspace perspective. The
-  // private "mine" route differs only in authentication/analytics treatment;
-  // it must not trigger unrelated project dashboard data loads.
-  const skipsWorkspaceState = route.kind === "public" || isZagulyakyRoute;
+  // Zagulyaky and the account-level Notes inbox are standalone from a
+  // workspace perspective, so neither may trigger project dashboard loads.
+  const skipsWorkspaceState = route.kind === "public" || isZagulyakyRoute || route.kind === "notes";
   const familyTreeRouteFocus = useMemo(
     () => parseFamilyTreeRouteFocus(location.search),
     [location.search],
@@ -830,9 +853,19 @@ export default function App() {
   }, [workspace?.projectId]);
   const subscriptionAccess = useSubscription(
     workspace?.projectId,
-    Boolean(account) && !skipsWorkspaceState,
+    // Subscription and administrator access belong to the signed-in account,
+    // not to the current workspace.  Standalone account screens such as
+    // /notes still render the profile menu, so they must resolve this context
+    // even though `skipsWorkspaceState` correctly suppresses project data.
+    Boolean(account),
     account?.id ?? "",
   );
+  const canDeleteAccount = Boolean(subscriptionAccess.context) && !subscriptionAccess.isAdmin;
+
+  useEffect(() => {
+    if (route.kind !== "notes" || location.pathname === "/notes") return;
+    routerNavigate(`/notes${location.search}${location.hash}`, { replace: true });
+  }, [location.hash, location.pathname, location.search, route.kind, routerNavigate]);
   const handleFamilyTreeDataChanged = useCallback(() => {
     void subscriptionAccess.refreshSubscription();
     const projectId = workspace?.projectId;
@@ -991,6 +1024,11 @@ export default function App() {
       return;
     }
 
+    if (route.kind === "notes") {
+      applyNotesSeo();
+      return;
+    }
+
     if (route.kind === "root" && !account) {
       applyHomeSeo();
       return;
@@ -1142,7 +1180,7 @@ export default function App() {
     if (!account || isAccountSigningIn || passwordRecovery) return;
 
     if (route.kind === "root") {
-      const postAuthReturn = consumeZagulyakyPostAuthReturn();
+      const postAuthReturn = consumePrivatePostAuthReturn();
       if (postAuthReturn) {
         routerNavigate(postAuthReturn, { replace: true });
         return;
@@ -1222,10 +1260,11 @@ export default function App() {
 
   useEffect(() => {
     if (!authReady || account || passwordRecovery) return;
-    if (route.kind === "zagulyaky" && route.tab === "mine") {
-      rememberZagulyakyPostAuthReturn(
-        `${location.pathname}${location.search}${location.hash}`,
-      );
+    if (route.kind === "notes" || (route.kind === "zagulyaky" && route.tab === "mine")) {
+      const returnPath = route.kind === "notes"
+        ? `/notes${location.search}${location.hash}`
+        : `${location.pathname}${location.search}${location.hash}`;
+      rememberPrivatePostAuthReturn(returnPath);
     }
     if (route.kind === "root" || isPublicContentRoute) return;
     routerNavigate("/", { replace: true });
@@ -2630,6 +2669,19 @@ export default function App() {
   const deleteMyAccount = async () => {
     if (!account) {
       notify("Щоб видалити акаунт, увійдіть у свій профіль.", true);
+      return;
+    }
+
+    // Fail closed in the browser as well as on the server.  In particular,
+    // never let a just-opened profile menu turn a still-unresolved admin role
+    // into a destructive affordance.
+    if (!canDeleteAccount) {
+      notify(
+        subscriptionAccess.isAdmin
+          ? "Адміністративний акаунт не можна видалити через профіль."
+          : "Не вдалося перевірити права для видалення акаунта. Оновіть сторінку та спробуйте ще раз.",
+        true,
+      );
       return;
     }
 
@@ -6091,7 +6143,9 @@ export default function App() {
     );
   }
 
-  const displayedContent = route.kind === "projects" ? (
+  const displayedContent = route.kind === "notes" ? (
+    <NotesPage account={account} />
+  ) : route.kind === "projects" ? (
     <ProjectsPage
       workspaces={workspaces}
       onOpen={switchWorkspace}
@@ -6121,7 +6175,7 @@ export default function App() {
     <>
     <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
-        page={route.kind === "projects" ? null : page}
+        page={route.kind === "projects" || route.kind === "notes" ? null : page}
         familyTreeView={
           route.kind === "project" && route.page === "familyTree"
             ? route.familyTreeView ?? "tree"
@@ -6129,6 +6183,8 @@ export default function App() {
         }
         onNavigate={navigate}
         onOpenZagulyaky={() => routerNavigate("/zahuliaky/my")}
+        onOpenNotes={() => routerNavigate("/notes")}
+        isNotesActive={route.kind === "notes"}
         onOpenProjects={openProjects}
         onOpenGeneHelp={() => {
           if (canOpenGeneHelp) setGeneHelpOpen(true);
@@ -6142,6 +6198,7 @@ export default function App() {
         onSignInAccount={() => void signIn()}
         onSignOutAccount={() => void signOutAccount()}
         onDeleteAccount={() => void deleteMyAccount()}
+        canDeleteAccount={canDeleteAccount}
         onSwitchWorkspace={switchWorkspace}
         onCreateWorkspace={() => void createWorkspace()}
         onRenameWorkspace={(projectId) => void renameWorkspace(projectId)}

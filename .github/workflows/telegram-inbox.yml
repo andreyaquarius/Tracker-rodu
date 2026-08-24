@@ -1,0 +1,56 @@
+name: Process private Telegram inbox
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-private-inbox
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    # A slice is serial and bounded; this leaves time for a Telegram image and
+    # AI response without allowing two workers to contend for the same lease.
+    timeout-minutes: 8
+    steps:
+      - name: Verify Telegram inbox worker secrets
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
+        run: |
+          if [ -z "$PROJECT_REF" ] || [ -z "$WORKER_SECRET" ]; then
+            echo "::error::SUPABASE_PROJECT_REF and TELEGRAM_WORKER_SECRET are required."
+            exit 1
+          fi
+
+      - name: Process a bounded private Telegram inbox slice
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
+        run: |
+          if ! response="$(curl --fail-with-body --retry 2 --retry-all-errors --max-time 420 \
+            -X POST \
+            -H "Authorization: Bearer $WORKER_SECRET" \
+            -H "Content-Type: application/json" \
+            --data '{"limit":3}' \
+            "https://${PROJECT_REF}.supabase.co/functions/v1/process-telegram-inbox")"; then
+            echo "::error::Telegram inbox worker request failed."
+            exit 1
+          fi
+
+          # The worker returns counters only; source texts, photos, paths,
+          # Telegram IDs, candidate fields, and provider diagnostics stay out
+          # of the GitHub log and summary.
+          echo "$response"
+          {
+            echo "### Private Telegram inbox"
+            echo '```json'
+            echo "$response"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

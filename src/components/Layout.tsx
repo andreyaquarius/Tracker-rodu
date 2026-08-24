@@ -20,6 +20,8 @@ interface LayoutProps {
   familyTreeView?: "tree" | "statistics";
   onNavigate: (page: PageKey) => void;
   onOpenZagulyaky: () => void;
+  onOpenNotes: () => void;
+  isNotesActive: boolean;
   onOpenProjects: () => void;
   onOpenGeneHelp: () => void;
   showGeneHelp: boolean;
@@ -31,6 +33,7 @@ interface LayoutProps {
   onSignInAccount: () => void;
   onSignOutAccount: () => void;
   onDeleteAccount: () => void;
+  canDeleteAccount: boolean;
   onSwitchWorkspace: (projectId: string) => void;
   onCreateWorkspace: () => void;
   onRenameWorkspace: (projectId: string) => void;
@@ -84,6 +87,8 @@ export function Layout(props: LayoutProps) {
           page={props.page}
           onNavigate={props.onNavigate}
           onOpenZagulyaky={props.onOpenZagulyaky}
+          onOpenNotes={props.onOpenNotes}
+          isNotesActive={props.isNotesActive}
           onOpenProjects={props.onOpenProjects}
           onOpenGeneHelp={props.onOpenGeneHelp}
           showGeneHelp={props.showGeneHelp}
@@ -114,6 +119,7 @@ export function Layout(props: LayoutProps) {
             onSignInAccount={props.onSignInAccount}
             onSignOutAccount={props.onSignOutAccount}
             onDeleteAccount={props.onDeleteAccount}
+            canDeleteAccount={props.canDeleteAccount}
             onSwitchWorkspace={props.onSwitchWorkspace}
             onCreateWorkspace={props.onCreateWorkspace}
             onRenameWorkspace={props.onRenameWorkspace}

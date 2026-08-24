@@ -125,6 +125,16 @@ verify_jwt = false
 # secret (or the existing scheduled-worker secret) before service-role work.
 verify_jwt = false
 
+[functions.telegram-webhook]
+# Telegram sends no Supabase JWT. The handler verifies Telegram's per-webhook
+# secret header in constant time before it can enqueue anything.
+verify_jwt = false
+
+[functions.process-telegram-inbox]
+# This internal worker accepts only TELEGRAM_WORKER_SECRET and never trusts a
+# browser session. It claims a bounded private queue in the database.
+verify_jwt = false
+
 [edge_runtime]
 # Keep the local Edge worker alive after a 202 response so waitUntil background
 # export, email and cleanup work can finish during localhost testing.

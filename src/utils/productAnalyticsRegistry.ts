@@ -23,6 +23,7 @@ export const PRODUCT_ANALYTICS_PAGE_CODES = [
   "settings",
   "subscription",
   "feedback",
+  "notes",
   "custom_section",
   "unknown",
 ] as const;
@@ -133,12 +134,14 @@ export const PRODUCT_ANALYTICS_PAGE_LABELS: Record<ProductAnalyticsPageCode, str
   settings: "Налаштування",
   subscription: "Тариф і підписка",
   feedback: "Зворотний зв’язок",
+  notes: "Нотатки",
   custom_section: "Власний розділ",
   unknown: "Інша сторінка",
 };
 
 export function productAnalyticsPageCode(route: AppRoute): ProductAnalyticsPageCode {
   if (route.kind === "projects") return "projects";
+  if (route.kind === "notes") return "notes";
   if (route.kind === "settings") {
     if (route.page === "subscription") return "subscription";
     if (route.page === "feedback") return "feedback";

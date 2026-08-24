@@ -12,6 +12,7 @@ interface TopBarProps {
   onSignInAccount: () => void;
   onSignOutAccount: () => void;
   onDeleteAccount: () => void | Promise<void>;
+  canDeleteAccount: boolean;
   onSwitchWorkspace: (projectId: string) => void;
   onCreateWorkspace: () => void;
   onRenameWorkspace: (projectId: string) => void;
@@ -41,6 +42,7 @@ export function TopBar({
   onSignInAccount,
   onSignOutAccount,
   onDeleteAccount,
+  canDeleteAccount,
   onSwitchWorkspace,
   onCreateWorkspace,
   onRenameWorkspace,
@@ -257,7 +259,7 @@ export function TopBar({
             >
               Вийти з облікового запису
             </button>
-            {!isAdmin ? (
+            {canDeleteAccount ? (
               <div className="account-delete-zone">
                 <span className="account-delete-divider" aria-hidden="true" />
                 {isDeleteConfirmOpen ? (

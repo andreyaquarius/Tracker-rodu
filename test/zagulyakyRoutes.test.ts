@@ -4,7 +4,7 @@ import test from "node:test";
 import { parseAppRoute } from "../src/utils/appRoutes.ts";
 import { zagulyakyTabPath } from "../src/utils/zagulyakyRoutePath.ts";
 
-test("parses every public Zaguliaky catalogue route", () => {
+test("parses public catalogue, private Zaguliaky, and account-level Notes routes", () => {
   assert.deepEqual(parseAppRoute("/zahuliaky"), {
     kind: "zagulyaky",
     tab: "people",
@@ -17,6 +17,8 @@ test("parses every public Zaguliaky catalogue route", () => {
     kind: "zagulyaky",
     tab: "mine",
   });
+  assert.deepEqual(parseAppRoute("/notes"), { kind: "notes" });
+  assert.deepEqual(parseAppRoute("/zahuliaky/notes"), { kind: "notes" });
 });
 
 test("routes the private My records tab to the parseable /zahuliaky/my URL", () => {
@@ -69,7 +71,7 @@ test("App renders Zaguliaky before the authenticated-app gate", () => {
   assert.match(source, /activatePublicAnalyticsPage\(location\.pathname\)/);
 });
 
-test("My records is auth-only while a direct private URL preserves its post-sign-in return", () => {
+test("private Zaguliaky drafts and standalone Notes are auth-only without workspace loads", () => {
   const pageSource = readFileSync(new URL("../src/pages/ZagulyakyPage.tsx", import.meta.url), "utf8");
   const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 
@@ -89,8 +91,8 @@ test("My records is auth-only while a direct private URL preserves its post-sign
   );
   assert.match(
     appSource,
-    /const skipsWorkspaceState = route\.kind === "public" \|\| isZagulyakyRoute;/,
-    "the private My records screen must remain independent from a selected project",
+    /const skipsWorkspaceState = route\.kind === "public" \|\| isZagulyakyRoute \|\| route\.kind === "notes";/,
+    "private catalogue drafts and Notes must remain independent from a selected project",
   );
   assert.match(
     appSource,
@@ -99,13 +101,13 @@ test("My records is auth-only while a direct private URL preserves its post-sign
   );
   assert.match(
     appSource,
-    /if \(route\.kind === "zagulyaky" && route\.tab === "mine"\) \{\s*rememberZagulyakyPostAuthReturn\(/s,
-    "a guest opening /zahuliaky/my must retain the private return path before sign-in",
+    /if \(route\.kind === "notes" \|\| \(route\.kind === "zagulyaky" && route\.tab === "mine"\)\) \{/,
+    "a guest opening private Notes or Zaguliaky drafts must retain its return path before sign-in",
   );
   assert.match(
     appSource,
-    /const postAuthReturn = consumeZagulyakyPostAuthReturn\(\);\s*if \(postAuthReturn\) \{\s*routerNavigate\(postAuthReturn, \{ replace: true \}\);/s,
-    "the authenticated session must resume the saved My records route",
+    /const postAuthReturn = consumePrivatePostAuthReturn\(\);\s*if \(postAuthReturn\) \{\s*routerNavigate\(postAuthReturn, \{ replace: true \}\);/s,
+    "the authenticated session must resume the saved private route",
   );
 });
 
@@ -127,6 +129,27 @@ test("authenticated workspace navigation exposes My Zagulyaky records", () => {
   assert.match(sidebarSource, />\s*Загуляки\s*<\/button>/);
   assert.match(layoutSource, /onOpenZagulyaky=\{props\.onOpenZagulyaky\}/);
   assert.match(appSource, /onOpenZagulyaky=\{\(\) => routerNavigate\("\/zahuliaky\/my"\)\}/);
+});
+
+test("Notes are a standalone Tracker Rodu section, not a Zagulyaky tab", () => {
+  const pageSource = readFileSync(new URL("../src/pages/ZagulyakyPage.tsx", import.meta.url), "utf8");
+  const notesPageSource = readFileSync(new URL("../src/pages/NotesPage.tsx", import.meta.url), "utf8");
+  const notesPanelSource = readFileSync(new URL("../src/components/notes/TelegramNotesPanel.tsx", import.meta.url), "utf8");
+  const sidebarSource = readFileSync(new URL("../src/components/Sidebar.tsx", import.meta.url), "utf8");
+  const layoutSource = readFileSync(new URL("../src/components/Layout.tsx", import.meta.url), "utf8");
+  const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(pageSource, /TelegramNotesPanel/);
+  assert.match(notesPageSource, /components\/notes\/TelegramNotesPanel/);
+  assert.match(notesPageSource, /<h1 id="notes-page-title">Нотатки<\/h1>/);
+  assert.match(notesPanelSource, /href="\/zahuliaky\/my">Мої чернетки Загуляк<\/a>/);
+  assert.match(sidebarSource, /onOpenNotes: \(\) => void/);
+  assert.match(sidebarSource, /onClick=\{openNotes\}/);
+  assert.match(sidebarSource, /aria-label="Відкрити особисті нотатки"/);
+  assert.match(layoutSource, /onOpenNotes=\{props\.onOpenNotes\}/);
+  assert.match(appSource, /onOpenNotes=\{\(\) => routerNavigate\("\/notes"\)\}/);
+  assert.match(appSource, /route\.kind === "notes" \? \(\s*<NotesPage account=\{account\} \/>/s);
+  assert.match(appSource, /routerNavigate\(`\/notes\$\{location\.search\}\$\{location\.hash\}`, \{ replace: true \}\)/);
 });
 
 test("My records can reopen editable private drafts and submit them again", () => {

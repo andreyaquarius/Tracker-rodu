@@ -25,6 +25,10 @@ const topBar = readFileSync(
   new URL("../src/components/TopBar.tsx", import.meta.url),
   "utf8",
 );
+const app = readFileSync(
+  new URL("../src/App.tsx", import.meta.url),
+  "utf8",
+);
 
 test("account deletion RPC is service-role only, including the inherited PUBLIC role", () => {
   assert.doesNotMatch(initialMigration, /grant execute[\s\S]*?authenticated/i);
@@ -97,4 +101,18 @@ test("client requires explicit server confirmation and UI requires a destructive
   assert.match(clientService, /response\?\.deleted !== true/);
   assert.match(topBar, /deleteConfirmationValue\.trim\(\) !== "ВИДАЛИТИ"/);
   assert.match(topBar, /disabled=\{deleteConfirmationValue\.trim\(\) !== "ВИДАЛИТИ"\}/);
+});
+
+test("administrator account deletion fails closed until account-level access is resolved", () => {
+  assert.match(
+    app,
+    /const subscriptionAccess = useSubscription\([\s\S]*?Boolean\(account\),[\s\S]*?account\?\.id \?\? "",[\s\S]*?\);/,
+  );
+  assert.match(
+    app,
+    /const canDeleteAccount = Boolean\(subscriptionAccess\.context\) && !subscriptionAccess\.isAdmin;/,
+  );
+  assert.match(topBar, /canDeleteAccount: boolean;/);
+  assert.match(topBar, /\{canDeleteAccount \? \(/);
+  assert.match(app, /if \(!canDeleteAccount\) \{/);
 });
