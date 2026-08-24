@@ -136,9 +136,10 @@ test("Telegram image intake wakes the worker promptly and preserves a manual dra
   assert.match(worker, /function conservativeUnrecognizedPhotoCandidate\(/);
   assert.match(worker, /image && normalized\.length === 0[\s\S]*?conservativeUnrecognizedPhotoCandidate/);
 
-  assert.match(deployWorkflow, /GEMINI_API_KEY: \$\{\{ secrets\.GEMINI_API_KEY \}\}/);
-  assert.match(deployWorkflow, /Repository secret GEMINI_API_KEY is required for Telegram Zagulyaka analysis/);
-  assert.match(deployWorkflow, /GEMINI_API_KEY="\$GEMINI_API_KEY"/);
+  assert.match(deployWorkflow, /supabase secrets list --project-ref "\$SUPABASE_PROJECT_REF" \| grep -Eq '\(\^\|\[\[:space:\]\]\)\(GEMINI_API_KEY\|GOOGLE_AI_API_KEY\)/);
+  assert.match(deployWorkflow, /Supabase Edge Function secret GEMINI_API_KEY or GOOGLE_AI_API_KEY is required for Telegram Zagulyaka analysis/);
+  assert.doesNotMatch(deployWorkflow, /GEMINI_API_KEY: \$\{\{ secrets\.GEMINI_API_KEY \}\}/);
+  assert.doesNotMatch(deployWorkflow, /GEMINI_API_KEY="\$GEMINI_API_KEY"/);
   assert.match(scheduleWorkflow, /\.accepted == true and \(\.failed \/\/ 0\) == 0/);
 });
 

@@ -37,7 +37,6 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
       TELEGRAM_WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
     steps:
       - name: Checkout repository
@@ -115,10 +114,6 @@ jobs:
             echo "::error::Repository secret TELEGRAM_WORKER_SECRET must contain at least 32 characters."
             exit 1
           fi
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "::error::Repository secret GEMINI_API_KEY is required for Telegram Zagulyaka analysis."
-            exit 1
-          fi
           node --input-type=module -e '
             const url = new URL(process.env.PDF_EXPORT_WORKER_URL);
             if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
@@ -169,7 +164,7 @@ jobs:
       - name: Link Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --yes
 
-      - name: Verify PDF gateway server secrets
+      - name: Verify Edge Function server secrets
         run: |
           if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])ENCRYPTION_KEY([[:space:]]|$)'; then
             echo "::error::Supabase Edge Function secret ENCRYPTION_KEY is required for private Google Drive PDF sessions."
@@ -177,6 +172,10 @@ jobs:
           fi
           if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])GOOGLE_DRIVE_PUBLIC_API_KEY([[:space:]]|$)'; then
             echo "::error::Supabase Edge Function secret GOOGLE_DRIVE_PUBLIC_API_KEY is required for public Google Drive PDF shares."
+            exit 1
+          fi
+          if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])(GEMINI_API_KEY|GOOGLE_AI_API_KEY)([[:space:]]|$)'; then
+            echo "::error::Supabase Edge Function secret GEMINI_API_KEY or GOOGLE_AI_API_KEY is required for Telegram Zagulyaka analysis."
             exit 1
           fi
 
@@ -199,7 +198,6 @@ jobs:
             TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
             TELEGRAM_WEBHOOK_SECRET="$TELEGRAM_WEBHOOK_SECRET" \
             TELEGRAM_WORKER_SECRET="$TELEGRAM_WORKER_SECRET" \
-            GEMINI_API_KEY="$GEMINI_API_KEY" \
             --project-ref "$SUPABASE_PROJECT_REF"
 
           for function_dir in supabase/functions/*; do
