@@ -6,6 +6,7 @@ import {
   loadMyZagulyakaDraft,
   loadMyZagulyaky,
   loadPublicZagulyaka,
+  ZAGULYAKY_MY_RECORDS_PAGE_SIZES,
   deleteMyZagulyakaDraft,
   loadZagulyakyStats,
   searchZagulyakyDocuments,
@@ -19,6 +20,7 @@ import type {
   ZagulyakaDraftSummary,
   ZagulyakaKind,
   ZagulyakaPersonListItem,
+  ZagulyakaWorkflowStatus,
   ZagulyakySearchCursor,
   ZagulyakyDocumentFilters,
   ZagulyakyPeopleFilters,
@@ -67,6 +69,12 @@ const initialDocumentFilters: ZagulyakyDocumentFilters = {
   verificationStatus: "",
 };
 
+const myRecordWorkflowOptions = Object.entries(zagulyakaWorkflowLabels) as Array<[
+  ZagulyakaWorkflowStatus,
+  string,
+]>;
+type MyRecordsPageSize = (typeof ZAGULYAKY_MY_RECORDS_PAGE_SIZES)[number];
+
 export interface ZagulyakyPageProps {
   account?: SupabaseAccount | null;
   initialTab?: ZagulyakyTab;
@@ -93,6 +101,12 @@ export function ZagulyakyPage({
   const [documents, setDocuments] = useState<ZagulyakaDocumentListItem[]>([]);
   const [myRecords, setMyRecords] = useState<ZagulyakaDraftSummary[]>([]);
   const [myRecordsRevision, setMyRecordsRevision] = useState(0);
+  const [myRecordsPage, setMyRecordsPage] = useState(1);
+  const [myRecordsPageSize, setMyRecordsPageSize] = useState<MyRecordsPageSize>(50);
+  const [myRecordsStatus, setMyRecordsStatus] = useState<ZagulyakaWorkflowStatus | "">("");
+  const [myRecordsTotal, setMyRecordsTotal] = useState<number | null>(null);
+  const [myRecordsOverallTotal, setMyRecordsOverallTotal] = useState<number | null>(null);
+  const [myRecordsStatusCounts, setMyRecordsStatusCounts] = useState<Partial<Record<ZagulyakaWorkflowStatus, number>> | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<Array<ZagulyakySearchCursor | null>>([null]);
@@ -117,6 +131,7 @@ export function ZagulyakyPage({
   useEffect(() => {
     setActiveTab(initialTab);
     resetPagination(setPage, setCursorHistory, setNextCursor);
+    setMyRecordsPage(1);
   }, [initialTab]);
 
   useEffect(() => {
@@ -139,16 +154,31 @@ export function ZagulyakyPage({
         setLoading(false);
         setError("");
         setMyRecords([]);
+        setMyRecordsTotal(null);
+        setMyRecordsOverallTotal(null);
+        setMyRecordsStatusCounts(null);
         return;
       }
       const generation = ++requestGeneration.current;
       setLoading(true);
       setError("");
-      void loadMyZagulyaky(account.id).then((items) => {
+      void loadMyZagulyaky(account.id, {
+        page: myRecordsPage,
+        pageSize: myRecordsPageSize,
+        status: myRecordsStatus || null,
+      }).then((result) => {
         if (requestGeneration.current !== generation) return;
-        setMyRecords(items);
+        setMyRecords(result.items);
+        setMyRecordsPage(result.page);
+        setMyRecordsPageSize(result.pageSize);
+        setMyRecordsTotal(result.total);
+        setMyRecordsOverallTotal(result.overallTotal);
+        setMyRecordsStatusCounts(result.statusCounts);
       }).catch((loadError) => {
-        if (requestGeneration.current === generation) setError(catalogError(loadError));
+        if (requestGeneration.current === generation) {
+          setMyRecordsTotal(null);
+          setError(catalogError(loadError));
+        }
       }).finally(() => {
         if (requestGeneration.current === generation) setLoading(false);
       });
@@ -174,7 +204,13 @@ export function ZagulyakyPage({
       });
     }, 320);
     return () => window.clearTimeout(timeout);
-  }, [account, activeTab, cursorHistory, documentFilters, myRecordsRevision, page, pageSize, peopleFilters]);
+  }, [account, activeTab, cursorHistory, documentFilters, myRecordsPage, myRecordsPageSize, myRecordsRevision, myRecordsStatus, page, pageSize, peopleFilters]);
+
+  useEffect(() => {
+    if (activeTab !== "mine" || loading || error || myRecordsTotal === null) return;
+    const lastPage = Math.max(1, Math.ceil(myRecordsTotal / myRecordsPageSize));
+    if (myRecordsPage > lastPage) setMyRecordsPage(lastPage);
+  }, [activeTab, error, loading, myRecordsPage, myRecordsPageSize, myRecordsTotal]);
 
   useEffect(() => {
     if (!selectedSlug) {
@@ -228,6 +264,7 @@ export function ZagulyakyPage({
     setPage(1);
     setCursorHistory([null]);
     setNextCursor(null);
+    setMyRecordsPage(1);
     setError("");
     onNavigate?.(zagulyakyTabPath(next));
   };
@@ -349,7 +386,10 @@ export function ZagulyakyPage({
           <button type="button" className={activeTab === "people" ? "active" : ""} onClick={() => setTab("people")}>Люди <span>{stats.peopleCount.toLocaleString("uk-UA")}</span></button>
           <button type="button" className={activeTab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документи <span>{stats.documentCount.toLocaleString("uk-UA")}</span></button>
           {account ? (
-            <button type="button" className={activeTab === "mine" ? "active" : ""} onClick={() => setTab("mine")}>Мої записи</button>
+            <button type="button" className={activeTab === "mine" ? "active" : ""} onClick={() => setTab("mine")}>
+              Мої записи
+              {myRecordsOverallTotal !== null ? <span>{myRecordsOverallTotal.toLocaleString("uk-UA")}</span> : null}
+            </button>
           ) : null}
         </nav>
 
@@ -377,6 +417,20 @@ export function ZagulyakyPage({
         {showFilters && activeTab === "people" ? <PeopleFilters value={peopleFilters} onChange={(next) => { setPeopleFilters(next); resetPagination(setPage, setCursorHistory, setNextCursor); }} /> : null}
         {showFilters && activeTab === "documents" ? <DocumentFilters value={documentFilters} onChange={(next) => { setDocumentFilters(next); resetPagination(setPage, setCursorHistory, setNextCursor); }} /> : null}
 
+        {activeTab === "mine" && account ? (
+          <MyRecordsToolbar
+            status={myRecordsStatus}
+            total={myRecordsTotal}
+            overallTotal={myRecordsOverallTotal}
+            statusCounts={myRecordsStatusCounts}
+            onStatusChange={(nextStatus) => {
+              setMyRecordsStatus(nextStatus);
+              setMyRecordsPage(1);
+              setMyRecordsTotal(null);
+            }}
+          />
+        ) : null}
+
         {isCatalogTab ? (
           <div className="zagulyaky-stats-grid" aria-label="Статистика каталогу">
             {statsCards.map((card) => (
@@ -396,9 +450,15 @@ export function ZagulyakyPage({
           account ? (
             <MyRecords
               items={myRecords}
+              statusFilter={myRecordsStatus}
               editingLoadingId={editingLoadingId}
               action={myRecordAction}
               onCreate={() => requestCreate("person")}
+              onClearStatus={() => {
+                setMyRecordsStatus("");
+                setMyRecordsPage(1);
+                setMyRecordsTotal(null);
+              }}
               onEdit={(record) => void editMyRecord(record)}
               onWithdraw={(record) => void withdrawMyRecord(record)}
               onDelete={(record) => void deleteMyRecord(record)}
@@ -438,6 +498,22 @@ export function ZagulyakyPage({
             onPageSizeChange={(next) => {
               setPageSize(next);
               resetPagination(setPage, setCursorHistory, setNextCursor);
+            }}
+          />
+        ) : null}
+        {!loading && !error && activeTab === "mine" && account && myRecords.length ? (
+          <MyRecordsPagination
+            page={myRecordsPage}
+            pageSize={myRecordsPageSize}
+            total={myRecordsTotal ?? myRecords.length}
+            currentCount={myRecords.length}
+            onPrevious={() => setMyRecordsPage((current) => Math.max(1, current - 1))}
+            onNext={() => setMyRecordsPage((current) => current + 1)}
+            onPageChange={setMyRecordsPage}
+            onPageSizeChange={(nextPageSize) => {
+              setMyRecordsPageSize(nextPageSize);
+              setMyRecordsPage(1);
+              setMyRecordsTotal(null);
             }}
           />
         ) : null}
@@ -571,26 +647,77 @@ function DocumentsTable({ items, onOpen }: { items: ZagulyakaDocumentListItem[];
   );
 }
 
+function MyRecordsToolbar({
+  status,
+  total,
+  overallTotal,
+  statusCounts,
+  onStatusChange,
+}: {
+  status: ZagulyakaWorkflowStatus | "";
+  total: number | null;
+  overallTotal: number | null;
+  statusCounts: Partial<Record<ZagulyakaWorkflowStatus, number>> | null;
+  onStatusChange: (nextStatus: ZagulyakaWorkflowStatus | "") => void;
+}) {
+  const selectedLabel = status ? zagulyakaWorkflowLabels[status] : "";
+  return (
+    <div className="zagulyaky-my-records-toolbar" aria-label="Фільтр моїх записів">
+      <label>
+        <span>Статус</span>
+        <select
+          value={status}
+          onChange={(event) => onStatusChange(event.target.value === "" ? "" : event.target.value as ZagulyakaWorkflowStatus)}
+        >
+          <option value="">
+            {overallTotal === null ? "Усі статуси" : `Усі статуси (${formatRecordCount(overallTotal)})`}
+          </option>
+          {myRecordWorkflowOptions.map(([optionStatus, label]) => {
+            const count = statusCounts?.[optionStatus];
+            return <option key={optionStatus} value={optionStatus}>{count === undefined ? label : `${label} (${formatRecordCount(count)})`}</option>;
+          })}
+        </select>
+      </label>
+      <p className="zagulyaky-my-records-toolbar-summary" aria-live="polite">
+        {total === null ? "Оновлюємо список…" : status ? (
+          <>Статус «{selectedLabel}»: <strong>{formatRecordCount(total)}</strong> · усього {formatRecordCount(overallTotal ?? total)}</>
+        ) : (
+          <>Усього моїх записів: <strong>{formatRecordCount(overallTotal ?? total)}</strong></>
+        )}
+      </p>
+    </div>
+  );
+}
+
 function MyRecords({
   items,
+  statusFilter,
   editingLoadingId,
   action,
   onCreate,
+  onClearStatus,
   onEdit,
   onWithdraw,
   onDelete,
   onOpenPublic,
 }: {
   items: ZagulyakaDraftSummary[];
+  statusFilter: ZagulyakaWorkflowStatus | "";
   editingLoadingId: string;
   action: { id: string; type: "withdraw" | "delete" } | null;
   onCreate: () => void;
+  onClearStatus: () => void;
   onEdit: (record: ZagulyakaDraftSummary) => void;
   onWithdraw: (record: ZagulyakaDraftSummary) => void;
   onDelete: (record: ZagulyakaDraftSummary) => void;
   onOpenPublic: (record: ZagulyakaDraftSummary) => void;
 }) {
-  if (!items.length) return <div className="zagulyaky-empty"><span>✎</span><h3>У вас ще немає записів</h3><p>Додайте першу загуляку — чернетка залишатиметься приватною.</p><button type="button" className="button button-primary" onClick={onCreate}>+ Додати запис</button></div>;
+  if (!items.length) {
+    if (statusFilter) {
+      return <div className="zagulyaky-empty"><span>⌕</span><h3>За обраним статусом записів немає</h3><p>Спробуйте інший статус або поверніться до повного списку.</p><button type="button" className="button button-secondary" onClick={onClearStatus}>Показати всі записи</button></div>;
+    }
+    return <div className="zagulyaky-empty"><span>✎</span><h3>У вас ще немає записів</h3><p>Додайте першу загуляку — чернетка залишатиметься приватною.</p><button type="button" className="button button-primary" onClick={onCreate}>+ Додати запис</button></div>;
+  }
   return <div className="zagulyaky-my-records">{items.map((item) => {
     const editable = ["draft", "needs_changes", "withdrawn"].includes(item.status);
     const withdrawable = ["pending_review", "needs_changes"].includes(item.status);
@@ -598,6 +725,56 @@ function MyRecords({
     const busy = action?.id === item.id || Boolean(editingLoadingId);
     return <article key={item.id}><div><span className="eyebrow">{item.kind === "person" ? "Людина" : "Документ"}</span><h3>{item.title}</h3><small>Оновлено {formatDate(item.updatedAt)}</small></div><div><span className={`zagulyaky-status workflow-${item.status}`}>{zagulyakaWorkflowLabels[item.status]}</span>{item.rejectionReason ? <p>{item.rejectionReason}</p> : null}<div className="zagulyaky-my-record-actions">{editable ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => onEdit(item)}>{editingLoadingId === item.id ? "Відкриваємо…" : "Редагувати"}</button> : null}{withdrawable ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => onWithdraw(item)}>{action?.id === item.id && action.type === "withdraw" ? "Відкликаємо…" : "Відкликати"}</button> : null}{deletable ? <button type="button" className="button button-ghost zagulyaky-delete-draft" disabled={busy} onClick={() => onDelete(item)}>{action?.id === item.id && action.type === "delete" ? "Видаляємо…" : "Видалити"}</button> : null}{item.publishedSlug ? <button type="button" className="button button-secondary" onClick={() => onOpenPublic(item)}>Відкрити публічну картку</button> : null}</div></div></article>;
   })}</div>;
+}
+
+function MyRecordsPagination({
+  page,
+  pageSize,
+  total,
+  currentCount,
+  onPrevious,
+  onNext,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  pageSize: MyRecordsPageSize;
+  total: number;
+  currentCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: MyRecordsPageSize) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const from = (page - 1) * pageSize + 1;
+  const to = from + currentCount - 1;
+  return (
+    <nav className="zagulyaky-cursor-pagination zagulyaky-my-records-pagination" aria-label="Сторінки моїх записів">
+      <span>{`Показано ${from}–${to} із ${formatRecordCount(total)}`}</span>
+      <label>
+        <span>На сторінці</span>
+        <select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value) as MyRecordsPageSize)}>
+          {ZAGULYAKY_MY_RECORDS_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+        </select>
+      </label>
+      <div className="zagulyaky-my-records-page-controls">
+        <button type="button" className="button button-secondary" onClick={onPrevious} disabled={page <= 1}>← Назад</button>
+        <label className="zagulyaky-page-picker">
+          <span>Сторінка</span>
+          <select value={page} onChange={(event) => onPageChange(Number(event.target.value))} aria-label="Оберіть сторінку">
+            {Array.from({ length: totalPages }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+        <span className="zagulyaky-page-total">із {totalPages}</span>
+        <button type="button" className="button button-secondary" onClick={onNext} disabled={page >= totalPages}>Далі →</button>
+      </div>
+    </nav>
+  );
+}
+
+function formatRecordCount(value: number): string {
+  return value.toLocaleString("uk-UA");
 }
 
 function EmptyCatalog({ kind }: { kind: "people" | "documents" }) {
@@ -684,9 +861,21 @@ function formatDate(value: string): string {
 }
 
 function catalogError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  if (/function .* does not exist|could not find the function|PGRST202/i.test(message)) return "База даних каталогу ще не оновлена. Застосуйте міграцію «Загуляки» і оновіть сторінку.";
+  const message = catalogErrorText(error);
+  if (/function .* does not exist|could not find the function|PGRST202/i.test(message)) return "Для «Моїх записів» ще не застосована міграція 202608240004. Застосуйте її в Supabase і оновіть сторінку.";
   return message || "Не вдалося завантажити каталог.";
+}
+
+function catalogErrorText(error: unknown): string {
+  if (error instanceof Error) return error.message.trim();
+  if (typeof error === "string") return error.trim();
+  if (!error || typeof error !== "object" || Array.isArray(error)) return "";
+
+  const record = error as Record<string, unknown>;
+  return [record.code, record.message, record.details, record.hint]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim())
+    .join(" ");
 }
 
 function requestSignIn(callback?: () => void): void {

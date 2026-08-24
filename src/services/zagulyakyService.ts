@@ -9,6 +9,7 @@ import type {
   ZagulyakaEventType,
   ZagulyakaPersonListItem,
   ZagulyakaVerificationStatus,
+  ZagulyakaWorkflowStatus,
   ZagulyakyDocumentFilters,
   ZagulyakyPeopleFilters,
   ZagulyakySearchCursor,
@@ -33,6 +34,33 @@ const verificationStatuses = new Set<ZagulyakaVerificationStatus>([
   "unverified", "plausible", "corroborated", "verified", "disputed",
 ]);
 const claimTypes = new Set(["correction", "privacy", "copyright", "abuse", "source_problem", "other"]);
+const zagulyakaWorkflowStatuses: ZagulyakaWorkflowStatus[] = [
+  "draft", "pending_review", "needs_changes", "published",
+  "rejected", "withdrawn", "merged", "archived",
+];
+
+/** The largest allowed private-list page. Kept for callers that need a default. */
+export const ZAGULYAKY_MY_RECORDS_PAGE_SIZE = 50;
+export const ZAGULYAKY_MY_RECORDS_PAGE_SIZES = [10, 20, 50] as const;
+export type ZagulyakyMyRecordsPageSize = typeof ZAGULYAKY_MY_RECORDS_PAGE_SIZES[number];
+
+export interface ZagulyakyMyRecordsPage {
+  items: ZagulyakaDraftSummary[];
+  page: number;
+  pageSize: ZagulyakyMyRecordsPageSize;
+  /** Exact count after applying the selected workflow-status filter. */
+  total: number;
+  /** Exact count of every private Zagulyaka record created by the current user. */
+  overallTotal: number;
+  /** Counts for every workflow status across all of the current user's records. */
+  statusCounts: Record<ZagulyakaWorkflowStatus, number>;
+}
+
+export interface LoadMyZagulyakyOptions {
+  page?: number;
+  pageSize?: number;
+  status?: ZagulyakaWorkflowStatus | null;
+}
 
 export async function loadZagulyakyStats(): Promise<ZagulyakyStats> {
   const { data, error } = await getSupabaseClient().rpc("get_zagulyaky_public_stats_v1");
@@ -113,18 +141,29 @@ export async function loadPublicZagulyaka(slug: string): Promise<ZagulyakaDetail
   };
 }
 
-export async function loadMyZagulyaky(expectedUserId?: string): Promise<ZagulyakaDraftSummary[]> {
+export async function loadMyZagulyaky(
+  expectedUserId?: string,
+  options: LoadMyZagulyakyOptions = {},
+): Promise<ZagulyakyMyRecordsPage> {
+  const requestedPage = Math.trunc(options.page ?? 1);
+  const page = Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1;
+  const pageSize = myRecordsPageSize(options.pageSize);
   const client = getSupabaseClient();
   const { data, error } = await runAuthenticatedSupabaseRequest(
     client,
     async () => {
-      const result = await client.rpc("get_my_zagulyaky_v1", { p_limit: 100, p_offset: 0, p_status: null });
+      const result = await client.rpc("get_my_zagulyaky_page_v1", {
+        p_limit: pageSize,
+        p_offset: (page - 1) * pageSize,
+        p_status: options.status ?? null,
+      });
       return { data: result.data, error: result.error };
     },
     expectedUserId,
   );
   if (error) throw error;
-  const items: ZagulyakaDraftSummary[] = records(data).map((row) => ({
+  const payload = firstRecord(data);
+  const items: ZagulyakaDraftSummary[] = records(value(payload, "items", "records")).map((row) => ({
     id: text(value(row, "id")),
     kind: text(value(row, "kind")) === "document" ? "document" : "person",
     title: text(value(row, "title"), "Без назви"),
@@ -137,7 +176,15 @@ export async function loadMyZagulyaky(expectedUserId?: string): Promise<Zagulyak
     lockVersion: naturalNumber(value(row, "lock_version", "lockVersion")),
   }));
   for (const item of items) markZagulyakaRecordFresh("author", item.id);
-  return items;
+  const total = naturalNumber(value(payload, "total"), items.length);
+  return {
+    items,
+    page,
+    pageSize: myRecordsPageSize(value(payload, "limit", "pageSize", "page_size")),
+    total,
+    overallTotal: Math.max(total, naturalNumber(value(payload, "overallTotal", "overall_total"), total)),
+    statusCounts: workflowStatusCounts(value(payload, "statusCounts", "status_counts")),
+  };
 }
 
 export async function loadMyZagulyakaDraft(
@@ -796,6 +843,18 @@ function naturalNumber(input: unknown, fallback = 0): number { const result = Nu
 function nullableInteger(input: unknown): number | null { if (input === null || input === undefined || input === "") return null; const result = Number(input); return Number.isFinite(result) ? Math.trunc(result) : null; }
 function stringArray(input: unknown): string[] { return Array.isArray(input) ? input.map((item) => text(item)).filter(Boolean) : []; }
 function clampPageSize(input: number): number { return Math.max(10, Math.min(50, Math.trunc(input) || 20)); }
+function myRecordsPageSize(input: unknown): ZagulyakyMyRecordsPageSize {
+  const pageSize = Number(input);
+  return ZAGULYAKY_MY_RECORDS_PAGE_SIZES.includes(pageSize as ZagulyakyMyRecordsPageSize)
+    ? pageSize as ZagulyakyMyRecordsPageSize
+    : ZAGULYAKY_MY_RECORDS_PAGE_SIZE;
+}
+function workflowStatusCounts(input: unknown): Record<ZagulyakaWorkflowStatus, number> {
+  const row = record(input);
+  return Object.fromEntries(
+    zagulyakaWorkflowStatuses.map((status) => [status, naturalNumber(value(row, status))]),
+  ) as Record<ZagulyakaWorkflowStatus, number>;
+}
 function eventType(input: unknown): ZagulyakaEventType { const result = text(input) as ZagulyakaEventType; return eventTypes.has(result) ? result : "other"; }
 function nullableEventType(input: unknown): ZagulyakaEventType | null { const result = text(input) as ZagulyakaEventType; return eventTypes.has(result) ? result : null; }
 function verificationStatus(input: unknown): ZagulyakaVerificationStatus { const result = text(input) as ZagulyakaVerificationStatus; return verificationStatuses.has(result) ? result : "unverified"; }

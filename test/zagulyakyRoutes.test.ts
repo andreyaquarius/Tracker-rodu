@@ -164,3 +164,37 @@ test("My records can reopen editable private drafts and submit them again", () =
   assert.match(serviceSource, /\.rpc\("get_my_zagulyaka_draft_v1"/);
   assert.match(dialogSource, /await submitZagulyakaDraft\(handle, account\.id\)/);
 });
+
+test("My records provide compact status filtering, totals, and selectable pages", () => {
+  const pageSource = readFileSync(new URL("../src/pages/ZagulyakyPage.tsx", import.meta.url), "utf8");
+  const stylesSource = readFileSync(
+    new URL("../src/pages/ZagulyakyPage.css", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(pageSource, /const \[myRecordsStatus, setMyRecordsStatus\] = useState<ZagulyakaWorkflowStatus \| "">\(""\)/);
+  assert.match(pageSource, /const \[myRecordsPageSize, setMyRecordsPageSize\] = useState<MyRecordsPageSize>\(50\)/);
+  assert.match(pageSource, /const \[myRecordsTotal, setMyRecordsTotal\] = useState<number \| null>\(null\)/);
+  assert.match(pageSource, /const \[myRecordsOverallTotal, setMyRecordsOverallTotal\] = useState<number \| null>\(null\)/);
+  assert.match(pageSource, /status: myRecordsStatus \|\| null/);
+  assert.match(pageSource, /<MyRecordsToolbar/);
+  assert.match(pageSource, /overallTotal=\{myRecordsOverallTotal\}/);
+  assert.match(pageSource, /statusCounts=\{myRecordsStatusCounts\}/);
+  assert.match(pageSource, /Мої записи\s*\{myRecordsOverallTotal !== null \? <span>/s);
+  assert.match(pageSource, /ZAGULYAKY_MY_RECORDS_PAGE_SIZES\.map\(\(size\)/);
+  assert.match(pageSource, /Array\.from\(\{ length: totalPages \}/);
+  assert.match(pageSource, /Показано \$\{from\}–\$\{to\} із \$\{formatRecordCount\(total\)\}/);
+
+  assert.match(stylesSource, /\.zagulyaky-my-records-toolbar \{\s*margin: 0 0 12px;\s*display: flex;\s*flex-wrap: wrap;/s);
+  assert.match(stylesSource, /\.zagulyaky-my-records-pagination \{ grid-template-columns: minmax\(0, 1fr\) auto auto; \}/);
+});
+
+test("My records format structured Supabase RPC errors instead of rendering an object", () => {
+  const pageSource = readFileSync(new URL("../src/pages/ZagulyakyPage.tsx", import.meta.url), "utf8");
+
+  assert.match(pageSource, /function catalogErrorText\(error: unknown\): string \{/);
+  assert.match(pageSource, /if \(!error \|\| typeof error !== "object" \|\| Array\.isArray\(error\)\) return "";/);
+  assert.match(pageSource, /return \[record\.code, record\.message, record\.details, record\.hint\]/);
+  assert.match(pageSource, /could not find the function\|PGRST202/i);
+  assert.doesNotMatch(pageSource, /error instanceof Error \? error\.message : String\(error \?\? ""\)/);
+});
