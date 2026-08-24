@@ -54,12 +54,14 @@ type TelegramIntentCallback = {
   telegramUserId: number;
   privateChatId: number;
   promptMessageId: number;
-  intent: TelegramIntent;
+  choiceToken: string | null;
+  intent: TelegramIntent | null;
+  legacyIntentPicker: boolean;
 };
 
 type BotReply = {
   text: string;
-  showIntentPicker?: boolean;
+  choiceToken?: string;
 };
 
 class WebhookProblem extends Error {
@@ -92,6 +94,11 @@ function integerId(value: unknown): number | null {
     && value > 0
     ? value
     : null;
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 }
 
 function telegramUsername(value: unknown): string | null {
@@ -390,10 +397,12 @@ function parseMessage(update: JsonObject): TelegramMessage | null {
   };
 }
 
-function callbackIntent(value: unknown): TelegramIntent | null {
-  if (value === "tracker:intent:note") return "note";
-  if (value === "tracker:intent:zagulyaka") return "zagulyaka";
-  return null;
+function parseChoiceCallback(value: unknown): { choiceToken: string; intent: TelegramIntent } | null {
+  if (typeof value !== "string") return null;
+  const match = /^tracker:choice:([0-9a-f-]{36}):(note|zagulyaka)$/iu.exec(value);
+  if (!match || !isUuid(match[1])) return null;
+  const intent = match[2] === "note" || match[2] === "zagulyaka" ? match[2] : null;
+  return intent ? { choiceToken: match[1].toLowerCase(), intent } : null;
 }
 
 function parseIntentCallback(update: JsonObject): TelegramIntentCallback | null {
@@ -401,7 +410,8 @@ function parseIntentCallback(update: JsonObject): TelegramIntentCallback | null 
   const callback = record(update.callback_query);
   if (!Object.keys(callback).length) return null;
   const callbackId = stringValue(callback.id, 128);
-  const intent = callbackIntent(callback.data);
+  const selection = parseChoiceCallback(callback.data);
+  const legacyIntentPicker = callback.data === "tracker:intent:note" || callback.data === "tracker:intent:zagulyaka";
   const from = record(callback.from);
   const message = record(callback.message);
   const chat = record(message.chat);
@@ -411,18 +421,26 @@ function parseIntentCallback(update: JsonObject): TelegramIntentCallback | null 
   // `callback.message.from` is the bot, so the only user identity trusted here
   // is callback_query.from.  Inline messages and group callbacks never reach
   // the mode-setting RPC.
-  if (!callbackId || !intent || !telegramUserId || !privateChatId || !promptMessageId
+  if (!callbackId || !telegramUserId || !privateChatId || !promptMessageId
     || chat.type !== "private" || privateChatId !== telegramUserId) {
     return null;
   }
-  return { callbackId, telegramUserId, privateChatId, promptMessageId, intent };
+  return {
+    callbackId,
+    telegramUserId,
+    privateChatId,
+    promptMessageId,
+    choiceToken: selection?.choiceToken ?? null,
+    intent: selection?.intent ?? null,
+    legacyIntentPicker,
+  };
 }
 
-function parseCommand(value: string): { name: "start" | "note" | "zagulyaka" | "help"; argument: string | null } | null {
-  const match = /^\/(start|note|zagulyaka|help)(?:@[A-Za-z0-9_]{3,64})?(?:\s+([^\s]+))?\s*$/iu.exec(value.trim());
+function parseCommand(value: string): { name: "start" | "note" | "zagulyaka" | "help" | "pending"; argument: string | null } | null {
+  const match = /^\/(start|note|zagulyaka|help|pending)(?:@[A-Za-z0-9_]{3,64})?(?:\s+([^\s]+))?\s*$/iu.exec(value.trim());
   if (!match) return null;
   const name = match[1]?.toLowerCase();
-  if (name !== "start" && name !== "note" && name !== "zagulyaka" && name !== "help") return null;
+  if (name !== "start" && name !== "note" && name !== "zagulyaka" && name !== "help" && name !== "pending") return null;
   // Only `/start CODE` has an argument. A non-command text that starts with
   // `/note` must be preserved as ordinary content rather than discarded.
   if (name !== "start" && match[2]) return null;
@@ -447,11 +465,11 @@ function safeTelegramToken(): string {
   return Deno.env.get("TELEGRAM_BOT_TOKEN")?.trim() ?? "";
 }
 
-function intentPicker(): JsonObject {
+function intentPicker(choiceToken: string): JsonObject {
   return {
     inline_keyboard: [[
-      { text: "📝 Нотатка", callback_data: "tracker:intent:note" },
-      { text: "🧭 Загуляка", callback_data: "tracker:intent:zagulyaka" },
+      { text: "📝 Нотатка", callback_data: `tracker:choice:${choiceToken}:note` },
+      { text: "🧭 Загуляка", callback_data: `tracker:choice:${choiceToken}:zagulyaka` },
     ]],
   };
 }
@@ -485,7 +503,7 @@ async function sendBotReply(chatId: number, reply: BotReply): Promise<void> {
     chat_id: chatId,
     text: reply.text,
     disable_web_page_preview: true,
-    ...(reply.showIntentPicker ? { reply_markup: intentPicker() } : {}),
+    ...(reply.choiceToken && isUuid(reply.choiceToken) ? { reply_markup: intentPicker(reply.choiceToken) } : {}),
   });
 }
 
@@ -521,9 +539,27 @@ async function handleCommand(
 ): Promise<BotReply> {
   if (command.name === "help") {
     return {
-      text: "Спочатку оберіть, що хочете додати. Після цього надішліть або приватно перешліть один текст, допис, посилання чи фото. Нотатки залишаються приватними; Загуляка створює лише приватну чернетку для вашої перевірки.",
-      showIntentPicker: true,
+      text: "Надішліть або приватно перешліть один текст, допис, посилання чи фото. Я збережу його у короткому приватному очікуванні, а потім запитаю: Нотатка чи Загуляка. Нотатки залишаються приватними; Загуляка створює лише приватну чернетку для вашої перевірки. Якщо кнопки не з’явилися, надішліть /pending.",
     };
+  }
+
+  if (command.name === "pending") {
+    const client = serviceClient();
+    const { data, error } = await client.rpc("service_get_telegram_pending_choice_v1", {
+      p_telegram_user_id: message.telegramUserId,
+      p_private_chat_id: message.privateChatId,
+    });
+    if (error) throw safeRpcFailure(error);
+    const result = record(data);
+    if (result.linked !== true) {
+      return { text: "Спочатку підключіть Telegram у налаштуваннях Трекера Роду." };
+    }
+    const choiceToken = typeof result.choiceToken === "string" && isUuid(result.choiceToken)
+      ? result.choiceToken
+      : null;
+    return result.pending === true && choiceToken
+      ? { text: "Ось останній матеріал, який очікує вашого вибору.", choiceToken }
+      : { text: "Матеріалів, що очікують вибору, немає. Надішліть або перешліть новий допис, посилання чи фото." };
   }
 
   if (command.name === "start") {
@@ -544,18 +580,15 @@ async function handleCommand(
     if (error) throw safeRpcFailure(error);
     return record(data).linked === true
       ? {
-          text: "Telegram підключено. Оберіть тип матеріалу, а потім надішліть або перешліть один допис, посилання чи фото.",
-          showIntentPicker: true,
+          text: "Telegram підключено. Тепер надішліть або перешліть один допис, посилання чи фото — після отримання я запитаю, чи зберегти його як Нотатку або передати в чернетку Загуляки.",
         }
       : { text: "Посилання недійсне, прострочене або цей Telegram уже підключений до іншого акаунта." };
   }
 
-  // Keep these legacy commands recognisable, but do not leave a hidden mode
-  // active.  The explicit inline choice is easier to understand and is reset
-  // after every material.
+  // Keep legacy commands recognisable, but do not keep an account-wide mode:
+  // the selection must always apply to the exact material already received.
   return {
-    text: "Тепер тип обирається кнопкою перед кожним матеріалом.",
-    showIntentPicker: true,
+    text: "Тепер спочатку надішліть матеріал. Після цього з’являться кнопки «Нотатка» і «Загуляка» саме для нього.",
   };
 }
 
@@ -587,40 +620,45 @@ async function enqueueMessage(message: TelegramMessage): Promise<BotReply> {
     return { text: "Спочатку підключіть Telegram у налаштуваннях Трекера Роду." };
   }
   if (result.accepted !== true) {
-    if (result.reason === "choice_required") {
-      return {
-        text: "Спочатку оберіть, чи це Нотатка або Загуляка, а потім надішліть матеріал ще раз.",
-        showIntentPicker: true,
-      };
-    }
-    if (result.reason === "ai_not_enabled") {
-      return { text: "Для підготовки Загуляки увімкніть ШІ-аналіз у налаштуваннях підключення Telegram.", showIntentPicker: true };
-    }
-    if (result.reason === "photo_requires_zagulyaka") {
-      return { text: "Фото можна надіслати як Загуляку. Оберіть цей тип і надішліть фото ще раз.", showIntentPicker: true };
-    }
     return { text: "Надішліть текст, посилання або фото." };
   }
-  if (result.duplicate === true) return { text: "Це повідомлення вже отримано.", showIntentPicker: true };
-  return result.intent === "zagulyaka"
-    ? {
-        text: "Матеріал прийнято. Трекер Роду підготує приватну чернетку Загуляки для вашої перевірки.",
-        showIntentPicker: true,
-      }
-    : result.mediaOmitted === true
-    ? {
-        text: "Нотатку прийнято. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках.",
-        showIntentPicker: true,
-      }
-    : { text: "Нотатку прийнято. Вона з’явиться у вашому приватному списку нотаток.", showIntentPicker: true };
+  const choiceToken = typeof result.choiceToken === "string" && isUuid(result.choiceToken)
+    ? result.choiceToken
+    : null;
+  if (result.awaitingChoice === true && choiceToken) {
+    return {
+      text: result.duplicate === true
+        ? "Цей матеріал уже отримано приватно. Оберіть, куди його передати."
+        : "Матеріал отримано приватно. Куди його передати?",
+      choiceToken,
+    };
+  }
+  if (result.reason === "expired") {
+    return { text: "Строк вибору для цього матеріалу минув, тож його приватний вміст очищено. Якщо він ще потрібен, перешліть його ще раз." };
+  }
+  return { text: "Це повідомлення вже було отримано." };
 }
 
 async function handleIntentCallback(callback: TelegramIntentCallback): Promise<void> {
+  // Buttons sent by the earlier pre-material flow cannot classify any saved
+  // payload. Remove them so they do not invite a resend or a hidden mode.
+  if (!callback.choiceToken || !callback.intent) {
+    await answerIntentCallback(
+      callback.callbackId,
+      callback.legacyIntentPicker
+        ? "Це попереднє меню вже неактивне. Спершу надішліть матеріал."
+        : "Ця дія більше недоступна.",
+    );
+    await removeIntentPicker(callback);
+    return;
+  }
+
   const client = serviceClient();
-  const { data, error } = await client.rpc("service_set_telegram_active_mode_v1", {
+  const { data, error } = await client.rpc("service_choose_telegram_intake_intent_v1", {
     p_telegram_user_id: callback.telegramUserId,
     p_private_chat_id: callback.privateChatId,
-    p_mode: callback.intent,
+    p_choice_token: callback.choiceToken,
+    p_intent: callback.intent,
   });
   if (error) throw safeRpcFailure(error);
   const result = record(data);
@@ -632,15 +670,37 @@ async function handleIntentCallback(callback: TelegramIntentCallback): Promise<v
     await answerIntentCallback(callback.callbackId, "Увімкніть ШІ-аналіз для чернеток Загуляк у Трекері Роду.");
     return;
   }
+  if (result.reason === "photo_requires_zagulyaka") {
+    await answerIntentCallback(callback.callbackId, "Фото можна передати як Загуляку. Виберіть цей тип — повторно надсилати фото не потрібно.");
+    return;
+  }
+  if (result.reason === "expired") {
+    await answerIntentCallback(callback.callbackId, "Строк вибору минув; матеріал очищено.");
+    await removeIntentPicker(callback);
+    return;
+  }
+  if (result.reason === "already_selected") {
+    await answerIntentCallback(callback.callbackId, "Для цього матеріалу вже обрано інший тип.");
+    await removeIntentPicker(callback);
+    return;
+  }
+  if (result.selected !== true) {
+    await answerIntentCallback(callback.callbackId, "Цей матеріал більше недоступний. Надішліть його ще раз.");
+    await removeIntentPicker(callback);
+    return;
+  }
   await answerIntentCallback(
     callback.callbackId,
-    callback.intent === "zagulyaka" ? "Обрано Загуляку." : "Обрано Нотатку.",
+    callback.intent === "zagulyaka" ? "Передано в чернетку Загуляки." : "Передано до Нотаток.",
   );
   await removeIntentPicker(callback);
+  if (result.duplicate === true) return;
   await sendBotReply(callback.privateChatId, {
     text: callback.intent === "zagulyaka"
-      ? "Надішліть або перешліть один текст, допис, посилання чи фото. Я підготую тільки приватну чернетку Загуляки для вашої перевірки."
-      : "Надішліть або перешліть один текст, допис чи посилання. Я збережу його як вашу приватну нотатку.",
+      ? "Матеріал передано на підготовку приватної чернетки Загуляки для вашої перевірки."
+      : result.mediaOmitted === true
+      ? "Нотатку передано до приватного списку. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках."
+      : "Матеріал передано до вашого приватного списку нотаток.",
   });
 }
 

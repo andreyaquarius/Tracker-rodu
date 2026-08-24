@@ -11,6 +11,10 @@ const intentPickerMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/202608240002_telegram_intent_picker_and_text_fix.sql",
 );
+const receivedMaterialChoiceMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/202608240003_telegram_classify_received_material.sql",
+);
 
 test("Telegram intake is private, account-scoped and does not auto-publish", () => {
   const source = readFileSync(migrationPath, "utf8");
@@ -184,8 +188,9 @@ test("Telegram text validation does not construct an impossible NUL character", 
   assert.doesNotMatch(source, /position\(chr\(0\)/i);
 });
 
-test("Telegram requires an explicit inline intent choice before each material", () => {
-  const migration = readFileSync(intentPickerMigrationPath, "utf8");
+test("Telegram saves received material privately before choosing its destination", () => {
+  const pickerMigration = readFileSync(intentPickerMigrationPath, "utf8");
+  const migration = readFileSync(receivedMaterialChoiceMigrationPath, "utf8");
   const webhook = readFileSync(
     resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts"),
     "utf8",
@@ -199,23 +204,38 @@ test("Telegram requires an explicit inline intent choice before each material", 
     "utf8",
   );
 
-  assert.match(migration, /active_mode in \('choose', 'note', 'zagulyaka'\)/i);
-  assert.match(migration, /alter column active_mode set default 'choose'/i);
-  assert.match(migration, /set active_mode = 'choose';/i);
-  assert.match(migration, /'reason', 'choice_required'/i);
-  assert.match(migration, /select intent into duplicate_intent[\s\S]*?if found then[\s\S]*?active_intent := link_row\.active_mode/s);
-  assert.match(migration, /set active_mode = 'choose'\s+where owner_id = link_row\.owner_id/i);
-  assert.match(migration, /active_mode = 'choose',\s+linked_at = now\(\)/i);
+  assert.match(pickerMigration, /active_mode in \('choose', 'note', 'zagulyaka'\)/i);
+  assert.match(migration, /intent in \('pending_choice', 'note', 'zagulyaka', 'expired_choice'\)/i);
+  assert.match(migration, /status = 'awaiting_choice'/i);
+  assert.match(migration, /choice_token uuid/i);
+  assert.match(migration, /choice_expires_at timestamptz/i);
+  assert.match(migration, /clock_timestamp\(\) \+ interval '15 minutes'/i);
+  assert.match(migration, /service_choose_telegram_intake_intent_v1/i);
+  assert.match(migration, /where choice_token = p_choice_token[\s\S]*?and owner_id = link_row\.owner_id[\s\S]*?and telegram_user_id = p_telegram_user_id[\s\S]*?and private_chat_id = p_private_chat_id/s);
+  assert.match(migration, /set intent = normalized_intent,[\s\S]*?status = 'queued'/i);
+  assert.match(migration, /photo_requires_zagulyaka/i);
+  assert.match(migration, /ai_not_enabled/i);
+  assert.match(migration, /expire_telegram_pending_choice_v1/i);
+  assert.match(migration, /message_text = ''[\s\S]*?source_metadata = '\{\}'::jsonb/i);
+  assert.match(migration, /where owner_id = current_user_id and status = 'awaiting_choice'/i);
+  assert.match(migration, /grant execute on function public\.service_choose_telegram_intake_intent_v1\(bigint,bigint,uuid,text\)\s+to service_role/i);
+  assert.match(migration, /service_get_telegram_pending_choice_v1/i);
+  assert.match(migration, /grant execute on function public\.service_get_telegram_pending_choice_v1\(bigint,bigint\)\s+to service_role/i);
 
   assert.match(webhook, /callback_query/i);
-  assert.match(webhook, /tracker:intent:note/);
-  assert.match(webhook, /tracker:intent:zagulyaka/);
+  assert.match(webhook, /tracker:choice:\$\{choiceToken\}:note/);
+  assert.match(webhook, /tracker:choice:\$\{choiceToken\}:zagulyaka/);
   assert.match(webhook, /chat\.type !== "private" \|\| privateChatId !== telegramUserId/i);
-  assert.match(webhook, /service_set_telegram_active_mode_v1/i);
+  assert.match(webhook, /service_choose_telegram_intake_intent_v1/i);
   assert.match(webhook, /answerCallbackQuery/i);
   assert.match(webhook, /editMessageReplyMarkup/i);
-  assert.match(webhook, /choice_required/i);
+  assert.match(webhook, /Матеріал отримано приватно\. Куди його передати\?/i);
+  assert.match(webhook, /p_choice_token: callback\.choiceToken/i);
+  assert.match(webhook, /service_get_telegram_pending_choice_v1/i);
+  assert.match(webhook, /\/pending/i);
+  assert.doesNotMatch(webhook, /service_set_telegram_active_mode_v1/i);
+  assert.doesNotMatch(webhook, /потім надішліть матеріал ще раз/i);
   assert.match(deployWorkflow, /allowed_updates=\["message","callback_query"\]/i);
   assert.match(deployWorkflow, /getWebhookInfo/i);
-  assert.match(notesPanel, /бот попросить обрати/i);
+  assert.match(notesPanel, /Бот спершу\s+збереже матеріал у короткому приватному очікуванні/i);
 });
