@@ -18,6 +18,8 @@ interface ModalProps {
   children: ReactNode;
   onClose: () => void;
   className?: string;
+  /** Use the entire viewport instead of reserving space for the workspace sidebar. */
+  viewportBounded?: boolean;
   mode?: "dialog" | "window";
   fullscreen?: boolean;
   minimizable?: boolean;
@@ -43,6 +45,7 @@ export function Modal({
   children,
   onClose,
   className = "",
+  viewportBounded = false,
   mode = "dialog",
   fullscreen = false,
   minimizable = mode === "window",
@@ -72,7 +75,7 @@ export function Modal({
 
   useEffect(() => {
     const modal = modalRef.current;
-    if (!modal || !isDraggableModalViewport()) {
+    if (!modal || viewportBounded || !isDraggableModalViewport()) {
       setPosition(null);
       return undefined;
     }
@@ -134,17 +137,17 @@ export function Modal({
       window.removeEventListener("resize", handleResize);
       window.removeEventListener(SIDEBAR_LAYOUT_CHANGE_EVENT, handleSidebarLayoutChange);
     };
-  }, []);
+  }, [viewportBounded]);
 
   useEffect(() => {
-    if (fullscreen || !isDraggableModalViewport()) return;
+    if (fullscreen || viewportBounded || !isDraggableModalViewport()) return;
     const modal = modalRef.current;
     if (!modal) return;
     const rect = modal.getBoundingClientRect();
     setPosition((current) => current
       ? clampModalPosition(current, rect.width, rect.height)
       : current);
-  }, [fullscreen]);
+  }, [fullscreen, viewportBounded]);
 
   const focusWindow = () => {
     if (frame) {
@@ -155,7 +158,7 @@ export function Modal({
   };
 
   const startDrag = (event: PointerEvent<HTMLDivElement>) => {
-    if (fullscreen || !isDraggableModalViewport() || event.button !== 0) return;
+    if (fullscreen || viewportBounded || !isDraggableModalViewport() || event.button !== 0) return;
     if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
 
     focusWindow();
@@ -240,7 +243,7 @@ export function Modal({
 
   return (
     <div
-      className={`modal-backdrop ${mode === "window" ? "modal-backdrop-windowed" : ""}`}
+      className={`modal-backdrop ${mode === "window" ? "modal-backdrop-windowed" : ""} ${viewportBounded ? "modal-backdrop-viewport" : ""}`.trim()}
       role="presentation"
       style={{ zIndex }}
       onMouseDown={mode === "dialog" ? onClose : undefined}

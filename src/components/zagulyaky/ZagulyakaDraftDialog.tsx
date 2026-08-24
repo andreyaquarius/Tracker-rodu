@@ -204,7 +204,7 @@ export function ZagulyakaDraftDialog({
   };
 
   return (
-    <Modal title={initialHandle ? "Редагувати загуляку" : "Додати загуляку"} className="zagulyaky-draft-modal" onClose={onClose}>
+    <Modal title={initialHandle ? "Редагувати загуляку" : "Додати загуляку"} className="zagulyaky-draft-modal" viewportBounded onClose={onClose}>
       <form className="zagulyaky-draft-form" onSubmit={submit}>
         <ol className="zagulyaky-form-steps" aria-label="Етапи форми">
           {steps.map((label, index) => (

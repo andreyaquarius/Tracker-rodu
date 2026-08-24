@@ -8826,10 +8826,13 @@ tbody tr:hover { background: #fbfaf5; }
   .modal-backdrop {
     padding: 30px 30px 30px calc(var(--app-sidebar-width, 340px) + 30px);
   }
+  .modal-backdrop.modal-backdrop-viewport { padding: 30px; }
   .modal {
     width: min(820px, 100%);
   }
 }
+
+.modal-backdrop-viewport .modal-header { cursor: default; touch-action: auto; }
 
 @media (max-width: 720px) {
   .project-route-grid { grid-template-columns: 1fr; }

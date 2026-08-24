@@ -206,6 +206,50 @@
 .zagulyaky-table td { max-width: 250px; padding: 11px 12px; vertical-align: top; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .zagulyaky-table tbody tr:hover { background: #f6faf7; }
 
+/*
+ * The catalogue has seven useful fields.  At common laptop and tablet widths
+ * its 1040px table used to stay in desktop mode, leaving the last columns
+ * behind a horizontal scroll area.  Keep the compact table where it fits,
+ * but switch each result into a labelled card before any field can disappear
+ * off-screen.
+ */
+@media (max-width: 1140px) {
+  .zagulyaky-stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .zagulyaky-table-wrap { overflow: visible; border: 0; }
+  .zagulyaky-table { min-width: 0; display: block; }
+  .zagulyaky-table thead { display: none; }
+  .zagulyaky-table tbody { display: grid; gap: 10px; }
+  .zagulyaky-table tr {
+    padding: 13px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  .zagulyaky-table td {
+    max-width: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 106px minmax(0, 1fr);
+    gap: 8px;
+    border: 0;
+  }
+  .zagulyaky-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .zagulyaky-table td:first-child {
+    display: block;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .zagulyaky-table td:first-child::before { display: none; }
+}
+
 .zagulyaky-record-link {
   min-width: 0;
   padding: 0;
@@ -412,6 +456,8 @@
   border: 1px solid #cadecf;
   border-radius: 12px;
 }
+.zagulyaky-source-card > div,
+.zagulyaky-original-post-card > div { min-width: 0; }
 .zagulyaky-original-post-card {
   margin-top: 12px;
   padding: 16px;
@@ -427,6 +473,13 @@
 .zagulyaky-original-post-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .zagulyaky-source-card p { margin: 0; }
 .zagulyaky-source-card small { display: block; margin-top: 4px; color: var(--muted); }
+.zagulyaky-source-card h3,
+.zagulyaky-source-card p,
+.zagulyaky-source-card small,
+.zagulyaky-original-post-card h3,
+.zagulyaky-original-post-card p { overflow-wrap: anywhere; }
+.zagulyaky-source-card .button,
+.zagulyaky-original-post-card .button { max-width: 100%; white-space: normal; text-align: center; }
 .zagulyaky-media-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .zagulyaky-media-grid a { min-height: 100px; display: grid; place-items: center; overflow: hidden; color: var(--green-900); background: #eef1ed; border-radius: 10px; }
 .zagulyaky-media-grid img { width: 100%; height: 160px; display: block; object-fit: cover; }
@@ -560,15 +613,6 @@
   .zagulyaky-review-facts,
   .zagulyaky-kind-options { grid-template-columns: 1fr; }
   .zagulyaky-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .zagulyaky-table-wrap { overflow: visible; border: 0; }
-  .zagulyaky-table { min-width: 0; display: block; }
-  .zagulyaky-table thead { display: none; }
-  .zagulyaky-table tbody { display: grid; gap: 10px; }
-  .zagulyaky-table tr { padding: 13px; display: grid; grid-template-columns: 1fr; gap: 8px; border: 1px solid var(--line); border-radius: 12px; }
-  .zagulyaky-table td { max-width: none; padding: 0; display: grid; grid-template-columns: 106px minmax(0, 1fr); gap: 8px; border: 0; }
-  .zagulyaky-table td::before { content: attr(data-label); color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; }
-  .zagulyaky-table td:first-child { display: block; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-  .zagulyaky-table td:first-child::before { display: none; }
   .zagulyaky-cursor-pagination { grid-template-columns: 1fr; justify-items: stretch; }
   .zagulyaky-cursor-pagination > div { justify-content: space-between; }
   .zagulyaky-cursor-pagination > label { justify-content: space-between; }

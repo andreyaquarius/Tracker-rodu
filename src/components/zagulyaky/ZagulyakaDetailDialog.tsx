@@ -57,6 +57,7 @@ export function ZagulyakaDetailDialog({
     <Modal
       title={detail?.title || "Картка загуляки"}
       className="zagulyaky-detail-modal"
+      viewportBounded
       onClose={onClose}
     >
       <div className="zagulyaky-detail-body">
