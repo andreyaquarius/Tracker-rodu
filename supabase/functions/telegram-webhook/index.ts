@@ -8,13 +8,15 @@ const MAX_REQUEST_BYTES = 128 * 1024;
 const MAX_MESSAGE_CHARS = 12_000;
 const TELEGRAM_API_ORIGIN = "https://api.telegram.org";
 const BOT_REPLY_TIMEOUT_MS = 8_000;
+const WORKER_WAKE_TIMEOUT_MS = 8_000;
 
 type JsonObject = Record<string, unknown>;
+type TelegramImageMimeType = "image/jpeg" | "image/png" | "image/webp";
 type TelegramPhoto = {
   fileId: string;
   fileUniqueId: string;
   fileName: string;
-  mimeType: "image/jpeg";
+  mimeType: TelegramImageMimeType;
   byteSize: number | null;
   area: number;
 };
@@ -359,6 +361,33 @@ function selectPhoto(value: unknown): TelegramPhoto | null {
   return selected;
 }
 
+function selectImageDocument(value: unknown): TelegramPhoto | null {
+  const document = record(value);
+  const fileId = stringValue(document.file_id, 512);
+  const fileUniqueId = stringValue(document.file_unique_id, 512);
+  const mimeType = nullableText(document.mime_type, 100)?.toLowerCase();
+  if (!fileId || !fileUniqueId
+    || (mimeType !== "image/jpeg" && mimeType !== "image/png" && mimeType !== "image/webp")) {
+    return null;
+  }
+  const declaredSize = typeof document.file_size === "number"
+    && Number.isSafeInteger(document.file_size)
+    && document.file_size > 0
+    && document.file_size <= 20 * 1024 * 1024
+    ? document.file_size
+    : null;
+  return {
+    fileId,
+    fileUniqueId,
+    // A Telegram document filename is user-controlled and does not need to be
+    // retained. The worker determines the final extension from magic bytes.
+    fileName: "telegram-image",
+    mimeType,
+    byteSize: declaredSize,
+    area: 0,
+  };
+}
+
 function parseMessage(update: JsonObject): TelegramMessage | null {
   const updateId = integerId(update.update_id);
   const message = record(update.message);
@@ -392,7 +421,7 @@ function parseMessage(update: JsonObject): TelegramMessage | null {
     username: nullableText(from.username, 128),
     displayName: [firstName, lastName].filter(Boolean).join(" ") || null,
     text: messageText.trim(),
-    photo: selectPhoto(message.photo),
+    photo: selectPhoto(message.photo) ?? selectImageDocument(message.document),
     forwardSource: forwardedSource(message),
   };
 }
@@ -463,6 +492,50 @@ function serviceClient() {
 
 function safeTelegramToken(): string {
   return Deno.env.get("TELEGRAM_BOT_TOKEN")?.trim() ?? "";
+}
+
+function telegramWorkerUrl(): string | null {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim() ?? "";
+  if (!supabaseUrl) return null;
+  try {
+    const endpoint = new URL("/functions/v1/process-telegram-inbox", supabaseUrl);
+    if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) return null;
+    return endpoint.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Start one bounded queue slice as soon as the user explicitly chooses a
+ * Zagulyaka. The durable five-minute GitHub schedule remains the recovery
+ * path if this best-effort wake is unavailable or finishes after the webhook.
+ */
+async function wakeTelegramInboxWorker(): Promise<void> {
+  const endpoint = telegramWorkerUrl();
+  const workerSecret = Deno.env.get("TELEGRAM_WORKER_SECRET")?.trim() ?? "";
+  if (!endpoint || !workerSecret) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WORKER_WAKE_TIMEOUT_MS);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      redirect: "error",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "x-telegram-worker-secret": workerSecret,
+      },
+      body: JSON.stringify({ limit: 1 }),
+    });
+    await response.body?.cancel("telegram-inbox-wake-complete").catch(() => undefined);
+  } catch {
+    // A failed wake must not expose secrets or make Telegram redeliver the
+    // already-persisted choice. The scheduled worker will retry the queue.
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function intentPicker(choiceToken: string): JsonObject {
@@ -689,6 +762,9 @@ async function handleIntentCallback(callback: TelegramIntentCallback): Promise<v
     await removeIntentPicker(callback);
     return;
   }
+  if (callback.intent === "zagulyaka" && result.duplicate !== true) {
+    EdgeRuntime.waitUntil(wakeTelegramInboxWorker());
+  }
   const noteMaterialized = callback.intent === "note" && result.materialized === true;
   await answerIntentCallback(
     callback.callbackId,
@@ -702,7 +778,7 @@ async function handleIntentCallback(callback: TelegramIntentCallback): Promise<v
   if (result.duplicate === true) return;
   await sendBotReply(callback.privateChatId, {
     text: callback.intent === "zagulyaka"
-      ? "Матеріал передано на підготовку приватної чернетки Загуляки для вашої перевірки."
+      ? "Матеріал передано на підготовку приватної чернетки Загуляки для вашої перевірки. Після обробки вона з’явиться у «Моїх записах» Трекера Роду."
       : noteMaterialized
       ? result.mediaOmitted === true
         ? "Нотатку збережено у вашому приватному списку. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках. Відкрийте «Нотатки» у Трекері Роду та натисніть «Оновити»."

@@ -48,6 +48,10 @@ jobs:
           # Telegram IDs, candidate fields, and provider diagnostics stay out
           # of the GitHub log and summary.
           echo "$response"
+          if ! jq --exit-status '.accepted == true and (.failed // 0) == 0' <<<"$response" >/dev/null; then
+            echo "::error::Telegram inbox worker reported a failed task. Check the safe last_error_code aggregate in Supabase."
+            exit 1
+          fi
           {
             echo "### Private Telegram inbox"
             echo '```json'

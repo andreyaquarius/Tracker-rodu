@@ -37,6 +37,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
       TELEGRAM_WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
     steps:
       - name: Checkout repository
@@ -112,6 +113,10 @@ jobs:
           fi
           if [ "${#TELEGRAM_WORKER_SECRET}" -lt 32 ]; then
             echo "::error::Repository secret TELEGRAM_WORKER_SECRET must contain at least 32 characters."
+            exit 1
+          fi
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "::error::Repository secret GEMINI_API_KEY is required for Telegram Zagulyaka analysis."
             exit 1
           fi
           node --input-type=module -e '
@@ -194,6 +199,7 @@ jobs:
             TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
             TELEGRAM_WEBHOOK_SECRET="$TELEGRAM_WEBHOOK_SECRET" \
             TELEGRAM_WORKER_SECRET="$TELEGRAM_WORKER_SECRET" \
+            GEMINI_API_KEY="$GEMINI_API_KEY" \
             --project-ref "$SUPABASE_PROJECT_REF"
 
           for function_dir in supabase/functions/*; do

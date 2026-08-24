@@ -148,6 +148,17 @@ export function ZagulyakyPage({
   }, []);
 
   useEffect(() => {
+    if (activeTab !== "mine" || !account) return;
+    const refreshAfterReturningToApp = () => {
+      if (document.visibilityState === "visible") {
+        setMyRecordsRevision((current) => current + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", refreshAfterReturningToApp);
+    return () => document.removeEventListener("visibilitychange", refreshAfterReturningToApp);
+  }, [account, activeTab]);
+
+  useEffect(() => {
     if (activeTab === "mine") {
       if (!account) {
         ++requestGeneration.current;
@@ -254,10 +265,21 @@ export function ZagulyakyPage({
     { label: "Дослідників долучилось", value: stats.contributorsCount, icon: "♙" },
   ], [activeTab, stats]);
 
+  const refreshMyRecords = () => {
+    setMyRecordsPage(1);
+    setMyRecordsTotal(null);
+    setError("");
+    setMyRecordsRevision((current) => current + 1);
+  };
+
   const setTab = (next: ZagulyakyTab) => {
     if (next === "mine" && !account) {
       rememberReturnPath(zagulyakyTabPath(next));
       requestSignIn(onRequestSignIn);
+      return;
+    }
+    if (next === "mine" && activeTab === "mine") {
+      refreshMyRecords();
       return;
     }
     setActiveTab(next);
@@ -428,6 +450,7 @@ export function ZagulyakyPage({
               setMyRecordsPage(1);
               setMyRecordsTotal(null);
             }}
+            onRefresh={refreshMyRecords}
           />
         ) : null}
 
@@ -653,12 +676,14 @@ function MyRecordsToolbar({
   overallTotal,
   statusCounts,
   onStatusChange,
+  onRefresh,
 }: {
   status: ZagulyakaWorkflowStatus | "";
   total: number | null;
   overallTotal: number | null;
   statusCounts: Partial<Record<ZagulyakaWorkflowStatus, number>> | null;
   onStatusChange: (nextStatus: ZagulyakaWorkflowStatus | "") => void;
+  onRefresh: () => void;
 }) {
   const selectedLabel = status ? zagulyakaWorkflowLabels[status] : "";
   return (
@@ -678,12 +703,15 @@ function MyRecordsToolbar({
           })}
         </select>
       </label>
+      <button type="button" className="button button-secondary" onClick={onRefresh}>↻ Оновити</button>
       <p className="zagulyaky-my-records-toolbar-summary" aria-live="polite">
         {total === null ? "Оновлюємо список…" : status ? (
           <>Статус «{selectedLabel}»: <strong>{formatRecordCount(total)}</strong> · усього {formatRecordCount(overallTotal ?? total)}</>
         ) : (
           <>Усього моїх записів: <strong>{formatRecordCount(overallTotal ?? total)}</strong></>
         )}
+        <br />
+        <small>Чернетки з Telegram з’являються тут зі статусом «Чернетка».</small>
       </p>
     </div>
   );

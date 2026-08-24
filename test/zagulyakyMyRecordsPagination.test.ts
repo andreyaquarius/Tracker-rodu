@@ -10,6 +10,10 @@ const service = readFileSync(
   new URL("../src/services/zagulyakyService.ts", import.meta.url),
   "utf8",
 );
+const page = readFileSync(
+  new URL("../src/pages/ZagulyakyPage.tsx", import.meta.url),
+  "utf8",
+);
 
 test("private Zagulyaky pagination returns owner-only exact totals and status counters", () => {
   assert.match(migration, /create or replace function public\.get_my_zagulyaky_page_v1\(\s*p_status text default null,\s*p_limit integer default 50,\s*p_offset integer default 0/s);
@@ -48,4 +52,13 @@ test("client asks the paged RPC for only 10, 20, or 50 records and preserves tot
   assert.match(service, /const payload = firstRecord\(data\)/);
   assert.match(service, /overallTotal: Math\.max\(total, naturalNumber\(value\(payload, "overallTotal", "overall_total"\), total\)\)/);
   assert.match(service, /statusCounts: workflowStatusCounts\(value\(payload, "statusCounts", "status_counts"\)\)/);
+});
+
+test("my records can refresh drafts created externally by the Telegram worker", () => {
+  assert.match(page, /const refreshMyRecords = \(\) => \{[\s\S]*?setMyRecordsPage\(1\)[\s\S]*?setMyRecordsRevision/);
+  assert.match(page, /document\.addEventListener\("visibilitychange", refreshAfterReturningToApp\)/);
+  assert.match(page, /document\.visibilityState === "visible"/);
+  assert.match(page, /onRefresh=\{refreshMyRecords\}/);
+  assert.match(page, /↻ Оновити/);
+  assert.match(page, /Чернетки з Telegram з’являються тут зі статусом «Чернетка»/);
 });

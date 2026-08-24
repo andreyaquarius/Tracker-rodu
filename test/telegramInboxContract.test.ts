@@ -102,6 +102,46 @@ test("Telegram functions are present as separate webhook and worker boundaries",
   assert.doesNotMatch(workerSource, /console\.log\(/i);
 });
 
+test("Telegram image intake wakes the worker promptly and preserves a manual draft when OCR finds no record", () => {
+  const webhook = readFileSync(
+    resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts"),
+    "utf8",
+  );
+  const worker = readFileSync(
+    resolve(process.cwd(), "supabase/functions/process-telegram-inbox/index.ts"),
+    "utf8",
+  );
+  const deployWorkflow = readFileSync(
+    resolve(process.cwd(), ".github/workflows/deploy-supabase-functions.yml"),
+    "utf8",
+  );
+  const scheduleWorkflow = readFileSync(
+    resolve(process.cwd(), ".github/workflows/telegram-inbox.yml"),
+    "utf8",
+  );
+
+  assert.match(webhook, /function selectImageDocument\(/);
+  assert.match(webhook, /mimeType !== "image\/jpeg"[\s\S]*?mimeType !== "image\/png"[\s\S]*?mimeType !== "image\/webp"/);
+  assert.match(webhook, /selectPhoto\(message\.photo\) \?\? selectImageDocument\(message\.document\)/);
+  assert.match(webhook, /function wakeTelegramInboxWorker\(/);
+  assert.match(webhook, /x-telegram-worker-secret/);
+  assert.match(webhook, /body: JSON\.stringify\(\{ limit: 1 \}\)/);
+  assert.match(webhook, /callback\.intent === "zagulyaka" && result\.duplicate !== true[\s\S]*?EdgeRuntime\.waitUntil\(wakeTelegramInboxWorker\(\)\)/);
+  assert.match(webhook, /The scheduled worker will retry the queue/);
+
+  assert.match(worker, /Працюй у трьох послідовних етапах/);
+  assert.match(worker, /Спершу транскрибуй доступний текст/);
+  assert.match(worker, /Потім проіндексуй лише підтверджені транскрипцією факти/);
+  assert.match(worker, /Трекер Роду сам розкладе ці факти по полях таблиці «Загуляки»/);
+  assert.match(worker, /function conservativeUnrecognizedPhotoCandidate\(/);
+  assert.match(worker, /image && normalized\.length === 0[\s\S]*?conservativeUnrecognizedPhotoCandidate/);
+
+  assert.match(deployWorkflow, /GEMINI_API_KEY: \$\{\{ secrets\.GEMINI_API_KEY \}\}/);
+  assert.match(deployWorkflow, /Repository secret GEMINI_API_KEY is required for Telegram Zagulyaka analysis/);
+  assert.match(deployWorkflow, /GEMINI_API_KEY="\$GEMINI_API_KEY"/);
+  assert.match(scheduleWorkflow, /\.accepted == true and \(\.failed \/\/ 0\) == 0/);
+});
+
 test("forwarded Telegram posts retain only safe, private note provenance", () => {
   const webhook = resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts");
   const worker = resolve(process.cwd(), "supabase/functions/process-telegram-inbox/index.ts");
