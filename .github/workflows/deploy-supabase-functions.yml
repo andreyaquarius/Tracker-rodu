@@ -217,13 +217,24 @@ jobs:
             --request POST \
             --data-urlencode "url=$webhook_url" \
             --data-urlencode "secret_token=$TELEGRAM_WEBHOOK_SECRET" \
-            --data-urlencode 'allowed_updates=["message"]' \
+            --data-urlencode 'allowed_updates=["message","callback_query"]' \
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook")"; then
             echo "::error::Telegram rejected webhook registration. Check TELEGRAM_BOT_TOKEN and function deployment."
             exit 1
           fi
           if ! jq --exit-status '.ok == true' <<<"$response" >/dev/null; then
             echo "::error::Telegram did not confirm webhook registration."
+            exit 1
+          fi
+
+          if ! webhook_info="$(curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 30 \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo")"; then
+            echo "::error::Could not verify Telegram webhook registration."
+            exit 1
+          fi
+          if ! jq --exit-status --arg url "$webhook_url" \
+            '.ok == true and .result.url == $url' <<<"$webhook_info" >/dev/null; then
+            echo "::error::Telegram webhook URL does not point to telegram-webhook after registration."
             exit 1
           fi
 

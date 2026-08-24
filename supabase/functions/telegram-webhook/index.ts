@@ -48,6 +48,20 @@ type TelegramMessage = {
   forwardSource: TelegramForwardSource | null;
 };
 
+type TelegramIntent = "note" | "zagulyaka";
+type TelegramIntentCallback = {
+  callbackId: string;
+  telegramUserId: number;
+  privateChatId: number;
+  promptMessageId: number;
+  intent: TelegramIntent;
+};
+
+type BotReply = {
+  text: string;
+  showIntentPicker?: boolean;
+};
+
 class WebhookProblem extends Error {
   constructor(readonly code: string, readonly status: number) {
     super(code);
@@ -376,6 +390,34 @@ function parseMessage(update: JsonObject): TelegramMessage | null {
   };
 }
 
+function callbackIntent(value: unknown): TelegramIntent | null {
+  if (value === "tracker:intent:note") return "note";
+  if (value === "tracker:intent:zagulyaka") return "zagulyaka";
+  return null;
+}
+
+function parseIntentCallback(update: JsonObject): TelegramIntentCallback | null {
+  if (!integerId(update.update_id)) return null;
+  const callback = record(update.callback_query);
+  if (!Object.keys(callback).length) return null;
+  const callbackId = stringValue(callback.id, 128);
+  const intent = callbackIntent(callback.data);
+  const from = record(callback.from);
+  const message = record(callback.message);
+  const chat = record(message.chat);
+  const telegramUserId = integerId(from.id);
+  const privateChatId = integerId(chat.id);
+  const promptMessageId = integerId(message.message_id);
+  // `callback.message.from` is the bot, so the only user identity trusted here
+  // is callback_query.from.  Inline messages and group callbacks never reach
+  // the mode-setting RPC.
+  if (!callbackId || !intent || !telegramUserId || !privateChatId || !promptMessageId
+    || chat.type !== "private" || privateChatId !== telegramUserId) {
+    return null;
+  }
+  return { callbackId, telegramUserId, privateChatId, promptMessageId, intent };
+}
+
 function parseCommand(value: string): { name: "start" | "note" | "zagulyaka" | "help"; argument: string | null } | null {
   const match = /^\/(start|note|zagulyaka|help)(?:@[A-Za-z0-9_]{3,64})?(?:\s+([^\s]+))?\s*$/iu.exec(value.trim());
   if (!match) return null;
@@ -405,20 +447,29 @@ function safeTelegramToken(): string {
   return Deno.env.get("TELEGRAM_BOT_TOKEN")?.trim() ?? "";
 }
 
-async function sendBotReply(chatId: number, message: string): Promise<void> {
+function intentPicker(): JsonObject {
+  return {
+    inline_keyboard: [[
+      { text: "📝 Нотатка", callback_data: "tracker:intent:note" },
+      { text: "🧭 Загуляка", callback_data: "tracker:intent:zagulyaka" },
+    ]],
+  };
+}
+
+async function callTelegramBot(method: string, payload: JsonObject): Promise<void> {
   const token = safeTelegramToken();
-  if (!token || !message) return;
+  if (!token) return;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BOT_REPLY_TIMEOUT_MS);
   try {
     // The bot token is necessarily part of the Bot API path. Never surface
     // this URL, response, or caught provider error in logs or HTTP responses.
-    await fetch(`${TELEGRAM_API_ORIGIN}/bot${token}/sendMessage`, {
+    await fetch(`${TELEGRAM_API_ORIGIN}/bot${token}/${method}`, {
       method: "POST",
       redirect: "error",
       signal: controller.signal,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: message, disable_web_page_preview: true }),
+      body: JSON.stringify(payload),
     });
   } catch {
     // Telegram delivery is best effort. The already-persisted operation must
@@ -426,6 +477,32 @@ async function sendBotReply(chatId: number, message: string): Promise<void> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function sendBotReply(chatId: number, reply: BotReply): Promise<void> {
+  if (!reply.text) return;
+  await callTelegramBot("sendMessage", {
+    chat_id: chatId,
+    text: reply.text,
+    disable_web_page_preview: true,
+    ...(reply.showIntentPicker ? { reply_markup: intentPicker() } : {}),
+  });
+}
+
+async function answerIntentCallback(callbackId: string, text: string): Promise<void> {
+  await callTelegramBot("answerCallbackQuery", {
+    callback_query_id: callbackId,
+    text,
+    show_alert: false,
+  });
+}
+
+async function removeIntentPicker(callback: TelegramIntentCallback): Promise<void> {
+  await callTelegramBot("editMessageReplyMarkup", {
+    chat_id: callback.privateChatId,
+    message_id: callback.promptMessageId,
+    reply_markup: { inline_keyboard: [] },
+  });
 }
 
 function safeRpcFailure(error: unknown): WebhookProblem {
@@ -438,17 +515,25 @@ function safeRpcFailure(error: unknown): WebhookProblem {
   return new WebhookProblem("SERVICE_OPERATION_FAILED", 503);
 }
 
-async function handleCommand(message: TelegramMessage, command: NonNullable<ReturnType<typeof parseCommand>>): Promise<string> {
+async function handleCommand(
+  message: TelegramMessage,
+  command: NonNullable<ReturnType<typeof parseCommand>>,
+): Promise<BotReply> {
   if (command.name === "help") {
-    return "Надішліть /note, а потім текст, посилання або приватно перешліть допис із Telegram. Для Facebook скористайтеся «Поділитися» або надішліть скопійоване посилання. Надішліть /zagulyaka, а потім текст чи фото — я підготую приватну чернетку для перевірки в Трекері Роду.";
+    return {
+      text: "Спочатку оберіть, що хочете додати. Після цього надішліть або приватно перешліть один текст, допис, посилання чи фото. Нотатки залишаються приватними; Загуляка створює лише приватну чернетку для вашої перевірки.",
+      showIntentPicker: true,
+    };
   }
 
-  const client = serviceClient();
   if (command.name === "start") {
+    const client = serviceClient();
     const code = command.argument && /^[A-Za-z0-9_-]{1,160}$/u.test(command.argument)
       ? command.argument
       : "";
-    if (!code) return "Відкрийте сторінку підключення Telegram у Трекері Роду та скористайтеся новим посиланням.";
+    if (!code) {
+      return { text: "Відкрийте сторінку «Нотатки» у Трекері Роду, створіть одноразовий код підключення й надішліть сюди команду /start з цим кодом." };
+    }
     const { data, error } = await client.rpc("service_consume_telegram_link_v1", {
       p_start_code: code,
       p_telegram_user_id: message.telegramUserId,
@@ -458,29 +543,23 @@ async function handleCommand(message: TelegramMessage, command: NonNullable<Retu
     });
     if (error) throw safeRpcFailure(error);
     return record(data).linked === true
-      ? "Telegram підключено. Надішліть /note, а потім текст, посилання чи перешліть допис із Telegram. Для Facebook надішліть посилання через «Поділитися» або скопіюйте його. /zagulyaka — для підготовки чернетки Загуляки."
-      : "Посилання недійсне, прострочене або цей Telegram уже підключений до іншого акаунта.";
+      ? {
+          text: "Telegram підключено. Оберіть тип матеріалу, а потім надішліть або перешліть один допис, посилання чи фото.",
+          showIntentPicker: true,
+        }
+      : { text: "Посилання недійсне, прострочене або цей Telegram уже підключений до іншого акаунта." };
   }
 
-  const { data, error } = await client.rpc("service_set_telegram_active_mode_v1", {
-    p_telegram_user_id: message.telegramUserId,
-    p_private_chat_id: message.privateChatId,
-    p_mode: command.name,
-  });
-  if (error) throw safeRpcFailure(error);
-  const result = record(data);
-  if (result.linked !== true) {
-    return "Спочатку підключіть Telegram у налаштуваннях Трекера Роду, а потім поверніться сюди.";
-  }
-  if (command.name === "zagulyaka" && result.reason === "ai_not_enabled") {
-    return "Для підготовки Загуляки увімкніть ШІ-аналіз у налаштуваннях підключення Telegram.";
-  }
-  return command.name === "note"
-    ? "Режим нотатки увімкнено. Надішліть текст, посилання або перешліть сюди допис із Telegram. Для Facebook надішліть посилання через «Поділитися» або скопіюйте його."
-    : "Режим Загуляки увімкнено на одне повідомлення. Надішліть текст або фото; після аналізу з’явиться приватна чернетка для перевірки.";
+  // Keep these legacy commands recognisable, but do not leave a hidden mode
+  // active.  The explicit inline choice is easier to understand and is reset
+  // after every material.
+  return {
+    text: "Тепер тип обирається кнопкою перед кожним матеріалом.",
+    showIntentPicker: true,
+  };
 }
 
-async function enqueueMessage(message: TelegramMessage): Promise<string> {
+async function enqueueMessage(message: TelegramMessage): Promise<BotReply> {
   const client = serviceClient();
   const { data, error } = await client.rpc("service_enqueue_telegram_message_v1", {
     p_update_id: message.updateId,
@@ -505,23 +584,64 @@ async function enqueueMessage(message: TelegramMessage): Promise<string> {
   if (error) throw safeRpcFailure(error);
   const result = record(data);
   if (result.linked !== true) {
-    return "Спочатку підключіть Telegram у налаштуваннях Трекера Роду.";
+    return { text: "Спочатку підключіть Telegram у налаштуваннях Трекера Роду." };
   }
   if (result.accepted !== true) {
+    if (result.reason === "choice_required") {
+      return {
+        text: "Спочатку оберіть, чи це Нотатка або Загуляка, а потім надішліть матеріал ще раз.",
+        showIntentPicker: true,
+      };
+    }
     if (result.reason === "ai_not_enabled") {
-      return "Для підготовки Загуляки увімкніть ШІ-аналіз у налаштуваннях підключення Telegram.";
+      return { text: "Для підготовки Загуляки увімкніть ШІ-аналіз у налаштуваннях підключення Telegram.", showIntentPicker: true };
     }
     if (result.reason === "photo_requires_zagulyaka") {
-      return "Щоб надіслати фото для Загуляки, спершу надішліть /zagulyaka, а потім фото одним окремим повідомленням.";
+      return { text: "Фото можна надіслати як Загуляку. Оберіть цей тип і надішліть фото ще раз.", showIntentPicker: true };
     }
-    return "Надішліть текст, посилання або фото."
+    return { text: "Надішліть текст, посилання або фото." };
   }
-  if (result.duplicate === true) return "Це повідомлення вже отримано.";
+  if (result.duplicate === true) return { text: "Це повідомлення вже отримано.", showIntentPicker: true };
   return result.intent === "zagulyaka"
-    ? "Матеріал прийнято. Трекер Роду підготує приватну чернетку Загуляки для вашої перевірки."
+    ? {
+        text: "Матеріал прийнято. Трекер Роду підготує приватну чернетку Загуляки для вашої перевірки.",
+        showIntentPicker: true,
+      }
     : result.mediaOmitted === true
-    ? "Нотатку прийнято. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках."
-    : "Нотатку прийнято. Вона з’явиться у вашому приватному списку нотаток.";
+    ? {
+        text: "Нотатку прийнято. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках.",
+        showIntentPicker: true,
+      }
+    : { text: "Нотатку прийнято. Вона з’явиться у вашому приватному списку нотаток.", showIntentPicker: true };
+}
+
+async function handleIntentCallback(callback: TelegramIntentCallback): Promise<void> {
+  const client = serviceClient();
+  const { data, error } = await client.rpc("service_set_telegram_active_mode_v1", {
+    p_telegram_user_id: callback.telegramUserId,
+    p_private_chat_id: callback.privateChatId,
+    p_mode: callback.intent,
+  });
+  if (error) throw safeRpcFailure(error);
+  const result = record(data);
+  if (result.linked !== true) {
+    await answerIntentCallback(callback.callbackId, "Спочатку підключіть Telegram у Трекері Роду.");
+    return;
+  }
+  if (result.reason === "ai_not_enabled") {
+    await answerIntentCallback(callback.callbackId, "Увімкніть ШІ-аналіз для чернеток Загуляк у Трекері Роду.");
+    return;
+  }
+  await answerIntentCallback(
+    callback.callbackId,
+    callback.intent === "zagulyaka" ? "Обрано Загуляку." : "Обрано Нотатку.",
+  );
+  await removeIntentPicker(callback);
+  await sendBotReply(callback.privateChatId, {
+    text: callback.intent === "zagulyaka"
+      ? "Надішліть або перешліть один текст, допис, посилання чи фото. Я підготую тільки приватну чернетку Загуляки для вашої перевірки."
+      : "Надішліть або перешліть один текст, допис чи посилання. Я збережу його як вашу приватну нотатку.",
+  });
 }
 
 async function handleRequest(request: Request): Promise<Response> {
@@ -531,6 +651,11 @@ async function handleRequest(request: Request): Promise<Response> {
   try {
     requireJsonContentType(request);
     const update = await readJsonBody(request);
+    const intentCallback = parseIntentCallback(update);
+    if (intentCallback) {
+      await handleIntentCallback(intentCallback);
+      return json({ ok: true });
+    }
     const message = parseMessage(update);
     // Unsupported update types, group messages and malformed identities do not
     // cause Telegram retries and never reach a database or an external API.

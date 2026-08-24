@@ -276,9 +276,9 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
           <h2 id="telegram-notes-title">Особиста скринька джерел</h2>
           <p>
             Перешліть допис із Telegram-каналу безпосередньо в приватний чат із ботом,
-            або надішліть посилання через «Поділитися» чи копіювання з Facebook. Це
-            збережеться як приватна нотатка. Після команди <code>/zagulyaka</code> можна
-            надіслати текст чи фото, щоб ШІ підготував окрему приватну чернетку для перевірки.
+            або надішліть посилання через «Поділитися» чи копіювання з Facebook. Перед кожним
+            матеріалом бот попросить обрати: приватна <strong>Нотатка</strong> чи
+            <strong> Загуляка</strong> для підготовки окремої приватної чернетки.
           </p>
         </div>
         <div className="telegram-notes-panel__actions">
@@ -470,7 +470,7 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
           {!loading && !notes.length ? (
             <div className="telegram-notes-empty panel">
               <strong>Нотаток за цими фільтрами ще немає.</strong>
-              <span>Перешліть допис із Telegram-каналу або надішліть посилання з Facebook — воно з’явиться тут приватно. Фото надсилайте командою <code>/zagulyaka</code>, щоб створити чернетку запису.</span>
+              <span>Оберіть у боті «Нотатка», а потім перешліть допис із Telegram-каналу або надішліть посилання з Facebook — воно з’явиться тут приватно. Для фото оберіть «Загуляка», щоб створити чернетку запису.</span>
             </div>
           ) : null}
           {notes.map((note) => (

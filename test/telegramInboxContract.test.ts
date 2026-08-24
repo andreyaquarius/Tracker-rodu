@@ -7,6 +7,10 @@ const migrationPath = resolve(
   process.cwd(),
   "supabase/migrations/202608240001_telegram_private_inbox.sql",
 );
+const intentPickerMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/202608240002_telegram_intent_picker_and_text_fix.sql",
+);
 
 test("Telegram intake is private, account-scoped and does not auto-publish", () => {
   const source = readFileSync(migrationPath, "utf8");
@@ -170,4 +174,48 @@ test("Telegram queue is scheduled independently from the generic reminder worker
   assert.match(source, /TELEGRAM_WORKER_SECRET/);
   assert.match(source, /process-telegram-inbox/);
   assert.doesNotMatch(source, /TASK_REMINDER_CRON_SECRET/);
+});
+
+test("Telegram text validation does not construct an impossible NUL character", () => {
+  const source = readFileSync(intentPickerMigrationPath, "utf8");
+
+  assert.match(source, /create or replace function security_private\.telegram_safe_text_v1/i);
+  assert.match(source, /if char_length\(normalized\) > p_maximum then/i);
+  assert.doesNotMatch(source, /position\(chr\(0\)/i);
+});
+
+test("Telegram requires an explicit inline intent choice before each material", () => {
+  const migration = readFileSync(intentPickerMigrationPath, "utf8");
+  const webhook = readFileSync(
+    resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts"),
+    "utf8",
+  );
+  const deployWorkflow = readFileSync(
+    resolve(process.cwd(), ".github/workflows/deploy-supabase-functions.yml"),
+    "utf8",
+  );
+  const notesPanel = readFileSync(
+    resolve(process.cwd(), "src/components/notes/TelegramNotesPanel.tsx"),
+    "utf8",
+  );
+
+  assert.match(migration, /active_mode in \('choose', 'note', 'zagulyaka'\)/i);
+  assert.match(migration, /alter column active_mode set default 'choose'/i);
+  assert.match(migration, /set active_mode = 'choose';/i);
+  assert.match(migration, /'reason', 'choice_required'/i);
+  assert.match(migration, /select intent into duplicate_intent[\s\S]*?if found then[\s\S]*?active_intent := link_row\.active_mode/s);
+  assert.match(migration, /set active_mode = 'choose'\s+where owner_id = link_row\.owner_id/i);
+  assert.match(migration, /active_mode = 'choose',\s+linked_at = now\(\)/i);
+
+  assert.match(webhook, /callback_query/i);
+  assert.match(webhook, /tracker:intent:note/);
+  assert.match(webhook, /tracker:intent:zagulyaka/);
+  assert.match(webhook, /chat\.type !== "private" \|\| privateChatId !== telegramUserId/i);
+  assert.match(webhook, /service_set_telegram_active_mode_v1/i);
+  assert.match(webhook, /answerCallbackQuery/i);
+  assert.match(webhook, /editMessageReplyMarkup/i);
+  assert.match(webhook, /choice_required/i);
+  assert.match(deployWorkflow, /allowed_updates=\["message","callback_query"\]/i);
+  assert.match(deployWorkflow, /getWebhookInfo/i);
+  assert.match(notesPanel, /бот попросить обрати/i);
 });
