@@ -75,7 +75,8 @@ test("draft pins are optional and never overwrite the historical source-place te
   assert.match(draftDialog, /label=\{draft\.kind === "person" \? "Точка: звідки людина" : "Точка: місце документа"\}/);
   assert.match(draftDialog, /label="Точка: де знайдено запис"/);
   assert.match(draftDialog, /onChange=\{\(value\) => update\("originGeo", value\)\}/);
-  assert.match(draftDialog, /onChange=\{\(value\) => update\("foundGeo", value\)\}/);
+  assert.match(draftDialog, /const updateFoundGeo[\s\S]*?update\("foundGeo", foundGeo\)/);
+  assert.match(draftDialog, /onChange=\{updateFoundGeo\}/);
   assert.doesNotMatch(
     draftDialog.slice(draftDialog.indexOf("<section className=\"zagulyaky-map-points"), draftDialog.indexOf("<label className=\"field-wide\"", draftDialog.indexOf("<section className=\"zagulyaky-map-points"))),
     /onPlaceNameChange=/,

@@ -1,8 +1,14 @@
-import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import type { SupabaseAccount } from "../../services/supabaseAuth";
 import {
   createZagulyakaDraft,
+  deleteMyZagulyakySavedPlace,
+  deleteMyZagulyakySavedSourcePreset,
   deleteZagulyakaDraftAttachment,
+  loadMyZagulyakySavedPlaces,
+  loadMyZagulyakySavedSourcePresets,
+  saveMyZagulyakySavedPlace,
+  saveMyZagulyakySavedSourcePreset,
   saveZagulyakaDraft,
   submitZagulyakaDraft,
   uploadZagulyakaDraftAttachment,
@@ -15,6 +21,8 @@ import {
   type ZagulyakaEventRoleCode,
   type ZagulyakaEventType,
   type ZagulyakaKind,
+  type ZagulyakaSavedPlace,
+  type ZagulyakaSavedSourcePreset,
 } from "../../types/zagulyaky";
 import { sanitizeWebUrl } from "../../utils/safeUrl";
 import { initialZagulyakaDraftForAuthor } from "../../utils/zagulyakyDraftDefaults";
@@ -27,6 +35,10 @@ import {
   zagulyakaDatePrecisionLabels,
   zagulyakaEventLabels,
 } from "../../utils/zagulyakyLabels";
+import {
+  isZagulyakaTitleAutofillActive,
+  nextZagulyakaTitleFromNormalizedName,
+} from "../../utils/zagulyakyTitleAutofill";
 import { GeoPlaceField } from "../GeoPlaceField";
 import { Modal } from "../Modal";
 import { ZagulyakaRouteMap } from "./ZagulyakaRouteMap";
@@ -62,10 +74,82 @@ export function ZagulyakaDraftDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [savedPlaces, setSavedPlaces] = useState<ZagulyakaSavedPlace[]>([]);
+  const [savedSourcePresets, setSavedSourcePresets] = useState<ZagulyakaSavedSourcePreset[]>([]);
+  const [selectedSavedPlaceId, setSelectedSavedPlaceId] = useState("");
+  const [selectedSavedSourcePresetId, setSelectedSavedSourcePresetId] = useState("");
+  const [savedInputsLoading, setSavedInputsLoading] = useState(true);
+  const [savedInputsBusy, setSavedInputsBusy] = useState(false);
+  const [savedInputsError, setSavedInputsError] = useState("");
+  const [titleAutofillActive, setTitleAutofillActive] = useState(() => (
+    isZagulyakaTitleAutofillActive(
+      initialDraft?.kind ?? initialKind,
+      initialDraft?.title ?? "",
+    )
+  ));
+
+  useEffect(() => {
+    let active = true;
+    setSavedInputsLoading(true);
+    setSavedInputsError("");
+    void Promise.all([
+      loadMyZagulyakySavedPlaces(account.id),
+      loadMyZagulyakySavedSourcePresets(account.id),
+    ]).then(([places, sourcePresets]) => {
+      if (!active) return;
+      setSavedPlaces(places);
+      setSavedSourcePresets(sourcePresets);
+    }).catch((loadError) => {
+      if (!active) return;
+      setSavedInputsError(savedInputErrorMessage(loadError));
+    }).finally(() => {
+      if (active) setSavedInputsLoading(false);
+    });
+    return () => { active = false; };
+  }, [account.id]);
 
   const update = <K extends keyof ZagulyakaDraftInput>(key: K, value: ZagulyakaDraftInput[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
     setNotice("");
+  };
+
+  const updateKind = (kind: ZagulyakaKind) => {
+    update("kind", kind);
+    setTitleAutofillActive(isZagulyakaTitleAutofillActive(kind, draft.title));
+  };
+
+  const updateTitle = (title: string) => {
+    update("title", title);
+    setTitleAutofillActive(isZagulyakaTitleAutofillActive(draft.kind, title));
+  };
+
+  const updateNormalizedNameUk = (normalizedNameUk: string) => {
+    setDraft((current) => ({
+      ...current,
+      normalizedNameUk,
+      title: current.kind === "person"
+        ? nextZagulyakaTitleFromNormalizedName(current.title, normalizedNameUk, titleAutofillActive)
+        : current.title,
+    }));
+    setNotice("");
+  };
+
+  const updateFoundPlace = (foundPlace: string) => {
+    setSelectedSavedPlaceId("");
+    update("foundPlace", foundPlace);
+  };
+
+  const updateFoundGeo = (foundGeo: ZagulyakaDraftInput["foundGeo"]) => {
+    setSelectedSavedPlaceId("");
+    update("foundGeo", foundGeo);
+  };
+
+  const updateSourcePresetField = (
+    key: "institutionName" | "archiveReference" | "sourceTitle" | "sourceUrl",
+    value: string,
+  ) => {
+    setSelectedSavedSourcePresetId("");
+    update(key, value);
   };
 
   const updateEventType = (eventType: ZagulyakaEventType | "") => {
@@ -95,9 +179,123 @@ export function ZagulyakaDraftDialog({
     setNotice("");
   };
 
+  const chooseSavedPlace = (savedPlaceId: string) => {
+    setSelectedSavedPlaceId(savedPlaceId);
+    const selected = savedPlaces.find((item) => item.id === savedPlaceId);
+    if (!selected) return;
+    setDraft((current) => ({
+      ...current,
+      foundPlace: selected.name,
+      foundGeo: { ...selected.geo },
+    }));
+    setNotice("Збережене місце застосовано до цієї чернетки.");
+  };
+
+  const saveCurrentFoundPlace = async () => {
+    if (!draft.foundPlace.trim() || !draft.foundGeo) {
+      setSavedInputsError("Щоб зберегти місце, заповніть «Де знайдено» та позначте точку на карті.");
+      return;
+    }
+    setSavedInputsBusy(true);
+    setSavedInputsError("");
+    try {
+      const saved = await saveMyZagulyakySavedPlace({
+        name: draft.foundPlace,
+        geo: draft.foundGeo,
+      }, account.id);
+      setSavedPlaces((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      setSelectedSavedPlaceId(saved.id);
+      setNotice("Місце збережено у вашому приватному списку.");
+    } catch (saveError) {
+      setSavedInputsError(savedInputErrorMessage(saveError));
+    } finally {
+      setSavedInputsBusy(false);
+    }
+  };
+
+  const removeSelectedSavedPlace = async () => {
+    const selected = savedPlaces.find((item) => item.id === selectedSavedPlaceId);
+    if (!selected || savedInputsBusy) return;
+    if (!window.confirm(`Вилучити «${selected.name}» з мого списку місць? Це не змінить уже створені картки.`)) return;
+    setSavedInputsBusy(true);
+    setSavedInputsError("");
+    try {
+      await deleteMyZagulyakySavedPlace(selected.id, account.id);
+      setSavedPlaces((current) => current.filter((item) => item.id !== selected.id));
+      setSelectedSavedPlaceId("");
+      setNotice("Збережене місце вилучено. Створені картки не змінено.");
+    } catch (removeError) {
+      setSavedInputsError(savedInputErrorMessage(removeError));
+    } finally {
+      setSavedInputsBusy(false);
+    }
+  };
+
+  const chooseSavedSourcePreset = (savedSourceId: string) => {
+    setSelectedSavedSourcePresetId(savedSourceId);
+    const selected = savedSourcePresets.find((item) => item.id === savedSourceId);
+    if (!selected) return;
+    setDraft((current) => ({
+      ...current,
+      institutionName: selected.institutionName,
+      archiveReference: selected.archiveReference,
+      sourceTitle: selected.sourceTitle,
+      sourceUrl: selected.sourceUrl,
+      // Page/frame differs between records in the same archive file, so it
+      // is intentionally left untouched.
+    }));
+    setNotice("Збережену справу застосовано; сторінку або кадр не змінено.");
+  };
+
+  const saveCurrentSourcePreset = async () => {
+    setSavedInputsBusy(true);
+    setSavedInputsError("");
+    try {
+      const saved = await saveMyZagulyakySavedSourcePreset({
+        institutionName: draft.institutionName,
+        archiveReference: draft.archiveReference,
+        sourceTitle: draft.sourceTitle,
+        sourceUrl: draft.sourceUrl,
+      }, account.id);
+      setSavedSourcePresets((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      setSelectedSavedSourcePresetId(saved.id);
+      setNotice("Справу збережено у вашому приватному списку.");
+    } catch (saveError) {
+      setSavedInputsError(savedInputErrorMessage(saveError));
+    } finally {
+      setSavedInputsBusy(false);
+    }
+  };
+
+  const removeSelectedSavedSourcePreset = async () => {
+    const selected = savedSourcePresets.find((item) => item.id === selectedSavedSourcePresetId);
+    if (!selected || savedInputsBusy) return;
+    if (!window.confirm(`Вилучити «${savedSourcePresetLabel(selected)}» з мого списку справ? Це не змінить уже створені картки.`)) return;
+    setSavedInputsBusy(true);
+    setSavedInputsError("");
+    try {
+      await deleteMyZagulyakySavedSourcePreset(selected.id, account.id);
+      setSavedSourcePresets((current) => current.filter((item) => item.id !== selected.id));
+      setSelectedSavedSourcePresetId("");
+      setNotice("Збережену справу вилучено. Створені картки не змінено.");
+    } catch (removeError) {
+      setSavedInputsError(savedInputErrorMessage(removeError));
+    } finally {
+      setSavedInputsBusy(false);
+    }
+  };
+
   const eventRoleOptions = useMemo(
     () => draft.eventType ? zagulyakaEventRoleOptions(draft.eventType) : [],
     [draft.eventType],
+  );
+  const selectedSavedPlace = useMemo(
+    () => savedPlaces.find((item) => item.id === selectedSavedPlaceId) ?? null,
+    [savedPlaces, selectedSavedPlaceId],
+  );
+  const selectedSavedSourcePreset = useMemo(
+    () => savedSourcePresets.find((item) => item.id === selectedSavedSourcePresetId) ?? null,
+    [savedSourcePresets, selectedSavedSourcePresetId],
   );
 
   const normalizedDraft = useMemo<ZagulyakaDraftInput>(() => ({
@@ -228,7 +426,7 @@ export function ZagulyakaDraftDialog({
                 <button
                   type="button"
                   className={draft.kind === "person" ? "active" : ""}
-                  onClick={() => update("kind", "person")}
+                  onClick={() => updateKind("person")}
                   disabled={Boolean(initialHandle)}
                 >
                   <strong>Запис про людину</strong>
@@ -237,7 +435,7 @@ export function ZagulyakaDraftDialog({
                 <button
                   type="button"
                   className={draft.kind === "document" ? "active" : ""}
-                  onClick={() => update("kind", "document")}
+                  onClick={() => updateKind("document")}
                   disabled={Boolean(initialHandle)}
                 >
                   <strong>Загублений документ</strong>
@@ -247,7 +445,14 @@ export function ZagulyakaDraftDialog({
               <div className="form-grid zagulyaky-form-grid">
                 <label className="field-wide">
                   <span>{draft.kind === "person" ? "Коротка назва запису" : "Назва документа"}</span>
-                  <input value={draft.title} onChange={(event) => update("title", event.target.value)} maxLength={180} placeholder={draft.kind === "person" ? "Наприклад: Іван Каленський — шлюб 1874" : "Наприклад: Метрична книга с. Паволоч"} />
+                  <input value={draft.title} onChange={(event) => updateTitle(event.target.value)} maxLength={180} placeholder={draft.kind === "person" ? "Наприклад: Іван Каленський — шлюб 1874" : "Наприклад: Метрична книга с. Паволоч"} />
+                  {draft.kind === "person" ? (
+                    <small className="zagulyaky-title-autofill-hint">
+                      {titleAutofillActive
+                        ? "Назва була порожня, тому вона підставляється з нормалізованого ПІБ, доки ви не зміните її вручну."
+                        : "Назву змінено вручну — ПІБ її більше не перезаписуватиме."}
+                    </small>
+                  ) : null}
                 </label>
                 {draft.kind === "person" ? (
                   <>
@@ -257,7 +462,7 @@ export function ZagulyakaDraftDialog({
                     </label>
                     <label>
                       <span>Нормалізоване ПІБ українською</span>
-                      <input value={draft.normalizedNameUk} onChange={(event) => update("normalizedNameUk", event.target.value)} maxLength={240} />
+                      <input value={draft.normalizedNameUk} onChange={(event) => updateNormalizedNameUk(event.target.value)} maxLength={240} />
                     </label>
                     <label>
                       <span>Стать</span>
@@ -360,8 +565,48 @@ export function ZagulyakaDraftDialog({
                 )}
                 <label>
                   <span>{draft.kind === "person" ? "Де знайдено *" : "Додатково знайдений населений пункт *"}</span>
-                  <input value={draft.foundPlace} onChange={(event) => update("foundPlace", event.target.value)} />
+                  <input value={draft.foundPlace} onChange={(event) => updateFoundPlace(event.target.value)} />
                 </label>
+                <section className="zagulyaky-saved-inputs field-wide" aria-labelledby="zagulyaky-saved-places-title">
+                  <div className="zagulyaky-saved-inputs-heading">
+                    <div>
+                      <span className="eyebrow">Для серійного внесення</span>
+                      <h4 id="zagulyaky-saved-places-title">Мої збережені місця</h4>
+                      <p>Вибір одразу заповнює поле «Де знайдено» та підтверджену точку. Походження людини не змінюється.</p>
+                    </div>
+                  </div>
+                  <div className="zagulyaky-saved-inputs-controls">
+                    <label>
+                      <span>Місце з мого списку</span>
+                      <select
+                        value={selectedSavedPlaceId}
+                        onChange={(event) => chooseSavedPlace(event.target.value)}
+                        disabled={savedInputsLoading || savedInputsBusy || busy}
+                      >
+                        <option value="">{savedInputsLoading ? "Завантажуємо місця…" : "Оберіть збережене місце"}</option>
+                        {savedPlaces.map((item) => (
+                          <option value={item.id} key={item.id}>{item.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="zagulyaky-saved-inputs-actions">
+                      <button type="button" className="button button-secondary" onClick={() => void saveCurrentFoundPlace()} disabled={savedInputsLoading || savedInputsBusy || busy}>
+                        Зберегти поточне місце
+                      </button>
+                      {selectedSavedPlace ? (
+                        <button type="button" className="button button-ghost" onClick={() => void removeSelectedSavedPlace()} disabled={savedInputsBusy || busy}>
+                          Вилучити зі списку
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {selectedSavedPlace ? (
+                    <p className="zagulyaky-saved-inputs-selection">
+                      Точка: {formatGeoCoordinates(selectedSavedPlace.geo)}. Зміни тут не змінюють уже створені картки.
+                    </p>
+                  ) : null}
+                  {savedInputsError ? <p className="zagulyaky-saved-inputs-error" role="status">{savedInputsError}</p> : null}
+                </section>
                 <section className="zagulyaky-map-points field-wide" aria-labelledby="zagulyaky-map-points-title">
                   <div>
                     <span className="eyebrow">Необов’язково</span>
@@ -379,7 +624,7 @@ export function ZagulyakaDraftDialog({
                     label="Точка: де знайдено запис"
                     value={draft.foundGeo}
                     placeName={draft.foundGeo?.displayName ?? draft.foundPlace}
-                    onChange={(value) => update("foundGeo", value)}
+                    onChange={updateFoundGeo}
                     allowMarkerColor={false}
                   />
                   <ZagulyakaRouteMap
@@ -404,18 +649,58 @@ export function ZagulyakaDraftDialog({
             <section aria-labelledby="zagulyaky-form-source">
               <span className="eyebrow">Крок 3</span>
               <h3 id="zagulyaky-form-source">Джерело і транскрипція</h3>
+              <section className="zagulyaky-saved-inputs" aria-labelledby="zagulyaky-saved-sources-title">
+                <div className="zagulyaky-saved-inputs-heading">
+                  <div>
+                    <span className="eyebrow">Для серійного внесення</span>
+                    <h4 id="zagulyaky-saved-sources-title">Мої збережені справи</h4>
+                    <p>Вибір заповнює архів, шифр, назву та посилання. Сторінка або кадр залишаються індивідуальними для цього запису.</p>
+                  </div>
+                </div>
+                <div className="zagulyaky-saved-inputs-controls">
+                  <label>
+                    <span>Справа або джерело з мого списку</span>
+                    <select
+                      value={selectedSavedSourcePresetId}
+                      onChange={(event) => chooseSavedSourcePreset(event.target.value)}
+                      disabled={savedInputsLoading || savedInputsBusy || busy}
+                    >
+                      <option value="">{savedInputsLoading ? "Завантажуємо справи…" : "Оберіть збережену справу"}</option>
+                      {savedSourcePresets.map((item) => (
+                        <option value={item.id} key={item.id}>{savedSourcePresetLabel(item)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="zagulyaky-saved-inputs-actions">
+                    <button type="button" className="button button-secondary" onClick={() => void saveCurrentSourcePreset()} disabled={savedInputsLoading || savedInputsBusy || busy}>
+                      Зберегти цю справу
+                    </button>
+                    {selectedSavedSourcePreset ? (
+                      <button type="button" className="button button-ghost" onClick={() => void removeSelectedSavedSourcePreset()} disabled={savedInputsBusy || busy}>
+                        Вилучити зі списку
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {selectedSavedSourcePreset ? (
+                  <p className="zagulyaky-saved-inputs-selection">
+                    Застосовано: {savedSourcePresetLabel(selectedSavedSourcePreset)}. Сторінку або кадр не змінено.
+                  </p>
+                ) : null}
+                {savedInputsError ? <p className="zagulyaky-saved-inputs-error" role="status">{savedInputsError}</p> : null}
+              </section>
               <div className="form-grid zagulyaky-form-grid">
                 <label>
                   <span>Архів або установа</span>
-                  <input value={draft.institutionName} onChange={(event) => update("institutionName", event.target.value)} placeholder="ДАКО" />
+                  <input value={draft.institutionName} onChange={(event) => updateSourcePresetField("institutionName", event.target.value)} placeholder="ДАКО" />
                 </label>
                 <label>
                   <span>Фонд, опис, справа *</span>
-                  <input value={draft.archiveReference} onChange={(event) => update("archiveReference", event.target.value)} placeholder="ф. 127, оп. 1012, спр. 305" />
+                  <input value={draft.archiveReference} onChange={(event) => updateSourcePresetField("archiveReference", event.target.value)} placeholder="ф. 127, оп. 1012, спр. 305" />
                 </label>
                 <label>
                   <span>Назва джерела</span>
-                  <input value={draft.sourceTitle} onChange={(event) => update("sourceTitle", event.target.value)} />
+                  <input value={draft.sourceTitle} onChange={(event) => updateSourcePresetField("sourceTitle", event.target.value)} />
                 </label>
                 <label>
                   <span>{draft.kind === "person" ? "Сторінка або кадр" : "Діапазон сторінок"}</span>
@@ -423,7 +708,7 @@ export function ZagulyakaDraftDialog({
                 </label>
                 <label className="field-wide">
                   <span>Посилання на джерело</span>
-                  <input type="url" value={draft.sourceUrl} onChange={(event) => update("sourceUrl", event.target.value)} placeholder="https://…" />
+                  <input type="url" value={draft.sourceUrl} onChange={(event) => updateSourcePresetField("sourceUrl", event.target.value)} placeholder="https://…" />
                 </label>
                 <label className="field-wide">
                   <span>Точна транскрипція мовою джерела</span>
@@ -533,6 +818,30 @@ function formatFileSize(value: number): string {
   if (value < 1024) return `${value} Б`;
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} КБ`;
   return `${(value / (1024 * 1024)).toFixed(1)} МБ`;
+}
+
+function formatGeoCoordinates(place: ZagulyakaSavedPlace["geo"]): string {
+  if (typeof place.latitude !== "number" || typeof place.longitude !== "number") {
+    return "координати не вказано";
+  }
+  return `${place.latitude.toFixed(5)}, ${place.longitude.toFixed(5)}`;
+}
+
+function savedSourcePresetLabel(source: ZagulyakaSavedSourcePreset): string {
+  return [
+    source.institutionName,
+    source.archiveReference,
+    source.sourceTitle,
+    source.sourceUrl,
+  ].map((item) => item.trim()).filter(Boolean).join(" · ") || "Без назви";
+}
+
+function savedInputErrorMessage(input: unknown): string {
+  const message = input instanceof Error ? input.message : String(input ?? "");
+  if (/PGRST202|42883|saved_(?:place|source)/i.test(message)) {
+    return "Не вдалося відкрити приватний список. Потрібно застосувати міграцію збережених місць і справ.";
+  }
+  return errorMessage(input);
 }
 
 function validateDraft(draft: ZagulyakaDraftInput, forSubmission: boolean): string {

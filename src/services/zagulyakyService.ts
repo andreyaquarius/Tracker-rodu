@@ -8,6 +8,9 @@ import type {
   ZagulyakaDraftSummary,
   ZagulyakaEventType,
   ZagulyakaPersonListItem,
+  ZagulyakaSavedPlace,
+  ZagulyakaSavedSourcePreset,
+  ZagulyakaSavedSourcePresetInput,
   ZagulyakaVerificationStatus,
   ZagulyakaWorkflowStatus,
   ZagulyakyDocumentFilters,
@@ -185,6 +188,145 @@ export async function loadMyZagulyaky(
     overallTotal: Math.max(total, naturalNumber(value(payload, "overallTotal", "overall_total"), total)),
     statusCounts: workflowStatusCounts(value(payload, "statusCounts", "status_counts")),
   };
+}
+
+/**
+ * Loads the current author's private shortcuts for the place where records
+ * were found.  These are not linked to records: applying one copies a
+ * snapshot into the open draft.
+ */
+export async function loadMyZagulyakySavedPlaces(
+  expectedUserId?: string,
+): Promise<ZagulyakaSavedPlace[]> {
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("list_my_zagulyaky_saved_places_v1", {
+        p_query: null,
+        p_limit: 100,
+      });
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
+  if (error) throw error;
+  return records(data).map(mapSavedPlace);
+}
+
+export async function saveMyZagulyakySavedPlace(
+  input: Pick<ZagulyakaSavedPlace, "name" | "geo"> & { id?: string },
+  expectedUserId?: string,
+): Promise<ZagulyakaSavedPlace> {
+  const geo = mapPointPayload(input.geo);
+  if (!input.name.trim() || !geo) {
+    throw new Error("Щоб зберегти місце, вкажіть його назву та підтверджену точку на карті.");
+  }
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("upsert_my_zagulyaky_saved_place_v1", {
+        p_place: compactObject({ id: input.id?.trim(), name: input.name.trim(), geo }),
+      });
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
+  if (error) throw error;
+  return mapSavedPlace(firstRecord(data));
+}
+
+export async function deleteMyZagulyakySavedPlace(
+  savedPlaceId: string,
+  expectedUserId?: string,
+): Promise<boolean> {
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("delete_my_zagulyaky_saved_place_v1", {
+        p_place_id: savedPlaceId,
+      });
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
+  if (error) throw error;
+  return Boolean(value(firstRecord(data), "deleted"));
+}
+
+/** Private reusable archive/file/source shortcuts for the current author. */
+export async function loadMyZagulyakySavedSourcePresets(
+  expectedUserId?: string,
+): Promise<ZagulyakaSavedSourcePreset[]> {
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("list_my_zagulyaky_saved_source_presets_v1", {
+        p_query: null,
+        p_limit: 100,
+      });
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
+  if (error) throw error;
+  return records(data).map(mapSavedSourcePreset);
+}
+
+export async function saveMyZagulyakySavedSourcePreset(
+  input: ZagulyakaSavedSourcePresetInput & { id?: string },
+  expectedUserId?: string,
+): Promise<ZagulyakaSavedSourcePreset> {
+  const hasSource = [
+    input.institutionName,
+    input.archiveReference,
+    input.sourceTitle,
+    input.sourceUrl,
+  ].some((item) => item.trim());
+  if (!hasSource) {
+    throw new Error("Заповніть хоча б один реквізит справи або джерела перед збереженням.");
+  }
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("upsert_my_zagulyaky_saved_source_preset_v1", {
+        p_source: compactObject({
+          id: input.id?.trim(),
+          institutionName: input.institutionName.trim(),
+          archiveReference: input.archiveReference.trim(),
+          sourceTitle: input.sourceTitle.trim(),
+          sourceUrl: input.sourceUrl.trim(),
+        }),
+      });
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
+  if (error) throw error;
+  return mapSavedSourcePreset(firstRecord(data));
+}
+
+export async function deleteMyZagulyakySavedSourcePreset(
+  savedSourceId: string,
+  expectedUserId?: string,
+): Promise<boolean> {
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("delete_my_zagulyaky_saved_source_preset_v1", {
+        p_source_id: savedSourceId,
+      });
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
+  if (error) throw error;
+  return Boolean(value(firstRecord(data), "deleted"));
 }
 
 export async function loadMyZagulyakaDraft(
@@ -555,6 +697,34 @@ function mapPointPayload(input: ZagulyakaDraftInput["originGeo"]): Record<string
     precision: point.precision ?? "unknown",
     provider: point.provider?.trim() || null,
     externalId: point.externalId?.trim() || null,
+  };
+}
+
+function mapSavedPlace(row: Record<string, unknown>): ZagulyakaSavedPlace {
+  const id = text(value(row, "id"));
+  const name = text(value(row, "name"));
+  const geo = normalizeGeo(value(row, "geo"));
+  if (!id || !name || !geo) throw new Error("Сервер повернув некоректне збережене місце.");
+  return {
+    id,
+    name,
+    geo,
+    createdAt: text(value(row, "createdAt", "created_at")),
+    updatedAt: text(value(row, "updatedAt", "updated_at")),
+  };
+}
+
+function mapSavedSourcePreset(row: Record<string, unknown>): ZagulyakaSavedSourcePreset {
+  const id = text(value(row, "id"));
+  if (!id) throw new Error("Сервер повернув некоректно збережену справу.");
+  return {
+    id,
+    institutionName: text(value(row, "institutionName", "institution_name")),
+    archiveReference: text(value(row, "archiveReference", "archive_reference")),
+    sourceTitle: text(value(row, "sourceTitle", "source_title")),
+    sourceUrl: text(value(row, "sourceUrl", "source_url")),
+    createdAt: text(value(row, "createdAt", "created_at")),
+    updatedAt: text(value(row, "updatedAt", "updated_at")),
   };
 }
 

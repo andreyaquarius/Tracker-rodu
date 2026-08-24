@@ -261,6 +261,35 @@ export interface ZagulyakaDraftAttachment {
   isPublicDerivative: boolean;
 }
 
+/**
+ * A private, reusable "where this record was found" shortcut owned by the
+ * current author.  It is copied into a draft and is never referenced by a
+ * public Zagulyaka record.
+ */
+export interface ZagulyakaSavedPlace {
+  id: string;
+  name: string;
+  geo: GeoPoint;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A private reusable archive/file/source shortcut owned by the author. */
+export interface ZagulyakaSavedSourcePreset {
+  id: string;
+  institutionName: string;
+  archiveReference: string;
+  sourceTitle: string;
+  sourceUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ZagulyakaSavedSourcePresetInput = Pick<
+  ZagulyakaSavedSourcePreset,
+  "institutionName" | "archiveReference" | "sourceTitle" | "sourceUrl"
+>;
+
 export interface ZagulyakaDraftSummary {
   id: string;
   kind: ZagulyakaKind;
