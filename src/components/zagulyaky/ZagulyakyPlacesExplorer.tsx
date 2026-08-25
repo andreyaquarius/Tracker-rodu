@@ -280,9 +280,14 @@ function PlacesConnectionsMap({
   activeConnectionId,
   onSelectConnection,
 }: PlacesConnectionsMapProps) {
+  const mapRegionId = useId();
+  const mapCaptionId = useId();
+  const figureRef = useRef<HTMLElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
+  const fullscreenButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   const selectedPoint = selectedPlace.geo;
   const mapConnections = useMemo(() => connections.filter((connection) => (
     connection.direction !== "local" && isMappedPoint(connection.relatedPlace.geo)
@@ -292,7 +297,8 @@ function PlacesConnectionsMap({
     if (!isMappedPoint(selectedPoint) || !containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, {
       attributionControl: true,
-      scrollWheelZoom: false,
+      scrollWheelZoom: true,
+      keyboard: true,
       zoomControl: true,
     }).setView([selectedPoint.latitude, selectedPoint.longitude], 8);
     mapRef.current = map;
@@ -371,6 +377,61 @@ function PlacesConnectionsMap({
     else map.fitBounds(bounds, { padding: [28, 28], maxZoom: 11 });
   }, [activeConnectionId, localRecordCount, mapConnections, onSelectConnection, selectedPlace, selectedPoint]);
 
+  useEffect(() => {
+    const invalidateFrame = window.requestAnimationFrame(() => {
+      mapRef.current?.invalidateSize({ pan: false });
+    });
+    const invalidateTimer = window.setTimeout(() => {
+      mapRef.current?.invalidateSize({ pan: false });
+    }, 160);
+
+    if (!fullscreen) {
+      return () => {
+        window.cancelAnimationFrame(invalidateFrame);
+        window.clearTimeout(invalidateTimer);
+      };
+    }
+
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleFullscreenKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        fullscreenButtonRef.current?.focus({ preventScroll: true });
+        setFullscreen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !figureRef.current) return;
+      const focusable = Array.from(figureRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.getClientRects().length > 0);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        fullscreenButtonRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === first || !figureRef.current.contains(activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleFullscreenKeyDown);
+    fullscreenButtonRef.current?.focus({ preventScroll: true });
+
+    return () => {
+      window.cancelAnimationFrame(invalidateFrame);
+      window.clearTimeout(invalidateTimer);
+      window.removeEventListener("keydown", handleFullscreenKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [fullscreen]);
+
   if (!isMappedPoint(selectedPoint)) {
     return (
       <div className="zagulyaky-places-explorer__map-empty" role="status">
@@ -380,15 +441,40 @@ function PlacesConnectionsMap({
   }
 
   return (
-    <figure className="zagulyaky-places-explorer__map-figure">
-      <div
-        ref={containerRef}
-        className="zagulyaky-places-explorer__map"
-        role="region"
-        aria-label={`Карта пов’язаних населених пунктів для ${selectedPlace.label}`}
-      />
-      <figcaption>
-        Пунктир показує зв’язок «походження — де знайдено» у публічних записах. Це не маршрут і не доказ переміщення людини.
+    <figure
+      ref={figureRef}
+      className={`zagulyaky-places-explorer__map-figure${fullscreen ? " zagulyaky-places-explorer__map-figure--fullscreen" : ""}`}
+      role={fullscreen ? "dialog" : undefined}
+      aria-modal={fullscreen ? true : undefined}
+      aria-label={fullscreen ? `Повноекранна карта зв’язків для ${selectedPlace.label}` : undefined}
+    >
+      <div className="zagulyaky-places-explorer__map-canvas">
+        <div
+          id={mapRegionId}
+          ref={containerRef}
+          className="zagulyaky-places-explorer__map"
+          role="region"
+          tabIndex={0}
+          aria-label={`Карта пов’язаних населених пунктів для ${selectedPlace.label}`}
+          aria-describedby={mapCaptionId}
+        />
+        <button
+          ref={fullscreenButtonRef}
+          type="button"
+          className="button button-secondary zagulyaky-places-explorer__map-fullscreen-button"
+          aria-controls={mapRegionId}
+          aria-pressed={fullscreen}
+          aria-keyshortcuts={fullscreen ? "Escape" : undefined}
+          title={fullscreen ? "Згорнути карту (Esc)" : "Відкрити карту на весь екран"}
+          onClick={() => setFullscreen((current) => !current)}
+        >
+          <span aria-hidden="true">{fullscreen ? "×" : "⛶"}</span>
+          {fullscreen ? "Згорнути карту" : "На весь екран"}
+        </button>
+      </div>
+      <figcaption id={mapCaptionId}>
+        <span>Пунктир показує зв’язок «походження — де знайдено» у публічних записах. Це не маршрут і не доказ переміщення людини.</span>
+        <span className="zagulyaky-places-explorer__map-controls-hint">Масштаб: коліщатко миші або клавіші + / − після фокусування карти.</span>
       </figcaption>
     </figure>
   );

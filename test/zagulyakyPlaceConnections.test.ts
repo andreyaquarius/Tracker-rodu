@@ -154,6 +154,35 @@ test("the settlement map remains contained on narrow displays", () => {
   assert.match(explorerStyles, /\.zagulyaky-places-explorer__map \{ height: min\(62vh, 390px\); min-height: 270px; \}/);
 });
 
+test("the settlement map fullscreen control is reversible, keyboard-safe, and viewport-safe", () => {
+  assert.match(explorer, /const \[fullscreen, setFullscreen\] = useState\(false\);/);
+  assert.match(explorer, /if \(event\.key === "Escape"\) \{[\s\S]*?setFullscreen\(false\);/);
+  assert.match(explorer, /document\.body\.style\.overflow = "hidden";/);
+  assert.match(explorer, /document\.body\.style\.overflow = previousBodyOverflow;/);
+  assert.match(explorer, /window\.requestAnimationFrame\(\(\) => \{[\s\S]*?mapRef\.current\?\.invalidateSize\(\{ pan: false \}\);/);
+  assert.match(explorer, /window\.setTimeout\(\(\) => \{[\s\S]*?mapRef\.current\?\.invalidateSize\(\{ pan: false \}\);[\s\S]*?\}, 160\);/);
+  assert.match(explorer, /fullscreenButtonRef\.current\?\.focus\(\{ preventScroll: true \}\);/);
+  assert.match(explorer, /aria-pressed=\{fullscreen\}/);
+  assert.match(explorer, /aria-keyshortcuts=\{fullscreen \? "Escape" : undefined\}/);
+  assert.match(explorer, /tabIndex=\{0\}/);
+  assert.match(explorer, /scrollWheelZoom: true,/);
+  assert.match(explorer, /keyboard: true,/);
+  assert.match(explorer, /role=\{fullscreen \? "dialog" : undefined\}/);
+  assert.match(explorer, /aria-modal=\{fullscreen \? true : undefined\}/);
+  assert.match(explorer, /event\.key !== "Tab"/);
+  assert.match(explorer, /querySelectorAll<HTMLElement>/);
+  assert.match(explorer, /Масштаб: коліщатко миші або клавіші \+ \/ −/);
+  assert.match(
+    explorerStyles,
+    /\.zagulyaky-places-explorer__map-figure--fullscreen\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?z-index:\s*5000;[\s\S]*?inset:\s*0;[\s\S]*?height:\s*100dvh;[\s\S]*?overscroll-behavior:\s*contain;/,
+  );
+  assert.match(explorerStyles, /env\(safe-area-inset-(?:top|right|bottom|left)\)/);
+  assert.match(
+    explorerStyles,
+    /\.zagulyaky-places-explorer__map-figure--fullscreen \.zagulyaky-places-explorer__map-canvas,[\s\S]*?\.zagulyaky-places-explorer__map \{[\s\S]*?height:\s*100%;[\s\S]*?min-height:\s*0;/,
+  );
+});
+
 test("place-picker and filters stay compactly aligned across responsive grids", () => {
   assert.match(
     explorerStyles,
