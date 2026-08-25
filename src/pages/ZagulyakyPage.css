@@ -422,7 +422,7 @@
 .zagulyaky-route-map li small { display: block; }
 .zagulyaky-route-map li strong { font-size: 10px; }
 .zagulyaky-route-map li small { margin-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
-.zagulyaky-route-map__canvas { height: 300px; margin-top: 14px; overflow: hidden; border: 1px solid #c8d5ce; border-radius: 10px; background: #e6ede8; }
+.zagulyaky-route-map__canvas { position: relative; z-index: 0; isolation: isolate; height: 300px; margin-top: 14px; overflow: hidden; border: 1px solid #c8d5ce; border-radius: 10px; background: #e6ede8; }
 .zagulyaky-route-map > p { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .zagulyaky-route-map-preview { margin: 14px 0 0; background: #fff; }
 .zagulyaky-route-map-preview .zagulyaky-route-map__canvas { height: 240px; }

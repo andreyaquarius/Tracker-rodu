@@ -23,6 +23,11 @@ const detailDialog = readFileSync(
   new URL("../src/components/zagulyaky/ZagulyakaDetailDialog.tsx", import.meta.url),
   "utf8",
 );
+const appStyles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const zagulyakyPageStyles = readFileSync(
+  new URL("../src/pages/ZagulyakyPage.css", import.meta.url),
+  "utf8",
+);
 
 const origin: GeoPoint = {
   displayName: "с. Хороше",
@@ -107,4 +112,23 @@ test("client sends canonical pins, maps public pins and renders a card map", () 
   assert.match(detailDialog, /<ZagulyakaRouteMap/);
   assert.match(detailDialog, /origin=\{detail\.originGeo\}/);
   assert.match(detailDialog, /found=\{detail\.foundGeo\}/);
+});
+
+test("a nested mobile place picker stays above Leaflet maps and keeps its actions opaque", () => {
+  assert.match(
+    appStyles,
+    /\.geo-field \.modal-backdrop\s*\{\s*z-index:\s*1100 !important;/s,
+  );
+  assert.match(
+    appStyles,
+    /\.geo-picker-map\s*\{[\s\S]*?position:\s*relative;[\s\S]*?z-index:\s*0;[\s\S]*?isolation:\s*isolate;[\s\S]*?overflow:\s*hidden;/,
+  );
+  assert.match(
+    zagulyakyPageStyles,
+    /\.zagulyaky-route-map__canvas\s*\{[\s\S]*?position:\s*relative;[\s\S]*?z-index:\s*0;[\s\S]*?isolation:\s*isolate;/,
+  );
+  assert.match(
+    appStyles,
+    /\.geo-picker \.modal-actions\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?z-index:\s*2;[\s\S]*?background:\s*var\(--paper\);/,
+  );
 });

@@ -7275,7 +7275,18 @@ tbody tr:hover { background: #fbfaf5; }
 .geo-color-picker button.active { border-color: var(--green-950); box-shadow: 0 0 0 2px rgba(196,154,50,.25); }
 .geo-picker { width: 100%; min-width: 0; padding: 18px 24px 0; overflow-x: hidden; box-sizing: border-box; }
 .geo-picker p { margin: 0 0 12px; color: var(--muted); }
-.geo-picker-map { width: 100%; max-width: 100%; height: min(52vh, 430px); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; box-sizing: border-box; }
+.geo-picker-map {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  width: 100%;
+  max-width: 100%;
+  height: min(52vh, 430px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-sizing: border-box;
+}
 .geo-picker-point-editor {
   display: grid;
   gap: 11px;
@@ -7291,7 +7302,22 @@ tbody tr:hover { background: #fbfaf5; }
 .geo-picker-point-editor > label input { width: 100%; min-width: 0; }
 .geo-picker-point-editor__coordinates { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .geo-picker-point-editor > p { margin: 0; color: #53665f; font-size: 10px; line-height: 1.45; }
-.geo-picker .modal-actions { position: sticky; bottom: 0; margin: 18px -24px 0; padding: 14px 24px; }
+.geo-picker .modal-actions {
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  margin: 18px -24px 0;
+  padding: 14px 24px;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 16px rgba(24, 51, 44, .08);
+}
+
+/* A location picker opens from inside another modal that can already contain
+   a Leaflet map. Leaflet controls use z-index values up to 1000; without a
+   higher nested backdrop the map under the picker can cover its fields and
+   sticky action buttons on phones. */
+.geo-field .modal-backdrop { z-index: 1100 !important; }
 .leaflet-container { font-family: inherit; }
 .tracker-map-marker-shell { position: relative; background: transparent !important; border: 0 !important; }
 .tracker-map-marker { display: block; position: relative; width: 22px; height: 22px; background: var(--marker-color, var(--green-800)); border: 2px solid rgba(16,47,42,.88); border-radius: 50% 50% 50% 0; box-shadow: 0 6px 18px rgba(0,0,0,.28); transform: rotate(-45deg); }
