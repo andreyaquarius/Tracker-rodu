@@ -55,7 +55,7 @@ export interface TelegramAccountLinkStatus {
   telegramUsername: string | null;
   linkedAt: string | null;
   displayName: string | null;
-  /** Explicit permission to send a selected Telegram intake to the AI worker. */
+  /** Legacy AI flag; it remains false while Telegram is in Notes-only mode. */
   aiOptIn: boolean;
 }
 

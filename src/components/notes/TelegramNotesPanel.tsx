@@ -184,18 +184,16 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
     <section className="telegram-notes-panel" aria-labelledby="telegram-notes-title">
       <header className="telegram-notes-panel__heading">
         <div>
-          <span className="eyebrow">Telegram і нотатки</span>
+          <span className="eyebrow">Telegram-бот і нотатки</span>
           <h2 id="telegram-notes-title">Особиста скринька джерел</h2>
           <p>
             Перешліть допис із Telegram-каналу безпосередньо в приватний чат із ботом,
-            або надішліть посилання через «Поділитися» чи копіювання з Facebook. Бот спершу
-            збереже матеріал у короткому приватному очікуванні, а потім попросить обрати:
-            приватна <strong>Нотатка</strong> чи <strong>Загуляка</strong> для підготовки
-            окремої приватної чернетки.
+            або надішліть посилання через «Поділитися» чи копіювання з Facebook. Бот одразу
+            збереже текст і джерело як приватну <strong>Нотатку</strong>. Чернетки Загуляк і
+            обробка фото через бот тимчасово вимкнені.
           </p>
         </div>
         <div className="telegram-notes-panel__actions">
-          <a className="button button-secondary" href="/zahuliaky/my">Мої чернетки Загуляк</a>
           <button type="button" className="button button-secondary" onClick={() => void refresh()} disabled={loading}>
             {loading ? "Оновлюємо…" : "Оновити"}
           </button>
@@ -279,7 +277,7 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
           {!loading && !notes.length ? (
             <div className="telegram-notes-empty panel">
               <strong>Нотаток за цими фільтрами ще немає.</strong>
-              <span>Надішліть або перешліть допис боту, а потім натисніть «Нотатка». Після оновлення сторінки він з’явиться тут приватно. Для фото оберіть «Загуляка», щоб створити чернетку запису.</span>
+              <span>Надішліть або перешліть боту текст чи посилання — він одразу збережеться тут приватно. Фото через бот тимчасово не обробляються та не зберігаються.</span>
             </div>
           ) : null}
           {!loading && notes.length && !selectedNote ? (
@@ -549,9 +547,6 @@ function telegramInboxErrorMessage(error: unknown): string {
   }
   if (raw.includes("TELEGRAM_LINK") || raw.includes("TELEGRAM_ACCOUNT")) {
     return "Не вдалося виконати дію з Telegram-підключенням. Оновіть сторінку та спробуйте ще раз.";
-  }
-  if (raw.includes("TELEGRAM_AI") || raw.includes("AI_OPT_IN")) {
-    return "Не вдалося змінити дозвіл на ШІ-аналіз. Оновіть сторінку та спробуйте ще раз.";
   }
   if (raw.includes("schema cache") || raw.includes("does not exist")) {
     return "Модуль Telegram-нотаток ще не підготовлено на сервері. Потрібно застосувати його міграцію.";

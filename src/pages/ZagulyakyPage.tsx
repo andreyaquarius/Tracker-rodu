@@ -711,7 +711,7 @@ function MyRecordsToolbar({
           <>Усього моїх записів: <strong>{formatRecordCount(overallTotal ?? total)}</strong></>
         )}
         <br />
-        <small>Чернетки з Telegram з’являються тут зі статусом «Чернетка».</small>
+        <small>Створюйте нові записи тут або перевіряйте вже наявні приватні чернетки.</small>
       </p>
     </div>
   );

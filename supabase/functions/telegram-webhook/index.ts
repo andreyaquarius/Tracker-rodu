@@ -8,7 +8,6 @@ const MAX_REQUEST_BYTES = 128 * 1024;
 const MAX_MESSAGE_CHARS = 12_000;
 const TELEGRAM_API_ORIGIN = "https://api.telegram.org";
 const BOT_REPLY_TIMEOUT_MS = 8_000;
-const WORKER_WAKE_TIMEOUT_MS = 8_000;
 
 type JsonObject = Record<string, unknown>;
 type TelegramImageMimeType = "image/jpeg" | "image/png" | "image/webp";
@@ -63,7 +62,6 @@ type TelegramIntentCallback = {
 
 type BotReply = {
   text: string;
-  choiceToken?: string;
 };
 
 class WebhookProblem extends Error {
@@ -494,59 +492,6 @@ function safeTelegramToken(): string {
   return Deno.env.get("TELEGRAM_BOT_TOKEN")?.trim() ?? "";
 }
 
-function telegramWorkerUrl(): string | null {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim() ?? "";
-  if (!supabaseUrl) return null;
-  try {
-    const endpoint = new URL("/functions/v1/process-telegram-inbox", supabaseUrl);
-    if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) return null;
-    return endpoint.toString();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Start one bounded queue slice as soon as the user explicitly chooses a
- * Zagulyaka. The durable five-minute GitHub schedule remains the recovery
- * path if this best-effort wake is unavailable or finishes after the webhook.
- */
-async function wakeTelegramInboxWorker(): Promise<void> {
-  const endpoint = telegramWorkerUrl();
-  const workerSecret = Deno.env.get("TELEGRAM_WORKER_SECRET")?.trim() ?? "";
-  if (!endpoint || !workerSecret) return;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), WORKER_WAKE_TIMEOUT_MS);
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      redirect: "error",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        "x-telegram-worker-secret": workerSecret,
-      },
-      body: JSON.stringify({ limit: 1 }),
-    });
-    await response.body?.cancel("telegram-inbox-wake-complete").catch(() => undefined);
-  } catch {
-    // A failed wake must not expose secrets or make Telegram redeliver the
-    // already-persisted choice. The scheduled worker will retry the queue.
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function intentPicker(choiceToken: string): JsonObject {
-  return {
-    inline_keyboard: [[
-      { text: "📝 Нотатка", callback_data: `tracker:choice:${choiceToken}:note` },
-      { text: "🧭 Загуляка", callback_data: `tracker:choice:${choiceToken}:zagulyaka` },
-    ]],
-  };
-}
-
 async function callTelegramBot(method: string, payload: JsonObject): Promise<void> {
   const token = safeTelegramToken();
   if (!token) return;
@@ -576,7 +521,6 @@ async function sendBotReply(chatId: number, reply: BotReply): Promise<void> {
     chat_id: chatId,
     text: reply.text,
     disable_web_page_preview: true,
-    ...(reply.choiceToken && isUuid(reply.choiceToken) ? { reply_markup: intentPicker(reply.choiceToken) } : {}),
   });
 }
 
@@ -612,27 +556,14 @@ async function handleCommand(
 ): Promise<BotReply> {
   if (command.name === "help") {
     return {
-      text: "Надішліть або приватно перешліть один текст, допис, посилання чи фото. Я збережу його у короткому приватному очікуванні, а потім запитаю: Нотатка чи Загуляка. Нотатки залишаються приватними; Загуляка створює лише приватну чернетку для вашої перевірки. Якщо кнопки не з’явилися, надішліть /pending.",
+      text: "Надішліть або приватно перешліть текст, допис чи посилання — я одразу збережу це як приватну Нотатку. Чернетки Загуляк у Telegram-боті тимчасово вимкнено. Фото зараз не обробляються і не зберігаються; додайте до них текст або посилання, якщо хочете зберегти нотатку.",
     };
   }
 
   if (command.name === "pending") {
-    const client = serviceClient();
-    const { data, error } = await client.rpc("service_get_telegram_pending_choice_v1", {
-      p_telegram_user_id: message.telegramUserId,
-      p_private_chat_id: message.privateChatId,
-    });
-    if (error) throw safeRpcFailure(error);
-    const result = record(data);
-    if (result.linked !== true) {
-      return { text: "Спочатку підключіть Telegram у налаштуваннях Трекера Роду." };
-    }
-    const choiceToken = typeof result.choiceToken === "string" && isUuid(result.choiceToken)
-      ? result.choiceToken
-      : null;
-    return result.pending === true && choiceToken
-      ? { text: "Ось останній матеріал, який очікує вашого вибору.", choiceToken }
-      : { text: "Матеріалів, що очікують вибору, немає. Надішліть або перешліть новий допис, посилання чи фото." };
+    return {
+      text: "Нові текстові повідомлення й посилання зберігаються як Нотатки одразу. Старі матеріали, що очікували вибору, не обробляються як Загуляки; за потреби перешліть текст або посилання ще раз.",
+    };
   }
 
   if (command.name === "start") {
@@ -641,7 +572,7 @@ async function handleCommand(
       ? command.argument
       : "";
     if (!code) {
-      return { text: "Відкрийте сторінку «Нотатки» у Трекері Роду, створіть одноразовий код підключення й надішліть сюди команду /start з цим кодом." };
+      return { text: "Відкрийте «Налаштування» у Трекері Роду, створіть одноразовий код підключення й надішліть сюди команду /start з цим кодом." };
     }
     const { data, error } = await client.rpc("service_consume_telegram_link_v1", {
       p_start_code: code,
@@ -653,35 +584,35 @@ async function handleCommand(
     if (error) throw safeRpcFailure(error);
     return record(data).linked === true
       ? {
-          text: "Telegram підключено. Тепер надішліть або перешліть один допис, посилання чи фото — після отримання я запитаю, чи зберегти його як Нотатку або передати в чернетку Загуляки.",
+          text: "Telegram підключено. Тепер надішліть або перешліть текст, допис чи посилання — я одразу збережу це як приватну Нотатку. Чернетки Загуляк і обробка фото в боті тимчасово вимкнені.",
         }
       : { text: "Посилання недійсне, прострочене або цей Telegram уже підключений до іншого акаунта." };
   }
 
-  // Keep legacy commands recognisable, but do not keep an account-wide mode:
-  // the selection must always apply to the exact material already received.
+  if (command.name === "zagulyaka") {
+    return {
+      text: "Створення чернеток Загуляк через Telegram-бот тимчасово вимкнено. Надішліть текст або посилання без команди — я збережу його як приватну Нотатку.",
+    };
+  }
+
+  // Keep the old command recognisable without exposing an account-wide mode.
   return {
-    text: "Тепер спочатку надішліть матеріал. Після цього з’являться кнопки «Нотатка» і «Загуляка» саме для нього.",
+    text: "Надішліть текст або посилання без команди — я одразу збережу це як приватну Нотатку.",
   };
 }
 
 async function enqueueMessage(message: TelegramMessage): Promise<BotReply> {
   const client = serviceClient();
+  // Notes are text/link bookmarks. During the temporary notes-only mode, do
+  // not persist a Telegram photo/file id, queue it, or send it to an AI worker.
+  const photoOmitted = message.photo !== null;
   const { data, error } = await client.rpc("service_enqueue_telegram_message_v1", {
     p_update_id: message.updateId,
     p_telegram_user_id: message.telegramUserId,
     p_private_chat_id: message.privateChatId,
     p_message_id: message.messageId,
     p_message_text: message.text,
-    p_media: message.photo
-      ? {
-          fileId: message.photo.fileId,
-          fileUniqueId: message.photo.fileUniqueId,
-          fileName: message.photo.fileName,
-          mimeType: message.photo.mimeType,
-          ...(message.photo.byteSize ? { byteSize: message.photo.byteSize } : {}),
-        }
-      : null,
+    p_media: null,
     // The update was delivered in the owner's private chat. Forward metadata
     // identifies only the original public/visible source and never causes the
     // bot to subscribe to or inspect the source group/channel.
@@ -693,100 +624,99 @@ async function enqueueMessage(message: TelegramMessage): Promise<BotReply> {
     return { text: "Спочатку підключіть Telegram у налаштуваннях Трекера Роду." };
   }
   if (result.accepted !== true) {
-    return { text: "Надішліть текст, посилання або фото." };
+    return {
+      text: photoOmitted
+        ? "Бот тимчасово зберігає лише текстові Нотатки та посилання. Фото не обробляються і не зберігаються; додайте текст або посилання до повідомлення."
+        : "Надішліть текст або посилання, щоб зберегти приватну Нотатку.",
+    };
   }
   const choiceToken = typeof result.choiceToken === "string" && isUuid(result.choiceToken)
     ? result.choiceToken
     : null;
   if (result.awaitingChoice === true && choiceToken) {
+    const { data: noteData, error: noteError } = await client.rpc("service_choose_telegram_intake_intent_v1", {
+      p_telegram_user_id: message.telegramUserId,
+      p_private_chat_id: message.privateChatId,
+      p_choice_token: choiceToken,
+      p_intent: "note",
+    });
+    if (noteError) throw safeRpcFailure(noteError);
+    const noteResult = record(noteData);
+    if (noteResult.linked !== true) {
+      return { text: "Спочатку підключіть Telegram у налаштуваннях Трекера Роду." };
+    }
+    if (noteResult.selected !== true) {
+      if (noteResult.reason === "expired") {
+        return { text: "Строк збереження цього матеріалу минув. Надішліть текст або посилання ще раз." };
+      }
+      if (noteResult.reason === "already_selected" || noteResult.reason === "zagulyaka_disabled") {
+        return { text: "Це повідомлення вже належить до старої чернетки Загуляки. Нові чернетки Загуляк через бот тимчасово вимкнено." };
+      }
+      return { text: "Не вдалося зберегти цей матеріал. Надішліть текст або посилання ще раз." };
+    }
+    if (noteResult.materialized === true) {
+      return {
+        text: photoOmitted
+          ? "Нотатку збережено у вашому приватному списку. Текст і джерело збережено, а фото навмисно не оброблялося та не зберігалося. Відкрийте «Нотатки» у Трекері Роду та натисніть «Оновити»."
+          : "Нотатку збережено у вашому приватному списку. Відкрийте «Нотатки» у Трекері Роду та натисніть «Оновити».",
+      };
+    }
     return {
-      text: result.duplicate === true
-        ? "Цей матеріал уже отримано приватно. Оберіть, куди його передати."
-        : "Матеріал отримано приватно. Куди його передати?",
-      choiceToken,
+      text: "Нотатку отримано та додано до приватної черги. Відкрийте «Нотатки» у Трекері Роду трохи пізніше.",
     };
   }
   if (result.reason === "expired") {
     return { text: "Строк вибору для цього матеріалу минув, тож його приватний вміст очищено. Якщо він ще потрібен, перешліть його ще раз." };
   }
-  return { text: "Це повідомлення вже було отримано." };
+  if (result.intent === "zagulyaka") {
+    return { text: "Це повідомлення вже належить до старої чернетки Загуляки. Нові чернетки через бот тимчасово вимкнено." };
+  }
+  return { text: "Це повідомлення вже було збережено як приватну Нотатку." };
 }
 
 async function handleIntentCallback(callback: TelegramIntentCallback): Promise<void> {
-  // Buttons sent by the earlier pre-material flow cannot classify any saved
-  // payload. Remove them so they do not invite a resend or a hidden mode.
-  if (!callback.choiceToken || !callback.intent) {
+  // A legacy Note button is still safe to honour: it materializes only a
+  // private note and never enters the worker.  A Zagulyaka button must remain
+  // inert, however, so old Telegram messages cannot revive the retired AI flow.
+  if (callback.choiceToken && callback.intent === "note") {
+    const client = serviceClient();
+    const { data, error } = await client.rpc("service_choose_telegram_intake_intent_v1", {
+      p_telegram_user_id: callback.telegramUserId,
+      p_private_chat_id: callback.privateChatId,
+      p_choice_token: callback.choiceToken,
+      p_intent: "note",
+    });
+    if (error) throw safeRpcFailure(error);
+    const result = record(data);
+    if (result.linked !== true) {
+      await answerIntentCallback(callback.callbackId, "Спочатку підключіть Telegram у Трекері Роду.");
+      return;
+    }
+    if (result.selected === true) {
+      await answerIntentCallback(
+        callback.callbackId,
+        result.materialized === true ? "Нотатку збережено." : "Нотатку додано до приватної черги.",
+      );
+      await removeIntentPicker(callback);
+      return;
+    }
     await answerIntentCallback(
       callback.callbackId,
-      callback.legacyIntentPicker
-        ? "Це попереднє меню вже неактивне. Спершу надішліть матеріал."
-        : "Ця дія більше недоступна.",
+      result.reason === "photo_requires_zagulyaka"
+        ? "Фото через Telegram-бот тимчасово не обробляються. Надішліть текст або посилання ще раз."
+        : "Цей матеріал більше недоступний. Надішліть текст або посилання ще раз.",
     );
     await removeIntentPicker(callback);
     return;
   }
 
-  const client = serviceClient();
-  const { data, error } = await client.rpc("service_choose_telegram_intake_intent_v1", {
-    p_telegram_user_id: callback.telegramUserId,
-    p_private_chat_id: callback.privateChatId,
-    p_choice_token: callback.choiceToken,
-    p_intent: callback.intent,
-  });
-  if (error) throw safeRpcFailure(error);
-  const result = record(data);
-  if (result.linked !== true) {
-    await answerIntentCallback(callback.callbackId, "Спочатку підключіть Telegram у Трекері Роду.");
-    return;
-  }
-  if (result.reason === "ai_not_enabled") {
-    await answerIntentCallback(callback.callbackId, "Увімкніть ШІ-аналіз для чернеток Загуляк у Трекері Роду.");
-    return;
-  }
-  if (result.reason === "photo_requires_zagulyaka") {
-    await answerIntentCallback(callback.callbackId, "Фото можна передати як Загуляку. Виберіть цей тип — повторно надсилати фото не потрібно.");
-    return;
-  }
-  if (result.reason === "expired") {
-    await answerIntentCallback(callback.callbackId, "Строк вибору минув; матеріал очищено.");
-    await removeIntentPicker(callback);
-    return;
-  }
-  if (result.reason === "already_selected") {
-    await answerIntentCallback(callback.callbackId, "Для цього матеріалу вже обрано інший тип.");
-    await removeIntentPicker(callback);
-    return;
-  }
-  if (result.selected !== true) {
-    await answerIntentCallback(callback.callbackId, "Цей матеріал більше недоступний. Надішліть його ще раз.");
-    await removeIntentPicker(callback);
-    return;
-  }
-  if (callback.intent === "zagulyaka" && result.duplicate !== true) {
-    EdgeRuntime.waitUntil(wakeTelegramInboxWorker());
-  }
-  const noteMaterialized = callback.intent === "note" && result.materialized === true;
-  await answerIntentCallback(
-    callback.callbackId,
-    callback.intent === "zagulyaka"
-      ? "Передано в чернетку Загуляки."
-      : noteMaterialized
-      ? "Нотатку збережено."
-      : "Нотатку додано в чергу.",
-  );
+  // A stale inline button must not offer a hidden way to start the retired
+  // Zagulyaka/AI flow. Remove it without consuming or changing its material.
+  const disabledMessage = callback.intent === "zagulyaka"
+    ? "Чернетки Загуляк у Telegram-боті тимчасово вимкнено."
+    : "Це попереднє меню вже неактивне. Надішліть текст або посилання ще раз — воно збережеться як Нотатка.";
+  await answerIntentCallback(callback.callbackId, disabledMessage);
   await removeIntentPicker(callback);
-  if (result.duplicate === true) return;
-  await sendBotReply(callback.privateChatId, {
-    text: callback.intent === "zagulyaka"
-      ? "Матеріал передано на підготовку приватної чернетки Загуляки для вашої перевірки. Після обробки вона з’явиться у «Моїх записах» Трекера Роду."
-      : noteMaterialized
-      ? result.mediaOmitted === true
-        ? "Нотатку збережено у вашому приватному списку. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках. Відкрийте «Нотатки» у Трекері Роду та натисніть «Оновити»."
-        : "Нотатку збережено у вашому приватному списку. Відкрийте «Нотатки» у Трекері Роду та натисніть «Оновити»."
-      : result.mediaOmitted === true
-      ? "Нотатку додано в чергу. Збережено текст і джерело пересланого допису; фото навмисно не зберігалося в нотатках."
-      : "Нотатку додано в чергу до вашого приватного списку.",
-  });
 }
 
 async function handleRequest(request: Request): Promise<Response> {

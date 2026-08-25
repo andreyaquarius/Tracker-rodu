@@ -3,7 +3,6 @@ import type { SupabaseAccount } from "../../services/supabaseAuth";
 import {
   createTelegramLink,
   loadTelegramLinkStatus,
-  setTelegramAiOptIn,
   unlinkTelegramAccount,
 } from "../../services/telegramInboxService";
 import type {
@@ -21,16 +20,13 @@ export interface TelegramBotSettingsProps {
  * Connects a user's Telegram account to their private Tracker Rodu inbox.
  *
  * This lives in Settings intentionally: the Notes page is for reading and
- * working with saved notes, while a bot link and AI permission are account
- * integration controls.
+ * working with saved notes, while a bot link is an account integration control.
  */
 export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
   const [linkStatus, setLinkStatus] = useState<TelegramAccountLinkStatus | null>(null);
   const [linkStart, setLinkStart] = useState<TelegramLinkStart | null>(null);
-  const [linkAiOptIn, setLinkAiOptIn] = useState(false);
   const [loading, setLoading] = useState(false);
   const [linking, setLinking] = useState(false);
-  const [aiOptInSaving, setAiOptInSaving] = useState(false);
   const [unlinkConfirming, setUnlinkConfirming] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
   const [notice, setNotice] = useState("");
@@ -48,7 +44,6 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
       const nextStatus = await loadTelegramLinkStatus(accountId);
       if (requestGeneration.current !== generation) return;
       setLinkStatus(nextStatus);
-      setLinkAiOptIn(nextStatus.aiOptIn);
       if (nextStatus.linked) setLinkStart(null);
     } catch (loadError) {
       if (requestGeneration.current === generation) setError(telegramSettingsErrorMessage(loadError));
@@ -62,7 +57,6 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
       ++requestGeneration.current;
       setLinkStatus(null);
       setLinkStart(null);
-      setLinkAiOptIn(false);
       setNotice("");
       setError("");
       return;
@@ -76,10 +70,11 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
     setError("");
     setNotice("");
     try {
-      const result = await createTelegramLink(linkAiOptIn, accountId);
+      // Telegram is temporarily a Notes-only integration.  Always issue links
+      // with AI disabled, including if an older browser tab still has state.
+      const result = await createTelegramLink(false, accountId);
       setLinkStart(result);
       setLinkStatus(result);
-      setLinkAiOptIn(result.aiOptIn);
       setUnlinkConfirming(false);
       setNotice(result.linked
         ? "Цей Telegram-акаунт уже підключено."
@@ -112,7 +107,6 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
       await unlinkTelegramAccount(accountId);
       setLinkStatus({ linked: false, telegramUsername: null, linkedAt: null, displayName: null, aiOptIn: false });
       setLinkStart(null);
-      setLinkAiOptIn(false);
       setUnlinkConfirming(false);
       setNotice("Telegram-акаунт від’єднано. Збережені нотатки залишилися у вашому акаунті.");
     } catch (unlinkError) {
@@ -122,33 +116,12 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
     }
   };
 
-  const updateAiProcessingPermission = async (nextAiOptIn: boolean) => {
-    if (!accountId || !linkStatus?.linked) return;
-    setAiOptInSaving(true);
-    setError("");
-    setNotice("");
-    try {
-      await setTelegramAiOptIn(nextAiOptIn, accountId);
-      // Disabling AI also changes server-side queue state, so read it back.
-      const nextStatus = await loadTelegramLinkStatus(accountId);
-      setLinkStatus(nextStatus);
-      setLinkAiOptIn(nextStatus.aiOptIn);
-      setNotice(nextStatus.aiOptIn
-        ? "ШІ-аналіз увімкнено. Позначені як «Загуляка» повідомлення можуть створювати лише приватні чернетки."
-        : "ШІ-аналіз вимкнено. Збереження приватних нотаток продовжує працювати без передавання їх до ШІ.");
-    } catch (aiOptInError) {
-      setError(telegramSettingsErrorMessage(aiOptInError));
-    } finally {
-      setAiOptInSaving(false);
-    }
-  };
-
   if (!accountId) {
     return (
       <section className="panel telegram-bot-settings telegram-bot-settings--signed-out" aria-labelledby="telegram-bot-settings-title">
         <span className="eyebrow">Підключення</span>
         <h2 id="telegram-bot-settings-title">Telegram-бот</h2>
-        <p>Увійдіть в акаунт, щоб підключити Telegram-бота до приватних нотаток і чернеток Загуляк.</p>
+        <p>Увійдіть в акаунт, щоб підключити Telegram-бота до приватних нотаток.</p>
       </section>
     );
   }
@@ -166,7 +139,8 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
           <h2 id="telegram-bot-settings-title">Telegram-бот</h2>
           <p>
             Перешліть допис із Telegram або надішліть посилання з Facebook у приватний чат із ботом.
-            Після цього оберіть, чи зберегти матеріал як Нотатку або підготувати чернетку Загуляки.
+            Бот одразу збереже текст або посилання як приватну Нотатку. Чернетки Загуляк і обробка фото
+            через бот тимчасово вимкнені.
           </p>
         </div>
         <div className="telegram-bot-settings__actions">
@@ -190,9 +164,7 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
                 {linkStatus?.linkedAt ? <> · {formatDateTime(linkStatus.linkedAt)}</> : null}.
               </p>
               <p className="telegram-bot-settings__ai-summary">
-                {linkStatus?.aiOptIn
-                  ? "ШІ-аналіз увімкнено для повідомлень, які ви надсилаєте боту як Загуляки."
-                  : "ШІ-аналіз вимкнено; бот зберігає ваші нотатки приватно без передавання їх до ШІ."}
+                Бот зберігає ваші текстові Нотатки приватно без передавання їх до ШІ.
               </p>
             </>
           ) : (
@@ -203,7 +175,7 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
           {isLinked ? (
             <>
               {botUrl ? <a className="button button-secondary" href={botUrl} target="_blank" rel="noreferrer noopener">Відкрити бота</a> : null}
-              <button type="button" className="button button-secondary" onClick={() => setUnlinkConfirming(true)} disabled={unlinking || aiOptInSaving}>
+              <button type="button" className="button button-secondary" onClick={() => setUnlinkConfirming(true)} disabled={unlinking}>
                 Від’єднати Telegram
               </button>
             </>
@@ -214,41 +186,6 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
           )}
         </div>
       </div>
-
-      {isLinked ? (
-        <div className="telegram-bot-settings__ai-control">
-          <label>
-            <input
-              type="checkbox"
-              checked={linkStatus?.aiOptIn ?? false}
-              disabled={aiOptInSaving || unlinking}
-              onChange={(event) => void updateAiProcessingPermission(event.target.checked)}
-            />
-            <span>Дозволити ШІ готувати приватні чернетки Загуляк</span>
-          </label>
-          <small>
-            Текст і дозволені фото, які ви самі позначите як Загуляки, можуть передаватися ШІ лише
-            для створення приватної чернетки. Це не подає запис на модерацію і не публікує його автоматично.
-          </small>
-          {aiOptInSaving ? <span className="telegram-bot-settings__ai-pending" role="status">Оновлюємо налаштування ШІ…</span> : null}
-        </div>
-      ) : (
-        <div className="telegram-bot-settings__ai-control">
-          <label>
-            <input
-              type="checkbox"
-              checked={linkAiOptIn}
-              disabled={linking || loading}
-              onChange={(event) => setLinkAiOptIn(event.target.checked)}
-            />
-            <span>Дозволити ШІ готувати приватні чернетки Загуляк</span>
-          </label>
-          <small>
-            Це окрема згода на передавання до ШІ лише тих матеріалів, які ви самі позначите як Загуляки.
-            Без неї бот усе одно зберігатиме ваші нотатки приватно.
-          </small>
-        </div>
-      )}
 
       {startCode && !isLinked ? (
         <div className="telegram-bot-settings__code" role="status">
@@ -319,9 +256,6 @@ function telegramSettingsErrorMessage(error: unknown): string {
   }
   if (raw.includes("TELEGRAM_LINK") || raw.includes("TELEGRAM_ACCOUNT")) {
     return "Не вдалося виконати дію з Telegram-підключенням. Оновіть сторінку та спробуйте ще раз.";
-  }
-  if (raw.includes("TELEGRAM_AI") || raw.includes("AI_OPT_IN")) {
-    return "Не вдалося змінити дозвіл на ШІ-аналіз. Оновіть сторінку та спробуйте ще раз.";
   }
   if (raw.includes("schema cache") || raw.includes("does not exist")) {
     return "Модуль Telegram ще не підготовлено на сервері. Потрібно застосувати його міграцію.";

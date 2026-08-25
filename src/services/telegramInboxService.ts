@@ -70,9 +70,8 @@ export async function unlinkTelegramAccount(expectedUserId?: string): Promise<vo
 }
 
 /**
- * Changes only the authenticated user's AI-processing permission. The caller
- * should re-read link status afterwards, because disabling it can also change
- * the server-managed Telegram mode and queued intake state.
+ * Legacy compatibility API. The server currently forces this value to false
+ * while the Telegram integration is temporarily Notes-only.
  */
 export async function setTelegramAiOptIn(
   aiOptIn: boolean,

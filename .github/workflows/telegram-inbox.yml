@@ -1,8 +1,6 @@
-name: Process private Telegram inbox
+name: Maintain private Telegram inbox (manual)
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,8 +13,9 @@ concurrency:
 jobs:
   process:
     runs-on: ubuntu-latest
-    # A slice is serial and bounded; this leaves time for a Telegram image and
-    # AI response without allowing two workers to contend for the same lease.
+    # The Telegram bot is temporarily Notes-only, so routine worker execution
+    # is disabled. This manual recovery path remains for fenced-media cleanup
+    # and safe handling of legacy intake rows.
     timeout-minutes: 8
     steps:
       - name: Verify Telegram inbox worker secrets

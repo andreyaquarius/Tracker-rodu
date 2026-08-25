@@ -54,11 +54,11 @@ test("client asks the paged RPC for only 10, 20, or 50 records and preserves tot
   assert.match(service, /statusCounts: workflowStatusCounts\(value\(payload, "statusCounts", "status_counts"\)\)/);
 });
 
-test("my records can refresh drafts created externally by the Telegram worker", () => {
+test("my records can refresh private drafts without depending on Telegram intake", () => {
   assert.match(page, /const refreshMyRecords = \(\) => \{[\s\S]*?setMyRecordsPage\(1\)[\s\S]*?setMyRecordsRevision/);
   assert.match(page, /document\.addEventListener\("visibilitychange", refreshAfterReturningToApp\)/);
   assert.match(page, /document\.visibilityState === "visible"/);
   assert.match(page, /onRefresh=\{refreshMyRecords\}/);
   assert.match(page, /↻ Оновити/);
-  assert.match(page, /Чернетки з Telegram з’являються тут зі статусом «Чернетка»/);
+  assert.match(page, /Створюйте нові записи тут або перевіряйте вже наявні приватні чернетки/);
 });

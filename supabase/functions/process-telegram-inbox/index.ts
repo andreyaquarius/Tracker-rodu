@@ -1229,12 +1229,11 @@ async function processTask(client: ReturnType<typeof serverClient>, task: Intake
       // inserted intake, and never allow generic note media.
       if (task.media) throw new WorkerProblem("TELEGRAM_NOTE_MEDIA_UNSUPPORTED", false);
       await completeNote(client, task);
-    } else {
-      // File resolution and download can be slow; refresh the claim before a
-      // request that includes the bot token and may run near Telegram's limit.
-      if (task.media) await renewIntakeLease(client, task);
-      const image = await downloadAndValidatePhoto(task);
-      await completeZagulyaka(client, task, image);
+    } else if (task.intent === "zagulyaka") {
+      // Temporary fail-closed switch: the Telegram bot is Notes-only. This
+      // check is deliberately before any Gemini, Telegram file or Storage
+      // request so a stale queued task cannot create a private draft.
+      throw new WorkerProblem("TELEGRAM_ZAGULYAKA_DISABLED", false);
     }
     return "completed";
   } catch (error) {

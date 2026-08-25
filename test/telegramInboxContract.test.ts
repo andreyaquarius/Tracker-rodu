@@ -19,6 +19,10 @@ const immediateNoteMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/202608240005_telegram_notes_materialize_immediately.sql",
 );
+const notesOnlyMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/202608250002_telegram_notes_only_mode.sql",
+);
 
 test("Telegram intake is private, account-scoped and does not auto-publish", () => {
   const source = readFileSync(migrationPath, "utf8");
@@ -98,11 +102,13 @@ test("Telegram functions are present as separate webhook and worker boundaries",
   assert.match(workerSource, /service_finalize_telegram_zagulyaka_v1/i);
   assert.match(workerSource, /conservativeLargePhotoCandidate/i);
   assert.match(workerSource, /sourceUrl: source\?\.url/i);
+  assert.match(workerSource, /task\.intent === "zagulyaka"[\s\S]{0,500}TELEGRAM_ZAGULYAKA_DISABLED/i);
+  assert.match(workerSource, /before any Gemini, Telegram file or Storage/i);
   assert.doesNotMatch(webhookSource, /console\.log\(/i);
   assert.doesNotMatch(workerSource, /console\.log\(/i);
 });
 
-test("Telegram image intake wakes the worker promptly and preserves a manual draft when OCR finds no record", () => {
+test("Telegram is temporarily Notes-only and never wakes the Zagulyaka worker", () => {
   const webhook = readFileSync(
     resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts"),
     "utf8",
@@ -119,28 +125,29 @@ test("Telegram image intake wakes the worker promptly and preserves a manual dra
     resolve(process.cwd(), ".github/workflows/telegram-inbox.yml"),
     "utf8",
   );
+  const notesOnlyMigration = readFileSync(notesOnlyMigrationPath, "utf8");
 
   assert.match(webhook, /function selectImageDocument\(/);
   assert.match(webhook, /mimeType !== "image\/jpeg"[\s\S]*?mimeType !== "image\/png"[\s\S]*?mimeType !== "image\/webp"/);
   assert.match(webhook, /selectPhoto\(message\.photo\) \?\? selectImageDocument\(message\.document\)/);
-  assert.match(webhook, /function wakeTelegramInboxWorker\(/);
-  assert.match(webhook, /x-telegram-worker-secret/);
-  assert.match(webhook, /body: JSON\.stringify\(\{ limit: 1 \}\)/);
-  assert.match(webhook, /callback\.intent === "zagulyaka" && result\.duplicate !== true[\s\S]*?EdgeRuntime\.waitUntil\(wakeTelegramInboxWorker\(\)\)/);
-  assert.match(webhook, /The scheduled worker will retry the queue/);
+  assert.match(webhook, /p_media: null/);
+  assert.match(webhook, /p_intent: "note"/);
+  assert.match(webhook, /Фото не обробляються і не зберігаються/i);
+  assert.doesNotMatch(webhook, /function wakeTelegramInboxWorker\(/);
+  assert.doesNotMatch(webhook, /x-telegram-worker-secret/);
+  assert.doesNotMatch(webhook, /EdgeRuntime\.waitUntil/);
+  assert.doesNotMatch(webhook, /function intentPicker\(/);
 
-  assert.match(worker, /Працюй у трьох послідовних етапах/);
-  assert.match(worker, /Спершу транскрибуй доступний текст/);
-  assert.match(worker, /Потім проіндексуй лише підтверджені транскрипцією факти/);
-  assert.match(worker, /Трекер Роду сам розкладе ці факти по полях таблиці «Загуляки»/);
-  assert.match(worker, /function conservativeUnrecognizedPhotoCandidate\(/);
-  assert.match(worker, /image && normalized\.length === 0[\s\S]*?conservativeUnrecognizedPhotoCandidate/);
-
-  assert.match(deployWorkflow, /supabase secrets list --project-ref "\$SUPABASE_PROJECT_REF" \| grep -Eq '\(\^\|\[\[:space:\]\]\)\(GEMINI_API_KEY\|GOOGLE_AI_API_KEY\)/);
-  assert.match(deployWorkflow, /Supabase Edge Function secret GEMINI_API_KEY or GOOGLE_AI_API_KEY is required for Telegram Zagulyaka analysis/);
-  assert.doesNotMatch(deployWorkflow, /GEMINI_API_KEY: \$\{\{ secrets\.GEMINI_API_KEY \}\}/);
-  assert.doesNotMatch(deployWorkflow, /GEMINI_API_KEY="\$GEMINI_API_KEY"/);
-  assert.match(scheduleWorkflow, /\.accepted == true and \(\.failed \/\/ 0\) == 0/);
+  assert.match(worker, /task\.intent === "zagulyaka"[\s\S]{0,500}TELEGRAM_ZAGULYAKA_DISABLED/i);
+  assert.match(notesOnlyMigration, /set ai_opt_in = false,[\s\S]*?active_mode = 'note'/i);
+  assert.match(notesOnlyMigration, /where intent = 'zagulyaka'[\s\S]*?status in \('queued', 'retry', 'processing', 'materialized'\)/i);
+  assert.match(notesOnlyMigration, /p_media jsonb default null[\s\S]*?\$5,null,\$7/s);
+  assert.match(notesOnlyMigration, /reason', 'zagulyaka_disabled'/i);
+  assert.match(notesOnlyMigration, /service_complete_telegram_zagulyaka_v1/i);
+  assert.match(notesOnlyMigration, /'status', 'rejected',[\s\S]*?'recordIds', '\[\]'::jsonb/s);
+  assert.doesNotMatch(deployWorkflow, /GEMINI_API_KEY or GOOGLE_AI_API_KEY is required for Telegram Zagulyaka analysis/i);
+  assert.doesNotMatch(scheduleWorkflow, /cron: "\*\/5 \* \* \* \*"/);
+  assert.match(scheduleWorkflow, /workflow_dispatch/);
 });
 
 test("forwarded Telegram posts retain only safe, private note provenance", () => {
@@ -185,16 +192,15 @@ test("forwarded Telegram posts retain only safe, private note provenance", () =>
   assert.match(workerSource, /p_source_metadata:/i);
   assert.match(workerSource, /platform:\s*"telegram"/i);
 
-  // Captioned forwarded photos remain bookmark-sized: retain their caption
-  // and provenance, but never create generic note media. A photo-only forward
-  // or a normal photo note still requires the explicit Zagulyaka flow.
+  // In the temporary Notes-only mode, the webhook deliberately never sends
+  // p_media to the database. A captioned forward keeps its text/provenance;
+  // a photo-only forward is refused without retaining the photo metadata.
   assert.match(
-    migration,
-    /if active_intent = 'note' and p_media is not null then[\s\S]{0,700}normalized_text <> '' and coalesce\(\(normalized_source_metadata ->> 'forwarded'\)::boolean, false\)/i,
+    readFileSync(notesOnlyMigrationPath, "utf8"),
+    /service_enqueue_telegram_message_v1\([\s\S]*?p_media jsonb default null[\s\S]*?\$5,null,\$7/s,
   );
-  assert.match(migration, /'mediaOmitted', media_omitted/i);
-  assert.match(migration, /'reason', 'photo_requires_zagulyaka'/i);
-  assert.match(webhookSource, /result\.mediaOmitted === true/i);
+  assert.match(webhookSource, /const photoOmitted = message\.photo !== null/);
+  assert.match(webhookSource, /Текст і джерело збережено, а фото навмисно не оброблялося та не зберігалося/i);
 });
 
 test("a directly shared Facebook link remains a private Facebook note", () => {
@@ -214,12 +220,13 @@ test("a directly shared Facebook link remains a private Facebook note", () => {
   assert.doesNotMatch(worker, /fetch\([^\n]*facebook/i);
 });
 
-test("Telegram queue is scheduled independently from the generic reminder worker", () => {
+test("Telegram worker has no automatic schedule while the bot is Notes-only", () => {
   const workflow = resolve(process.cwd(), ".github/workflows/telegram-inbox.yml");
-  assert.ok(existsSync(workflow), "Expected a dedicated Telegram inbox schedule");
+  assert.ok(existsSync(workflow), "Expected a manual Telegram inbox maintenance workflow");
   const source = readFileSync(workflow, "utf8");
 
-  assert.match(source, /cron: "\*\/5 \* \* \* \*"/);
+  assert.doesNotMatch(source, /cron:/);
+  assert.match(source, /workflow_dispatch/);
   assert.match(source, /TELEGRAM_WORKER_SECRET/);
   assert.match(source, /process-telegram-inbox/);
   assert.doesNotMatch(source, /TASK_REMINDER_CRON_SECRET/);
@@ -233,9 +240,8 @@ test("Telegram text validation does not construct an impossible NUL character", 
   assert.doesNotMatch(source, /position\(chr\(0\)/i);
 });
 
-test("Telegram saves received material privately before choosing its destination", () => {
-  const pickerMigration = readFileSync(intentPickerMigrationPath, "utf8");
-  const migration = readFileSync(receivedMaterialChoiceMigrationPath, "utf8");
+test("Telegram saves every new supported message as a Note and blocks Zagulyaka callbacks", () => {
+  const notesOnlyMigration = readFileSync(notesOnlyMigrationPath, "utf8");
   const webhook = readFileSync(
     resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts"),
     "utf8",
@@ -249,40 +255,30 @@ test("Telegram saves received material privately before choosing its destination
     "utf8",
   );
 
-  assert.match(pickerMigration, /active_mode in \('choose', 'note', 'zagulyaka'\)/i);
-  assert.match(migration, /intent in \('pending_choice', 'note', 'zagulyaka', 'expired_choice'\)/i);
-  assert.match(migration, /status = 'awaiting_choice'/i);
-  assert.match(migration, /choice_token uuid/i);
-  assert.match(migration, /choice_expires_at timestamptz/i);
-  assert.match(migration, /clock_timestamp\(\) \+ interval '15 minutes'/i);
-  assert.match(migration, /service_choose_telegram_intake_intent_v1/i);
-  assert.match(migration, /where choice_token = p_choice_token[\s\S]*?and owner_id = link_row\.owner_id[\s\S]*?and telegram_user_id = p_telegram_user_id[\s\S]*?and private_chat_id = p_private_chat_id/s);
-  assert.match(migration, /set intent = normalized_intent,[\s\S]*?status = 'queued'/i);
-  assert.match(migration, /photo_requires_zagulyaka/i);
-  assert.match(migration, /ai_not_enabled/i);
-  assert.match(migration, /expire_telegram_pending_choice_v1/i);
-  assert.match(migration, /message_text = ''[\s\S]*?source_metadata = '\{\}'::jsonb/i);
-  assert.match(migration, /where owner_id = current_user_id and status = 'awaiting_choice'/i);
-  assert.match(migration, /grant execute on function public\.service_choose_telegram_intake_intent_v1\(bigint,bigint,uuid,text\)\s+to service_role/i);
-  assert.match(migration, /service_get_telegram_pending_choice_v1/i);
-  assert.match(migration, /grant execute on function public\.service_get_telegram_pending_choice_v1\(bigint,bigint\)\s+to service_role/i);
+  assert.match(notesOnlyMigration, /Temporary product mode: Telegram remains a private capture channel for[\s\S]*?Notes only/i);
+  assert.match(notesOnlyMigration, /create or replace function public\.service_choose_telegram_intake_intent_v1/i);
+  assert.match(notesOnlyMigration, /lower\(btrim\(coalesce\(p_intent, ''\)\)\) = 'zagulyaka'/i);
+  assert.match(notesOnlyMigration, /'selected', false,[\s\S]*?'reason', 'zagulyaka_disabled'/i);
+  assert.match(notesOnlyMigration, /create or replace function public\.service_enqueue_telegram_message_v1/i);
+  assert.match(notesOnlyMigration, /\$5,null,\$7/);
+  assert.match(notesOnlyMigration, /grant execute on function public\.service_choose_telegram_intake_intent_v1\(bigint,bigint,uuid,text\)\s+to service_role/i);
 
   assert.match(webhook, /callback_query/i);
-  assert.match(webhook, /tracker:choice:\$\{choiceToken\}:note/);
-  assert.match(webhook, /tracker:choice:\$\{choiceToken\}:zagulyaka/);
   assert.match(webhook, /chat\.type !== "private" \|\| privateChatId !== telegramUserId/i);
   assert.match(webhook, /service_choose_telegram_intake_intent_v1/i);
   assert.match(webhook, /answerCallbackQuery/i);
   assert.match(webhook, /editMessageReplyMarkup/i);
-  assert.match(webhook, /Матеріал отримано приватно\. Куди його передати\?/i);
-  assert.match(webhook, /p_choice_token: callback\.choiceToken/i);
-  assert.match(webhook, /service_get_telegram_pending_choice_v1/i);
-  assert.match(webhook, /\/pending/i);
+  assert.match(webhook, /p_choice_token: choiceToken/i);
+  assert.match(webhook, /p_intent: "note"/);
+  assert.match(webhook, /старі матеріали, що очікували вибору/i);
+  assert.doesNotMatch(webhook, /service_get_telegram_pending_choice_v1/i);
+  assert.match(webhook, /command\.name === "pending"/i);
   assert.doesNotMatch(webhook, /service_set_telegram_active_mode_v1/i);
-  assert.doesNotMatch(webhook, /потім надішліть матеріал ще раз/i);
+  assert.doesNotMatch(webhook, /function intentPicker\(/);
   assert.match(deployWorkflow, /allowed_updates=\["message","callback_query"\]/i);
   assert.match(deployWorkflow, /getWebhookInfo/i);
-  assert.match(notesPanel, /Бот спершу\s+збереже матеріал у короткому приватному очікуванні/i);
+  assert.match(notesPanel, /Бот одразу\s+збереже текст і джерело як приватну/i);
+  assert.doesNotMatch(notesPanel, /Мої чернетки Загуляк/i);
 });
 
 test("choosing a text note materializes it immediately without waiting for the worker", () => {
@@ -305,8 +301,8 @@ test("choosing a text note materializes it immediately without waiting for the w
   assert.match(migration, /note_source_platform := 'facebook'/i);
   assert.match(migration, /normalized_intent,\s*status = 'queued'/i, "Only the Zagulyaka branch remains queued.");
 
-  assert.match(webhook, /result\.materialized === true/i);
+  assert.match(webhook, /noteResult\.materialized === true/i);
   assert.match(webhook, /Нотатку збережено/i);
-  assert.match(notesPanel, /Надішліть або перешліть допис боту, а потім натисніть «Нотатка»/i);
+  assert.match(notesPanel, /Надішліть або перешліть боту текст чи посилання — він одразу збережеться тут приватно/i);
   assert.doesNotMatch(notesPanel, /Оберіть у боті «Нотатка», а потім перешліть/i);
 });

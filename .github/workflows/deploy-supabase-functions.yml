@@ -174,10 +174,6 @@ jobs:
             echo "::error::Supabase Edge Function secret GOOGLE_DRIVE_PUBLIC_API_KEY is required for public Google Drive PDF shares."
             exit 1
           fi
-          if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])(GEMINI_API_KEY|GOOGLE_AI_API_KEY)([[:space:]]|$)'; then
-            echo "::error::Supabase Edge Function secret GEMINI_API_KEY or GOOGLE_AI_API_KEY is required for Telegram Zagulyaka analysis."
-            exit 1
-          fi
 
       - name: Preview database migrations
         run: supabase db push --linked --dry-run
