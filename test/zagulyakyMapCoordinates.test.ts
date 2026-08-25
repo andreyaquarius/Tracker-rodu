@@ -132,3 +132,15 @@ test("a nested mobile place picker stays above Leaflet maps and keeps its action
     /\.geo-picker \.modal-actions\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?z-index:\s*2;[\s\S]*?background:\s*var\(--paper\);/,
   );
 });
+
+test("the public-author attribution choice stays readable beside its checkbox on narrow screens", () => {
+  assert.match(draftDialog, /Дозволяю показати моє авторство на публічній картці\./);
+  assert.match(
+    zagulyakyPageStyles,
+    /\.zagulyaky-attribution-choice input\[type="checkbox"\]\s*\{[\s\S]*?width:\s*20px;[\s\S]*?min-width:\s*20px;[\s\S]*?height:\s*20px;[\s\S]*?flex:\s*0 0 20px;[\s\S]*?padding:\s*0;/,
+  );
+  assert.match(
+    zagulyakyPageStyles,
+    /\.zagulyaky-attribution-choice > span\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?line-height:\s*1\.45;[\s\S]*?overflow-wrap:\s*anywhere;/,
+  );
+});

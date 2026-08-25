@@ -583,8 +583,9 @@
 .zagulyaky-review-facts > div { padding: 12px; background: #f6f5ef; border-radius: 9px; }
 .zagulyaky-publication-note { margin-top: 14px; padding: 14px; color: var(--green-900); background: #e9f3ee; border-radius: 10px; }
 .zagulyaky-publication-note p { margin: 3px 0 0; font-size: 11px; }
-.zagulyaky-attribution-choice { margin-top: 15px; padding: 13px; display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf8; }
-.zagulyaky-attribution-choice input { margin-top: 2px; }
+.zagulyaky-attribution-choice { min-width: 0; margin-top: 15px; padding: 13px; display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf8; }
+.zagulyaky-attribution-choice input[type="checkbox"] { box-sizing: border-box; width: 20px; min-width: 20px; height: 20px; min-height: 20px; flex: 0 0 20px; margin: 2px 0 0; padding: 0; }
+.zagulyaky-attribution-choice > span { min-width: 0; margin: 0; color: var(--green-950); font-size: 13px; font-weight: 700; letter-spacing: normal; line-height: 1.45; text-transform: none; overflow-wrap: anywhere; }
 .zagulyaky-attribution-name { display: grid; gap: 6px; margin-top: 12px; }
 .zagulyaky-attribution-name > span { color: var(--green-950); font-size: 10px; font-weight: 800; letter-spacing: .035em; text-transform: uppercase; }
 .zagulyaky-attribution-name input { width: 100%; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
