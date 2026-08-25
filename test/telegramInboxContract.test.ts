@@ -277,7 +277,7 @@ test("Telegram saves every new supported message as a Note and blocks Zagulyaka 
   assert.doesNotMatch(webhook, /function intentPicker\(/);
   assert.match(deployWorkflow, /allowed_updates=\["message","callback_query"\]/i);
   assert.match(deployWorkflow, /getWebhookInfo/i);
-  assert.match(notesPanel, /Бот одразу\s+збереже текст і джерело як приватну/i);
+  assert.match(notesPanel, /він одразу збережеться як приватна нотатка/i);
   assert.doesNotMatch(notesPanel, /Мої чернетки Загуляк/i);
 });
 

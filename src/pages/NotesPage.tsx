@@ -13,14 +13,6 @@ export interface NotesPageProps {
 export function NotesPage({ account }: NotesPageProps) {
   return (
     <section className="notes-page" aria-labelledby="notes-page-title">
-      <header className="notes-page__header">
-        <span className="eyebrow">Особистий простір</span>
-        <h1 id="notes-page-title">Нотатки</h1>
-        <p>
-          Пересилайте сюди важливі дописи з Telegram або зберігайте посилання
-          з Facebook та інших джерел, щоб повернутися до них пізніше.
-        </p>
-      </header>
       <TelegramNotesPanel account={account} />
     </section>
   );

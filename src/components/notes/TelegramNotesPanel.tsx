@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { SupabaseAccount } from "../../services/supabaseAuth";
 import {
+  createTelegramNote,
   listTelegramNotes,
   updateTelegramNote,
 } from "../../services/telegramInboxService";
@@ -34,10 +35,24 @@ const SOURCE_STATUSES = ["unverified", "available", "unavailable", "changed"] as
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 const PLATFORMS = ["telegram", "facebook", "web", "other"] as const;
 
-type NoteDraft = Pick<
+type NoteFormDraft = Pick<
   TelegramNote,
-  "id" | "title" | "body" | "sourceUrl" | "sourcePlatform" | "status" | "sourceStatus" | "priority"
+  "title" | "body" | "sourceUrl" | "sourcePlatform" | "status" | "sourceStatus" | "priority"
 >;
+
+type NoteDraft = NoteFormDraft & Pick<TelegramNote, "id">;
+
+function emptyNoteDraft(): NoteFormDraft {
+  return {
+    title: "",
+    body: "",
+    sourceUrl: "",
+    sourcePlatform: "other",
+    status: "saved",
+    sourceStatus: "unverified",
+    priority: "normal",
+  };
+}
 
 export interface TelegramNotesPanelProps {
   /** The connected account owns all links and saved notes shown here. */
@@ -45,8 +60,9 @@ export interface TelegramNotesPanelProps {
 }
 
 /**
- * Private Telegram inbox. It intentionally only displays a submitted URL and
- * never fetches, previews, or analyses an arbitrary external link in browser.
+ * Private account-level notes workspace. It intentionally only displays a
+ * submitted URL and never fetches, previews, or analyses an arbitrary
+ * external link in browser.
  */
 export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
   const [notes, setNotes] = useState<TelegramNote[]>([]);
@@ -54,6 +70,7 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
   const [filterDraft, setFilterDraft] = useState<TelegramNotesFilters>(() => ({ ...emptyTelegramNotesFilters }));
   const [selectedNoteId, setSelectedNoteId] = useState("");
   const [editing, setEditing] = useState<NoteDraft | null>(null);
+  const [creating, setCreating] = useState<NoteFormDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [notice, setNotice] = useState("");
@@ -86,6 +103,7 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
       setNotes([]);
       setSelectedNoteId("");
       setEditing(null);
+      setCreating(null);
       setError("");
       return;
     }
@@ -107,6 +125,7 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
     setFilters(nextFilters);
     setSelectedNoteId("");
     setEditing(null);
+    setCreating(null);
     void refresh(nextFilters);
   };
 
@@ -116,7 +135,16 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
     setFilterDraft(nextFilters);
     setSelectedNoteId("");
     setEditing(null);
+    setCreating(null);
     void refresh(nextFilters);
+  };
+
+  const startCreate = () => {
+    setCreating(emptyNoteDraft());
+    setSelectedNoteId("");
+    setEditing(null);
+    setError("");
+    setNotice("");
   };
 
   const startEdit = (note: TelegramNote) => {
@@ -170,35 +198,58 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
     }
   };
 
+  const saveCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!creating || !accountId) return;
+    if (!creating.title.trim()) {
+      setError("Додайте коротку назву нотатки.");
+      return;
+    }
+    const sourceUrl = normalizedEditableSourceUrl(creating.sourceUrl);
+    if (sourceUrl === null) {
+      setError("Вкажіть повне й коректне http або https посилання на джерело.");
+      return;
+    }
+    setSavingId("new");
+    setError("");
+    try {
+      const created = await createTelegramNote({
+        title: creating.title,
+        body: creating.body,
+        sourceUrl,
+        sourcePlatform: creating.sourcePlatform,
+        status: creating.status,
+        sourceStatus: creating.sourceStatus,
+        priority: creating.priority,
+      }, accountId);
+      setNotes((current) => [created, ...current.filter((note) => note.id !== created.id)]);
+      setCreating(null);
+      setSelectedNoteId(created.id);
+      setNotice("Нотатку створено.");
+    } catch (createError) {
+      setError(telegramInboxErrorMessage(createError));
+    } finally {
+      setSavingId("");
+    }
+  };
+
   if (!accountId) {
     return (
-      <section className="telegram-notes-panel telegram-notes-panel--signed-out" aria-labelledby="telegram-notes-title">
-        <span className="eyebrow">Особистий простір</span>
-        <h2 id="telegram-notes-title">Збережені нотатки</h2>
+      <div className="telegram-notes-panel telegram-notes-panel--signed-out">
+        <NotesWorkspaceHeader />
         <p>Увійдіть в акаунт, щоб бачити свої приватні нотатки.</p>
-      </section>
+      </div>
     );
   }
 
   return (
-    <section className="telegram-notes-panel" aria-labelledby="telegram-notes-title">
-      <header className="telegram-notes-panel__heading">
-        <div>
-          <span className="eyebrow">Telegram-бот і нотатки</span>
-          <h2 id="telegram-notes-title">Особиста скринька джерел</h2>
-          <p>
-            Перешліть допис із Telegram-каналу безпосередньо в приватний чат із ботом,
-            або надішліть посилання через «Поділитися» чи копіювання з Facebook. Бот одразу
-            збереже текст і джерело як приватну <strong>Нотатку</strong>. Чернетки Загуляк і
-            обробка фото через бот тимчасово вимкнені.
-          </p>
-        </div>
-        <div className="telegram-notes-panel__actions">
-          <button type="button" className="button button-secondary" onClick={() => void refresh()} disabled={loading}>
-            {loading ? "Оновлюємо…" : "Оновити"}
-          </button>
-        </div>
-      </header>
+    <div className="telegram-notes-panel">
+      <NotesWorkspaceHeader
+        loading={loading}
+        onCreate={startCreate}
+        createDisabled={Boolean(creating) || Boolean(editing)}
+        onRefresh={() => void refresh()}
+      />
 
       {error ? <div className="alert alert-error telegram-notes-panel__alert" role="alert">{error}</div> : null}
       {notice ? <div className="alert telegram-notes-panel__alert" role="status">{notice}</div> : null}
@@ -274,39 +325,88 @@ export function TelegramNotesPanel({ account }: TelegramNotesPanelProps) {
             <h3 id="telegram-note-list-title">Нотатки</h3>
             <span>{loading ? "Завантажуємо…" : visibleCountLabel}</span>
           </div>
-          {!loading && !notes.length ? (
+          {creating ? (
+            <NoteEditor
+              mode="create"
+              draft={creating}
+              saving={savingId === "new"}
+              onChange={(nextDraft) => setCreating(nextDraft)}
+              onCancel={() => setCreating(null)}
+              onSubmit={saveCreate}
+            />
+          ) : null}
+          {!creating && !loading && !notes.length ? (
             <div className="telegram-notes-empty panel">
               <strong>Нотаток за цими фільтрами ще немає.</strong>
               <span>Надішліть або перешліть боту текст чи посилання — він одразу збережеться тут приватно. Фото через бот тимчасово не обробляються та не зберігаються.</span>
             </div>
           ) : null}
-          {!loading && notes.length && !selectedNote ? (
+          {!creating && !loading && notes.length && !selectedNote ? (
             <ul className="telegram-note-list panel" aria-label="Список збережених нотаток">
               {notes.map((note) => (
                 <NoteListItem key={note.id} note={note} onOpen={() => setSelectedNoteId(note.id)} />
               ))}
             </ul>
           ) : null}
-          {selectedNote ? (
+          {!creating && selectedNote ? (
             editing?.id === selectedNote.id ? (
               <NoteEditor
+                mode="edit"
                 draft={editing}
                 saving={savingId === selectedNote.id}
-                onChange={setEditing}
+                onChange={(nextDraft) => setEditing({ ...nextDraft, id: editing.id })}
                 onCancel={() => setEditing(null)}
                 onSubmit={saveEdit}
               />
             ) : (
               <NoteDetail
                 note={selectedNote}
-                onBack={() => setSelectedNoteId("")}
+                onBack={() => {
+                  setSelectedNoteId("");
+                  void refresh();
+                }}
                 onEdit={() => startEdit(selectedNote)}
               />
             )
           ) : null}
         </div>
       </section>
-    </section>
+    </div>
+  );
+}
+
+function NotesWorkspaceHeader({
+  loading = false,
+  onCreate,
+  createDisabled = false,
+  onRefresh,
+}: {
+  loading?: boolean;
+  onCreate?: () => void;
+  createDisabled?: boolean;
+  onRefresh?: () => void;
+}) {
+  return (
+    <header className="telegram-notes-panel__heading">
+      <div>
+        <span className="eyebrow">Особистий простір</span>
+        <h1 id="notes-page-title">Нотатки</h1>
+        <p>Зберігайте важливі тексти й посилання з Telegram, Facebook та інших джерел, щоб повернутися до них пізніше.</p>
+        <p className="telegram-notes-panel__hint">
+          Створюйте власні нотатки або перешліть допис у приватний чат із Telegram-ботом — він одразу збережеться як приватна нотатка.
+        </p>
+      </div>
+      {onCreate || onRefresh ? (
+        <div className="telegram-notes-panel__actions">
+          {onCreate ? <button type="button" className="button button-primary" onClick={onCreate} disabled={loading || createDisabled}>+ Створити нотатку</button> : null}
+          {onRefresh ? (
+            <button type="button" className="button button-secondary" onClick={onRefresh} disabled={loading}>
+              {loading ? "Оновлюємо…" : "Оновити"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </header>
   );
 }
 
@@ -386,36 +486,38 @@ function forwardedSourceLabel(note: TelegramNote): string {
 }
 
 function NoteEditor({
+  mode,
   draft,
   saving,
   onChange,
   onCancel,
   onSubmit,
 }: {
-  draft: NoteDraft;
+  mode: "create" | "edit";
+  draft: NoteFormDraft;
   saving: boolean;
-  onChange: (draft: NoteDraft) => void;
+  onChange: (draft: NoteFormDraft) => void;
   onCancel: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const sourceUrl = sanitizeWebUrl(draft.sourceUrl);
-  const sourceUrlHelpId = `telegram-note-source-url-help-${draft.id}`;
+  const sourceUrlHelpId = `telegram-note-source-url-help-${mode}`;
   return (
     <form className="telegram-note-editor panel" onSubmit={onSubmit}>
       <div className="telegram-note-editor__heading">
         <div>
-          <span className="eyebrow">Редагування</span>
-          <h4>Збережена нотатка</h4>
+          <span className="eyebrow">{mode === "create" ? "Нова нотатка" : "Редагування"}</span>
+          <h4>{mode === "create" ? "Створити нотатку" : "Збережена нотатка"}</h4>
         </div>
-        {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer noopener">Першоджерело</a> : null}
+        {mode === "edit" && sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer noopener">Першоджерело</a> : null}
       </div>
       <label>
         <span>Назва</span>
-        <input value={draft.title} maxLength={300} required onChange={(event) => onChange({ ...draft, title: event.target.value })} />
+        <input value={draft.title} maxLength={240} required onChange={(event) => onChange({ ...draft, title: event.target.value })} />
       </label>
       <label>
         <span>Текст нотатки</span>
-        <textarea rows={7} value={draft.body} maxLength={20_000} onChange={(event) => onChange({ ...draft, body: event.target.value })} />
+        <textarea rows={7} value={draft.body} maxLength={12_000} onChange={(event) => onChange({ ...draft, body: event.target.value })} />
       </label>
       <label>
         <span>Посилання на джерело</span>
@@ -433,7 +535,7 @@ function NoteEditor({
             if (normalized !== null) onChange({ ...draft, sourceUrl: normalized });
           }}
         />
-        <small id={sourceUrlHelpId}>Лише повне http або https посилання. Під час редагування воно не завантажується.</small>
+        <small id={sourceUrlHelpId}>Лише повне http або https посилання. Воно не завантажується під час збереження.</small>
       </label>
       <div className="telegram-note-editor__fields">
         <label>
@@ -463,7 +565,7 @@ function NoteEditor({
       </div>
       <div className="telegram-note-editor__actions">
         <button type="button" className="button button-secondary" onClick={onCancel} disabled={saving}>Скасувати</button>
-        <button type="submit" className="button button-primary" disabled={saving}>{saving ? "Зберігаємо…" : "Зберегти"}</button>
+        <button type="submit" className="button button-primary" disabled={saving}>{saving ? "Зберігаємо…" : mode === "create" ? "Створити нотатку" : "Зберегти"}</button>
       </div>
     </form>
   );

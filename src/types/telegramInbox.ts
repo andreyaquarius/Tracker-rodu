@@ -1,8 +1,7 @@
 /**
- * Private, account-scoped bookmark created by the Telegram bot.
- *
- * These values deliberately describe the inbox only. They are not a public
- * Zagulyaka and do not grant publication or moderation status.
+ * Private, account-scoped note received from Telegram or created directly in
+ * Tracker Rodu. These values never grant public Zagulyaka publication or
+ * moderation status.
  */
 export type TelegramNoteStatus =
   | "inbox"
@@ -92,6 +91,22 @@ export interface TelegramNotesFilters {
 
 export interface UpdateTelegramNoteInput {
   noteId: string;
+  title: string;
+  body: string;
+  sourceUrl: string;
+  sourcePlatform: TelegramNoteSourcePlatform;
+  status: TelegramNoteStatus;
+  sourceStatus: TelegramNoteSourceStatus;
+  priority: TelegramNotePriority;
+}
+
+/**
+ * A private note created directly in Tracker Rodu.
+ *
+ * It deliberately uses the same editable fields as an imported Telegram
+ * note, so both kinds of notes can be filtered, opened and edited together.
+ */
+export interface CreateTelegramNoteInput {
   title: string;
   body: string;
   sourceUrl: string;

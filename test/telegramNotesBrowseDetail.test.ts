@@ -11,6 +11,19 @@ const stylesSource = readFileSync(
   resolve(process.cwd(), "src/components/notes/TelegramNotesPanel.css"),
   "utf8",
 );
+const notesPageSource = readFileSync(
+  resolve(process.cwd(), "src/pages/NotesPage.tsx"),
+  "utf8",
+);
+
+test("notes use one shared heading instead of repeating the Telegram introduction", () => {
+  assert.match(panelSource, /<h1 id="notes-page-title">Нотатки<\/h1>/);
+  assert.match(panelSource, /Створюйте власні нотатки або перешліть допис у приватний чат із Telegram-ботом/);
+  assert.doesNotMatch(panelSource, /Особиста скринька джерел/);
+  assert.doesNotMatch(panelSource, /Telegram-бот і нотатки/);
+  assert.doesNotMatch(notesPageSource, /notes-page__header/);
+  assert.doesNotMatch(notesPageSource, /<h1/);
+});
 
 test("notes open a focused detail from a compact title list", () => {
   assert.match(panelSource, /const \[selectedNoteId, setSelectedNoteId\] = useState\(""\)/);

@@ -11,19 +11,6 @@
   margin: 0 auto;
 }
 
-.notes-page__header {
-  max-width: 760px;
-}
-
-.notes-page__header h1 {
-  margin: 0.25rem 0 0.5rem;
-}
-
-.notes-page__header p {
-  margin: 0;
-  color: var(--muted, #5e6c70);
-}
-
 .telegram-notes-panel--signed-out {
   padding: 24px;
   border: 1px solid var(--line);
@@ -43,12 +30,20 @@
   gap: 16px;
 }
 
-.telegram-notes-panel__heading h2,
+.telegram-notes-panel__heading > div:first-child {
+  max-width: 760px;
+}
+
+.telegram-notes-panel__heading h1,
 .telegram-notes-filters h3,
 .telegram-notes-list h3,
 .telegram-note-detail h4,
 .telegram-note-editor h4 {
   margin: 0;
+}
+
+.telegram-notes-panel__heading h1 {
+  margin: 0.25rem 0 0.5rem;
 }
 
 .telegram-notes-panel__heading p,
@@ -58,6 +53,11 @@
   margin: 8px 0 0;
   color: var(--muted);
   line-height: 1.55;
+}
+
+.telegram-notes-panel__hint {
+  max-width: 700px;
+  font-size: .92rem;
 }
 
 .telegram-notes-panel__heading > .button,

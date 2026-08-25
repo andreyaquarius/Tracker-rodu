@@ -1,4 +1,5 @@
 import type {
+  CreateTelegramNoteInput,
   TelegramAccountLinkStatus,
   TelegramLinkStart,
   TelegramNote,
@@ -113,6 +114,33 @@ export async function listTelegramNotes(
   );
   if (error) throw error;
   return records(data).map(mapTelegramNote).filter((note) => Boolean(note.id));
+}
+
+/** Creates a private note directly in Tracker Rodu, without a Telegram intake. */
+export async function createTelegramNote(
+  input: CreateTelegramNoteInput,
+  expectedUserId?: string,
+): Promise<TelegramNote> {
+  const sourceUrl = safeHttpSourceUrl(input.sourceUrl);
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(
+    client,
+    async () => {
+      const result = await client.rpc("create_my_telegram_note_v1", {
+        p_title: text(input.title),
+        p_body: text(input.body),
+        p_source_url: sourceUrl,
+        p_source_platform: text(input.sourcePlatform),
+        p_status: text(input.status),
+        p_source_status: text(input.sourceStatus),
+        p_priority: text(input.priority),
+      });
+      return { data: result.data, error: result.error };
+    },
+    expectedUserId,
+  );
+  if (error) throw error;
+  return mapTelegramNote(firstRecord(data));
 }
 
 export async function updateTelegramNote(
