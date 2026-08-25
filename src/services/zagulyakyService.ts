@@ -826,7 +826,7 @@ function mapDetail(row: Record<string, unknown>): ZagulyakaDetail {
     eventYearFrom: nullableInteger(value(row, "eventYearFrom", "event_year_from")),
     eventYearTo: nullableInteger(value(row, "eventYearTo", "event_year_to")),
     datePrecision: datePrecision(value(row, "datePrecision", "date_precision")),
-    // Initial-base imports may use source_location for a church or archive;
+    // The source location may name a church or archive;
     // for a person, the participant's origin wording is the better label for
     // a deliberately confirmed origin pin.
     originPlace: text(
@@ -845,7 +845,7 @@ function mapDetail(row: Record<string, unknown>): ZagulyakaDetail {
     confirmationsCount: naturalNumber(value(row, "confirmationCount", "confirmation_count")),
     contributor: nullableString(value(row, "contributor")),
     // The public RPC is the only source for this deliberately named field.
-    // Do not fall back to private import provenance or generic source URLs.
+    // Do not fall back to private source-link metadata or generic source URLs.
     originalPostUrl: text(value(row, "originalPostUrl", "original_post_url")),
     source: Object.keys(primarySource).length ? {
       id: text(value(primarySource, "id")), institutionName: text(value(primarySource, "archiveName", "archive_name")),

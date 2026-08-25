@@ -68,10 +68,10 @@ export interface AdminZagulyakaDetail {
   record: Record<string, unknown>;
   sources: Array<Record<string, unknown>>;
   /**
-   * Admin-review-only provenance from the tabular import ledger. This never
-   * belongs to a public record projection, search result or staging list.
+   * Generic moderator-only source-link evidence. It is never part of a public
+   * record projection or search result.
    */
-  privateImportOrigins: AdminZagulyakaPrivateImportOrigin[];
+  privateSourceLinks: AdminZagulyakaPrivateSourceLink[];
   participants: Array<Record<string, unknown>>;
   documentDiscoveries: Array<Record<string, unknown>>;
   attachments: Array<Record<string, unknown>>;
@@ -81,20 +81,10 @@ export interface AdminZagulyakaDetail {
   claims: Array<Record<string, unknown>>;
 }
 
-export interface AdminZagulyakaPrivateImportOrigin {
-  cardKey: string;
-  eventKey: string;
-  postKey: string;
+export interface AdminZagulyakaPrivateSourceLink {
   sourcePlatform: string;
-  sourceDateText: string;
   facebookPostUrl: string;
-  sourceCollectionUrl: string;
   sourceTitleOriginal: string;
-  postOriginalText: string;
-  eventTypeOriginal: string;
-  eventDateOriginal: string;
-  eventPlaceOriginal: string;
-  eventOriginalText: string;
 }
 
 export interface AdminZagulyakaVersion {
@@ -243,192 +233,6 @@ export interface AdminZagulyakaAttachmentAccess {
   mimeType: string;
 }
 
-/**
- * Private Stage 0 is intentionally a separate workflow from the public
- * catalogue. These types describe the narrow, admin-only projection returned
- * by the ingestion reviewer RPCs; the browser never queries the underlying
- * ingestion tables directly.
- */
-export type AdminZagulyakyIngestionBatchStatus =
-  | "received"
-  | "processing"
-  | "dry_run_complete"
-  | "completed"
-  | "completed_with_errors"
-  | "failed"
-  | "cancelled"
-  | "unknown";
-
-export type AdminZagulyakyIngestionStageStatus =
-  | "staged"
-  | "quarantined"
-  | "structured"
-  | "linked"
-  | "ignored"
-  | "unknown";
-
-export type AdminZagulyakyIngestionFlag =
-  | "has_attachments"
-  | "requires_ocr"
-  | "requires_source_refetch";
-
-export interface AdminZagulyakyIngestionBatch {
-  id: string;
-  sourceFileName: string;
-  sourcePlatform: string;
-  importMode: "dry_run" | "commit" | "unknown";
-  status: AdminZagulyakyIngestionBatchStatus;
-  expectedItemCount: number;
-  processedItemCount: number;
-  stagedItemCount: number;
-  duplicateItemCount: number;
-  quarantinedItemCount: number;
-  failedItemCount: number;
-  receivedAt: string | null;
-  completedAt: string | null;
-}
-
-export interface AdminZagulyakyIngestionBatchesPage {
-  items: AdminZagulyakyIngestionBatch[];
-  total: number;
-}
-
-export interface AdminZagulyakyIngestionItem {
-  id: string;
-  batchId: string;
-  sourceItemIndex: number | null;
-  externalId: string;
-  stageStatus: AdminZagulyakyIngestionStageStatus;
-  quarantined: boolean;
-  declaredAttachmentCount: number;
-  attachmentCount: number;
-  linkCount: number;
-  requiresOcr: boolean;
-  requiresSourceRefetch: boolean;
-  sourceIncomplete: boolean;
-  textTruncated: boolean;
-  possibleLivingPerson: boolean;
-  sourceDateText: string;
-  sourcePublishedAt: string | null;
-  /** A server-bounded, plain-text scan aid (never the full private text). */
-  textPreview: string;
-  lastSeenAt: string | null;
-}
-
-export interface AdminZagulyakyIngestionItemsPage {
-  items: AdminZagulyakyIngestionItem[];
-  total: number;
-}
-
-export interface AdminZagulyakyIngestionAttachment {
-  id: string;
-  sourceIndex: number | null;
-  assetId: string;
-  altText: string;
-  originalCdnUrl: string;
-  photoPageUrl: string;
-  width: number | null;
-  height: number | null;
-  downloadStatus: string;
-  rightsStatus: string;
-}
-
-export interface AdminZagulyakyIngestionLink {
-  id: string;
-  sourceIndex: number | null;
-  rawUrl: string;
-  normalizedUrl: string;
-  label: string;
-  linkKind: string;
-  requiresSafeFetch: boolean;
-}
-
-export interface AdminZagulyakyIngestionJob {
-  id: string;
-  jobType: string;
-  status: string;
-  attemptCount: number;
-  lastErrorCode: string;
-  createdAt: string | null;
-  updatedAt: string | null;
-}
-
-export interface AdminZagulyakyIngestionItemError {
-  errorCode: string;
-  errorDetail: string;
-  sourceItemIndex: number | null;
-  createdAt: string | null;
-}
-
-/**
- * A bounded, admin-only rendering of the extraction associated with one
- * imported post. It is deliberately kept inside the selected source item:
- * this is review data, not a second public catalogue projection.
- */
-export type AdminZagulyakyStructuredCandidateKind = "person" | "document" | "unknown";
-
-export interface AdminZagulyakyStructuredCandidateParticipant {
-  structuralRole: string;
-  eventRoleCode: string;
-  eventRoleCustom: string;
-  originalFullName: string;
-  normalizedUkFullName: string;
-  surname: string;
-  givenName: string;
-  patronymic: string;
-  originText: string;
-  residenceText: string;
-  socialEstateText: string;
-}
-
-export interface AdminZagulyakyStructuredCandidate {
-  id: string;
-  kind: AdminZagulyakyStructuredCandidateKind;
-  status: string;
-  title: string;
-  classificationReason: string;
-  confidence: number | null;
-  possibleLivingPerson: boolean;
-  eventType: string;
-  eventDateText: string;
-  eventYearFrom: number | null;
-  eventYearTo: number | null;
-  eventLocationText: string;
-  /** Some source adapters return these on the candidate rather than a participant. */
-  originText: string;
-  residenceText: string;
-  socialEstateText: string;
-  participants: AdminZagulyakyStructuredCandidateParticipant[];
-}
-
-export interface AdminZagulyakyIngestionItemDetail {
-  item: AdminZagulyakyIngestionItem;
-  sourceAuthorLabel: string;
-  sourceUrl: string;
-  /** An allowlisted Facebook post URL from the protected item-detail RPC. */
-  facebookPostUrl: string;
-  sourceCollectionUrl: string;
-  candidateYears: number[];
-  rawText: string;
-  rawTextTruncatedForDisplay: boolean;
-  /** Optional until the item-detail RPC is upgraded; an empty array is safe. */
-  structuredCandidates: AdminZagulyakyStructuredCandidate[];
-  attachments: AdminZagulyakyIngestionAttachment[];
-  links: AdminZagulyakyIngestionLink[];
-  extractionJobs: AdminZagulyakyIngestionJob[];
-  errors: AdminZagulyakyIngestionItemError[];
-}
-
-export interface LoadAdminZagulyakyIngestionItemsInput {
-  batchId: string;
-  query?: string | null;
-  stageStatus?: AdminZagulyakyIngestionStageStatus | null;
-  quarantined?: boolean | null;
-  flag?: AdminZagulyakyIngestionFlag | null;
-  limit?: number;
-  offset?: number;
-}
-
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -466,271 +270,20 @@ function unknownArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function valueFor(row: Record<string, unknown>, ...keys: string[]): unknown {
-  for (const key of keys) {
-    if (key in row) return row[key];
-  }
-  return undefined;
-}
-
-function pageRows(value: unknown, ...keys: string[]): Array<Record<string, unknown>> {
-  if (Array.isArray(value)) return records(value);
-  const payload = record(value);
-  for (const key of keys) {
-    const candidate = valueFor(payload, key);
-    if (Array.isArray(candidate)) return records(candidate);
-  }
-  return [];
-}
-
-function safeTimestamp(value: unknown): string | null {
-  const candidate = nullableText(value);
-  return candidate && candidate.length <= 80 && Number.isFinite(Date.parse(candidate)) ? candidate : null;
-}
-
-function safeUuid(value: unknown): string {
-  const candidate = text(value).trim();
-  return /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(candidate)
-    ? candidate
-    : "";
-}
-
 function safePrivateText(value: unknown, maximum = 1_500): string {
   if (typeof value !== "string") return "";
-  // Private text is rendered only by the reviewer component, but bounded here
-  // to keep an unusually large social post from locking up the admin page.
+  // Source metadata is moderator-only, but stays bounded to keep a malformed
+  // response from locking up the review page.
   return value.replace(/\u0000/gu, "").slice(0, maximum);
 }
 
-/**
- * The review-bundle RPC deliberately returns this data only to a moderator.
- * Keep a second browser-side bound before retaining it in React state: a
- * malformed response must not make the review view hold an unbounded social
- * post or URL. URL protocols are validated again at the render boundary.
- */
-function privateImportOrigin(value: unknown): AdminZagulyakaPrivateImportOrigin {
+/** Generic moderator-only source-link evidence; never a public projection. */
+function privateSourceLink(value: unknown): AdminZagulyakaPrivateSourceLink {
   const row = record(value);
   return {
-    cardKey: safePrivateText(row.cardKey, 200),
-    eventKey: safePrivateText(row.eventKey, 200),
-    postKey: safePrivateText(row.postKey, 200),
     sourcePlatform: safePrivateText(row.sourcePlatform, 120),
-    sourceDateText: safePrivateText(row.sourceDateText, 500),
     facebookPostUrl: safePrivateText(row.facebookPostUrl, 4_000),
-    sourceCollectionUrl: safePrivateText(row.sourceCollectionUrl, 4_000),
     sourceTitleOriginal: safePrivateText(row.sourceTitleOriginal, 2_000),
-    postOriginalText: safePrivateText(row.postOriginalText, 12_000),
-    eventTypeOriginal: safePrivateText(row.eventTypeOriginal, 500),
-    eventDateOriginal: safePrivateText(row.eventDateOriginal, 500),
-    eventPlaceOriginal: safePrivateText(row.eventPlaceOriginal, 4_000),
-    eventOriginalText: safePrivateText(row.eventOriginalText, 12_000),
-  };
-}
-
-function nullableIndex(value: unknown): number | null {
-  const candidate = nullableInteger(value);
-  return candidate !== null && candidate >= 0 ? candidate : null;
-}
-
-function safeBoolean(value: unknown): boolean {
-  return value === true || value === 1 || value === "1" || value === "true";
-}
-
-function ingestionBatchStatus(value: unknown): AdminZagulyakyIngestionBatchStatus {
-  const candidate = text(value);
-  return [
-    "received",
-    "processing",
-    "dry_run_complete",
-    "completed",
-    "completed_with_errors",
-    "failed",
-    "cancelled",
-  ].includes(candidate)
-    ? candidate as AdminZagulyakyIngestionBatchStatus
-    : "unknown";
-}
-
-function ingestionStageStatus(value: unknown): AdminZagulyakyIngestionStageStatus {
-  const candidate = text(value);
-  return ["staged", "quarantined", "structured", "linked", "ignored"].includes(candidate)
-    ? candidate as AdminZagulyakyIngestionStageStatus
-    : "unknown";
-}
-
-function ingestionBatchItem(value: unknown): AdminZagulyakyIngestionBatch {
-  const row = record(value);
-  const importMode = text(valueFor(row, "importMode", "import_mode"));
-  return {
-    id: safeUuid(valueFor(row, "id", "batchId", "batch_id")),
-    sourceFileName: safePrivateText(valueFor(row, "sourceFileName", "source_file_name"), 255) || "Файл без назви",
-    sourcePlatform: safePrivateText(valueFor(row, "sourcePlatform", "source_platform"), 80) || "facebook_group_json",
-    importMode: importMode === "dry_run" || importMode === "commit" ? importMode : "unknown",
-    status: ingestionBatchStatus(valueFor(row, "status")),
-    expectedItemCount: Math.max(0, integer(valueFor(row, "expectedItemCount", "expected_item_count"))),
-    processedItemCount: Math.max(0, integer(valueFor(row, "processedItemCount", "processed_item_count"))),
-    stagedItemCount: Math.max(0, integer(valueFor(row, "stagedItemCount", "staged_item_count"))),
-    duplicateItemCount: Math.max(0, integer(valueFor(row, "duplicateItemCount", "duplicate_item_count"))),
-    quarantinedItemCount: Math.max(0, integer(valueFor(row, "quarantinedItemCount", "quarantined_item_count"))),
-    failedItemCount: Math.max(0, integer(valueFor(row, "failedItemCount", "failed_item_count"))),
-    receivedAt: safeTimestamp(valueFor(row, "receivedAt", "received_at")),
-    completedAt: safeTimestamp(valueFor(row, "completedAt", "completed_at")),
-  };
-}
-
-function ingestionItem(value: unknown, defaultBatchId = ""): AdminZagulyakyIngestionItem {
-  const row = record(value);
-  const flags = record(valueFor(row, "flags"));
-  const source = record(valueFor(row, "source"));
-  const declaredAttachmentCount = Math.max(0, integer(valueFor(
-    row,
-    "declaredAttachmentCount",
-    "declared_attachment_count",
-  )));
-  return {
-    id: safeUuid(valueFor(row, "id", "itemId", "item_id")),
-    batchId: safeUuid(valueFor(row, "batchId", "batch_id")) || defaultBatchId,
-    sourceItemIndex: nullableIndex(valueFor(row, "sourceItemIndex", "source_item_index")),
-    externalId: safePrivateText(valueFor(row, "externalId", "external_id"), 255),
-    stageStatus: ingestionStageStatus(valueFor(row, "stageStatus", "stage_status")),
-    quarantined: safeBoolean(valueFor(row, "quarantined")),
-    declaredAttachmentCount,
-    attachmentCount: Math.max(0, integer(valueFor(row, "attachmentCount", "attachment_count"), declaredAttachmentCount)),
-    linkCount: Math.max(0, integer(valueFor(row, "linkCount", "link_count"))),
-    requiresOcr: safeBoolean(valueFor(row, "requiresOcr", "requires_ocr") ?? valueFor(flags, "requiresOcr", "requires_ocr")),
-    requiresSourceRefetch: safeBoolean(valueFor(row, "requiresSourceRefetch", "requires_source_refetch") ?? valueFor(flags, "requiresSourceRefetch", "requires_source_refetch")),
-    sourceIncomplete: safeBoolean(valueFor(row, "sourceIncomplete", "source_incomplete") ?? valueFor(flags, "sourceIncomplete", "source_incomplete")),
-    textTruncated: safeBoolean(valueFor(row, "textTruncated", "text_truncated") ?? valueFor(flags, "textTruncated", "text_truncated")),
-    possibleLivingPerson: safeBoolean(valueFor(row, "possibleLivingPerson", "possible_living_person") ?? valueFor(flags, "possibleLivingPerson", "possible_living_person")),
-    sourceDateText: safePrivateText(valueFor(row, "sourceDateText", "source_date_text") ?? valueFor(source, "sourceDateText", "source_date_text"), 500),
-    sourcePublishedAt: safeTimestamp(valueFor(row, "sourcePublishedAt", "source_published_at") ?? valueFor(source, "sourcePublishedAt", "source_published_at")),
-    textPreview: safePrivateText(valueFor(row, "textPreview", "text_preview"), 360),
-    lastSeenAt: safeTimestamp(valueFor(row, "lastSeenAt", "last_seen_at", "updatedAt", "updated_at")),
-  };
-}
-
-function ingestionAttachment(value: unknown): AdminZagulyakyIngestionAttachment {
-  const row = record(value);
-  const asset = record(valueFor(row, "asset", "mediaAsset", "media_asset"));
-  return {
-    id: safeUuid(valueFor(row, "id", "attachmentId", "attachment_id")),
-    sourceIndex: nullableIndex(valueFor(row, "sourceIndex", "source_index")),
-    assetId: safeUuid(valueFor(row, "assetId", "asset_id")) || safeUuid(valueFor(asset, "id", "assetId", "asset_id")),
-    altText: safePrivateText(valueFor(row, "altText", "alt_text"), 1_500),
-    originalCdnUrl: safePrivateText(valueFor(row, "originalCdnUrl", "original_cdn_url") ?? valueFor(asset, "originalCdnUrl", "original_cdn_url"), 4_000),
-    photoPageUrl: safePrivateText(valueFor(row, "photoPageUrl", "photo_page_url") ?? valueFor(asset, "photoPageUrl", "photo_page_url"), 4_000),
-    width: nullableIndex(valueFor(row, "width")),
-    height: nullableIndex(valueFor(row, "height")),
-    downloadStatus: safePrivateText(valueFor(row, "downloadStatus", "download_status") ?? valueFor(asset, "downloadStatus", "download_status"), 80),
-    rightsStatus: safePrivateText(valueFor(row, "rightsStatus", "rights_status") ?? valueFor(asset, "rightsStatus", "rights_status"), 80),
-  };
-}
-
-function ingestionLink(value: unknown): AdminZagulyakyIngestionLink {
-  const row = record(value);
-  return {
-    id: safeUuid(valueFor(row, "id", "linkId", "link_id")),
-    sourceIndex: nullableIndex(valueFor(row, "sourceIndex", "source_index")),
-    rawUrl: safePrivateText(valueFor(row, "rawUrl", "raw_url"), 4_000),
-    normalizedUrl: safePrivateText(valueFor(row, "normalizedUrl", "normalized_url"), 4_000),
-    label: safePrivateText(valueFor(row, "label"), 1_500),
-    linkKind: safePrivateText(valueFor(row, "linkKind", "link_kind"), 80),
-    requiresSafeFetch: safeBoolean(valueFor(row, "requiresSafeFetch", "requires_safe_fetch")),
-  };
-}
-
-function ingestionJob(value: unknown): AdminZagulyakyIngestionJob {
-  const row = record(value);
-  return {
-    id: safeUuid(valueFor(row, "id", "jobId", "job_id")),
-    jobType: safePrivateText(valueFor(row, "jobType", "job_type"), 80),
-    status: safePrivateText(valueFor(row, "status"), 80),
-    attemptCount: Math.max(0, integer(valueFor(row, "attemptCount", "attempt_count"))),
-    lastErrorCode: safePrivateText(valueFor(row, "lastErrorCode", "last_error_code"), 100),
-    createdAt: safeTimestamp(valueFor(row, "createdAt", "created_at")),
-    updatedAt: safeTimestamp(valueFor(row, "updatedAt", "updated_at")),
-  };
-}
-
-function ingestionItemError(value: unknown): AdminZagulyakyIngestionItemError {
-  const row = record(value);
-  return {
-    errorCode: safePrivateText(valueFor(row, "errorCode", "error_code"), 100),
-    errorDetail: safePrivateText(valueFor(row, "errorDetail", "error_detail"), 500),
-    sourceItemIndex: nullableIndex(valueFor(row, "sourceItemIndex", "source_item_index")),
-    createdAt: safeTimestamp(valueFor(row, "createdAt", "created_at")),
-  };
-}
-
-function structuredCandidateKind(value: unknown): AdminZagulyakyStructuredCandidateKind {
-  const candidate = text(value).trim();
-  return candidate === "person" || candidate === "document" ? candidate : "unknown";
-}
-
-function structuredCandidateConfidence(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const candidate = Number(value);
-  return Number.isFinite(candidate) ? Math.min(1, Math.max(0, candidate)) : null;
-}
-
-function structuredCandidateParticipant(value: unknown): AdminZagulyakyStructuredCandidateParticipant {
-  const row = record(value);
-  return {
-    structuralRole: safePrivateText(valueFor(row, "structuralRole", "structural_role"), 40),
-    eventRoleCode: safePrivateText(valueFor(row, "eventRoleCode", "event_role_code"), 40),
-    eventRoleCustom: safePrivateText(valueFor(row, "eventRoleCustom", "eventRoleCustomText", "event_role_custom"), 160),
-    originalFullName: safePrivateText(valueFor(row, "originalFullName", "original_full_name", "fullName", "full_name"), 300),
-    normalizedUkFullName: safePrivateText(valueFor(row, "normalizedUkFullName", "normalized_uk_full_name"), 300),
-    surname: safePrivateText(valueFor(row, "surname"), 160),
-    givenName: safePrivateText(valueFor(row, "givenName", "given_name"), 160),
-    patronymic: safePrivateText(valueFor(row, "patronymic"), 160),
-    originText: safePrivateText(valueFor(row, "originText", "origin_text"), 500),
-    residenceText: safePrivateText(valueFor(row, "residenceText", "residence_text"), 500),
-    socialEstateText: safePrivateText(valueFor(row, "socialEstateText", "social_estate_text"), 300),
-  };
-}
-
-/**
- * The detail RPC is rolled out independently from the browser. Accept both
- * the stored `candidateData` envelope and a future flattened projection so a
- * harmlessly older response simply renders no extracted fields instead of
- * breaking the private reviewer.
- */
-function structuredCandidate(value: unknown): AdminZagulyakyStructuredCandidate {
-  const row = record(value);
-  const candidateData = record(valueFor(row, "candidateData", "candidate_data", "data"));
-  const candidate = Object.keys(candidateData).length ? candidateData : row;
-  const event = record(valueFor(candidate, "event") ?? valueFor(row, "event"));
-  const candidateValue = (...keys: string[]): unknown => valueFor(candidate, ...keys) ?? valueFor(row, ...keys);
-  const participants = unknownArray(candidateValue("participants"))
-    .map(structuredCandidateParticipant)
-    .filter((participant) => Boolean(
-      participant.originalFullName
-      || participant.normalizedUkFullName
-      || participant.surname
-      || participant.givenName
-      || participant.eventRoleCode
-      || participant.structuralRole,
-    ))
-    .slice(0, 30);
-
-  return {
-    id: safeUuid(valueFor(row, "candidateId", "candidate_id", "id")),
-    kind: structuredCandidateKind(candidateValue("kind")),
-    status: safePrivateText(valueFor(row, "status"), 40),
-    title: safePrivateText(candidateValue("title"), 500),
-    classificationReason: safePrivateText(candidateValue("classificationReason", "classification_reason"), 1_000),
-    confidence: structuredCandidateConfidence(candidateValue("confidence")),
-    possibleLivingPerson: safeBoolean(candidateValue("possibleLivingPerson", "possible_living_person")),
-    eventType: safePrivateText(valueFor(event, "type", "eventType", "event_type") ?? candidateValue("eventType", "event_type"), 80),
-    eventDateText: safePrivateText(valueFor(event, "dateText", "eventDateText", "event_date_text") ?? candidateValue("eventDateText", "event_date_text"), 500),
-    eventYearFrom: nullableInteger(valueFor(event, "yearFrom", "eventYearFrom", "event_year_from") ?? candidateValue("eventYearFrom", "event_year_from")),
-    eventYearTo: nullableInteger(valueFor(event, "yearTo", "eventYearTo", "event_year_to") ?? candidateValue("eventYearTo", "event_year_to")),
-    eventLocationText: safePrivateText(valueFor(event, "placeText", "eventPlaceText", "eventLocationText", "event_place_text", "event_location_text") ?? candidateValue("eventPlaceText", "eventLocationText", "event_place_text", "event_location_text"), 500),
-    originText: safePrivateText(candidateValue("originText", "origin_text"), 500),
-    residenceText: safePrivateText(candidateValue("residenceText", "residence_text"), 500),
-    socialEstateText: safePrivateText(candidateValue("socialEstateText", "social_estate_text"), 300),
-    participants,
   };
 }
 
@@ -944,7 +497,9 @@ export async function loadAdminZagulyakaDetail(recordId: string): Promise<AdminZ
   const detail = {
     record: record(payload.record),
     sources: records(payload.sources),
-    privateImportOrigins: records(payload.privateImportOrigins).map(privateImportOrigin),
+    // The server retains the old JSON key only during the database migration.
+    // The browser treats it as a neutral, moderator-only source-link list.
+    privateSourceLinks: records(payload.privateImportOrigins).map(privateSourceLink),
     participants: records(payload.participants),
     documentDiscoveries: records(payload.documentDiscoveries),
     attachments: records(payload.attachments),
@@ -1128,120 +683,4 @@ export async function mergeAdminZagulyakaDuplicate(
       merged: record(payload.merged),
     };
   });
-}
-
-/**
- * Lists only the metadata needed to choose an import batch. The RPC is
- * permission-gated server-side; this client intentionally receives neither a
- * file body nor a source checksum/payload.
- */
-export async function loadAdminZagulyakyIngestionBatches(
-  status: AdminZagulyakyIngestionBatchStatus | null = null,
-  limit = 25,
-  offset = 0,
-): Promise<AdminZagulyakyIngestionBatchesPage> {
-  const safeStatus = status && status !== "unknown" ? status : null;
-  const { data, error } = await getSupabaseClient().rpc("admin_list_zagulyaky_ingestion_batches_v1", {
-    p_status: safeStatus,
-    p_limit: Math.min(Math.max(Math.trunc(limit), 1), 100),
-    p_offset: Math.max(Math.trunc(offset), 0),
-  });
-  if (error) throw error;
-  const payload = record(data);
-  const items = pageRows(data, "items", "batches").map(ingestionBatchItem).filter((item) => Boolean(item.id));
-  return {
-    items,
-    total: Math.max(0, integer(valueFor(payload, "total", "totalCount", "total_count"), items.length)),
-  };
-}
-
-/**
- * Lists a narrow review projection for one private batch. Search and all
- * filters are evaluated by the security-definer RPC; the browser has no
- * direct access to Stage 0 tables.
- */
-export async function loadAdminZagulyakyIngestionItems(
-  input: LoadAdminZagulyakyIngestionItemsInput,
-): Promise<AdminZagulyakyIngestionItemsPage> {
-  const batchId = safeUuid(input.batchId);
-  if (!batchId) throw new Error("INGESTION_BATCH_NOT_FOUND");
-  const stageStatus = input.stageStatus && input.stageStatus !== "unknown" ? input.stageStatus : null;
-  const flag = input.flag === "has_attachments"
-    || input.flag === "requires_ocr"
-    || input.flag === "requires_source_refetch"
-    ? input.flag
-    : null;
-  const query = typeof input.query === "string" ? input.query.trim().slice(0, 160) : "";
-  const { data, error } = await getSupabaseClient().rpc("admin_list_zagulyaky_ingestion_items_v1", {
-    p_batch_id: batchId,
-    p_query: query || null,
-    p_stage_status: stageStatus,
-    p_quarantined: typeof input.quarantined === "boolean" ? input.quarantined : null,
-    p_flag: flag,
-    p_limit: Math.min(Math.max(Math.trunc(input.limit ?? 25), 1), 100),
-    p_offset: Math.max(Math.trunc(input.offset ?? 0), 0),
-  });
-  if (error) throw error;
-  const payload = record(data);
-  const items = pageRows(data, "items").map((value) => ingestionItem(value, batchId)).filter((item) => Boolean(item.id));
-  return {
-    items,
-    total: Math.max(0, integer(valueFor(payload, "total", "totalCount", "total_count"), items.length)),
-  };
-}
-
-/**
- * Fetches one explicitly selected private source item. Deliberately ignored:
- * the raw source JSON object and all image bytes. Text, URL metadata and
- * attachment/job state are enough for a moderator to decide the next step.
- */
-export async function loadAdminZagulyakyIngestionItemDetail(
-  batchIdValue: string,
-  itemIdValue: string,
-): Promise<AdminZagulyakyIngestionItemDetail> {
-  const batchId = safeUuid(batchIdValue);
-  const itemId = safeUuid(itemIdValue);
-  if (!batchId || !itemId) throw new Error("INGESTION_ITEM_NOT_FOUND");
-  const { data, error } = await getSupabaseClient().rpc("admin_get_zagulyaky_ingestion_item_v1", {
-    p_batch_id: batchId,
-    p_item_id: itemId,
-  });
-  if (error) throw error;
-  const payload = record(data);
-  const itemRow = record(valueFor(payload, "item"));
-  const effectiveItemRow = Object.keys(itemRow).length ? itemRow : payload;
-  const source = record(valueFor(effectiveItemRow, "source"));
-  const content = record(valueFor(effectiveItemRow, "content"));
-  const item = ingestionItem(effectiveItemRow, batchId);
-  if (!item.id) throw new Error("INGESTION_ITEM_NOT_FOUND");
-  const rawTextValue = valueFor(content, "rawText", "raw_text") ?? valueFor(effectiveItemRow, "rawText", "raw_text");
-  const rawText = safePrivateText(rawTextValue, 16_000);
-  const rawTextTruncatedForDisplay = safeBoolean(valueFor(content, "rawTextTruncatedForReview", "raw_text_truncated_for_review"))
-    || (typeof rawTextValue === "string" && rawTextValue.length > rawText.length);
-  const candidateYears = unknownArray(valueFor(source, "candidateYears", "candidate_years") ?? valueFor(effectiveItemRow, "candidateYears", "candidate_years"))
-    .map((value) => nullableInteger(value))
-    .filter((value): value is number => value !== null && value >= 1 && value <= 9_999)
-    .slice(0, 50);
-  const structuredCandidateRows = pageRows(payload, "structuredCandidates", "structured_candidates", "candidates");
-  const itemStructuredCandidateRows = structuredCandidateRows.length
-    ? structuredCandidateRows
-    : pageRows(effectiveItemRow, "structuredCandidates", "structured_candidates", "candidates");
-  return {
-    item,
-    sourceAuthorLabel: safePrivateText(valueFor(source, "sourceAuthorLabel", "source_author_label") ?? valueFor(effectiveItemRow, "sourceAuthorLabel", "source_author_label"), 500),
-    sourceUrl: safePrivateText(valueFor(source, "sourceUrl", "source_url") ?? valueFor(effectiveItemRow, "sourceUrl", "source_url"), 4_000),
-    facebookPostUrl: safePrivateText(valueFor(source, "facebookPostUrl", "facebook_post_url") ?? valueFor(effectiveItemRow, "facebookPostUrl", "facebook_post_url"), 4_000),
-    sourceCollectionUrl: safePrivateText(valueFor(source, "sourceCollectionUrl", "source_collection_url") ?? valueFor(effectiveItemRow, "sourceCollectionUrl", "source_collection_url"), 4_000),
-    candidateYears,
-    rawText,
-    rawTextTruncatedForDisplay,
-    structuredCandidates: itemStructuredCandidateRows
-      .map(structuredCandidate)
-      .filter((candidate) => Boolean(candidate.id || candidate.title || candidate.participants.length))
-      .slice(0, 50),
-    attachments: pageRows(payload, "attachments").map(ingestionAttachment),
-    links: pageRows(payload, "links").map(ingestionLink),
-    extractionJobs: pageRows(payload, "extractionJobs", "extraction_jobs", "jobs").map(ingestionJob),
-    errors: pageRows(payload, "errors", "itemErrors", "item_errors").map(ingestionItemError),
-  };
 }

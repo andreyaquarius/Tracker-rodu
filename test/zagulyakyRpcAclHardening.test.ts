@@ -66,16 +66,12 @@ const authenticatedOrService = [
   "public.admin_prepare_zagulyaka_attachment_publication_v2(uuid)",
   "public.admin_complete_zagulyaka_attachment_publication_v2(uuid,text)",
   "public.admin_revoke_zagulyaka_attachment_publication_v2(uuid)",
-  "public.admin_begin_zagulyaky_facebook_import_v1(text,text,timestamptz,text,integer,text,jsonb)",
-  "public.admin_get_zagulyaky_ingestion_batch_v1(uuid)",
 ];
 
 const serviceOnly = [
   "public.claim_zagulyaky_storage_cleanup_queue_v1(integer)",
   "public.claim_zagulyaky_storage_cleanup_task_v1(uuid)",
   "public.finalize_zagulyaky_storage_cleanup_v1(uuid,uuid,boolean,text)",
-  "public.service_ingest_zagulyaky_facebook_chunk_v1(uuid,jsonb,text,integer,text)",
-  "public.service_finalize_zagulyaky_facebook_import_v1(uuid,text)",
   "public.service_get_public_zagulyaka_attachment_delivery_v1(uuid)",
 ];
 

@@ -3,11 +3,13 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(17);
+select plan(18);
 
 create temporary table expected_security_advisor_functions (
   signature text primary key,
+  implementation_signature text,
   moved_to_private boolean not null,
+  anonymous_execute boolean not null default false,
   authenticated_execute boolean not null,
   service_execute boolean not null
 ) on commit drop;
@@ -55,6 +57,46 @@ insert into expected_security_advisor_functions (
   ('public.start_project_deletion(uuid)', true, true, true),
   ('public.touch_gedcom_import_operation(uuid)', true, true, true);
 
+-- The remaining current Advisor surface: 27 Zagulyaky RPCs and the
+-- family-tree statistics drill-down.  The four catalogue functions are the
+-- only endpoints intentionally callable without signing in.
+insert into expected_security_advisor_functions (
+  signature,
+  implementation_signature,
+  moved_to_private,
+  anonymous_execute,
+  authenticated_execute,
+  service_execute
+) values
+  ('public.get_public_zagulyaka_v1(text)', 'security_private.get_public_zagulyaka_api_v1(text)', true, true, true, true),
+  ('public.get_zagulyaky_public_stats_v1()', null, true, true, true, true),
+  ('public.search_zagulyaky_documents_v1(text,jsonb,integer,timestamptz,uuid)', null, true, true, true, true),
+  ('public.search_zagulyaky_people_v1(text,jsonb,integer,timestamptz,uuid)', null, true, true, true, true),
+  ('public.admin_list_zagulyaky_claims_v1(text,integer,integer)', null, true, false, true, true),
+  ('public.admin_list_zagulyaky_queue_v1(text,integer,integer)', null, true, false, true, true),
+  ('public.admin_review_zagulyaka_v1(uuid,integer,text,text,text,text,text)', null, true, false, true, true),
+  ('public.attach_my_zagulyaka_file_v1(uuid,integer,text,text,text,bigint,text)', null, true, false, true, true),
+  ('public.confirm_zagulyaka_v1(uuid,text,text)', null, true, false, true, true),
+  ('public.create_zagulyaka_claim_v1(uuid,text,text)', null, true, false, true, true),
+  ('public.create_zagulyaka_draft_v1(text,jsonb)', null, true, false, true, true),
+  ('public.delete_my_zagulyaka_attachment_v2(uuid,uuid,integer)', null, true, false, true, true),
+  ('public.delete_my_zagulyaka_draft_v3(uuid,integer)', null, true, false, true, true),
+  ('public.delete_my_zagulyaky_saved_place_v1(uuid)', null, true, false, true, true),
+  ('public.delete_my_zagulyaky_saved_source_preset_v1(uuid)', null, true, false, true, true),
+  ('public.get_my_zagulyaka_draft_v1(uuid)', null, true, false, true, true),
+  ('public.get_my_zagulyaky_page_v1(text,integer,integer)', null, true, false, true, true),
+  ('public.get_my_zagulyaky_v1(text,integer,integer)', null, true, false, true, true),
+  ('public.list_my_zagulyaky_saved_places_v1(text,integer)', null, true, false, true, true),
+  ('public.list_my_zagulyaky_saved_source_presets_v1(text,integer)', null, true, false, true, true),
+  ('public.replace_my_zagulyaka_details_v1(uuid,integer,jsonb,jsonb,jsonb)', null, true, false, true, true),
+  ('public.set_zagulyaka_bookmark_v1(uuid,boolean)', null, true, false, true, true),
+  ('public.submit_zagulyaka_v1(uuid,integer)', null, true, false, true, true),
+  ('public.update_my_zagulyaka_draft_v1(uuid,integer,jsonb)', null, true, false, true, true),
+  ('public.upsert_my_zagulyaky_saved_place_v1(jsonb)', null, true, false, true, true),
+  ('public.upsert_my_zagulyaky_saved_source_preset_v1(jsonb)', null, true, false, true, true),
+  ('public.withdraw_zagulyaka_v1(uuid,integer)', null, true, false, true, true),
+  ('public.list_family_tree_statistics_people_v1(jsonb)', null, true, false, true, true);
+
 create temporary table expected_rls_helper_functions (
   signature text primary key
 ) on commit drop;
@@ -71,8 +113,8 @@ insert into expected_rls_helper_functions (signature) values
 
 select is(
   (select count(*)::integer from expected_security_advisor_functions),
-  36,
-  'the regression list covers all 36 Security Advisor findings'
+  64,
+  'the regression list covers all 64 protected Security Advisor entry points'
 );
 
 select has_schema(
@@ -83,8 +125,10 @@ select has_schema(
 select ok(
   has_schema_privilege('authenticated', 'security_private', 'USAGE')
   and not has_schema_privilege('authenticated', 'security_private', 'CREATE')
-  and not has_schema_privilege('anon', 'security_private', 'USAGE')
+  and has_schema_privilege('anon', 'security_private', 'USAGE')
   and not has_schema_privilege('anon', 'security_private', 'CREATE')
+  and has_schema_privilege('service_role', 'security_private', 'USAGE')
+  and not has_schema_privilege('service_role', 'security_private', 'CREATE')
   and not has_schema_privilege('authenticated', 'public', 'CREATE')
   and not has_schema_privilege('anon', 'public', 'CREATE'),
   'API roles cannot create objects in trusted search-path schemas'
@@ -111,9 +155,10 @@ select ok(
 )
 from expected_security_advisor_functions expected
 left join pg_proc private_function
-  on private_function.oid = to_regprocedure(
+  on private_function.oid = to_regprocedure(coalesce(
+    expected.implementation_signature,
     regexp_replace(expected.signature, '^public\.', 'security_private.')
-  )
+  ))
 where expected.moved_to_private;
 
 select ok(
@@ -131,9 +176,10 @@ from expected_security_advisor_functions expected
 join pg_proc public_function
   on public_function.oid = to_regprocedure(expected.signature)
 join pg_proc private_function
-  on private_function.oid = to_regprocedure(
+  on private_function.oid = to_regprocedure(coalesce(
+    expected.implementation_signature,
     regexp_replace(expected.signature, '^public\.', 'security_private.')
-  )
+  ))
 where expected.moved_to_private;
 
 select ok(
@@ -155,8 +201,11 @@ select ok(
 from expected_security_advisor_functions;
 
 select ok(
-  bool_and(not has_function_privilege('anon', to_regprocedure(signature), 'EXECUTE')),
-  'none of the 36 RPCs is executable anonymously'
+  bool_and(
+    has_function_privilege('anon', to_regprocedure(signature), 'EXECUTE')
+      = anonymous_execute
+  ),
+  'anonymous callers can execute only the intended public catalogue RPCs'
 )
 from expected_security_advisor_functions;
 
@@ -164,7 +213,10 @@ select ok(
   bool_and(
     has_function_privilege(
       'authenticated',
-      to_regprocedure(regexp_replace(signature, '^public\.', 'security_private.')),
+      to_regprocedure(coalesce(
+        implementation_signature,
+        regexp_replace(signature, '^public\.', 'security_private.')
+      )),
       'EXECUTE'
     ) = authenticated_execute
   ),
@@ -177,11 +229,30 @@ select ok(
   bool_and(
     has_function_privilege(
       'service_role',
-      to_regprocedure(regexp_replace(signature, '^public\.', 'security_private.')),
+      to_regprocedure(coalesce(
+        implementation_signature,
+        regexp_replace(signature, '^public\.', 'security_private.')
+      )),
       'EXECUTE'
     ) = service_execute
   ),
   'service workers can execute only the intended moved implementations'
+)
+from expected_security_advisor_functions
+where moved_to_private;
+
+select ok(
+  bool_and(
+    has_function_privilege(
+      'anon',
+      to_regprocedure(coalesce(
+        implementation_signature,
+        regexp_replace(signature, '^public\.', 'security_private.')
+      )),
+      'EXECUTE'
+    ) = anonymous_execute
+  ),
+  'anonymous callers can execute only the intended trusted catalogue implementations'
 )
 from expected_security_advisor_functions
 where moved_to_private;
@@ -231,10 +302,13 @@ select is(
         'vault'
       )
       and function_record.prosecdef
-      and has_function_privilege('authenticated', function_record.oid, 'EXECUTE')
+      and (
+        has_function_privilege('authenticated', function_record.oid, 'EXECUTE')
+        or has_function_privilege('anon', function_record.oid, 'EXECUTE')
+      )
   ),
   0::bigint,
-  'lint 0029 has no authenticated-executable SECURITY DEFINER in exposed schemas'
+  'Security Advisor has no API-executable SECURITY DEFINER function in exposed schemas'
 );
 
 select ok(
@@ -258,9 +332,10 @@ select ok(
 )
 from expected_security_advisor_functions expected
 join pg_proc function_record
-  on function_record.oid = to_regprocedure(
+  on function_record.oid = to_regprocedure(coalesce(
+    expected.implementation_signature,
     regexp_replace(expected.signature, '^public\.', 'security_private.')
-  )
+  ))
 where expected.moved_to_private;
 
 select ok(
@@ -269,9 +344,10 @@ select ok(
 )
 from expected_security_advisor_functions expected
 join pg_proc function_record
-  on function_record.oid = to_regprocedure(
+  on function_record.oid = to_regprocedure(coalesce(
+    expected.implementation_signature,
     regexp_replace(expected.signature, '^public\.', 'security_private.')
-  )
+  ))
 join pg_roles owner_role on owner_role.oid = function_record.proowner
 where expected.moved_to_private;
 

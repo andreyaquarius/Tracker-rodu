@@ -9,7 +9,6 @@ export const ADMIN_PERMISSION_CODES = {
   operationsManage: "operations.manage",
   securityView: "security.view",
   zagulyakyModerate: "zagulyaky.moderate",
-  zagulyakyImport: "zagulyaky.import",
 } as const;
 
 export type AdminPermissionCode = typeof ADMIN_PERMISSION_CODES[keyof typeof ADMIN_PERMISSION_CODES];

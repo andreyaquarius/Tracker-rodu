@@ -18,7 +18,7 @@ const publicDetailType = readFileSync(
 test("public original-post affordance consumes only an explicitly named public projection", () => {
   assert.match(publicDetailType, /originalPostUrl: string;/);
   assert.match(publicDetailService, /originalPostUrl: text\(value\(row, "originalPostUrl", "original_post_url"\)\)/);
-  assert.match(publicDetailService, /Do not fall back to private import provenance or generic source URLs\./);
+  assert.match(publicDetailService, /Do not fall back to private source-link metadata or generic source URLs\./);
 
   assert.match(publicDetailDialog, /const safeOriginalPostUrl = sanitizeFacebookPostUrl\(detail\?\.originalPostUrl\);/);
   assert.match(publicDetailDialog, /function sanitizeFacebookPostUrl\(value: unknown\): string \| null/);

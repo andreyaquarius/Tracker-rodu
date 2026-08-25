@@ -10,10 +10,6 @@ const attachmentEdge = readFileSync(
   new URL("../supabase/functions/zagulyaka-attachment/index.ts", import.meta.url),
   "utf8",
 );
-const stage0Edge = readFileSync(
-  new URL("../supabase/functions/zagulyaky-stage0-import/index.ts", import.meta.url),
-  "utf8",
-);
 const config = readFileSync(new URL("../supabase/config.toml", import.meta.url), "utf8");
 const publicService = readFileSync(new URL("../src/services/zagulyakyService.ts", import.meta.url), "utf8");
 const publicDetail = readFileSync(
@@ -97,12 +93,4 @@ test("attachment changes are visible to moderated history without exposing stora
   assert.match(moderationPanel, /snapshotAttachmentSummary/);
   assert.match(moderationPanel, /attachment_publish/);
   assert.match(moderationPanel, /attachment_revoke/);
-});
-
-test("the browser-facing Stage 0 importer authenticates before it reads the export body", () => {
-  const authAt = stage0Edge.indexOf("callerClient.auth.getUser(accessToken)");
-  const bytesAt = stage0Edge.indexOf("await request.arrayBuffer()");
-  assert.ok(authAt >= 0, "expected code-side JWT validation");
-  assert.ok(bytesAt >= 0, "expected request body handling");
-  assert.ok(authAt < bytesAt, "JWT must be checked before processing up to 20 MiB of export data");
 });

@@ -197,8 +197,6 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
     || capabilities?.permissions.includes(permission) === true;
   const hasPagePermission = canSee(requiredPermission);
   const hasAnalyticsPermission = canSee(ADMIN_PERMISSION_CODES.analyticsView);
-  const hasZagulyakyModeratePermission = canSee(ADMIN_PERMISSION_CODES.zagulyakyModerate);
-  const hasZagulyakyImportPermission = canSee(ADMIN_PERMISSION_CODES.zagulyakyImport);
 
   const refreshSubscriptions = useCallback(async () => {
     setSubscriptions(await loadAdminSubscriptions());
@@ -480,12 +478,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   else if (currentPage === "features") pageContent = <AdminFeatureFlags flags={featureFlags} loadError="" onChanged={refreshFeatures} />;
   else if (currentPage === "announcements") pageContent = <AdminAnnouncements announcements={announcements} loadError="" onChanged={refreshAnnouncements} />;
   else if (currentPage === "feedback") pageContent = props.account ? <FeedbackPage account={props.account} isAdmin /> : <div className="admin-alert">Обліковий запис недоступний.</div>;
-  else if (currentPage === "zagulyaky") pageContent = (
-    <ZagulyakyModerationPanel
-      canImportStage0={hasZagulyakyImportPermission}
-      canModerateZagulyaky={hasZagulyakyModeratePermission}
-    />
-  );
+  else if (currentPage === "zagulyaky") pageContent = <ZagulyakyModerationPanel />;
   else if (currentPage === "operations") {
     pageContent = (
       <section className="admin-panel-card">

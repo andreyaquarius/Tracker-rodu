@@ -28,10 +28,6 @@ import {
   type ZagulyakaVerificationStatus,
 } from "../../services/zagulyakyAdminService.ts";
 import { zagulyakaEventRoleLabel } from "../../utils/zagulyakyEventRoles";
-import { ZagulyakyStage0ImportCard } from "./ZagulyakyStage0ImportCard.tsx";
-import { ZagulyakyInitialBaseBulkPanel } from "./ZagulyakyInitialBaseBulkPanel.tsx";
-import { ZagulyakyStagingReviewPanel } from "./ZagulyakyStagingReviewPanel.tsx";
-import { ZagulyakyTabularEventImportCard } from "./ZagulyakyTabularEventImportCard.tsx";
 import "./ZagulyakyModerationPanel.css";
 
 const PAGE_SIZE = 25;
@@ -233,18 +229,8 @@ function safeExternalUrl(value: unknown): string | null {
   }
 }
 
-export function ZagulyakyModerationPanel({
-  canImportStage0 = false,
-  canModerateZagulyaky = false,
-}: {
-  canImportStage0?: boolean;
-  /**
-   * Kept separate from the import capability.  Importing an XLSX must not
-   * implicitly grant a user the right to publish or bulk-moderate it.
-   */
-  canModerateZagulyaky?: boolean;
-}) {
-  const [view, setView] = useState<"records" | "claims" | "duplicates" | "staging">("records");
+export function ZagulyakyModerationPanel() {
+  const [view, setView] = useState<"records" | "claims" | "duplicates">("records");
   const [status, setStatus] = useState<ZagulyakaModerationStatus | "">("pending_review");
   const [offset, setOffset] = useState(0);
   const [items, setItems] = useState<AdminZagulyakaQueueItem[]>([]);
@@ -701,23 +687,6 @@ export function ZagulyakyModerationPanel({
     }
   };
 
-  /**
-   * A successful tabular commit deliberately creates `draft` records. The
-   * ordinary moderation queue starts on `pending_review`, so give operators a
-   * deterministic route to the records that were just materialized instead
-   * of leaving the visible list empty. The refresh key also covers the case
-   * where the user is already on the same filter/page.
-   */
-  const openImportedDrafts = () => {
-    setView("records");
-    setStatus("draft");
-    setOffset(0);
-    setSelected(null);
-    setError("");
-    setSuccess("Відкрито чернетки, створені з XLSX-імпорту. Вони ще не публічні та потребують модерації.");
-    setRecordsRefreshKey((value) => value + 1);
-  };
-
   const reviewActions: ZagulyakaModerationAction[] = !selected ? []
     : selected.status === "pending_review" ? ["publish", "request_changes", "reject"]
       : selected.status === "published" || selected.status === "rejected" ? ["archive"]
@@ -749,13 +718,8 @@ export function ZagulyakyModerationPanel({
           <button type="button" role="tab" aria-selected={view === "records"} className={view === "records" ? "active" : ""} onClick={() => setView("records")}>Записи</button>
           <button type="button" role="tab" aria-selected={view === "claims"} className={view === "claims" ? "active" : ""} onClick={() => setView("claims")}>Скарги й уточнення</button>
           <button type="button" role="tab" aria-selected={view === "duplicates"} className={view === "duplicates" ? "active" : ""} onClick={() => setView("duplicates")}>Дублікати</button>
-          {canImportStage0 ? <button type="button" role="tab" aria-selected={view === "staging"} className={view === "staging" ? "active" : ""} onClick={() => setView("staging")}>Приватний staging</button> : null}
         </div>
       </section>
-
-      {canImportStage0 ? <ZagulyakyStage0ImportCard /> : null}
-      {canImportStage0 ? <ZagulyakyTabularEventImportCard onOpenDrafts={openImportedDrafts} /> : null}
-      {(canImportStage0 || canModerateZagulyaky) ? <ZagulyakyInitialBaseBulkPanel canModerateZagulyaky={canModerateZagulyaky} /> : null}
 
       {error ? <div className="admin-alert error" role="alert">{error}</div> : null}
       {success ? <div className="admin-alert zagulyaky-success" role="status">{success}</div> : null}
@@ -922,7 +886,7 @@ export function ZagulyakyModerationPanel({
           onResolve={(nextStatus) => void runResolveDuplicateCandidate(nextStatus)}
           onMerge={() => void runMergeDuplicate()}
         />
-      ) : canImportStage0 ? <ZagulyakyStagingReviewPanel /> : null}
+      ) : null}
     </div>
   );
 }
@@ -964,7 +928,7 @@ function ReviewEvidence({
         })}
         {!detail.sources.length ? <p>Джерел немає.</p> : null}
       </section>
-      {detail.privateImportOrigins.length ? <PrivateImportOrigins origins={detail.privateImportOrigins} /> : null}
+      {detail.privateSourceLinks.length ? <PrivateSourceLinks origins={detail.privateSourceLinks} /> : null}
       {detail.documentDiscoveries.length ? <section><h3>Знахідка документа</h3>{detail.documentDiscoveries.map((discovery, index) => <p key={index}><strong>{detailText(discovery, "official_location_text")}</strong><span>Знайдено: {detailText(discovery, "discovered_location_text")}</span></p>)}</section> : null}
       <section className="zagulyaky-attachment-review"><h3>Приватні вкладення ({detail.attachments.length})</h3>
         <p>Оригінал доступний модератору лише за коротким приватним посиланням. Публічна копія створюється окремою контрольованою дією після публікації запису.</p>
@@ -989,43 +953,26 @@ function ReviewEvidence({
   );
 }
 
-/**
- * This projection is intentionally nested in the admin review bundle only.
- * It is not shared with the public record-detail component or with private
- * staging lists, because it can contain private Facebook/source provenance.
- */
-function PrivateImportOrigins({ origins }: { origins: AdminZagulyakaDetail["privateImportOrigins"] }) {
+/** This moderator-only provenance is never part of the public catalogue response. */
+function PrivateSourceLinks({ origins }: { origins: AdminZagulyakaDetail["privateSourceLinks"] }) {
   return (
-    <section className="zagulyaky-private-import-origins" aria-label="Приватне походження імпорту">
-      <h3>Приватне джерело імпорту ({origins.length})</h3>
-      <p>Видно лише модераторам. Це посилання та вихідний текст не публікуються в каталозі.</p>
+    <section className="zagulyaky-private-source-links" aria-label="Приватні посилання на оригінали">
+      <h3>Приватне посилання на оригінал ({origins.length})</h3>
+      <p>Видно лише модераторам. Посилання не публікується в каталозі автоматично.</p>
       {origins.map((origin, index) => {
         const facebookPostUrl = safeExternalUrl(origin.facebookPostUrl);
-        const sourceCollectionUrl = safeExternalUrl(origin.sourceCollectionUrl);
-        const eventFacts = [origin.eventTypeOriginal, origin.eventDateOriginal, origin.eventPlaceOriginal]
-          .filter(Boolean)
-          .join(" · ");
-        const sourceTitle = origin.sourceTitleOriginal || origin.sourcePlatform || "Імпортоване джерело";
-        const rowKey = origin.cardKey || `${origin.eventKey}:${origin.postKey}:${index}`;
+        const sourceTitle = origin.sourceTitleOriginal || origin.sourcePlatform || "Джерело";
+        const rowKey = `${origin.sourcePlatform}:${origin.facebookPostUrl}:${index}`;
         return (
           <article key={rowKey}>
             <div>
               <strong>{sourceTitle}</strong>
-              <span>Приватне джерело · {origin.sourcePlatform || "платформа не вказана"}{origin.sourceDateText ? ` · ${origin.sourceDateText}` : ""}</span>
-              {eventFacts ? <small>{eventFacts}</small> : null}
+              <span>Приватне посилання · {origin.sourcePlatform || "платформа не вказана"}</span>
             </div>
-            <div className="zagulyaky-private-import-origin-actions">
+            <div className="zagulyaky-private-source-link-actions">
               {facebookPostUrl ? <a href={facebookPostUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Відкрити оригінальний допис Facebook</a> : null}
-              {!facebookPostUrl && sourceCollectionUrl ? <a href={sourceCollectionUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Відкрити приватне джерело</a> : null}
-              {!facebookPostUrl && !sourceCollectionUrl ? <small>Приватного посилання не збережено.</small> : null}
+              {!facebookPostUrl ? <small>Приватного посилання не збережено.</small> : null}
             </div>
-            {origin.postOriginalText || origin.eventOriginalText ? (
-              <details>
-                <summary>Переглянути приватний вихідний текст</summary>
-                {origin.postOriginalText ? <pre>{origin.postOriginalText}</pre> : null}
-                {origin.eventOriginalText ? <pre>{origin.eventOriginalText}</pre> : null}
-              </details>
-            ) : null}
           </article>
         );
       })}

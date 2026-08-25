@@ -189,8 +189,8 @@ export interface ZagulyakaDetail {
   /**
    * An explicitly approved public link to the original Facebook post.
    *
-   * This is deliberately separate from a source URL: imported provenance
-   * remains private unless the protected publication workflow returns this
+   * This is deliberately separate from a source URL: private source-link
+   * metadata remains private unless the protected publication workflow returns this
    * field in the public detail projection.
    */
   originalPostUrl: string;

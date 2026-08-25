@@ -1,15 +1,14 @@
-# «Загуляки» — локальне тестування Stage 0–2
+# «Загуляки» — локальне тестування каталогу й модерації
 
 Це відтворюваний сценарій для Windows PowerShell, який перевіряє:
 
 | Етап | Що перевіряється |
 | --- | --- |
-| Stage 0 | приватний Facebook JSON staging: dry run, commit, checksum, роль імпортера та відсутність автоматичної публікації |
-| Stage 1 | публічні каталоги людей і документів, пошук, картки, canonical URL, robots та sitemap |
-| Stage 2 | авторські чернетки, подання, повернення на уточнення, модерація, версії, аудит, звернення та кандидати на дублікати |
+| Каталог | публічні каталоги людей і документів, пошук, картки, canonical URL, robots та sitemap |
+| Автор і модератор | авторські чернетки, подання, повернення на уточнення, модерація, версії, аудит, звернення та кандидати на дублікати |
 
 Усі команди нижче призначені **лише для локального** стеку Supabase і
-frontend на `http://localhost:5173`. Не виконуйте їх проти linked, staging або
+frontend на `http://localhost:5173`. Не виконуйте їх проти linked, тестового або
 production-проєкту.
 
 ## 0. Незмінні межі безпеки
@@ -83,16 +82,14 @@ npm.cmd exec -- supabase db reset --local --sql-paths seed/zagulyaky-local-demo.
 
 `--sql-paths` задає шлях від каталогу `supabase`, тому тут навмисно використано
 `seed/zagulyaky-local-demo.sql`, а не шлях від кореня репозиторію. Команда
-послідовно застосує всі локальні міграції, включно зі Stage 0–2, а потім
-додасть тільки вигадані local-only дані.
+послідовно застосує всі локальні міграції каталогу й модерації, а потім додасть
+тільки вигадані local-only дані.
 
 Seed створює:
 
 - публічну очищену особу `Демо: Марія Тестова (1891)`;
 - публічний очищений документ `Демо: метричний витяг за 1891 рік`;
 - тільки fixed UUID, `example.test` та вигадані джерела;
-- одну приватну демонстраційну staging-лінію без реального Facebook export,
-  вкладення або Storage-файлу.
 
 ### Додати лише демо-дані без reset
 
@@ -179,7 +176,7 @@ npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
 замість тихо перейти на `5174` і зробити перевірку не того URL. Відкрийте
 `http://localhost:5173/`.
 
-### 3.1. Локальні Edge Functions для Stage 0 і Stage 2
+### 3.1. Локальні Edge Functions для вкладень
 
 В **окремому** PowerShell-вікні (після `supabase start`) залиште запущеним
 локальний Edge Runtime:
@@ -192,7 +189,6 @@ npm.cmd exec -- supabase functions serve
 Поточна pinned-версія CLI запускає всі функції з `supabase/functions/` одним
 процесом. Це, зокрема, дає локальні endpoint-и для:
 
-- `zagulyaky-stage0-import` — контрольованого імпорту Facebook export;
 - `zagulyaka-attachment` — приватного перегляду та короткочасної публічної
   доставки вкладень;
 - `zagulyaky-storage-cleanup` — безпечного очищення видалених приватних і
@@ -201,9 +197,9 @@ npm.cmd exec -- supabase functions serve
 `VITE_LOCAL_EDGE_FUNCTIONS_URL` з кроку 3 уже вказує на
 `$localSupabaseUrl/functions/v1`, тому окремо копіювати service key, складати
 URL або відкривати доступ браузеру до Storage не потрібно. Не закривайте це
-вікно до завершення перевірок вкладень та імпорту.
+вікно до завершення перевірок вкладень.
 
-## 4. Публічний smoke test Stage 1
+## 4. Публічний smoke test каталогу
 
 Проводьте цю частину у приватному вікні браузера, ще до входу тестового автора.
 
@@ -218,7 +214,7 @@ URL або відкривати доступ браузеру до Storage не 
    - Відкривається картка
      `/zahuliaky/documents/demo-metrychnyi-vytiah-1891`.
 3. Переконайтеся, що на публічних маршрутах немає кнопок чи даних приватних
-   чернеток, авторських сесій та staging payload.
+   чернеток, авторських сесій та приватних даних джерел.
 4. Відкрийте `http://localhost:5173/zahuliaky/my` без входу. Очікуваний
    результат — запит увійти; список чернеток не розкривається.
 
@@ -290,8 +286,8 @@ $png = [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC
 
 ## 6. Тимчасово надати роль модератора тільки локальному тестовому автору
 
-Поточна модель RBAC навмисно має дві умови: дозволи `zagulyaky.moderate` /
-`zagulyaky.import` і legacy-ознаку `public.app_admins`. Тому одного запису в
+Поточна модель RBAC навмисно має дві умови: дозвіл `zagulyaky.moderate` і
+legacy-ознаку `public.app_admins`. Тому одного запису в
 `admin_role_assignments` недостатньо. Додавання до `app_admins` запускає
 сумісний тригер, який надає **локальну `super_admin`** роль.
 
@@ -342,7 +338,7 @@ Remove-Item -LiteralPath $grantFile -Force
 `http://localhost:5173/admin/zagulyaky`. Якщо сторінка доступна і відображає
 чергу, локальна роль та захищений admin RPC працюють.
 
-## 7. Модерація, версії та аудит Stage 2
+## 7. Модерація, версії та аудит
 
 1. На `/admin/zagulyaky` залиште фільтр `Очікує перевірки` і відкрийте щойно
    поданий запис.
@@ -389,7 +385,7 @@ Remove-Item -LiteralPath $grantFile -Force
    `attachment_publish` і `attachment_revoke`, але без приватного Storage path.
 
 Не ставте прапорець `може стосуватися живої людини` у базовому smoke test. Для
-такого запису Stage 2 вимагає окремо зафіксувати дату та приватний доказ
+такого запису модерація вимагає окремо зафіксувати дату та приватний доказ
 документованої згоди в модераторській картці, перш ніж вибрати `Можна
 публікувати` й публікувати. Це перевіряється DB trigger, а не лише UI.
 
@@ -416,7 +412,8 @@ smoke-record.
 
 ### Уточнення і кандидати на дублікати
 
-Ці кроки не обов'язкові для швидкого smoke test, але покривають решту Stage 2.
+Ці кроки не обов'язкові для швидкого smoke test, але перевіряють додаткові
+звичайні сценарії модерації.
 
 1. Увійшовши як тестовий автор, відкрийте картку опублікованої демо-особи та
    натисніть `Уточнити запис`.
@@ -427,7 +424,7 @@ smoke-record.
    `Позначити вирішеним`. Звернення залишається приватним і не має
    автоматично редагувати публічну картку.
 4. Для кандидата на дублікат дістаньте UUID свого опублікованого запису з
-   локальної БД (це не друкує raw staging data):
+   локальної БД:
 
    ```powershell
    npm.cmd exec -- supabase db query --local "select id, title, status, public_slug from public.zagulyaky_records where created_by = (select id from auth.users where email = '$testAuthorEmail') order by created_at desc limit 1;"
@@ -440,154 +437,7 @@ smoke-record.
    завершіть запис кнопкою `Не дублі`. Не використовуйте `Об'єднати записи`
    у базовому тесті: воно навмисно змінює один з каталогових записів.
 
-## 8. Stage 0: локальний Facebook JSON import
-
-### Перевірити import Edge endpoint
-
-Функція вже запущена єдиним локальним Edge Runtime з кроку 3.1. Local CLI
-надає їй `SUPABASE_URL` і локальні ключі; не копіюйте service/secret key у
-Vite, запит або `.env.local`.
-
-Функція доступна за адресою:
-
-```text
-http://127.0.0.1:54321/functions/v1/zagulyaky-stage0-import
-```
-
-`verify_jwt = false` у локальному конфігу існує тільки для того, щоб CORS
-`OPTIONS` дійшов до функції. Кожен `POST` усе одно перевіряє Bearer JWT,
-`zagulyaky.import`, SHA-256 точних байтів і server-side RPC contract.
-
-### Створити тільки вигаданий export та виконати dry run
-
-Поверніться до PowerShell-вікна, де є `$localSupabaseUrl`,
-`$localPublishableKey` і `$testAuthorEmail`. Пароль вводиться у пам'ять лише
-на час локального Auth login, не записується у файл або історію команд.
-
-```powershell
-$securePassword = Read-Host 'Пароль локального test author' -AsSecureString
-$plainPassword = [System.Net.NetworkCredential]::new('', $securePassword).Password
-try {
-  $authBody = @{ email = $testAuthorEmail; password = $plainPassword } | ConvertTo-Json -Compress
-  $login = Invoke-RestMethod `
-    -Method Post `
-    -Uri "$localSupabaseUrl/auth/v1/token?grant_type=password" `
-    -Headers @{ apikey = $localPublishableKey } `
-    -ContentType 'application/json' `
-    -Body $authBody
-} finally {
-  $plainPassword = $null
-  Remove-Variable securePassword -ErrorAction SilentlyContinue
-}
-if (-not $login.access_token) { throw 'Локальний Auth не повернув access_token.' }
-
-$jsonPath = Join-Path $env:TEMP 'zagulyaky-stage0-local-demo.json'
-$json = @'
-{
-  "exportedAt": "2026-08-19T12:00:00Z",
-  "posts": [
-    {
-      "postId": "local-stage0-doc-001",
-      "text": "Вигаданий локальний допис для перевірки приватного staging.",
-      "author": "Локальний тестовий автор",
-      "publishedAt": "2026-08-18T12:00:00Z",
-      "url": "https://example.test/posts/local-stage0-doc-001",
-      "groupUrl": "https://example.test/groups/local-zagulyaky",
-      "years": [1891],
-      "images": [],
-      "links": []
-    }
-  ]
-}
-'@
-[System.IO.File]::WriteAllText($jsonPath, $json, [System.Text.UTF8Encoding]::new($false))
-
-$checksum = (Get-FileHash -LiteralPath $jsonPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$importUri = "$localSupabaseUrl/functions/v1/zagulyaky-stage0-import"
-$importHeaders = @{
-  apikey = $localPublishableKey
-  Authorization = "Bearer $($login.access_token)"
-  'x-zagulyaky-import-mode' = 'dry_run'
-  'x-zagulyaky-source-file-name' = [System.IO.Path]::GetFileName($jsonPath)
-  'x-zagulyaky-source-checksum' = $checksum
-}
-
-$dryRun = Invoke-RestMethod `
-  -Method Post `
-  -Uri $importUri `
-  -Headers $importHeaders `
-  -ContentType 'application/json' `
-  -InFile $jsonPath
-
-$dryRun
-```
-
-Перший clean запуск очікувано повертає `accepted: true`, `replayed: false` і
-batch metadata. Повторна відправка того самого exact-byte export може коректно
-повернути `replayed: true`: це ідемпотентний retry, а не новий import. Dry run
-не повинен додати нову публічну людину, документ, Storage object або зв'язок
-staging → catalogue record.
-
-### Commit того самого exact-byte файла
-
-Commit можливий тільки після чистого dry run з **тим самим** файлом і
-checksum. Не переформатковуйте JSON, не міняйте переводи рядка й не генеруйте
-хеш повторно від нового вмісту між цими двома запитами.
-
-```powershell
-$importHeaders['x-zagulyaky-import-mode'] = 'commit'
-$commit = Invoke-RestMethod `
-  -Method Post `
-  -Uri $importUri `
-  -Headers $importHeaders `
-  -ContentType 'application/json' `
-  -InFile $jsonPath
-
-$commit
-```
-
-Після `commit` перевірте тільки безпечну статистику та відсутність
-автоматичного каталогового зв'язку. Не робіть `select raw_payload` і не
-виводьте тестові або реальні Facebook-дані в консоль.
-
-```powershell
-$batchId = $commit.batch.batchId
-if (-not $batchId) { throw 'Commit не повернув batchId.' }
-
-$stage0Check = @"
-select
-  batch.id,
-  batch.status,
-  batch.import_mode,
-  batch.processed_item_count,
-  batch.staged_item_count,
-  (select count(*) from public.zagulyaky_ingestion_item_errors error_row where error_row.batch_id = batch.id) as item_error_count,
-  (
-    select count(*)
-    from public.zagulyaky_ingestion_batch_items batch_item
-    join public.zagulyaky_ingestion_item_records record_link on record_link.item_id = batch_item.item_id
-    where batch_item.batch_id = batch.id
-  ) as automatic_catalogue_link_count
-from public.zagulyaky_ingestion_batches batch
-where batch.id = '$batchId';
-"@
-npm.cmd exec -- supabase db query --local $stage0Check
-
-Remove-Item -LiteralPath $jsonPath -Force
-Remove-Variable login, dryRun, commit -ErrorAction SilentlyContinue
-```
-
-Очікування для цього test payload: `status = completed`, один staged item,
-нуль `item_error_count` і `automatic_catalogue_link_count = 0`. Останнє —
-важлива межа Stage 0: importer лише ставить material у private quarantine; він
-ніколи не створює та не публікує запис каталогу автоматично.
-
-Якщо `dry_run` повертає `IMPORT_PERMISSION_REQUIRED`, перевірте, що крок 6
-виконано в тій самій **локальній** БД, а токен належить саме цьому тестовому
-автору. Якщо `SOURCE_CHECKSUM_MISMATCH`, повторіть dry run з незміненим файлом
-та заголовком, обчисленим від цього самого файлу.
-
-## 9. SEO, canonical URL і sitemap
+## 8. SEO, canonical URL і sitemap
 
 Для SPA metadata з'являється після виконання JavaScript, тому інспектуйте її в
 відкритому браузері, а не через `Invoke-WebRequest` HTML shell.
@@ -629,7 +479,7 @@ Get-Content -LiteralPath $localSitemap
 
 У файлі очікуються canonical detail URL демо-особи й демо-документа; там не
 повинно бути `/zahuliaky/my`, private drafts, record title, author id або
-staging даних. Статичні public-файли також повинні містити лише public entry
+приватних даних джерел. Статичні public-файли також повинні містити лише public entry
 points:
 
 ```powershell
@@ -637,13 +487,13 @@ Select-String -LiteralPath .\public\robots.txt -Pattern 'Sitemap: https://treker
 Select-String -LiteralPath .\public\sitemap.xml -Pattern 'https://trekerrodu.com.ua/zahuliaky'
 ```
 
-## 10. Автоматичні перевірки та завершення локального тесту
+## 9. Автоматичні перевірки та завершення локального тесту
 
 Після запуску Docker виконайте щонайменше такі перевірки:
 
 ```powershell
 node --test `
-  test/zagulyakyStage0Import.test.ts `
+  test/zagulyakyImportSurfaceRemoval.test.ts `
   test/zagulyakyRoutes.test.ts `
   test/zagulyakySitemap.test.ts `
   test/zagulyakyModerationWorkflows.test.ts `
