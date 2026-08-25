@@ -7,6 +7,7 @@ import {
   assertPublishableSupabaseKey,
   generateZagulyakySitemap,
   publicZagulyakaUrl,
+  requestPublicZagulyakyRpc,
 } from "../scripts/generate-zagulyaky-sitemap.mjs";
 
 test("static sitemap exposes only the two public Zagulyaky catalogue URLs", () => {
@@ -91,5 +92,31 @@ test("detail URL construction encodes slug input and the generator refuses serve
   assert.throws(
     () => assertPublishableSupabaseKey(serviceRoleJwt),
     /non-anon/i,
+  );
+});
+
+test("build-time public requester permits the bounded indexing facade, not arbitrary detail RPCs", async () => {
+  let requestedUrl = "";
+  const payload = await requestPublicZagulyakyRpc({
+    supabaseUrl: "https://example.supabase.co",
+    publishableKey: "sb_publishable_fixture",
+    rpcName: "list_public_zagulyaky_indexing_v1",
+    parameters: { p_kind: "person", p_limit: 100, p_cursor_slug: null },
+    fetchImpl: async (input: string | URL) => {
+      requestedUrl = String(input);
+      return { ok: true, json: async () => ({ items: [], nextCursor: null }) } as Response;
+    },
+  });
+
+  assert.equal(requestedUrl, "https://example.supabase.co/rest/v1/rpc/list_public_zagulyaky_indexing_v1");
+  assert.deepEqual(payload, { items: [], nextCursor: null });
+  await assert.rejects(
+    requestPublicZagulyakyRpc({
+      supabaseUrl: "https://example.supabase.co",
+      publishableKey: "sb_publishable_fixture",
+      rpcName: "get_public_zagulyaka_v1",
+      parameters: { p_slug: "not-allowed-here" },
+    }),
+    /only approved public Zagulyaky RPCs/i,
   );
 });

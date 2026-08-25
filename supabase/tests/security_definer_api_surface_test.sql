@@ -57,8 +57,8 @@ insert into expected_security_advisor_functions (
   ('public.start_project_deletion(uuid)', true, true, true),
   ('public.touch_gedcom_import_operation(uuid)', true, true, true);
 
--- The remaining current Advisor surface: 27 Zagulyaky RPCs and the
--- family-tree statistics drill-down.  The four catalogue functions are the
+-- The remaining current Advisor surface: 28 Zagulyaky RPCs and the
+-- family-tree statistics drill-down.  The five catalogue functions are the
 -- only endpoints intentionally callable without signing in.
 insert into expected_security_advisor_functions (
   signature,
@@ -70,6 +70,7 @@ insert into expected_security_advisor_functions (
 ) values
   ('public.get_public_zagulyaka_v1(text)', 'security_private.get_public_zagulyaka_api_v1(text)', true, true, true, true),
   ('public.get_zagulyaky_public_stats_v1()', null, true, true, true, true),
+  ('public.list_public_zagulyaky_indexing_v1(text,integer,text)', null, true, true, true, true),
   ('public.search_zagulyaky_documents_v1(text,jsonb,integer,timestamptz,uuid)', null, true, true, true, true),
   ('public.search_zagulyaky_people_v1(text,jsonb,integer,timestamptz,uuid)', null, true, true, true, true),
   ('public.admin_list_zagulyaky_claims_v1(text,integer,integer)', null, true, false, true, true),
@@ -113,8 +114,8 @@ insert into expected_rls_helper_functions (signature) values
 
 select is(
   (select count(*)::integer from expected_security_advisor_functions),
-  64,
-  'the regression list covers all 64 protected Security Advisor entry points'
+  65,
+  'the regression list covers all 65 protected Security Advisor entry points'
 );
 
 select has_schema(

@@ -102,6 +102,15 @@ jobs:
           VITE_PDF_VIEWER_MAX_CANVAS_SIDE: ${{ vars.VITE_PDF_VIEWER_MAX_CANVAS_SIDE || '8192' }}
         run: npm run build
 
+      # GitHub Pages cannot serve SPA deep links as indexable documents.  Build
+      # a privacy-safe static public projection from anonymous catalogue RPCs
+      # after Vite has produced its HTML template.
+      - name: Generate indexable public Zagulyaky pages and sitemap
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: node scripts/generate-zagulyaky-public-pages.mjs
+
       - name: Verify prerendered public output
         run: npm run verify:pages
 

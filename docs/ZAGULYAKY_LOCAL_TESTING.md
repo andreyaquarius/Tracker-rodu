@@ -439,8 +439,10 @@ smoke-record.
 
 ## 8. SEO, canonical URL і sitemap
 
-Для SPA metadata з'являється після виконання JavaScript, тому інспектуйте її в
-відкритому браузері, а не через `Invoke-WebRequest` HTML shell.
+Для маршруту, відкритого через Vite dev server, SPA metadata з'являється після
+виконання JavaScript, тому інспектуйте її у відкритому браузері, а не через
+`Invoke-WebRequest` HTML shell. У production-build каталоги й публічні картки
+також мають статичний SEO fallback, який перевіряється нижче.
 
 На кожному маршруті відкрийте DevTools Console та виконайте:
 
@@ -464,23 +466,27 @@ smoke-record.
 Production canonical origin на localhost — очікувана поведінка цього
 public-site SEO contract; це не причина запускати deployment.
 
-Для локальної генерації dynamic sitemap використовуйте тільки отримані в
-кроці 3 loopback URL та publishable key. Скрипт відмовляється працювати із
-service/secret key і створює файл у `%TEMP%`, а не в `public/`:
+Для локальної генерації sitemap і статичних HTML-карток використовуйте тільки
+отримані в кроці 3 loopback URL та publishable key. Генератор відмовляється
+працювати із service/secret key і створює build artifacts тільки в `dist/`:
 
 ```powershell
-$env:ZAGULYAKY_SITEMAP_SUPABASE_URL = $localSupabaseUrl
-$env:ZAGULYAKY_SITEMAP_PUBLISHABLE_KEY = $localPublishableKey
-$localSitemap = Join-Path $env:TEMP 'sitemap-zagulyaky.local.xml'
+$env:VITE_SUPABASE_URL = $localSupabaseUrl
+$env:VITE_SUPABASE_PUBLISHABLE_KEY = $localPublishableKey
 
-node .\scripts\generate-zagulyaky-sitemap.mjs --output $localSitemap
-Get-Content -LiteralPath $localSitemap
+npm.cmd run build
+node .\scripts\generate-zagulyaky-public-pages.mjs
+npm.cmd run verify:pages
+
+Get-Content -LiteralPath .\dist\sitemap-zagulyaky.xml
+Get-Content -LiteralPath .\dist\zahuliaky\people\demo-mariia-testova-1891\index.html
 ```
 
-У файлі очікуються canonical detail URL демо-особи й демо-документа; там не
-повинно бути `/zahuliaky/my`, private drafts, record title, author id або
-приватних даних джерел. Статичні public-файли також повинні містити лише public entry
-points:
+У sitemap очікуються canonical detail URL демо-особи й демо-документа. У
+статичному HTML має бути canonical URL, `robots: index, follow`, видимий
+заголовок та JSON-LD. У sitemap і HTML не повинно бути `/zahuliaky/my`, private
+drafts, author id, приватних даних джерел або даних вкладень. Статичні
+public-файли також повинні містити лише public entry points:
 
 ```powershell
 Select-String -LiteralPath .\public\robots.txt -Pattern 'Sitemap: https://trekerrodu.com.ua/sitemap-zagulyaky.xml'

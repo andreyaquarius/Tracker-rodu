@@ -446,6 +446,17 @@ function applyZagulyakySeo(route: Extract<ReturnType<typeof parseAppRoute>, { ki
         : "/zahuliaky";
   const canonical = `${SITE_ORIGIN}${canonicalPath}`;
 
+  // The deployment creates real HTML documents for the public catalogue and
+  // its published cards.  When one of those documents was loaded directly,
+  // preserve its record-specific title, description and JSON-LD after React
+  // takes over.  Client-side navigation has no matching marker, so it still
+  // receives the normal route-level metadata below.
+  const staticSeoMarker = document.head.querySelector<HTMLMetaElement>(
+    'meta[name="zagulyaky-static-seo"]',
+  );
+  if (staticSeoMarker?.content === canonical) return;
+  staticSeoMarker?.remove();
+
   document.title = title;
   upsertMetaName("description", description);
   upsertMetaName("robots", personal ? "noindex, nofollow, noarchive" : "index, follow");

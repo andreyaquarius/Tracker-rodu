@@ -1,84 +1,134 @@
-# Sitemap публічного каталогу «Загуляки»
+# Публічні HTML-сторінки та sitemap каталогу «Загуляки»
 
-`public/sitemap.xml` містить лише стабільні публічні URL каталогу:
+Публічний каталог «Загуляки» має два sitemap:
 
-- `https://trekerrodu.com.ua/zahuliaky`;
-- `https://trekerrodu.com.ua/zahuliaky/documents`.
+- `https://trekerrodu.com.ua/sitemap.xml` — стабільні сторінки каталогу:
+  - `https://trekerrodu.com.ua/zahuliaky`;
+  - `https://trekerrodu.com.ua/zahuliaky/documents`.
+- `https://trekerrodu.com.ua/sitemap-zagulyaky.xml` — канонічні URL усіх
+  опублікованих публічних карток людей і документів.
 
-Особистий розділ `/zahuliaky/my`, адмін-маршрути, чернетки, записи на модерації та відхилені записи до sitemap не потрапляють. У `public/robots.txt` окремо оголошено динамічний sitemap `https://trekerrodu.com.ua/sitemap-zagulyaky.xml` для деталок уже опублікованих записів.
+Обидва sitemap оголошено в `public/robots.txt`. Особистий розділ
+`/zahuliaky/my`, адмін-маршрути, чернетки, записи на модерації та відхилені
+записи до них не потрапляють.
 
-## Що генерується і чому це безпечно
+## Що створюється під час деплою
 
-`scripts/generate-zagulyaky-sitemap.mjs` викликає тільки два публічні RPC:
+Після `npm run build` workflow запускає
+`scripts/generate-zagulyaky-public-pages.mjs`. Скрипт створює у `dist`:
 
-- `search_zagulyaky_people_v1`;
-- `search_zagulyaky_documents_v1`.
+```text
+dist/zahuliaky/index.html
+dist/zahuliaky/documents/index.html
+dist/zahuliaky/people/<slug>/index.html
+dist/zahuliaky/documents/<slug>/index.html
+dist/sitemap-zagulyaky.xml
+```
 
-Ці RPC за foundation-міграцією повертають лише `published` записи з `privacy_status = cleared`. Генератор читає з кожного рядка **лише `slug`** та створює канонічний URL. Він не звертається до таблиць напряму, не використовує `service_role`/`secret` key, не друкує ключі й не записує до XML назву, автора, джерело, ідентифікатор запису чи будь-яке приватне поле.
+Це не дублікати даних у репозиторії, а статичні HTML-проєкції, які GitHub
+Pages може віддати за прямим URL ще до виконання JavaScript. Кожна картка має:
 
-Для роботи дозволено тільки:
+- видимий заголовок та короткий опис для людини й пошукового робота;
+- canonical URL, `robots: index, follow`, Open Graph і Twitter metadata;
+- JSON-LD `ProfilePage`/`Person` для людини або `CreativeWork` для документа;
+- JSON-LD breadcrumbs.
 
-- `ZAGULYAKY_SITEMAP_SUPABASE_URL` або наявний `VITE_SUPABASE_URL`;
-- `ZAGULYAKY_SITEMAP_PUBLISHABLE_KEY` або наявний `VITE_SUPABASE_PUBLISHABLE_KEY`.
+Так Google отримує окремий доступний URL для каталогу та для кожної публічної
+картки, а не лише SPA-сторінку, яку GitHub Pages інакше віддав би через
+`404.html`.
 
-Скрипт відмовляється працювати з `sb_secret_`, з JWT не-`anon` ролі та з будь-яким іншим непізнаним типом ключа. Значення цих змінних не додаються до Git, sitemap або логу.
+## Дані, які дозволено виводити
 
-## Передумови
+За нормального стану генератор викликає лише один анонімний публічний RPC,
+пагінований за типом картки:
 
-1. Foundation-міграцію «Загуляк» застосовано до цільової Supabase-БД.
-2. Анонімний виклик обох публічних search RPC успішний.
-3. У БД є лише записи, які дозволено показувати публічно: `published` і `cleared`.
+- `list_public_zagulyaky_indexing_v1`.
 
-Якщо міграція ще не застосована або RPC повертає помилку, генератор завершується з помилкою і не створює частковий sitemap.
+Він створюється міграцією `202608250007_zagulyaky_public_seo_indexing.sql` і
+повертає вже очищений для індексації набір даних. Це принципово відрізняється
+від тисяч окремих викликів detail endpoint, які можуть перевищити timeout.
+Якщо міграцію ще не застосовано або PostgREST ще не оновив schema cache,
+генератор безпечно переходить на наявні `search_zagulyaky_people_v1` і
+`search_zagulyaky_documents_v1`: сторінки та sitemap все одно з'являться, але
+без повного тексту транскрипції до наступного деплою після міграції.
+
+RPC повертає лише записи зі статусом `published` і
+`privacy_status = cleared`, а також відсіює можливих живих осіб без чинного
+дозволу. Із відповідей до статичного HTML потрапляють тільки
+поля, призначені для публічного каталогу: назва/ПІБ, короткий опис, тип і дата
+події, публічні назви місць, бібліографічне посилання на джерело та
+транскрипція `originalText`/`normalizedText`, яку повернув саме публічний
+detail RPC. Це робить інформацію з картки доступною пошуку за ПІБ, місцем,
+датою й текстом запису.
+
+Генератор навмисно не додає до HTML або sitemap:
+
+- ідентифікатори записів, автора чи дані приватних сесій;
+- приватний payload, сирий імпортований допис, чернетки ШІ/OCR або нотатки
+  учасників (навіть якщо вони є у внутрішньому записі);
+- URL приватних джерел, тимчасові Facebook CDN URL, storage-path або дані
+  вкладень;
+- записи, що не були опубліковані або не пройшли перевірку приватності.
+
+Для запуску достатньо browser-safe змінних `VITE_SUPABASE_URL` і
+`VITE_SUPABASE_PUBLISHABLE_KEY`. Не використовуйте
+`SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` або інші серверні секрети:
+вони не потрібні та відхиляються перевіркою генератора.
 
 ## Локальна перевірка
 
-Статичний каталог доступний із Vite одразу:
-
-```text
-http://localhost:5173/sitemap.xml
-```
-
-Він має містити два URL каталогу та не має містити `/zahuliaky/my`.
-
-Щоб згенерувати динамічний файл для production-build, використайте локальний `.env.local` без виведення його в консоль:
+Після локального build виконайте генератор із `.env.local`, де є тільки
+публічні Supabase credentials:
 
 ```powershell
 npm.cmd run build
-node --env-file=.env.local .\scripts\generate-zagulyaky-sitemap.mjs
+node --env-file=.env.local .\scripts\generate-zagulyaky-public-pages.mjs
 npm.cmd run verify:pages
 ```
 
-Файл буде створено у `dist/sitemap-zagulyaky.xml`. Його можна переглянути після запуску preview-сервера. Для короткої перевірки саме через Vite dev server дозволено явно вказати output у `public`:
-
-```powershell
-node --env-file=.env.local .\scripts\generate-zagulyaky-sitemap.mjs --output .\public\sitemap-zagulyaky.xml
-```
-
-Після цього відкрийте:
+Перевірте щонайменше:
 
 ```text
-http://localhost:5173/sitemap-zagulyaky.xml
+dist/sitemap.xml
+dist/sitemap-zagulyaky.xml
+dist/zahuliaky/index.html
+dist/zahuliaky/documents/index.html
 ```
 
-Це локальний generated artifact: не додавайте його до коміту. Після перевірки приберіть лише цей файл, якщо він більше не потрібен:
+Згенеровані файли в `dist` — build artifacts. Не додавайте їх до Git і не
+редагуйте вручну.
 
-```powershell
-Remove-Item -LiteralPath .\public\sitemap-zagulyaky.xml
-```
+## Критичне правило оновлення
 
-## Перед production-деплоєм
+Статична картка відображає стан каталогу на момент останнього деплою. Тому
+потрібен новий deployment у `main` після кожної зміни, яка впливає на
+публічність або зміст картки:
 
-Поточний workflow навмисно не змінювався цією задачею. Власник релізу має додати крок **після отримання VITE Supabase public values і перед upload `dist`**:
+- опублікування чи зняття з публікації;
+- зміна `privacy_status`;
+- зміна slug, назви, ПІБ, короткого опису, події, місця або джерела;
+- об'єднання, видалення або приховування публічного запису.
 
-```yaml
-- name: Generate public Zagulyaky sitemap
-  env:
-    VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-    VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-  run: node scripts/generate-zagulyaky-sitemap.mjs
-```
+Без нового деплою Google і відвідувачі можуть тимчасово бачити застарілу
+статичну версію, навіть якщо Supabase уже містить новий стан. Звичайний
+production workflow генерує сторінки та sitemap автоматично — вручну копіювати
+файли з `dist` не потрібно.
 
-Якщо генерація виконується після `npm run build`, вона записує файл безпосередньо в `dist`, тому повторний build після неї не потрібен. Не підставляйте `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` або інший серверний секрет: вони не потрібні для цього завдання й будуть відхилені генератором.
+## Після production-деплою
 
-Після першого production-деплою перевірте обидва sitemap у Search Console. Кореневий sitemap уже оголошений у `robots.txt`; dynamic sitemap також оголошений там окремим рядком.
+1. Переконайтеся, що відкриваються обидва sitemap:
+
+   ```text
+   https://trekerrodu.com.ua/sitemap.xml
+   https://trekerrodu.com.ua/sitemap-zagulyaky.xml
+   ```
+
+2. У Google Search Console додайте або оновіть обидва sitemap.
+3. Через URL Inspection перевірте каталог і щонайменше одну картку людини та
+   одну картку документа. Для перевірки використовуйте саме канонічні URL.
+4. Переконайтеся, що URL не має `noindex`, не веде на `404.html`, а canonical
+   збігається з URL картки.
+
+Sitemap допомагає Google знайти сторінки, але не гарантує індексацію кожної з
+них і не є гарантією появи інформації у відповідях будь-яких ШІ-сервісів.
+Відстежуйте фактичний стан у Search Console.

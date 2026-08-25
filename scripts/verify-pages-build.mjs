@@ -124,6 +124,53 @@ for (const url of privateSitemapUrls) {
   expectNotIncludes(sitemap, `<loc>${url}</loc>`, "sitemap.xml");
 }
 
+const zagulyakySitemap = readDistFile("sitemap-zagulyaky.xml");
+const zagulyakyDetailUrls = [...zagulyakySitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
+const zagulyakyCataloguePages = [
+  {
+    path: "zahuliaky/index.html",
+    url: "https://trekerrodu.com.ua/zahuliaky",
+    title: "Загуляки людей — публічний генеалогічний каталог | Трекер Роду",
+    heading: "Загуляки людей",
+  },
+  {
+    path: "zahuliaky/documents/index.html",
+    url: "https://trekerrodu.com.ua/zahuliaky/documents",
+    title: "Загуляки документів — публічний генеалогічний каталог | Трекер Роду",
+    heading: "Загуляки документів",
+  },
+];
+
+expectMatches(zagulyakySitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>/i, "sitemap-zagulyaky.xml");
+for (const url of zagulyakyDetailUrls) {
+  if (!/^https:\/\/trekerrodu\.com\.ua\/zahuliaky\/(?:people|documents)\/[^/?#]+$/.test(url)) {
+    fail(`sitemap-zagulyaky.xml contains an invalid public detail URL: ${url}`);
+    continue;
+  }
+  const pathname = new URL(url).pathname.replace(/^\//, "");
+  const html = readDistFile(`${pathname}/index.html`);
+  expectIncludes(html, `<link rel="canonical" href="${url}"`, `${pathname}/index.html`);
+  expectIncludes(html, 'name="robots" content="index, follow"', `${pathname}/index.html`);
+  expectIncludes(html, `name="zagulyaky-static-seo" content="${url}"`, `${pathname}/index.html`);
+  expectIncludes(html, 'type="application/ld+json"', `${pathname}/index.html JSON-LD`);
+  expectIncludes(html, 'class="zagulyaky-static-seo"', `${pathname}/index.html static fallback`);
+  const h1Count = (html.match(/<h1[\s>]/g) ?? []).length;
+  if (h1Count !== 1) fail(`${pathname}/index.html must contain exactly one h1, got ${h1Count}`);
+}
+if (new Set(zagulyakyDetailUrls).size !== zagulyakyDetailUrls.length) {
+  fail("sitemap-zagulyaky.xml contains duplicate detail URLs.");
+}
+for (const page of zagulyakyCataloguePages) {
+  const html = readDistFile(page.path);
+  expectIncludes(html, `<title>${page.title}</title>`, page.path);
+  expectIncludes(html, `<link rel="canonical" href="${page.url}"`, page.path);
+  expectIncludes(html, 'name="robots" content="index, follow"', page.path);
+  expectIncludes(html, `name="zagulyaky-static-seo" content="${page.url}"`, page.path);
+  expectIncludes(html, 'type="application/ld+json"', `${page.path} JSON-LD`);
+  expectIncludes(html, `<h1>${page.heading}</h1>`, page.path);
+  expectIncludes(html, 'class="zagulyaky-static-seo"', `${page.path} static fallback`);
+}
+
 for (const page of publicPages) {
   const html = readDistFile(page.path);
   expectIncludes(html, `<title>${page.title}</title>`, page.path);

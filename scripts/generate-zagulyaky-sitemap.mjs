@@ -7,10 +7,17 @@ export const DEFAULT_ZAGULYAKY_SITEMAP_OUTPUT = "dist/sitemap-zagulyaky.xml";
 export const ZAGULYAKY_SITEMAP_PAGE_SIZE = 50;
 const MAX_PAGES_PER_KIND = 20_000;
 
-const PUBLIC_RPC_BY_KIND = Object.freeze({
+export const PUBLIC_RPC_BY_KIND = Object.freeze({
   person: "search_zagulyaky_people_v1",
   document: "search_zagulyaky_documents_v1",
 });
+// All requests made from CI use the anonymous, intentionally public API
+// surface.  Keep this allow-list narrow: the static renderer needs list pages
+// plus the existing redacted detail facade, never tables or private helpers.
+export const PUBLIC_ZAGULYAKY_INDEXING_RPCS = Object.freeze([
+  ...Object.values(PUBLIC_RPC_BY_KIND),
+  "list_public_zagulyaky_indexing_v1",
+]);
 
 function text(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -158,10 +165,18 @@ function searchPayload(rawPayload) {
   return { items, nextCursor: publishedAt && id ? { publishedAt, id } : null };
 }
 
-export async function collectPublishedZagulyakyUrls({ requestRpc, siteOrigin = ZAGULYAKY_SITEMAP_ORIGIN }) {
+/**
+ * Collects only the public search projection that is already safe for an
+ * anonymous catalogue visitor.  Keep the original RPC row available to the
+ * static SEO renderer, but never put it into the sitemap itself.
+ */
+export async function collectPublishedZagulyakyEntries({
+  requestRpc,
+  siteOrigin = ZAGULYAKY_SITEMAP_ORIGIN,
+}) {
   if (typeof requestRpc !== "function") throw new Error("A public RPC requester is required.");
 
-  const urls = [];
+  const entriesByUrl = new Map();
   for (const [kind, rpcName] of Object.entries(PUBLIC_RPC_BY_KIND)) {
     let cursor = null;
     const seenCursors = new Set();
@@ -179,7 +194,13 @@ export async function collectPublishedZagulyakyUrls({ requestRpc, siteOrigin = Z
       for (const item of payload.items) {
         // Do not put title, source, contributor, record id, or any other
         // returned field into the sitemap. A canonical public URL needs only a slug.
-        urls.push(publicZagulyakaUrl(kind, item.slug, siteOrigin));
+        const url = publicZagulyakaUrl(kind, item.slug, siteOrigin);
+        entriesByUrl.set(url, {
+          kind,
+          slug: text(item.slug),
+          url,
+          item,
+        });
       }
 
       if (!payload.nextCursor) break;
@@ -199,12 +220,17 @@ export async function collectPublishedZagulyakyUrls({ requestRpc, siteOrigin = Z
     }
   }
 
-  return [...new Set(urls)].sort((left, right) => left.localeCompare(right, "en"));
+  return [...entriesByUrl.values()].sort((left, right) => left.url.localeCompare(right.url, "en"));
+}
+
+export async function collectPublishedZagulyakyUrls(options) {
+  const entries = await collectPublishedZagulyakyEntries(options);
+  return entries.map((entry) => entry.url);
 }
 
 export async function requestPublicZagulyakyRpc({ supabaseUrl, publishableKey, rpcName, parameters, fetchImpl = fetch }) {
-  if (!Object.values(PUBLIC_RPC_BY_KIND).includes(rpcName)) {
-    throw new Error("The sitemap generator may call only public Zagulyaky search RPCs.");
+  if (!PUBLIC_ZAGULYAKY_INDEXING_RPCS.includes(rpcName)) {
+    throw new Error("The public indexing generator may call only approved public Zagulyaky RPCs.");
   }
   const endpoint = new URL(`/rest/v1/rpc/${rpcName}`, `${supabaseUrl}/`);
   const response = await fetchImpl(endpoint, {
@@ -218,7 +244,18 @@ export async function requestPublicZagulyakyRpc({ supabaseUrl, publishableKey, r
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
-    throw new Error(`The public ${rpcName} RPC returned HTTP ${response.status}.`);
+    let diagnostic = "";
+    try {
+      const payload = await response.json();
+      const row = payload && typeof payload === "object" ? payload : {};
+      const code = typeof row.code === "string" ? row.code.trim() : "";
+      const message = typeof row.message === "string" ? row.message.trim() : "";
+      const hint = typeof row.hint === "string" ? row.hint.trim() : "";
+      diagnostic = [code, message, hint].filter(Boolean).join(" — ").slice(0, 600);
+    } catch {
+      // The HTTP status remains useful when a gateway did not return JSON.
+    }
+    throw new Error(`The public ${rpcName} RPC returned HTTP ${response.status}${diagnostic ? `: ${diagnostic}` : "."}`);
   }
   try {
     return await response.json();
