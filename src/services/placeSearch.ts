@@ -8,9 +8,19 @@ export interface PlaceSuggestion {
   geo: GeoPoint;
 }
 
+/**
+ * Ordinary map fields can represent a house or another exact point.  Some
+ * catalogue fields instead need a reusable settlement pin, so they opt in to
+ * this narrower Nominatim mode explicitly.
+ */
+export interface PlaceSearchOptions {
+  settlementOnly?: boolean;
+}
+
 type NominatimResult = {
   place_id?: number | string;
   osm_id?: number | string;
+  osm_type?: string;
   display_name?: string;
   name?: string;
   lat?: string;
@@ -19,6 +29,18 @@ type NominatimResult = {
   class?: string;
   address?: Record<string, string>;
 };
+
+function stableExternalId(item: NominatimResult): string {
+  const osmId = item.osm_id == null ? "" : String(item.osm_id).trim();
+  const prefix = ({
+    node: "N",
+    way: "W",
+    relation: "R",
+  } as Record<string, string | undefined>)[String(item.osm_type ?? "").trim().toLowerCase()];
+  if (prefix && osmId) return `${prefix}${osmId}`;
+  const placeId = item.place_id == null ? "" : String(item.place_id).trim();
+  return placeId;
+}
 
 type PlaceSearchResponse = {
   suggestions?: PlaceSuggestion[];
@@ -81,15 +103,20 @@ function normalizeSuggestion(value: unknown): PlaceSuggestion | null {
   };
 }
 
-function mapNominatimResults(data: NominatimResult[], normalized: string): PlaceSuggestion[] {
+function mapNominatimResults(
+  data: NominatimResult[],
+  normalized: string,
+  settlementOnly = false,
+): PlaceSuggestion[] {
   return data
     .map((item): PlaceSuggestion | null => {
       const latitude = Number(item.lat);
       const longitude = Number(item.lon);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
       const label = item.name || item.display_name || normalized;
+      const externalId = stableExternalId(item);
       return {
-        id: String(item.place_id ?? item.osm_id ?? `${latitude}:${longitude}`),
+        id: externalId || `${latitude}:${longitude}`,
         label,
         details: placeDetails(item.address) || item.display_name || "",
         geo: {
@@ -97,36 +124,57 @@ function mapNominatimResults(data: NominatimResult[], normalized: string): Place
           latitude,
           longitude,
           source: "search",
-          precision: item.type === "house" || item.class === "building" ? "exact" : "settlement",
+          precision: settlementOnly || (item.type !== "house" && item.class !== "building")
+            ? "settlement"
+            : "exact",
           provider: "OpenStreetMap Nominatim",
-          externalId: String(item.place_id ?? item.osm_id ?? ""),
+          externalId: externalId || null,
         },
       };
     })
     .filter((item): item is PlaceSuggestion => Boolean(item));
 }
 
-function mapNominatimReverseResult(item: NominatimResult, latitude: number, longitude: number): PlaceSuggestion {
+function mapNominatimReverseResult(
+  item: NominatimResult,
+  latitude: number,
+  longitude: number,
+  settlementOnly = false,
+): PlaceSuggestion | null {
+  // A settlement result is a catalogue entity.  Its own Nominatim geometry is
+  // deliberately retained instead of the arbitrary point that was clicked
+  // somewhere within (or near) that settlement.
+  const resultLatitude = settlementOnly ? Number(item.lat) : latitude;
+  const resultLongitude = settlementOnly ? Number(item.lon) : longitude;
+  if (!Number.isFinite(resultLatitude) || !Number.isFinite(resultLongitude)) return null;
   const label = placeLabel(item.address, item.name || item.display_name || "Позначка на карті");
+  const externalId = stableExternalId(item);
   return {
-    id: String(item.place_id ?? item.osm_id ?? `${latitude}:${longitude}`),
+    id: externalId || `${resultLatitude}:${resultLongitude}`,
     label,
     details: placeDetails(item.address) || item.display_name || "",
     geo: {
       displayName: item.display_name || label,
-      latitude,
-      longitude,
-      source: "map_click",
-      precision: item.type === "house" || item.class === "building" ? "exact" : "approximate",
+      latitude: resultLatitude,
+      longitude: resultLongitude,
+      source: settlementOnly ? "search" : "map_click",
+      precision: settlementOnly
+        ? "settlement"
+        : item.type === "house" || item.class === "building"
+          ? "exact"
+          : "approximate",
       provider: "OpenStreetMap Nominatim",
-      externalId: String(item.place_id ?? item.osm_id ?? ""),
+      externalId: externalId || null,
     },
   };
 }
 
-async function searchPlacesViaServer(normalized: string): Promise<PlaceSuggestion[]> {
+async function searchPlacesViaServer(
+  normalized: string,
+  settlementOnly = false,
+): Promise<PlaceSuggestion[]> {
   const { data, error } = await getSupabaseClient().functions.invoke("search-places", {
-    body: { query: normalized },
+    body: { query: normalized, settlementOnly },
   });
   if (error) {
     const context = "context" in error ? error.context : null;
@@ -149,9 +197,13 @@ async function searchPlacesViaServer(normalized: string): Promise<PlaceSuggestio
     .filter((item): item is PlaceSuggestion => Boolean(item));
 }
 
-async function reversePlaceViaServer(latitude: number, longitude: number): Promise<PlaceSuggestion | null> {
+async function reversePlaceViaServer(
+  latitude: number,
+  longitude: number,
+  settlementOnly = false,
+): Promise<PlaceSuggestion | null> {
   const { data, error } = await getSupabaseClient().functions.invoke("search-places", {
-    body: { latitude, longitude },
+    body: { latitude, longitude, settlementOnly },
   });
   if (error) {
     const context = "context" in error ? error.context : null;
@@ -172,7 +224,10 @@ async function reversePlaceViaServer(latitude: number, longitude: number): Promi
   return normalizeSuggestion(payload?.place) ?? null;
 }
 
-async function searchPlacesDirectly(normalized: string): Promise<PlaceSuggestion[]> {
+async function searchPlacesDirectly(
+  normalized: string,
+  settlementOnly = false,
+): Promise<PlaceSuggestion[]> {
   const params = new URLSearchParams({
     q: normalized,
     format: "jsonv2",
@@ -180,6 +235,7 @@ async function searchPlacesDirectly(normalized: string): Promise<PlaceSuggestion
     limit: "7",
     "accept-language": "uk",
   });
+  if (settlementOnly) params.set("featureType", "settlement");
   const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
     headers: { Accept: "application/json" },
   });
@@ -187,18 +243,23 @@ async function searchPlacesDirectly(normalized: string): Promise<PlaceSuggestion
     throw new Error("Не вдалося знайти місце.");
   }
   const data = await response.json() as NominatimResult[];
-  return mapNominatimResults(data, normalized);
+  return mapNominatimResults(data, normalized, settlementOnly);
 }
 
-async function reversePlaceDirectly(latitude: number, longitude: number): Promise<PlaceSuggestion | null> {
+async function reversePlaceDirectly(
+  latitude: number,
+  longitude: number,
+  settlementOnly = false,
+): Promise<PlaceSuggestion | null> {
   const params = new URLSearchParams({
     lat: String(latitude),
     lon: String(longitude),
     format: "jsonv2",
     addressdetails: "1",
-    zoom: "18",
+    zoom: settlementOnly ? "15" : "18",
     "accept-language": "uk",
   });
+  if (settlementOnly) params.set("layer", "address");
   const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
     headers: { Accept: "application/json" },
   });
@@ -206,23 +267,27 @@ async function reversePlaceDirectly(latitude: number, longitude: number): Promis
     throw new Error("Не вдалося визначити назву місця.");
   }
   const item = await response.json() as NominatimResult;
-  return mapNominatimReverseResult(item, latitude, longitude);
+  return mapNominatimReverseResult(item, latitude, longitude, settlementOnly);
 }
 
-export async function searchPlaces(query: string): Promise<PlaceSuggestion[]> {
+export async function searchPlaces(
+  query: string,
+  options: PlaceSearchOptions = {},
+): Promise<PlaceSuggestion[]> {
   const normalized = query.trim();
   if (normalized.length < 3) return [];
+  const settlementOnly = options.settlementOnly === true;
   try {
     if (isSupabaseConfigured) {
-      return await searchPlacesViaServer(normalized);
+      return await searchPlacesViaServer(normalized, settlementOnly);
     }
-    return await searchPlacesDirectly(normalized);
+    return await searchPlacesDirectly(normalized, settlementOnly);
   } catch (error) {
     if (!isSupabaseConfigured) {
       throw new Error("Не вдалося підключитися до пошуку місць. Спробуйте вибрати точку на карті вручну.");
     }
     try {
-      return await searchPlacesDirectly(normalized);
+      return await searchPlacesDirectly(normalized, settlementOnly);
     } catch {
       throw new Error(
         error instanceof Error && error.message && !error.message.includes("Failed to fetch")
@@ -233,15 +298,20 @@ export async function searchPlaces(query: string): Promise<PlaceSuggestion[]> {
   }
 }
 
-export async function reversePlace(latitude: number, longitude: number): Promise<PlaceSuggestion | null> {
+export async function reversePlace(
+  latitude: number,
+  longitude: number,
+  options: PlaceSearchOptions = {},
+): Promise<PlaceSuggestion | null> {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  const settlementOnly = options.settlementOnly === true;
   try {
     if (isSupabaseConfigured) {
-      return await reversePlaceViaServer(latitude, longitude);
+      return await reversePlaceViaServer(latitude, longitude, settlementOnly);
     }
-    return await reversePlaceDirectly(latitude, longitude);
+    return await reversePlaceDirectly(latitude, longitude, settlementOnly);
   } catch (error) {
     if (!isSupabaseConfigured) throw error;
-    return reversePlaceDirectly(latitude, longitude);
+    return reversePlaceDirectly(latitude, longitude, settlementOnly);
   }
 }

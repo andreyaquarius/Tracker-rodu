@@ -28,6 +28,7 @@ const corsHeaders = {
 type NominatimResult = {
   place_id?: number | string;
   osm_id?: number | string;
+  osm_type?: string;
   display_name?: string;
   name?: string;
   lat?: string;
@@ -36,6 +37,18 @@ type NominatimResult = {
   class?: string;
   address?: Record<string, string>;
 };
+
+function stableExternalId(item: NominatimResult): string {
+  const osmId = item.osm_id == null ? "" : String(item.osm_id).trim();
+  const prefix = ({
+    node: "N",
+    way: "W",
+    relation: "R",
+  } as Record<string, string | undefined>)[String(item.osm_type ?? "").trim().toLowerCase()];
+  if (prefix && osmId) return `${prefix}${osmId}`;
+  const placeId = item.place_id == null ? "" : String(item.place_id).trim();
+  return placeId;
+}
 
 function isValidCoordinate(latitude: number, longitude: number): boolean {
   return Number.isFinite(latitude) &&
@@ -79,15 +92,20 @@ function placeLabel(address: Record<string, string> | undefined, fallback: strin
   ].find((value) => typeof value === "string" && value.trim()) ?? fallback;
 }
 
-function mapNominatimResults(data: NominatimResult[], normalized: string) {
+function mapNominatimResults(
+  data: NominatimResult[],
+  normalized: string,
+  settlementOnly = false,
+) {
   return data
     .map((item) => {
       const latitude = Number(item.lat);
       const longitude = Number(item.lon);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
       const label = item.name || item.display_name || normalized;
+      const externalId = stableExternalId(item);
       return {
-        id: String(item.place_id ?? item.osm_id ?? `${latitude}:${longitude}`),
+        id: externalId || `${latitude}:${longitude}`,
         label,
         details: placeDetails(item.address) || item.display_name || "",
         geo: {
@@ -95,29 +113,46 @@ function mapNominatimResults(data: NominatimResult[], normalized: string) {
           latitude,
           longitude,
           source: "search",
-          precision: item.type === "house" || item.class === "building" ? "exact" : "settlement",
+          precision: settlementOnly || (item.type !== "house" && item.class !== "building")
+            ? "settlement"
+            : "exact",
           provider: "OpenStreetMap Nominatim",
-          externalId: String(item.place_id ?? item.osm_id ?? ""),
+          externalId: externalId || null,
         },
       };
     })
     .filter(Boolean);
 }
 
-function mapNominatimReverseResult(item: NominatimResult, latitude: number, longitude: number) {
+function mapNominatimReverseResult(
+  item: NominatimResult,
+  latitude: number,
+  longitude: number,
+  settlementOnly = false,
+) {
+  // For a catalogue settlement we save Nominatim's own point, never the
+  // arbitrary raw map click used to look it up.
+  const resultLatitude = settlementOnly ? Number(item.lat) : latitude;
+  const resultLongitude = settlementOnly ? Number(item.lon) : longitude;
+  if (!Number.isFinite(resultLatitude) || !Number.isFinite(resultLongitude)) return null;
   const label = placeLabel(item.address, item.name || item.display_name || "Позначка на карті");
+  const externalId = stableExternalId(item);
   return {
-    id: String(item.place_id ?? item.osm_id ?? `${latitude}:${longitude}`),
+    id: externalId || `${resultLatitude}:${resultLongitude}`,
     label,
     details: placeDetails(item.address) || item.display_name || "",
     geo: {
       displayName: item.display_name || label,
-      latitude,
-      longitude,
-      source: "map_click",
-      precision: item.type === "house" || item.class === "building" ? "exact" : "approximate",
+      latitude: resultLatitude,
+      longitude: resultLongitude,
+      source: settlementOnly ? "search" : "map_click",
+      precision: settlementOnly
+        ? "settlement"
+        : item.type === "house" || item.class === "building"
+          ? "exact"
+          : "approximate",
       provider: "OpenStreetMap Nominatim",
-      externalId: String(item.place_id ?? item.osm_id ?? ""),
+      externalId: externalId || null,
     },
   };
 }
@@ -143,13 +178,15 @@ Deno.serve(async (request) => {
 
   try {
     await requireAuthenticatedUser(request);
-    const { query, latitude, longitude } = await request.json() as {
+    const { query, latitude, longitude, settlementOnly } = await request.json() as {
       query?: unknown;
       latitude?: unknown;
       longitude?: unknown;
+      settlementOnly?: unknown;
     };
     const reverseLatitude = Number(latitude);
     const reverseLongitude = Number(longitude);
+    const canonicalSettlement = settlementOnly === true;
     const appUrl = Deno.env.get("APP_URL")?.trim() || "https://trekerrodu.com.ua";
 
     if (isValidCoordinate(reverseLatitude, reverseLongitude)) {
@@ -158,9 +195,10 @@ Deno.serve(async (request) => {
         lon: String(reverseLongitude),
         format: "jsonv2",
         addressdetails: "1",
-        zoom: "18",
+        zoom: canonicalSettlement ? "15" : "18",
         "accept-language": "uk",
       });
+      if (canonicalSettlement) params.set("layer", "address");
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -177,7 +215,14 @@ Deno.serve(async (request) => {
           return json({ error: "Сервіс пошуку місць тимчасово недоступний." }, 502);
         }
         const data = await response.json() as NominatimResult;
-        return json({ place: mapNominatimReverseResult(data, reverseLatitude, reverseLongitude) });
+        return json({
+          place: mapNominatimReverseResult(
+            data,
+            reverseLatitude,
+            reverseLongitude,
+            canonicalSettlement,
+          ),
+        });
       } finally {
         clearTimeout(timeoutId);
       }
@@ -194,6 +239,7 @@ Deno.serve(async (request) => {
       limit: "7",
       "accept-language": "uk",
     });
+    if (canonicalSettlement) params.set("featureType", "settlement");
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -210,7 +256,7 @@ Deno.serve(async (request) => {
         return json({ error: "Сервіс пошуку місць тимчасово недоступний." }, 502);
       }
       const data = await response.json() as NominatimResult[];
-      return json({ suggestions: mapNominatimResults(data, normalized) });
+      return json({ suggestions: mapNominatimResults(data, normalized, canonicalSettlement) });
     } finally {
       clearTimeout(timeoutId);
     }

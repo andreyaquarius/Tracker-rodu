@@ -152,7 +152,7 @@ test("the database regression test covers the new Advisor surface and ACL split"
   assert.match(pgtapContract, /select plan\(18\);/i);
   assert.match(
     pgtapContract,
-    /the regression list covers all 64 protected Security Advisor entry points/i,
+    /the regression list covers all 67 protected Security Advisor entry points/i,
   );
   assert.match(
     pgtapContract,

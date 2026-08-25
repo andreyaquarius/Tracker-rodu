@@ -619,6 +619,7 @@ export function ZagulyakaDraftDialog({
                     placeName={draft.originGeo?.displayName ?? (draft.kind === "person" ? draft.originPlace : draft.officialPlace)}
                     onChange={(value) => update("originGeo", value)}
                     allowMarkerColor={false}
+                    canonicalSettlement
                   />
                   <GeoPlaceField
                     label="Точка: де знайдено запис"
@@ -626,6 +627,7 @@ export function ZagulyakaDraftDialog({
                     placeName={draft.foundGeo?.displayName ?? draft.foundPlace}
                     onChange={updateFoundGeo}
                     allowMarkerColor={false}
+                    canonicalSettlement
                   />
                   <ZagulyakaRouteMap
                     origin={draft.originGeo}

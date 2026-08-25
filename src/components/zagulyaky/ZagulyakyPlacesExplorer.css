@@ -49,6 +49,7 @@
 .zagulyaky-places-explorer__controls {
   display: grid;
   grid-template-columns: minmax(260px, 1.2fr) minmax(0, 2fr);
+  align-items: start;
   gap: 14px;
   margin-top: 20px;
   padding: 14px;
@@ -56,7 +57,7 @@
   border: 1px solid var(--line, #d8dfda);
   border-radius: 13px;
 }
-.zagulyaky-places-explorer label { display: grid; min-width: 0; gap: 5px; }
+.zagulyaky-places-explorer label { display: grid; min-width: 0; align-content: start; gap: 5px; }
 .zagulyaky-places-explorer label > span,
 .zagulyaky-places-explorer legend {
   color: var(--muted, #53665f);
@@ -81,6 +82,7 @@
 .zagulyaky-places-explorer__place-picker { display: grid; align-content: start; gap: 9px; }
 .zagulyaky-places-explorer__place-picker small { color: var(--muted, #53665f); font-size: 11px; line-height: 1.35; }
 .zagulyaky-places-explorer__filters {
+  position: relative;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -89,8 +91,23 @@
   gap: 10px;
   border: 0;
 }
-.zagulyaky-places-explorer__filters legend { width: 100%; margin-bottom: 3px; }
-.zagulyaky-places-explorer__filters > button { align-self: end; min-height: 40px; }
+.zagulyaky-places-explorer__filters legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.zagulyaky-places-explorer__filters > button {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-width: 140px;
+  min-height: 40px;
+}
 .zagulyaky-places-explorer__filters > button:disabled { cursor: not-allowed; opacity: .55; }
 .zagulyaky-places-explorer__status {
   min-height: 22px;
@@ -191,7 +208,7 @@
 
 @media (max-width: 860px) {
   .zagulyaky-places-explorer__controls { grid-template-columns: 1fr; }
-  .zagulyaky-places-explorer__filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .zagulyaky-places-explorer__filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (max-width: 620px) {
   .zagulyaky-places-explorer { padding: 14px; border-radius: 14px; }
@@ -199,7 +216,7 @@
   .zagulyaky-places-explorer__view-switch { align-self: flex-start; }
   .zagulyaky-places-explorer__controls { padding: 11px; }
   .zagulyaky-places-explorer__filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .zagulyaky-places-explorer__filters > button { grid-column: span 2; }
+  .zagulyaky-places-explorer__filters > button { width: 100%; }
   .zagulyaky-places-explorer__connection-group { padding: 12px; }
   .zagulyaky-places-explorer__connection-group li { flex-direction: column; }
   .zagulyaky-places-explorer__records-button { width: 100%; }

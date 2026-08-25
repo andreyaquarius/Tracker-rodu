@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(30);
+select plan(39);
 
 select has_function(
   'public',
@@ -41,6 +41,140 @@ select ok(
     and has_function_privilege('anon', 'public.get_public_zagulyaky_place_connections_v1(jsonb,text,jsonb,integer,integer)'::regprocedure, 'EXECUTE')
     and not has_function_privilege('anon', 'security_private.zagulyaky_public_place_key_v1(jsonb)'::regprocedure, 'EXECUTE'),
   'anonymous callers can use the two facades but not their private place-key helper'
+);
+
+select is(
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Любимівка, Новомосковський повіт, Катеринославська губернія","latitude":48.3731,"longitude":35.1734,"source":"search","precision":"settlement","provider":"Provider A","externalId":"first-pin"}'::jsonb
+  ),
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"  Любимівка , Новомосковський повіт , Катеринославська губернія  ","latitude":48.3722,"longitude":35.1751,"source":"search","precision":"settlement","provider":"Provider B","externalId":"second-pin"}'::jsonb
+  ),
+  'the same contextual settlement keeps one key despite small coordinate and provider differences'
+);
+
+select is(
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Любимівка, Новомосковський повіт, Катеринославська губернія","latitude":48.3722,"longitude":35.1751,"source":"search","precision":"settlement","provider":"Provider B","externalId":"second-pin"}'::jsonb
+  ),
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Оновлена назва каталогу B","latitude":48.3900,"longitude":35.1751,"source":"search","precision":"settlement","provider":"Provider B","externalId":"second-pin"}'::jsonb
+  ),
+  'a trusted provider object resolves through every registered alias, not only the first anchor'
+);
+
+select isnt(
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Любимівка","latitude":48.3731,"longitude":35.1734,"source":"map_click","precision":"settlement","provider":"","externalId":""}'::jsonb
+  ),
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Любимівка","latitude":50.4501,"longitude":30.5234,"source":"map_click","precision":"settlement","provider":"","externalId":""}'::jsonb
+  ),
+  'distant settlements with the same ambiguous short label remain separate'
+);
+
+select is(
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Політанки, Шаргородська міська громада, Жмеринський район, Вінницька область, Україна","latitude":48.6379,"longitude":28.1277,"source":"map_click","precision":"exact","provider":"Provider A","externalId":"result-a"}'::jsonb
+  ),
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Політанки, Шаргородська міська громада, Жмеринський район, Вінницька область, Україна","latitude":48.6379,"longitude":28.1277,"source":"map_click","precision":"exact","provider":"Provider B","externalId":"result-b"}'::jsonb
+  ),
+  'identical labels and coordinates ignore differing technical provider result IDs'
+);
+
+select isnt(
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Точний клік, район, область","latitude":48.0000,"longitude":30.0000,"source":"map_click","precision":"exact","provider":"Provider A","externalId":"shared-id"}'::jsonb
+  ),
+  security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Точний клік, район, область","latitude":48.1000,"longitude":30.0000,"source":"map_click","precision":"exact","provider":"Provider A","externalId":"shared-id"}'::jsonb
+  ),
+  'a provider ID never merges distant exact map clicks'
+);
+
+create temporary table pgtap_canonical_chain (
+  first_place uuid not null,
+  last_place uuid not null
+) on commit drop;
+do $chain$
+declare
+  first_id uuid;
+begin
+  first_id := security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Ланцюг, тестовий район, тестова область","latitude":47.0000,"longitude":31.0000,"source":"map_click","precision":"exact","provider":"","externalId":""}'::jsonb
+  );
+  perform security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Ланцюг, тестовий район, тестова область","latitude":47.0040,"longitude":31.0000,"source":"map_click","precision":"exact","provider":"","externalId":""}'::jsonb
+  );
+  insert into pgtap_canonical_chain (first_place, last_place)
+  values (
+    first_id,
+    security_private.resolve_zagulyaky_canonical_place_v1(
+      '{"displayName":"Пгтап Ланцюг, тестовий район, тестова область","latitude":47.0080,"longitude":31.0000,"source":"map_click","precision":"exact","provider":"","externalId":""}'::jsonb
+    )
+  );
+end;
+$chain$;
+select isnt(
+  (select first_place from pgtap_canonical_chain),
+  (select last_place from pgtap_canonical_chain),
+  'an immutable canonical anchor prevents transitive nearby-point chaining'
+);
+
+create temporary table pgtap_provider_chain (
+  first_place uuid not null,
+  last_place uuid not null
+) on commit drop;
+do $provider_chain$
+declare
+  first_id uuid;
+begin
+  first_id := security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Provider anchor","latitude":45.0000,"longitude":30.0000,"source":"search","precision":"settlement","provider":"Provider Chain","externalId":"shared-settlement"}'::jsonb
+  );
+  perform security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Provider middle","latitude":45.0405,"longitude":30.0000,"source":"search","precision":"settlement","provider":"Provider Chain","externalId":"shared-settlement"}'::jsonb
+  );
+  insert into pgtap_provider_chain (first_place, last_place)
+  values (
+    first_id,
+    security_private.resolve_zagulyaky_canonical_place_v1(
+      '{"displayName":"Пгтап Provider distant","latitude":45.0810,"longitude":30.0000,"source":"search","precision":"settlement","provider":"Provider Chain","externalId":"shared-settlement"}'::jsonb
+    )
+  );
+end;
+$provider_chain$;
+select isnt(
+  (select first_place from pgtap_provider_chain),
+  (select last_place from pgtap_provider_chain),
+  'provider aliases are always measured from the immutable anchor and cannot form a distance chain'
+);
+
+do $visible_point$
+begin
+  perform security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Видима точка, тестовий район, тестова область","latitude":49.0000,"longitude":32.0000,"source":"search","precision":"settlement","provider":"Provider A","externalId":"visible-a"}'::jsonb
+  );
+  perform security_private.resolve_zagulyaky_canonical_place_v1(
+    '{"displayName":"Пгтап Видима точка, тестовий район, тестова область","latitude":49.0010,"longitude":32.0010,"source":"search","precision":"settlement","provider":"Provider B","externalId":"visible-b"}'::jsonb
+  );
+end;
+$visible_point$;
+select is(
+  security_private.zagulyaky_public_place_point_v1(
+    '{"displayName":"Пгтап Видима точка, тестовий район, тестова область","latitude":49.0010,"longitude":32.0010,"source":"search","precision":"settlement","provider":"Provider B","externalId":"visible-b"}'::jsonb
+  ) -> 'geo' ->> 'latitude',
+  '49.001',
+  'the public point returns the current visible record coordinate, never a private registry anchor'
+);
+
+select ok(
+  not has_table_privilege('anon', 'security_private.zagulyaky_canonical_places', 'SELECT')
+    and not has_table_privilege('authenticated', 'security_private.zagulyaky_canonical_place_aliases', 'SELECT')
+    and not has_function_privilege('anon', 'security_private.resolve_zagulyaky_canonical_place_v1(jsonb)'::regprocedure, 'EXECUTE')
+    and not has_function_privilege('authenticated', 'security_private.resolve_zagulyaky_canonical_place_v1(jsonb)'::regprocedure, 'EXECUTE'),
+  'canonical registry rows and mutating resolver remain private'
 );
 
 insert into public.zagulyaky_records (

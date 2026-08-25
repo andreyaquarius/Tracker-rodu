@@ -197,12 +197,13 @@ test("wires event-specific markers and exact manual map points through the UI", 
   assert.match(mapPage, /personEventIconSvgMarkup\(/u);
 });
 
-test("requests house-level reverse geocoding and preserves the provider display name", () => {
+test("keeps house-level reverse geocoding as the default and supports settlement reverse mode", () => {
   const service = source("../src/services/placeSearch.ts");
   const edgeFunction = source("../supabase/functions/search-places/index.ts");
 
+  assert.match(service, /zoom:\s*settlementOnly\s*\?\s*["']15["']\s*:\s*["']18["']/u);
+  assert.match(edgeFunction, /zoom:\s*canonicalSettlement\s*\?\s*["']15["']\s*:\s*["']18["']/u);
   for (const implementation of [service, edgeFunction]) {
-    assert.match(implementation, /zoom:\s*["']18["']/u);
     assert.match(implementation, /displayName:\s*item\.display_name\s*\|\|\s*label/u);
   }
 });

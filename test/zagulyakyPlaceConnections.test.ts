@@ -10,6 +10,10 @@ const exactCatalogueFilterMigration = readFileSync(
   new URL("../supabase/migrations/202608250009_zagulyaky_public_place_exact_catalog_filters.sql", import.meta.url),
   "utf8",
 );
+const coordinateCanonicalizationMigration = readFileSync(
+  new URL("../supabase/migrations/202608250010_zagulyaky_public_place_coordinate_canonicalization.sql", import.meta.url),
+  "utf8",
+);
 const service = readFileSync(
   new URL("../src/services/zagulyakyService.ts", import.meta.url),
   "utf8",
@@ -63,6 +67,35 @@ test("the public RPC contract limits selectors and filters to safe confirmed fac
     migration,
     /grant execute on function[\s\S]*?public\.list_public_zagulyaky_places_v1[\s\S]*?to anon, authenticated, service_role/s,
   );
+});
+
+test("same contextual settlement coordinates are canonicalised without globally merging short names", () => {
+  assert.match(coordinateCanonicalizationMigration, /create table if not exists security_private\.zagulyaky_canonical_places/);
+  assert.match(coordinateCanonicalizationMigration, /create table if not exists security_private\.zagulyaky_canonical_place_aliases/);
+  assert.match(coordinateCanonicalizationMigration, /create or replace function security_private\.resolve_zagulyaky_canonical_place_v1/);
+  assert.match(coordinateCanonicalizationMigration, /v_label_parts >= 3/);
+  assert.match(coordinateCanonicalizationMigration, /candidate\.distance_km <= 0\.05/);
+  assert.match(coordinateCanonicalizationMigration, /candidate\.distance_km <= 0\.5/);
+  assert.match(coordinateCanonicalizationMigration, /candidate\.distance_km <= 5/);
+  assert.match(coordinateCanonicalizationMigration, /v_source = 'search'/);
+  assert.match(coordinateCanonicalizationMigration, /v_precision = 'settlement'/);
+  assert.match(coordinateCanonicalizationMigration, /match_method text not null/);
+  assert.match(coordinateCanonicalizationMigration, /zagulyaky_canonical_place_aliases_provider_idx/);
+  assert.match(coordinateCanonicalizationMigration, /from security_private\.zagulyaky_canonical_place_aliases place_alias[\s\S]*?join security_private\.zagulyaky_canonical_places place_row/);
+  assert.match(coordinateCanonicalizationMigration, /v_latitude,[\s\S]*?place_row\.latitude,[\s\S]*?place_row\.longitude/);
+  assert.match(coordinateCanonicalizationMigration, /coalesce\(cardinality\(v_candidate_ids\), 0\) = 1/);
+  assert.match(coordinateCanonicalizationMigration, /Only already-public person pins participate/);
+  assert.match(coordinateCanonicalizationMigration, /record_row\.status = 'published'/);
+  assert.match(coordinateCanonicalizationMigration, /record_row\.privacy_status = 'cleared'/);
+  assert.match(coordinateCanonicalizationMigration, /after insert or update of origin_geo, found_geo, payload, kind, status, privacy_status, possible_living_person/);
+  assert.match(coordinateCanonicalizationMigration, /The anchor never moves after creation/);
+  assert.match(coordinateCanonicalizationMigration, /'latitude', v_geo -> 'latitude'/);
+  assert.match(coordinateCanonicalizationMigration, /private registry contributes the opaque grouping/);
+  assert.match(coordinateCanonicalizationMigration, /drop index if exists public\.zagulyaky_records_public_person_origin_place_key_idx/);
+  assert.match(coordinateCanonicalizationMigration, /drop index if exists public\.zagulyaky_records_public_person_found_place_key_idx/);
+  assert.doesNotMatch(coordinateCanonicalizationMigration, /round\(latitude_value/);
+  assert.doesNotMatch(coordinateCanonicalizationMigration, /source_location_(?:normalized|text)/i);
+  assert.doesNotMatch(coordinateCanonicalizationMigration, /found_location_(?:normalized|text)/i);
 });
 
 test("browser requests the public-only RPCs and passes only safe connection filters", () => {
@@ -119,4 +152,31 @@ test("the settlement map remains contained on narrow displays", () => {
   );
   assert.match(explorerStyles, /@media \(max-width: 620px\)/);
   assert.match(explorerStyles, /\.zagulyaky-places-explorer__map \{ height: min\(62vh, 390px\); min-height: 270px; \}/);
+});
+
+test("place-picker and filters stay compactly aligned across responsive grids", () => {
+  assert.match(
+    explorerStyles,
+    /\.zagulyaky-places-explorer__controls\s*\{[\s\S]*?align-items:\s*start;/,
+  );
+  assert.match(
+    explorerStyles,
+    /\.zagulyaky-places-explorer label\s*\{[\s\S]*?align-content:\s*start;/,
+  );
+  assert.match(
+    explorerStyles,
+    /\.zagulyaky-places-explorer__filters legend\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?clip:\s*rect\(0 0 0 0\);/,
+  );
+  assert.match(
+    explorerStyles,
+    /\.zagulyaky-places-explorer__filters > button\s*\{[\s\S]*?grid-column:\s*1 \/ -1;[\s\S]*?justify-self:\s*end;/,
+  );
+  assert.match(
+    explorerStyles,
+    /@media \(max-width: 860px\)\s*\{[\s\S]*?\.zagulyaky-places-explorer__filters\s*\{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/,
+  );
+  assert.match(
+    explorerStyles,
+    /@media \(max-width: 620px\)\s*\{[\s\S]*?\.zagulyaky-places-explorer__filters\s*\{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}[\s\S]*?\.zagulyaky-places-explorer__filters > button\s*\{ width: 100%; \}/,
+  );
 });

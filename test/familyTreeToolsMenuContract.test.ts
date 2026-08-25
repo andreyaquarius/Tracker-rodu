@@ -203,7 +203,7 @@ test("circular chart keeps full labels fitted and supports a reversible fullscre
   assert.doesNotMatch(circularChart, /fontSize:\s*22 \* worldPerPixel/);
   assert.match(modal, /fullscreen\?: boolean/);
   assert.match(modal, /fullscreen \? "modal-fullscreen"/);
-  assert.match(modal, /if \(fullscreen \|\| !isDraggableModalViewport\(\)/);
+  assert.match(modal, /if \(fullscreen \|\| (?:viewportBounded \|\| )?!isDraggableModalViewport\(\)/);
 });
 
 test("circular chart can change its central person and select any rendered sector", () => {
