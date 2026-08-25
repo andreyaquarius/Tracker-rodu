@@ -20,7 +20,7 @@ const MAX_NOTE_LIMIT = 200;
 
 type JsonRecord = Record<string, unknown>;
 
-/** Starts (or rotates) the one-time `/start` code for the authenticated user. */
+/** Starts (or rotates) the one-time Telegram connection code for the authenticated user. */
 export async function createTelegramLink(
   aiOptIn: boolean,
   expectedUserId?: string,

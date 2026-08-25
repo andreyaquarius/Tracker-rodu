@@ -108,6 +108,26 @@ test("Telegram functions are present as separate webhook and worker boundaries",
   assert.doesNotMatch(workerSource, /console\.log\(/i);
 });
 
+test("Telegram links an unlinked private chat from a pasted code after bare /start", () => {
+  const webhook = readFileSync(
+    resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts"),
+    "utf8",
+  );
+
+  // The initial Telegram Start button sends `/start` without an argument. It
+  // must ask for the Tracker-generated code, then treat the next normal text
+  // from an unlinked private chat as that code rather than queuing a Note.
+  assert.match(webhook, /Команду \/start вдруге вводити не потрібно/i);
+  assert.match(webhook, /async function isTelegramAccountLinked\(/);
+  assert.match(webhook, /\.from\("telegram_account_links"\)[\s\S]*?\.eq\("telegram_user_id", message\.telegramUserId\)[\s\S]*?\.eq\("private_chat_id", message\.privateChatId\)/);
+  assert.match(webhook, /await isTelegramAccountLinked\(message\)[\s\S]*?await enqueueMessage\(message\)[\s\S]*?await consumeTelegramLink\(message, message\.text\)/);
+  assert.match(webhook, /p_start_code: code/);
+
+  // Existing deep links and the previously documented manual command remain
+  // valid while users transition to the simpler copy-and-paste flow.
+  assert.match(webhook, /Retain compatibility with old deep links[\s\S]*?return consumeTelegramLink\(message, command\.argument\)/);
+});
+
 test("Telegram is temporarily Notes-only and never wakes the Zagulyaka worker", () => {
   const webhook = readFileSync(
     resolve(process.cwd(), "supabase/functions/telegram-webhook/index.ts"),

@@ -78,7 +78,7 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
       setUnlinkConfirming(false);
       setNotice(result.linked
         ? "Цей Telegram-акаунт уже підключено."
-        : "Код готовий. Надішліть його боту командою /start.");
+        : "Код готовий. У Telegram-боті натисніть «Розпочати», вставте код у чат і надішліть його без команди /start.");
     } catch (linkError) {
       setError(telegramSettingsErrorMessage(linkError));
     } finally {
@@ -92,7 +92,7 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
     try {
       if (!navigator.clipboard?.writeText) throw new Error("COPY_UNAVAILABLE");
       await navigator.clipboard.writeText(code);
-      setNotice(`Код скопійовано. Відкрийте Telegram-бота й надішліть: /start ${code}`);
+      setNotice("Код скопійовано. У Telegram-боті натисніть «Розпочати», вставте код у чат і надішліть його без команди /start.");
     } catch {
       setError("Не вдалося скопіювати код. Скопіюйте його вручну.");
     }
@@ -128,7 +128,10 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
 
   const linkName = telegramAccountName(linkStatus);
   const startCode = linkStart?.startCode?.trim() ?? "";
-  const botUrl = telegramBotUrl(startCode);
+  // Open the regular bot chat rather than a deep link.  A new user first taps
+  // Telegram's «Розпочати» button, then sends the one-time code as a normal
+  // message; this is clearer than asking them to compose `/start CODE`.
+  const botUrl = telegramBotUrl();
   const isLinked = Boolean(linkStatus?.linked);
 
   return (
@@ -168,7 +171,7 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
               </p>
             </>
           ) : (
-            <p>Створіть одноразовий код, а потім надішліть його боту командою <code>/start код</code>.</p>
+            <p>Створіть одноразовий код. У Telegram-боті натисніть «Розпочати», а потім вставте й надішліть код у чат без команди <code>/start</code>.</p>
           )}
         </div>
         <div className="telegram-bot-settings__connection-actions">
@@ -190,13 +193,18 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
       {startCode && !isLinked ? (
         <div className="telegram-bot-settings__code" role="status">
           <div>
-            <span>Одноразовий код</span>
+            <span>Код підключення</span>
             <code>{startCode}</code>
             <small>{linkStart?.expiresAt ? `Дійсний до ${formatDateTime(linkStart.expiresAt)}.` : "Строк дії коду обмежений."}</small>
+            <ol className="telegram-bot-settings__link-steps">
+              <li>Скопіюйте цей код.</li>
+              <li>Відкрийте бота й натисніть «Розпочати».</li>
+              <li>Вставте код у чат і надішліть його без команди <code>/start</code>.</li>
+            </ol>
           </div>
           <div className="telegram-bot-settings__code-actions">
-            <button type="button" className="button button-secondary" onClick={() => void copyStartCode()}>Скопіювати код</button>
-            {botUrl ? <a className="button button-primary" href={botUrl} target="_blank" rel="noreferrer noopener">Відкрити бота</a> : null}
+            <button type="button" className="button button-secondary" onClick={() => void copyStartCode()}>1. Скопіювати код</button>
+            {botUrl ? <a className="button button-primary" href={botUrl} target="_blank" rel="noreferrer noopener">2. Відкрити бота</a> : null}
           </div>
         </div>
       ) : null}
@@ -223,13 +231,10 @@ function telegramAccountName(status: TelegramAccountLinkStatus | null): string {
 }
 
 /** A Telegram bot username is public configuration, not an API credential. */
-function telegramBotUrl(startCode = ""): string | null {
+function telegramBotUrl(): string | null {
   const username = import.meta.env.VITE_TELEGRAM_BOT_USERNAME?.trim().replace(/^@+/, "") ?? "";
   if (!/^[A-Za-z][A-Za-z0-9_]{4,63}bot$/iu.test(username)) return null;
-  const base = `https://t.me/${username}`;
-  return startCode && /^[A-Za-z0-9_-]{1,64}$/u.test(startCode)
-    ? `${base}?start=${encodeURIComponent(startCode)}`
-    : base;
+  return `https://t.me/${username}`;
 }
 
 function formatDateTime(value: string): string {

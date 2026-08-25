@@ -58,7 +58,7 @@ export interface TelegramAccountLinkStatus {
   aiOptIn: boolean;
 }
 
-/** A short, expiring code a user sends to the Telegram bot as `/start CODE`. */
+/** A short, expiring code a user sends to the Telegram bot after tapping «Розпочати». */
 export interface TelegramLinkStart extends TelegramAccountLinkStatus {
   startCode: string | null;
   expiresAt: string | null;

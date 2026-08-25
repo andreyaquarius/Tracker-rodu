@@ -141,7 +141,7 @@ test("Notes are a standalone Tracker Rodu section, not a Zagulyaky tab", () => {
 
   assert.doesNotMatch(pageSource, /TelegramNotesPanel/);
   assert.match(notesPageSource, /components\/notes\/TelegramNotesPanel/);
-  assert.match(notesPageSource, /<h1 id="notes-page-title">Нотатки<\/h1>/);
+  assert.match(notesPanelSource, /<h1 id="notes-page-title">Нотатки<\/h1>/);
   assert.doesNotMatch(notesPanelSource, /href="\/zahuliaky\/my">Мої чернетки Загуляк<\/a>/);
   assert.match(sidebarSource, /onOpenNotes: \(\) => void/);
   assert.match(sidebarSource, /onClick=\{openNotes\}/);

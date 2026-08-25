@@ -550,6 +550,56 @@ function safeRpcFailure(error: unknown): WebhookProblem {
   return new WebhookProblem("SERVICE_OPERATION_FAILED", 503);
 }
 
+function linkCode(value: string | null | undefined): string {
+  const normalized = value?.trim() ?? "";
+  // Keep accepting the same conservative token alphabet as the legacy
+  // `/start CODE` deep-link flow. The database still hashes and validates the
+  // one-time code; this only keeps arbitrary chat text out of that RPC.
+  return /^[A-Za-z0-9_-]{1,160}$/u.test(normalized) ? normalized : "";
+}
+
+async function isTelegramAccountLinked(message: TelegramMessage): Promise<boolean> {
+  const client = serviceClient();
+  // This is a server-side, service-key-only lookup. It exposes no account data
+  // to Telegram; it solely decides whether a normal private message is a Note
+  // or the one-time code requested immediately after `/start`.
+  const { data, error } = await client
+    .from("telegram_account_links")
+    .select("owner_id")
+    .eq("telegram_user_id", message.telegramUserId)
+    .eq("private_chat_id", message.privateChatId)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw safeRpcFailure(error);
+  return Boolean(data);
+}
+
+async function consumeTelegramLink(message: TelegramMessage, rawCode: string | null | undefined): Promise<BotReply> {
+  const code = linkCode(rawCode);
+  if (!code) {
+    return {
+      text: "Це не схоже на код підключення. Відкрийте «Налаштування» у Трекері Роду, створіть або скопіюйте одноразовий код і надішліть його сюди одним повідомленням без команди /start.",
+    };
+  }
+
+  const client = serviceClient();
+  const { data, error } = await client.rpc("service_consume_telegram_link_v1", {
+    p_start_code: code,
+    p_telegram_user_id: message.telegramUserId,
+    p_private_chat_id: message.privateChatId,
+    p_telegram_username: message.username,
+    p_display_name: message.displayName,
+  });
+  if (error) throw safeRpcFailure(error);
+  return record(data).linked === true
+    ? {
+        text: "Telegram підключено. Тепер надішліть або перешліть текст, допис чи посилання — я одразу збережу це як приватну Нотатку. Чернетки Загуляк і обробка фото в боті тимчасово вимкнені.",
+      }
+    : {
+        text: "Код недійсний або строк його дії минув. Створіть новий код у «Налаштуваннях» Трекера Роду та надішліть його сюди одним повідомленням.",
+      };
+}
+
 async function handleCommand(
   message: TelegramMessage,
   command: NonNullable<ReturnType<typeof parseCommand>>,
@@ -567,26 +617,14 @@ async function handleCommand(
   }
 
   if (command.name === "start") {
-    const client = serviceClient();
-    const code = command.argument && /^[A-Za-z0-9_-]{1,160}$/u.test(command.argument)
-      ? command.argument
-      : "";
-    if (!code) {
-      return { text: "Відкрийте «Налаштування» у Трекері Роду, створіть одноразовий код підключення й надішліть сюди команду /start з цим кодом." };
+    if (!command.argument) {
+      return {
+        text: "Вітаю! Вставте сюди одноразовий код, який ви створили у «Налаштуваннях» Трекера Роду, і надішліть його одним повідомленням. Команду /start вдруге вводити не потрібно.",
+      };
     }
-    const { data, error } = await client.rpc("service_consume_telegram_link_v1", {
-      p_start_code: code,
-      p_telegram_user_id: message.telegramUserId,
-      p_private_chat_id: message.privateChatId,
-      p_telegram_username: message.username,
-      p_display_name: message.displayName,
-    });
-    if (error) throw safeRpcFailure(error);
-    return record(data).linked === true
-      ? {
-          text: "Telegram підключено. Тепер надішліть або перешліть текст, допис чи посилання — я одразу збережу це як приватну Нотатку. Чернетки Загуляк і обробка фото в боті тимчасово вимкнені.",
-        }
-      : { text: "Посилання недійсне, прострочене або цей Telegram уже підключений до іншого акаунта." };
+    // Retain compatibility with old deep links and users who still send
+    // `/start CODE`. The shorter bare-code flow below is now the default.
+    return consumeTelegramLink(message, command.argument);
   }
 
   if (command.name === "zagulyaka") {
@@ -737,7 +775,11 @@ async function handleRequest(request: Request): Promise<Response> {
     if (!message) return json({ ok: true });
 
     const command = parseCommand(message.text);
-    const reply = command ? await handleCommand(message, command) : await enqueueMessage(message);
+    const reply = command
+      ? await handleCommand(message, command)
+      : await isTelegramAccountLinked(message)
+        ? await enqueueMessage(message)
+        : await consumeTelegramLink(message, message.text);
     await sendBotReply(message.privateChatId, reply);
     return json({ ok: true });
   } catch (error) {

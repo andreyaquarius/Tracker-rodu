@@ -26,6 +26,13 @@ test("Telegram connection controls live in Settings, while the bot is Notes-only
   assert.match(settings, /unlinkTelegramAccount/);
   assert.match(settings, /Від’єднати Telegram/);
   assert.match(settings, /createTelegramLink\(false, accountId\)/);
+  assert.match(settings, /У Telegram-боті натисніть «Розпочати», вставте код у чат і надішліть його без команди \/start/);
+  assert.match(settings, /<ol className="telegram-bot-settings__link-steps">/);
+  assert.match(settings, /Відкрийте бота й натисніть «Розпочати»/);
+  assert.match(settings, /Вставте код у чат і надішліть його без команди <code>\/start<\/code>/);
+  assert.match(settings, /function telegramBotUrl\(\): string \| null/);
+  assert.doesNotMatch(settings, /\?start=/);
+  assert.doesNotMatch(settings, /\/start \$\{code\}/);
   assert.match(settings, /Чернетки Загуляк і обробка фото[\s\S]*?тимчасово вимкнені/);
   assert.doesNotMatch(settings, /setTelegramAiOptIn/);
   assert.doesNotMatch(settings, /Дозволити ШІ готувати приватні чернетки Загуляк/);

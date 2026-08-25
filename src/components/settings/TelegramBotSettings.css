@@ -140,6 +140,16 @@
   letter-spacing: .08em;
 }
 
+.telegram-bot-settings__link-steps {
+  display: grid;
+  gap: 3px;
+  margin: 12px 0 0;
+  padding-left: 1.25rem;
+  color: var(--ink);
+  font-size: .9rem;
+  line-height: 1.45;
+}
+
 .telegram-bot-settings__confirm {
   border-color: #d6aa56;
   background: #fff8e8;
