@@ -41,7 +41,11 @@ function normalizeOrigin(value: string): string {
 }
 
 function allowedOrigins(): Set<string> {
-  const configured = [Deno.env.get("ALLOWED_ORIGIN"), Deno.env.get("APP_URL")]
+  const configured = [
+    Deno.env.get("ALLOWED_ORIGINS"),
+    Deno.env.get("ALLOWED_ORIGIN"),
+    Deno.env.get("APP_URL"),
+  ]
     .flatMap((value) => (value ?? "").split(","))
     .map(normalizeOrigin)
     .filter(Boolean);
@@ -167,6 +171,35 @@ function isPublicDerivativePath(storagePath: string): boolean {
     && isUuid(segments[2]);
 }
 
+/**
+ * Storage generates a signed URL even when the referenced object was removed.
+ * Do an inexpensive, service-role-only directory lookup first so moderators do
+ * not receive a blank tab and cannot mistake a missing original for a browser
+ * problem.  The object name is a random upload id and its parent directory is
+ * already scoped to the record owner, so this does not broaden Storage access.
+ */
+async function privateObjectPresence(
+  adminClient: ReturnType<typeof createClient>,
+  bucket: string,
+  storagePath: string,
+): Promise<"exists" | "missing" | "unavailable"> {
+  const slash = storagePath.lastIndexOf("/");
+  if (slash <= 0 || slash === storagePath.length - 1) return "missing";
+  const directory = storagePath.slice(0, slash);
+  const fileName = storagePath.slice(slash + 1);
+  try {
+    const { data, error } = await adminClient.storage.from(bucket).list(directory, {
+      limit: 100,
+      offset: 0,
+      search: fileName,
+    });
+    if (error) return "unavailable";
+    return data?.some((item) => item.name === fileName) ? "exists" : "missing";
+  } catch {
+    return "unavailable";
+  }
+}
+
 async function preparePublication(
   callerClient: ReturnType<typeof createClient>,
   attachmentId: string,
@@ -287,10 +320,17 @@ Deno.serve(async (request) => {
       if (bucket !== "zagulyaky-private" || !path || path.includes("..")) {
         return json(request, { error: "ATTACHMENT_NOT_AVAILABLE" }, 404);
       }
+      const presence = await privateObjectPresence(adminClient, bucket, path);
+      if (presence === "missing") {
+        return json(request, { error: "ATTACHMENT_PRIVATE_OBJECT_NOT_FOUND" }, 404);
+      }
+      if (presence === "unavailable") {
+        return json(request, { error: "ATTACHMENT_PRIVATE_STORAGE_CHECK_FAILED" }, 502);
+      }
       const { data: signed, error: signedError } = await adminClient.storage
         .from(bucket)
         .createSignedUrl(path, SIGNED_URL_SECONDS);
-      if (signedError || !signed?.signedUrl) return json(request, { error: "ATTACHMENT_NOT_AVAILABLE" }, 404);
+      if (signedError || !signed?.signedUrl) return json(request, { error: "ATTACHMENT_PRIVATE_SIGNING_FAILED" }, 502);
       return json(request, {
         url: signed.signedUrl,
         expiresIn: SIGNED_URL_SECONDS,
@@ -312,7 +352,7 @@ Deno.serve(async (request) => {
         const { data: original, error: downloadError } = await adminClient.storage
           .from(preparation.privateBucket)
           .download(preparation.privatePath);
-        if (downloadError || !original) return json(request, { error: "ATTACHMENT_NOT_AVAILABLE" }, 404);
+        if (downloadError || !original) return json(request, { error: "ATTACHMENT_PRIVATE_OBJECT_NOT_FOUND" }, 404);
         const { error: uploadError } = await adminClient.storage
           .from(preparation.publicBucket)
           .upload(preparation.publicPath, original, {

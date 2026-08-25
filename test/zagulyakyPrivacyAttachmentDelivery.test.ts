@@ -16,6 +16,10 @@ const stage0Edge = readFileSync(
 );
 const config = readFileSync(new URL("../supabase/config.toml", import.meta.url), "utf8");
 const publicService = readFileSync(new URL("../src/services/zagulyakyService.ts", import.meta.url), "utf8");
+const publicDetail = readFileSync(
+  new URL("../src/components/zagulyaky/ZagulyakaDetailDialog.tsx", import.meta.url),
+  "utf8",
+);
 const adminService = readFileSync(new URL("../src/services/zagulyakyAdminService.ts", import.meta.url), "utf8");
 const moderationPanel = readFileSync(
   new URL("../src/components/admin/ZagulyakyModerationPanel.tsx", import.meta.url),
@@ -59,13 +63,21 @@ test("private evidence is reviewed and published only through controlled server 
   assert.match(migration, /create or replace function public\.get_public_zagulyaka_attachment_delivery_v1\([\s\S]*?security definer[\s\S]*?set search_path = pg_catalog, public, security_private, pg_temp/s);
   assert.match(attachmentEdge, /type AttachmentAction = "delivery" \| "preview" \| "publish" \| "revoke"/);
   assert.match(attachmentEdge, /callerClient\.auth\.getUser\(\)/);
+  assert.match(attachmentEdge, /function privateObjectPresence/);
+  assert.match(attachmentEdge, /ATTACHMENT_PRIVATE_OBJECT_NOT_FOUND/);
+  assert.match(attachmentEdge, /ATTACHMENT_PRIVATE_STORAGE_CHECK_FAILED/);
+  assert.match(attachmentEdge, /ATTACHMENT_PRIVATE_SIGNING_FAILED/);
   assert.match(attachmentEdge, /adminClient\.storage\s*\.from\(preparation\.privateBucket\)\s*\.download\(preparation\.privatePath\)/);
   assert.match(attachmentEdge, /createSignedUrl\(path, SIGNED_URL_SECONDS\)/);
   assert.match(config, /\[functions\.zagulyaka-attachment\][\s\S]*?verify_jwt = false/);
   assert.match(publicService, /functions\.invoke\("zagulyaka-attachment"/);
+  assert.match(publicService, /deliveryUnavailable: true/);
+  assert.match(publicDetail, /Файл тимчасово недоступний/);
   assert.match(adminService, /invokeAttachmentWorkflow\("preview", attachmentId\)/);
   assert.match(moderationPanel, /Переглянути приватно/);
   assert.match(moderationPanel, /Створити публічну копію/);
+  assert.match(moderationPanel, /Опублікувати цей запис і створити публічні копії/);
+  assert.match(moderationPanel, /for \(const attachmentId of pendingAttachmentIds\)/);
   assert.doesNotMatch(
     migration,
     /select a, r into attachment, target_record/i,

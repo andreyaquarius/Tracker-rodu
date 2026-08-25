@@ -879,12 +879,15 @@ async function hydratePublicMedia(media: ZagulyakaDetail["publicMedia"]): Promis
         body: { action: "delivery", attachmentId: item.id },
       });
       const url = !error ? text(value(record(data), "url")) : "";
-      return url ? { ...item, url } : null;
+      // The public record already says this attachment was approved. Do not
+      // silently hide it when a short-lived delivery URL cannot be issued;
+      // the detail view can then explain that the file is temporarily down.
+      return url ? { ...item, url } : { ...item, deliveryUnavailable: true };
     } catch {
-      return null;
+      return { ...item, deliveryUnavailable: true };
     }
   }));
-  return delivered.filter((item): item is ZagulyakaDetail["publicMedia"][number] => item !== null);
+  return delivered;
 }
 
 function mapEditableDraft(payload: Record<string, unknown>): ZagulyakaEditableDraft {

@@ -193,7 +193,14 @@ export function ZagulyakaDetailDialog({
                 <div className="zagulyaky-media-grid">
                   {detail.publicMedia.map((media) => {
                     const safeMediaUrl = sanitizeWebUrl(media.url);
-                    if (!safeMediaUrl) return null;
+                    if (!safeMediaUrl) {
+                      return (
+                        <div className="zagulyaky-media-unavailable" key={media.id} role="status">
+                          <strong>{media.name}</strong>
+                          <span>{media.deliveryUnavailable ? "Файл тимчасово недоступний" : "Файл не має безпечного посилання"}</span>
+                        </div>
+                      );
+                    }
                     return (
                       <a href={safeMediaUrl} target="_blank" rel="noreferrer noopener" key={media.id}>
                         {media.mimeType.startsWith("image/")

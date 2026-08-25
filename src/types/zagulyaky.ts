@@ -202,6 +202,8 @@ export interface ZagulyakaDetail {
     mimeType: string;
     url: string;
     alt: string;
+    /** The metadata is public, but a short-lived delivery URL was unavailable. */
+    deliveryUnavailable?: boolean;
   }>;
   publishedAt: string;
   updatedAt: string;

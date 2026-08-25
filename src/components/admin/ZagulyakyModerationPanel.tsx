@@ -147,6 +147,15 @@ function errorMessage(error: unknown): string {
   if (message.includes("ATTACHMENT_COPY_FAILED")) {
     return "Не вдалося створити контрольовану публічну копію вкладення. Спробуйте ще раз.";
   }
+  if (message.includes("ATTACHMENT_PRIVATE_OBJECT_NOT_FOUND")) {
+    return "Оригінальний файл вкладення вже відсутній у приватному сховищі. Попросіть автора додати файл повторно: перегляд і публічну копію відновити без оригіналу неможливо.";
+  }
+  if (message.includes("ATTACHMENT_PRIVATE_STORAGE_CHECK_FAILED") || message.includes("ATTACHMENT_PRIVATE_SIGNING_FAILED")) {
+    return "Не вдалося безпечно перевірити або відкрити приватне вкладення. Спробуйте ще раз; якщо помилка повторюється, перевірте деплой Edge Function вкладень.";
+  }
+  if (message.includes("ATTACHMENT_FUNCTION_NOT_CONFIGURED")) {
+    return "Сервер перегляду вкладень не налаштований. Потрібен деплой Edge Functions із серверним ключем Supabase.";
+  }
   if (message.includes("PUBLIC_ATTACHMENT_CLEANUP_PENDING")) {
     return "Попередня публічна копія ще безпечно очищується. Дочекайтеся завершення черги перед повторною публікацією.";
   }
@@ -161,6 +170,9 @@ function errorMessage(error: unknown): string {
   }
   if (message.includes("ATTACHMENT_OPERATION_FAILED")) {
     return "Не вдалося безпечно обробити вкладення. Спробуйте ще раз або перевірте журнал модерації.";
+  }
+  if (message.includes("PGRST202") || /Could not find the function.*zagulyaka_attachment/i.test(message)) {
+    return "Серверні зміни для вкладень ще не застосовані. Застосуйте міграції Supabase та задеплойте Edge Functions.";
   }
   if (message.includes("ATTACHMENT_REVOKED_STORAGE_RETRY_REQUIRED")) {
     return "Публічний доступ уже відкликано. Файл додано до черги повторного очищення сховища.";
@@ -404,13 +416,22 @@ export function ZagulyakyModerationPanel({
       setError("Для повернення або відхилення додайте зрозумілий коментар модератора.");
       return;
     }
+    const pendingAttachmentIds = action === "publish"
+      ? (detail?.attachments ?? [])
+        .filter((attachment) => attachment.is_public_derivative !== true)
+        .map((attachment) => detailText(attachment, "id"))
+        .filter((attachmentId) => attachmentId !== "—")
+      : [];
+    const publishConfirmation = pendingAttachmentIds.length
+      ? `Опублікувати цей запис і створити публічні копії ${pendingAttachmentIds.length} вкладень?`
+      : "Опублікувати цей запис?";
     if (["publish", "reject", "archive"].includes(action)
-      && !window.confirm(action === "publish" ? "Опублікувати цей запис?" : "Підтвердити цю модераторську дію?")) return;
+      && !window.confirm(action === "publish" ? publishConfirmation : "Підтвердити цю модераторську дію?")) return;
     setSubmitting(true);
     setError("");
     setSuccess("");
     try {
-      await reviewAdminZagulyaka({
+      const reviewed = await reviewAdminZagulyaka({
         recordId: selected.id,
         expectedLockVersion: selected.lockVersion,
         action,
@@ -419,8 +440,33 @@ export function ZagulyakyModerationPanel({
         privacyStatus,
         publicSlug,
       });
-      setSuccess("Модераторське рішення збережено в журналі аудиту.");
-      setSelected(null);
+      if (action === "publish" && pendingAttachmentIds.length) {
+        // Copy one original at a time. A batch can contain several 25 MiB PDFs,
+        // and parallel browser requests would needlessly exhaust Edge/Storage
+        // memory while the moderator is waiting for a single confirmation.
+        const publicationErrors: unknown[] = [];
+        for (const attachmentId of pendingAttachmentIds) {
+          try {
+            await publishAdminZagulyakaAttachment(attachmentId);
+          } catch (publicationError) {
+            publicationErrors.push(publicationError);
+          }
+        }
+        if (publicationErrors.length) {
+          setError(`Запис опубліковано, але ${publicationErrors.length} із ${pendingAttachmentIds.length} вкладень не вдалося скопіювати. ${errorMessage(publicationErrors[0])}`);
+          setSuccess("Модераторське рішення збережено в журналі аудиту.");
+          // Keep the newly published record open so the moderator can retry an
+          // individual controlled copy without having to find it in the queue.
+          setSelected(reviewed);
+          setReviewRefreshKey((value) => value + 1);
+        } else {
+          setSuccess(`Запис і ${pendingAttachmentIds.length} вкладень опубліковано. Публічні копії доступні з картки.`);
+          setSelected(null);
+        }
+      } else {
+        setSuccess("Модераторське рішення збережено в журналі аудиту.");
+        setSelected(null);
+      }
       await refreshQueue();
     } catch (requestError) {
       setError(errorMessage(requestError));

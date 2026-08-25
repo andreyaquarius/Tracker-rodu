@@ -244,6 +244,10 @@ jobs:
             echo "::error::pdf-gateway is missing after Edge Function deployment."
             exit 1
           fi
+          if ! supabase functions list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])zagulyaka-attachment([[:space:]]|$)'; then
+            echo "::error::zagulyaka-attachment is missing after Edge Function deployment."
+            exit 1
+          fi
           if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])PDF_EXPORT_WORKER_URL([[:space:]]|$)'; then
             echo "::error::PDF_EXPORT_WORKER_URL is missing after deployment."
             exit 1
