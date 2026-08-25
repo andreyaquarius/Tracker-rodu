@@ -213,7 +213,15 @@ export interface ZagulyakyPeopleFilters {
   query: string;
   originPlace: string;
   foundPlace: string;
+  /**
+   * Opaque selectors issued by the public settlement explorer. They make a
+   * connection click exact even when the visible source text spells the same
+   * settlement differently. They are never shown as editable user input.
+   */
+  originPlaceKey: string;
+  foundPlaceKey: string;
   eventType: ZagulyakaEventType | "";
+  eventRole: ZagulyakaEventRoleCode | "";
   yearFrom: number | null;
   yearTo: number | null;
   verificationStatus: ZagulyakaVerificationStatus | "";
@@ -228,6 +236,66 @@ export interface ZagulyakyDocumentFilters {
   yearFrom: number | null;
   yearTo: number | null;
   verificationStatus: ZagulyakaVerificationStatus | "";
+}
+
+/**
+ * A confirmed public settlement extracted from a published person's
+ * `origin_geo` or `found_geo` map point.  The key is an opaque server-issued
+ * identity; it deliberately is not a record or author identifier.
+ */
+export interface ZagulyakyPublicSettlement {
+  key: string;
+  label: string;
+  geo: GeoPoint | null;
+  recordCount: number;
+  originRecordCount: number;
+  foundRecordCount: number;
+}
+
+export type ZagulyakyPlaceConnectionDirection = "incoming" | "outgoing" | "local";
+
+export interface ZagulyakyPlaceConnectionFilters {
+  eventType: ZagulyakaEventType | "";
+  eventRole: ZagulyakaEventRoleCode | "";
+  yearFrom: number | null;
+  yearTo: number | null;
+}
+
+/**
+ * A public relationship between exactly two confirmed map points on a person
+ * Zagulyaka: origin and the place where the record was found.  It is never a
+ * claimed travel route.
+ */
+export interface ZagulyakyPlaceConnection {
+  key: string;
+  direction: ZagulyakyPlaceConnectionDirection;
+  relatedPlace: ZagulyakyPublicSettlement;
+  recordCount: number;
+  eventTypes: ZagulyakaEventType[];
+  yearFrom: number | null;
+  yearTo: number | null;
+  sampleRecords: Array<{
+    slug: string;
+    title: string;
+    eventType: ZagulyakaEventType | null;
+    eventDateText: string;
+    eventYearFrom: number | null;
+    eventYearTo: number | null;
+  }>;
+}
+
+export interface ZagulyakyPlaceConnectionGroup {
+  placeCount: number;
+  recordCount: number;
+  hasMore: boolean;
+  items: ZagulyakyPlaceConnection[];
+}
+
+export interface ZagulyakyPlaceConnections {
+  place: ZagulyakyPublicSettlement;
+  incoming: ZagulyakyPlaceConnectionGroup;
+  outgoing: ZagulyakyPlaceConnectionGroup;
+  local: ZagulyakyPlaceConnectionGroup;
 }
 
 export interface ZagulyakySearchResult<T> {

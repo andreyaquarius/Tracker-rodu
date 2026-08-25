@@ -1,16 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ZagulyakaDetailDialog } from "../components/zagulyaky/ZagulyakaDetailDialog";
 import { ZagulyakaDraftDialog } from "../components/zagulyaky/ZagulyakaDraftDialog";
+import {
+  ZagulyakyPlacesExplorer,
+  type ZagulyakyPlacesExplorerFilters,
+  type ZagulyakyPlacesExplorerOpenRecordsRequest,
+  type ZagulyakySettlementConnection,
+  type ZagulyakySettlementConnectionDirection,
+  type ZagulyakySettlementOption,
+} from "../components/zagulyaky/ZagulyakyPlacesExplorer";
 import type { SupabaseAccount } from "../services/supabaseAuth";
 import {
   loadMyZagulyakaDraft,
   loadMyZagulyaky,
+  loadPublicZagulyakyPlaceConnections,
   loadPublicZagulyaka,
   ZAGULYAKY_MY_RECORDS_PAGE_SIZES,
   deleteMyZagulyakaDraft,
   loadZagulyakyStats,
   searchZagulyakyDocuments,
   searchZagulyakyPeople,
+  searchPublicZagulyakySettlements,
   withdrawZagulyakaDraft,
 } from "../services/zagulyakyService";
 import type {
@@ -18,10 +28,13 @@ import type {
   ZagulyakaDocumentListItem,
   ZagulyakaEditableDraft,
   ZagulyakaDraftSummary,
+  ZagulyakaEventRoleCode,
+  ZagulyakaEventType,
   ZagulyakaKind,
   ZagulyakaPersonListItem,
   ZagulyakaWorkflowStatus,
   ZagulyakySearchCursor,
+  ZagulyakyPlaceConnection,
   ZagulyakyDocumentFilters,
   ZagulyakyPeopleFilters,
   ZagulyakyStats,
@@ -31,10 +44,11 @@ import {
   zagulyakaVerificationLabels,
   zagulyakaWorkflowLabels,
 } from "../utils/zagulyakyLabels";
+import { zagulyakaEventRoleLabels } from "../utils/zagulyakyEventRoles";
 import { zagulyakyTabPath } from "../utils/zagulyakyRoutePath";
 import "./ZagulyakyPage.css";
 
-export type ZagulyakyTab = "people" | "documents" | "mine";
+export type ZagulyakyTab = "people" | "documents" | "places" | "mine";
 
 const initialStats: ZagulyakyStats = {
   peopleCount: 0,
@@ -52,7 +66,10 @@ const initialPeopleFilters: ZagulyakyPeopleFilters = {
   query: "",
   originPlace: "",
   foundPlace: "",
+  originPlaceKey: "",
+  foundPlaceKey: "",
   eventType: "",
+  eventRole: "",
   yearFrom: null,
   yearTo: null,
   verificationStatus: "",
@@ -196,6 +213,13 @@ export function ZagulyakyPage({
       return;
     }
 
+    if (activeTab === "places") {
+      ++requestGeneration.current;
+      setLoading(false);
+      setError("");
+      return;
+    }
+
     const generation = ++requestGeneration.current;
     setLoading(true);
     setError("");
@@ -248,7 +272,7 @@ export function ZagulyakyPage({
   const currentItemsCount = activeTab === "people" ? people.length : activeTab === "documents" ? documents.length : myRecords.length;
   const searchQuery = activeTab === "documents" ? documentFilters.query : peopleFilters.query;
   const filterCount = activeTab === "people"
-    ? countActiveFilters(peopleFilters, ["query"])
+    ? countActiveFilters(peopleFilters, ["query", "originPlaceKey", "foundPlaceKey"])
     : activeTab === "documents"
       ? countActiveFilters(documentFilters, ["query"])
       : 0;
@@ -264,6 +288,111 @@ export function ZagulyakyPage({
     { label: "Джерело перевірено", value: stats.verifiedCount, icon: "✓" },
     { label: "Дослідників долучилось", value: stats.contributorsCount, icon: "♙" },
   ], [activeTab, stats]);
+
+  const loadSettlementOptions = useCallback(async (
+    query: string,
+    signal: AbortSignal,
+  ): Promise<readonly ZagulyakySettlementOption[]> => {
+    const places = await searchPublicZagulyakySettlements(query, signal);
+    return places.map((place) => ({
+      key: place.key,
+      label: place.label,
+      geo: place.geo,
+    }));
+  }, []);
+
+  const loadSettlementConnections = useCallback(async ({
+    selectedPlace,
+    filters,
+    signal,
+  }: {
+    selectedPlace: ZagulyakySettlementOption;
+    filters: ZagulyakyPlacesExplorerFilters;
+    signal: AbortSignal;
+  }) => {
+    const result = await loadPublicZagulyakyPlaceConnections(selectedPlace.key ?? "", {
+      eventType: filters.eventType as ZagulyakaEventType | "",
+      eventRole: filters.eventRole as ZagulyakaEventRoleCode | "",
+      yearFrom: filters.yearFrom,
+      yearTo: filters.yearTo,
+    }, signal);
+    const toExplorerConnection = (
+      connection: ZagulyakyPlaceConnection,
+      direction: ZagulyakySettlementConnectionDirection,
+    ): ZagulyakySettlementConnection => {
+      const sample = connection.sampleRecords[0];
+      return {
+        id: `${direction}:${connection.key}`,
+        direction,
+        relatedPlace: {
+          key: connection.relatedPlace.key,
+          label: connection.relatedPlace.label,
+          geo: connection.relatedPlace.geo,
+        },
+        recordCount: connection.recordCount,
+        eventLabels: connection.eventTypes.map((eventType) => zagulyakaEventLabels[eventType]),
+        yearFrom: connection.yearFrom,
+        yearTo: connection.yearTo,
+        sample: sample ? {
+          title: sample.title,
+          eventLabel: sample.eventType ? zagulyakaEventLabels[sample.eventType] : null,
+          dateLabel: sample.eventDateText || placeSampleYearLabel(sample.eventYearFrom, sample.eventYearTo),
+        } : null,
+      };
+    };
+    return {
+      selectedPlace: {
+        key: result.place.key,
+        label: result.place.label,
+        geo: result.place.geo,
+      },
+      connections: [
+        ...result.incoming.items.map((connection) => toExplorerConnection(connection, "incoming")),
+        ...result.outgoing.items.map((connection) => toExplorerConnection(connection, "outgoing")),
+        ...result.local.items.map((connection) => toExplorerConnection(connection, "local")),
+      ],
+      totalRecordCount: result.incoming.recordCount + result.outgoing.recordCount + result.local.recordCount,
+      hasMoreConnections: result.incoming.hasMore || result.outgoing.hasMore || result.local.hasMore,
+    };
+  }, []);
+
+  const openSettlementConnectionRecords = useCallback(({
+    selectedPlace,
+    connection,
+    filters,
+  }: ZagulyakyPlacesExplorerOpenRecordsRequest) => {
+    const local = connection.direction === "local";
+    const originPlace = connection.direction === "incoming"
+      ? connection.relatedPlace.label
+      : selectedPlace.label;
+    const foundPlace = connection.direction === "incoming"
+      ? selectedPlace.label
+      : local
+        ? selectedPlace.label
+        : connection.relatedPlace.label;
+    setPeopleFilters({
+      ...initialPeopleFilters,
+      originPlace,
+      foundPlace,
+      originPlaceKey: connection.direction === "incoming"
+        ? connection.relatedPlace.key ?? ""
+        : selectedPlace.key ?? "",
+      foundPlaceKey: connection.direction === "incoming"
+        ? selectedPlace.key ?? ""
+        : local
+          ? selectedPlace.key ?? ""
+          : connection.relatedPlace.key ?? "",
+      eventType: filters.eventType as ZagulyakaEventType | "",
+      eventRole: filters.eventRole as ZagulyakaEventRoleCode | "",
+      yearFrom: filters.yearFrom,
+      yearTo: filters.yearTo,
+    });
+    setShowFilters(true);
+    setActiveTab("people");
+    resetPagination(setPage, setCursorHistory, setNextCursor);
+    setError("");
+    onNavigate?.("/zahuliaky");
+  }, [onNavigate]);
 
   const refreshMyRecords = () => {
     setMyRecordsPage(1);
@@ -354,7 +483,7 @@ export function ZagulyakyPage({
     setSelectedSlug("");
     setDetail(null);
     setDetailError("");
-    onNavigate?.(activeTab === "documents" ? "/zahuliaky/documents" : activeTab === "mine" ? "/zahuliaky/my" : "/zahuliaky");
+    onNavigate?.(zagulyakyTabPath(activeTab));
   };
 
   return (
@@ -407,6 +536,7 @@ export function ZagulyakyPage({
         <nav className="zagulyaky-tabs" aria-label="Розділи каталогу">
           <button type="button" className={activeTab === "people" ? "active" : ""} onClick={() => setTab("people")}>Люди <span>{stats.peopleCount.toLocaleString("uk-UA")}</span></button>
           <button type="button" className={activeTab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документи <span>{stats.documentCount.toLocaleString("uk-UA")}</span></button>
+          <button type="button" className={activeTab === "places" ? "active" : ""} onClick={() => setTab("places")}>Місцевості</button>
           {account ? (
             <button type="button" className={activeTab === "mine" ? "active" : ""} onClick={() => setTab("mine")}>
               Мої записи
@@ -465,8 +595,18 @@ export function ZagulyakyPage({
           </div>
         ) : null}
 
-        {error ? <div className="alert alert-error zagulyaky-alert" role="alert">{error}</div> : null}
-        {loading ? <CatalogSkeleton /> : null}
+        {activeTab === "places" ? (
+          <ZagulyakyPlacesExplorer
+            loadPlaces={loadSettlementOptions}
+            loadConnections={loadSettlementConnections}
+            eventTypeOptions={Object.entries(zagulyakaEventLabels).map(([value, label]) => ({ value, label }))}
+            eventRoleOptions={Object.entries(zagulyakaEventRoleLabels).map(([value, label]) => ({ value, label }))}
+            onOpenRecords={openSettlementConnectionRecords}
+          />
+        ) : null}
+
+        {activeTab !== "places" && error ? <div className="alert alert-error zagulyaky-alert" role="alert">{error}</div> : null}
+        {activeTab !== "places" && loading ? <CatalogSkeleton /> : null}
         {!loading && !error && activeTab === "people" ? <PeopleTable items={people} onOpen={(slug) => openDetail("person", slug)} /> : null}
         {!loading && !error && activeTab === "documents" ? <DocumentsTable items={documents} onOpen={(slug) => openDetail("document", slug)} /> : null}
         {!loading && !error && activeTab === "mine" ? (
@@ -600,9 +740,10 @@ export function ZagulyakyPage({
 function PeopleFilters({ value, onChange }: { value: ZagulyakyPeopleFilters; onChange: (next: ZagulyakyPeopleFilters) => void }) {
   return (
     <div className="zagulyaky-filter-panel">
-      <label><span>Походження</span><input value={value.originPlace} onChange={(event) => onChange({ ...value, originPlace: event.target.value })} /></label>
-      <label><span>Де знайдено</span><input value={value.foundPlace} onChange={(event) => onChange({ ...value, foundPlace: event.target.value })} /></label>
+      <label><span>Походження</span><input value={value.originPlace} onChange={(event) => onChange({ ...value, originPlace: event.target.value, originPlaceKey: "" })} /></label>
+      <label><span>Де знайдено</span><input value={value.foundPlace} onChange={(event) => onChange({ ...value, foundPlace: event.target.value, foundPlaceKey: "" })} /></label>
       <label><span>Подія</span><select value={value.eventType} onChange={(event) => onChange({ ...value, eventType: event.target.value as ZagulyakyPeopleFilters["eventType"] })}><option value="">Усі події</option>{Object.entries(zagulyakaEventLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+      <label><span>Роль у події</span><select value={value.eventRole} onChange={(event) => onChange({ ...value, eventRole: event.target.value as ZagulyakyPeopleFilters["eventRole"] })}><option value="">Усі ролі</option>{Object.entries(zagulyakaEventRoleLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
       <YearFilter value={value} onChange={onChange} />
       <VerificationFilter value={value} onChange={onChange} />
       <button type="button" className="button button-ghost" onClick={() => onChange({ ...initialPeopleFilters, query: value.query })}>Скинути фільтри</button>
@@ -877,6 +1018,11 @@ function yearRange(from: number | null, to: number | null): string {
   if (from === to || to === null) return String(from ?? to);
   if (from === null) return `до ${to}`;
   return `${from}–${to}`;
+}
+
+function placeSampleYearLabel(from: number | null, to: number | null): string | null {
+  const label = yearRange(from, to);
+  return label === "—" ? null : label;
 }
 
 function initials(name: string): string {

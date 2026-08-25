@@ -428,22 +428,29 @@ function applyPublicSeo(page: PublicPageKey): void {
 
 function applyZagulyakySeo(route: Extract<ReturnType<typeof parseAppRoute>, { kind: "zagulyaky" }>): void {
   const documents = route.tab === "documents" || route.recordKind === "document";
+  const places = route.tab === "places";
   const personal = route.tab === "mine";
   const title = personal
     ? "Мої загуляки — Трекер Роду"
+    : places
+      ? "Загуляки за населеними пунктами — карта зв’язків | Трекер Роду"
     : documents
       ? "Загуляки документів — публічний генеалогічний каталог"
       : "Загуляки людей — публічний генеалогічний каталог";
-  const description = documents
-    ? "Документи та справи, у яких дослідники знайшли записи інших населених пунктів або неочікуваних періодів."
-    : "Люди, знайдені в генеалогічних документах поза очікуваним місцем пошуку, із перевірюваними посиланнями на джерела.";
+  const description = places
+    ? "Публічна карта зв’язків між населеними пунктами у загуляках: походження людини та місце, де знайдено запис. Лінії показують лише підтверджений зв’язок, а не маршрут."
+    : documents
+      ? "Документи та справи, у яких дослідники знайшли записи інших населених пунктів або неочікуваних періодів."
+      : "Люди, знайдені в генеалогічних документах поза очікуваним місцем пошуку, із перевірюваними посиланнями на джерела.";
   const canonicalPath = route.recordSlug && route.recordKind
     ? `/zahuliaky/${route.recordKind === "person" ? "people" : "documents"}/${encodeURIComponent(route.recordSlug)}`
-    : route.tab === "documents"
-      ? "/zahuliaky/documents"
-      : route.tab === "mine"
-        ? "/zahuliaky/my"
-        : "/zahuliaky";
+    : places
+      ? "/zahuliaky/places"
+      : route.tab === "documents"
+        ? "/zahuliaky/documents"
+        : route.tab === "mine"
+          ? "/zahuliaky/my"
+          : "/zahuliaky";
   const canonical = `${SITE_ORIGIN}${canonicalPath}`;
 
   // The deployment creates real HTML documents for the public catalogue and

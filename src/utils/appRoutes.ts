@@ -57,7 +57,7 @@ export type AppRoute =
   | { kind: "public"; page: "privacy" | "terms" | "features" | "pricing" | "faq" }
   | {
       kind: "zagulyaky";
-      tab: "people" | "documents" | "mine";
+      tab: "people" | "documents" | "places" | "mine";
       recordKind?: "person" | "document";
       recordSlug?: string;
     }
@@ -185,6 +185,9 @@ export function parseAppRoute(
     }
     if (parts.length === 2 && parts[1] === "documents") {
       return { kind: "zagulyaky", tab: "documents" };
+    }
+    if (parts.length === 2 && parts[1] === "places") {
+      return { kind: "zagulyaky", tab: "places" };
     }
     if (parts.length === 2 && parts[1] === "my") {
       return { kind: "zagulyaky", tab: "mine" };

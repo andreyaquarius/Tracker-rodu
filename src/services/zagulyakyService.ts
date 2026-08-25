@@ -13,6 +13,12 @@ import type {
   ZagulyakaSavedSourcePresetInput,
   ZagulyakaVerificationStatus,
   ZagulyakaWorkflowStatus,
+  ZagulyakyPlaceConnection,
+  ZagulyakyPlaceConnectionDirection,
+  ZagulyakyPlaceConnectionFilters,
+  ZagulyakyPlaceConnectionGroup,
+  ZagulyakyPlaceConnections,
+  ZagulyakyPublicSettlement,
   ZagulyakyDocumentFilters,
   ZagulyakyPeopleFilters,
   ZagulyakySearchCursor,
@@ -82,6 +88,79 @@ export async function loadZagulyakyStats(): Promise<ZagulyakyStats> {
   };
 }
 
+/**
+ * Finds only settlements that already occur as confirmed public origin/found
+ * pins. This is intentionally separate from the general geocoder: choosing a
+ * result can never introduce an unreviewed point into the public explorer.
+ */
+export async function searchPublicZagulyakySettlements(
+  query: string,
+  signal?: AbortSignal,
+): Promise<ZagulyakyPublicSettlement[]> {
+  throwIfAborted(signal);
+  const { data, error } = await getSupabaseClient().rpc("list_public_zagulyaky_places_v1", {
+    p_query: nullableText(query),
+    p_limit: 100,
+  });
+  throwIfAborted(signal);
+  if (error) throw error;
+  const payload = firstRecord(data);
+  return records(value(payload, "items"))
+    .map(mapPublicZagulyakySettlement)
+    .filter((place): place is ZagulyakyPublicSettlement => Boolean(place));
+}
+
+/**
+ * Loads aggregated, public-only origin ↔ found-place connections. The RPC
+ * owns the visibility gate; this browser function never queries catalogue
+ * tables directly and never receives private record/source data.
+ */
+export async function loadPublicZagulyakyPlaceConnections(
+  placeKey: string,
+  filters: ZagulyakyPlaceConnectionFilters,
+  signal?: AbortSignal,
+): Promise<ZagulyakyPlaceConnections> {
+  const safeKey = placeKey.trim();
+  if (!safeKey) throw new Error("Оберіть населений пункт зі списку Загуляк.");
+  const safeFilters = compactObject({
+    eventType: filters.eventType,
+    eventRole: filters.eventRole,
+    yearFrom: filters.yearFrom,
+    yearTo: filters.yearTo,
+  });
+  const payload = await loadPublicZagulyakyPlaceConnectionsPayload(
+    safeKey,
+    safeFilters,
+    "all",
+    0,
+    signal,
+  );
+  const place = mapPublicZagulyakySettlement(record(value(payload, "place")));
+  if (!place) throw new Error("Населений пункт не знайдено серед публічних Загуляк.");
+  const initialGroups: Record<ZagulyakyPlaceConnectionDirection, ZagulyakyPlaceConnectionGroup> = {
+    incoming: mapZagulyakyPlaceConnectionGroup(value(payload, "incoming"), "incoming"),
+    outgoing: mapZagulyakyPlaceConnectionGroup(value(payload, "outgoing"), "outgoing"),
+    local: mapZagulyakyPlaceConnectionGroup(value(payload, "local"), "local"),
+  };
+  const [incoming, outgoing, local] = await Promise.all(([
+    "incoming",
+    "outgoing",
+    "local",
+  ] as const).map((direction) => loadRemainingPublicPlaceConnectionPages(
+    safeKey,
+    safeFilters,
+    direction,
+    initialGroups[direction],
+    signal,
+  )));
+  return {
+    place,
+    incoming,
+    outgoing,
+    local,
+  };
+}
+
 export async function searchZagulyakyPeople(
   filters: ZagulyakyPeopleFilters,
   cursor: ZagulyakySearchCursor | null,
@@ -93,7 +172,10 @@ export async function searchZagulyakyPeople(
     p_filters: compactObject({
       sourceLocation: filters.originPlace,
       foundLocation: filters.foundPlace,
+      originPlaceKey: filters.originPlaceKey,
+      foundPlaceKey: filters.foundPlaceKey,
       eventType: filters.eventType,
+      eventRole: filters.eventRole,
       yearFrom: filters.yearFrom,
       yearTo: filters.yearTo,
       verificationStatus: filters.verificationStatus,
@@ -1000,6 +1082,133 @@ function draftHandle(data: unknown): ZagulyakaDraftHandle {
 
 function compactObject(input: Record<string, unknown>): Record<string, unknown> { return Object.fromEntries(Object.entries(input).filter(([, item]) => item !== null && item !== undefined && item !== "")); }
 function cleanedStrings(input: string[]): string[] { return input.map((item) => item.trim()).filter(Boolean); }
+
+const ZAGULYAKY_PUBLIC_PLACE_CONNECTION_PAGE_SIZE = 250;
+// The RPC rejects offsets above 10,000. Stop before its defensive clamp would
+// return the same page forever; the caller surfaces that a very large result
+// set is only partially displayed.
+const ZAGULYAKY_PUBLIC_PLACE_CONNECTION_MAX_OFFSET = 10_000;
+
+async function loadPublicZagulyakyPlaceConnectionsPayload(
+  placeKey: string,
+  filters: Record<string, unknown>,
+  direction: "all" | ZagulyakyPlaceConnectionDirection,
+  offset: number,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  throwIfAborted(signal);
+  const { data, error } = await getSupabaseClient().rpc("get_public_zagulyaky_place_connections_v1", {
+    p_place: { key: placeKey },
+    p_direction: direction,
+    p_filters: filters,
+    p_limit: ZAGULYAKY_PUBLIC_PLACE_CONNECTION_PAGE_SIZE,
+    p_offset: offset,
+  });
+  throwIfAborted(signal);
+  if (error) throw error;
+  return firstRecord(data);
+}
+
+async function loadRemainingPublicPlaceConnectionPages(
+  placeKey: string,
+  filters: Record<string, unknown>,
+  direction: ZagulyakyPlaceConnectionDirection,
+  initialGroup: ZagulyakyPlaceConnectionGroup,
+  signal?: AbortSignal,
+): Promise<ZagulyakyPlaceConnectionGroup> {
+  if (!initialGroup.hasMore) return initialGroup;
+
+  const items = [...initialGroup.items];
+  let offset = ZAGULYAKY_PUBLIC_PLACE_CONNECTION_PAGE_SIZE;
+  let hasMore: boolean = initialGroup.hasMore;
+
+  while (hasMore && offset <= ZAGULYAKY_PUBLIC_PLACE_CONNECTION_MAX_OFFSET) {
+    const payload = await loadPublicZagulyakyPlaceConnectionsPayload(
+      placeKey,
+      filters,
+      direction,
+      offset,
+      signal,
+    );
+    const page = mapZagulyakyPlaceConnectionGroup(value(payload, direction), direction);
+    if (page.items.length === 0) {
+      // The server is authoritative.  Stop defensively rather than spinning
+      // forever if data changed between pages or a malformed item was skipped.
+      hasMore = false;
+      break;
+    }
+    items.push(...page.items);
+    offset += ZAGULYAKY_PUBLIC_PLACE_CONNECTION_PAGE_SIZE;
+    hasMore = page.hasMore;
+  }
+
+  return {
+    ...initialGroup,
+    items,
+    hasMore,
+  };
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw new DOMException("The public Zagulyaky place request was aborted.", "AbortError");
+}
+function mapPublicZagulyakySettlement(input: Record<string, unknown>): ZagulyakyPublicSettlement | null {
+  const geo = normalizeGeo(value(input, "geo"));
+  const key = text(value(input, "key"));
+  const label = text(value(input, "label"), geo?.displayName?.trim() || "");
+  if (!key || !label) return null;
+  return {
+    key,
+    label,
+    geo,
+    recordCount: naturalNumber(value(input, "recordCount", "record_count")),
+    originRecordCount: naturalNumber(value(input, "originRecordCount", "origin_record_count")),
+    foundRecordCount: naturalNumber(value(input, "foundRecordCount", "found_record_count")),
+  };
+}
+function mapZagulyakyPlaceConnectionGroup(
+  input: unknown,
+  direction: ZagulyakyPlaceConnectionDirection,
+): ZagulyakyPlaceConnectionGroup {
+  const row = record(input);
+  return {
+    placeCount: naturalNumber(value(row, "placeCount", "place_count")),
+    recordCount: naturalNumber(value(row, "recordCount", "record_count")),
+    hasMore: value(row, "hasMore", "has_more") === true,
+    items: records(value(row, "items"))
+      .map((item) => mapZagulyakyPlaceConnection(item, direction))
+      .filter((item): item is ZagulyakyPlaceConnection => Boolean(item)),
+  };
+}
+function mapZagulyakyPlaceConnection(
+  input: Record<string, unknown>,
+  direction: ZagulyakyPlaceConnectionDirection,
+): ZagulyakyPlaceConnection | null {
+  const relatedPlace = mapPublicZagulyakySettlement(input);
+  const key = text(value(input, "key"));
+  if (!relatedPlace || !key) return null;
+  const eventTypes = stringArray(value(input, "eventTypes", "event_types"))
+    .map(nullableEventType)
+    .filter((item): item is ZagulyakaEventType => Boolean(item));
+  return {
+    key,
+    direction,
+    relatedPlace,
+    recordCount: naturalNumber(value(input, "recordCount", "record_count")),
+    eventTypes: Array.from(new Set(eventTypes)),
+    yearFrom: nullableInteger(value(input, "yearFrom", "year_from")),
+    yearTo: nullableInteger(value(input, "yearTo", "year_to")),
+    sampleRecords: records(value(input, "sampleRecords", "sample_records")).map((sample) => ({
+      slug: text(value(sample, "slug")),
+      title: text(value(sample, "title"), "Без назви"),
+      eventType: nullableEventType(value(sample, "eventType", "event_type")),
+      eventDateText: text(value(sample, "eventDateText", "event_date_text")),
+      eventYearFrom: nullableInteger(value(sample, "eventYearFrom", "event_year_from")),
+      eventYearTo: nullableInteger(value(sample, "eventYearTo", "event_year_to")),
+    })).filter((sample) => Boolean(sample.slug)),
+  };
+}
 function pageRange(row: Record<string, unknown>): string {
   const from = text(value(row, "pageFrom", "page_from"));
   const to = text(value(row, "pageTo", "page_to"));

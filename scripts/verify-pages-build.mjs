@@ -115,6 +115,7 @@ const expectedUrls = [
   ...publicPages.slice(0, 4).map((page) => page.url),
   "https://trekerrodu.com.ua/zahuliaky",
   "https://trekerrodu.com.ua/zahuliaky/documents",
+  "https://trekerrodu.com.ua/zahuliaky/places",
   ...publicPages.slice(4).map((page) => page.url),
 ];
 if (JSON.stringify(sitemapUrls) !== JSON.stringify(expectedUrls)) {
@@ -138,6 +139,12 @@ const zagulyakyCataloguePages = [
     url: "https://trekerrodu.com.ua/zahuliaky/documents",
     title: "Загуляки документів — публічний генеалогічний каталог | Трекер Роду",
     heading: "Загуляки документів",
+  },
+  {
+    path: "zahuliaky/places/index.html",
+    url: "https://trekerrodu.com.ua/zahuliaky/places",
+    title: "Загуляки за населеними пунктами — карта зв’язків | Трекер Роду",
+    heading: "Загуляки за населеними пунктами",
   },
 ];
 

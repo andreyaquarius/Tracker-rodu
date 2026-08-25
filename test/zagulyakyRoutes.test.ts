@@ -13,6 +13,10 @@ test("parses public catalogue, private Zaguliaky, and account-level Notes routes
     kind: "zagulyaky",
     tab: "documents",
   });
+  assert.deepEqual(parseAppRoute("/zahuliaky/places"), {
+    kind: "zagulyaky",
+    tab: "places",
+  });
   assert.deepEqual(parseAppRoute("/zahuliaky/my"), {
     kind: "zagulyaky",
     tab: "mine",
@@ -24,7 +28,12 @@ test("parses public catalogue, private Zaguliaky, and account-level Notes routes
 test("routes the private My records tab to the parseable /zahuliaky/my URL", () => {
   assert.equal(zagulyakyTabPath("people"), "/zahuliaky");
   assert.equal(zagulyakyTabPath("documents"), "/zahuliaky/documents");
+  assert.equal(zagulyakyTabPath("places"), "/zahuliaky/places");
   assert.equal(zagulyakyTabPath("mine"), "/zahuliaky/my");
+  assert.deepEqual(parseAppRoute(zagulyakyTabPath("places")), {
+    kind: "zagulyaky",
+    tab: "places",
+  });
   assert.deepEqual(parseAppRoute(zagulyakyTabPath("mine")), {
     kind: "zagulyaky",
     tab: "mine",
@@ -71,6 +80,16 @@ test("App renders Zaguliaky before the authenticated-app gate", () => {
   assert.match(source, /activatePublicAnalyticsPage\(location\.pathname\)/);
 });
 
+test("the public settlement explorer has an indexable canonical URL", () => {
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /const places = route\.tab === "places";/);
+  assert.match(source, /Загуляки за населеними пунктами — карта зв’язків \| Трекер Роду/);
+  assert.match(source, /Публічна карта зв’язків між населеними пунктами у загуляках/);
+  assert.match(source, /\? "\/zahuliaky\/places"/);
+  assert.match(source, /personal \? "noindex, nofollow, noarchive" : "index, follow"/);
+});
+
 test("private Zaguliaky drafts and standalone Notes are auth-only without workspace loads", () => {
   const pageSource = readFileSync(new URL("../src/pages/ZagulyakyPage.tsx", import.meta.url), "utf8");
   const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
@@ -87,7 +106,7 @@ test("private Zaguliaky drafts and standalone Notes are auth-only without worksp
   assert.match(
     appSource,
     /isZagulyakyRoute && !isPrivateZagulyakyRoute/,
-    "only people/documents remain public Zagulyaky routes",
+    "all public Zagulyaky catalogue routes remain available without a workspace",
   );
   assert.match(
     appSource,

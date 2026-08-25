@@ -143,7 +143,7 @@ test("static SEO generation uses the enriched public indexing RPC and writes pri
     });
 
     assert.equal(result.entries.length, 2);
-    assert.equal(result.pages.length, 4);
+    assert.equal(result.pages.length, 5);
     assert.equal(result.indexingMode, "full");
     assert.deepEqual(calls.map((call) => call.rpcName), [
       "list_public_zagulyaky_indexing_v1",
@@ -165,15 +165,17 @@ test("static SEO generation uses the enriched public indexing RPC and writes pri
     const documentPath = join(outputDirectory, "zahuliaky", "documents", "dako-127-1902", "index.html");
     const peopleCataloguePath = join(outputDirectory, "zahuliaky", "index.html");
     const documentsCataloguePath = join(outputDirectory, "zahuliaky", "documents", "index.html");
+    const placesCataloguePath = join(outputDirectory, "zahuliaky", "places", "index.html");
     const sitemapPath = join(outputDirectory, "sitemap-zagulyaky.xml");
 
-    for (const path of [personPath, documentPath, peopleCataloguePath, documentsCataloguePath, sitemapPath]) {
+    for (const path of [personPath, documentPath, peopleCataloguePath, documentsCataloguePath, placesCataloguePath, sitemapPath]) {
       assert.equal(existsSync(path), true, `Expected static output at ${path}`);
     }
 
     const personHtml = readFileSync(personPath, "utf8");
     const peopleCatalogueHtml = readFileSync(peopleCataloguePath, "utf8");
     const documentHtml = readFileSync(documentPath, "utf8");
+    const placesCatalogueHtml = readFileSync(placesCataloguePath, "utf8");
     const sitemap = readFileSync(sitemapPath, "utf8");
 
     assert.match(personHtml, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/people/${encodedPersonSlug}"`));
@@ -182,12 +184,17 @@ test("static SEO generation uses the enriched public indexing RPC and writes pri
     assert.match(documentHtml, /Повний текст опису документа\./);
     assert.match(peopleCatalogueHtml, /<h1>Загуляки людей<\/h1>/);
     assert.match(peopleCatalogueHtml, new RegExp(`href="/zahuliaky/people/${encodedPersonSlug}"`));
+    assert.match(placesCatalogueHtml, /<title>Загуляки за населеними пунктами — карта зв’язків \| Трекер Роду<\/title>/);
+    assert.match(placesCatalogueHtml, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/places"`));
+    assert.match(placesCatalogueHtml, /<h1>Загуляки за населеними пунктами<\/h1>/);
+    assert.match(placesCatalogueHtml, /Географічний зв’язок між двома місцями, а не маршрут/);
+    assert.match(placesCatalogueHtml, /href="\/zahuliaky\/places">Місцевості<\/a>/);
     assert.match(documentHtml, /<h1>Метрична книга 1902<\/h1>/);
     assert.match(documentHtml, /"@type":"CreativeWork"/);
     assert.match(sitemap, new RegExp(`<loc>${PUBLIC_ORIGIN}/zahuliaky/people/${encodedPersonSlug}<\/loc>`));
     assert.match(sitemap, new RegExp(`<loc>${PUBLIC_ORIGIN}/zahuliaky/documents/dako-127-1902<\/loc>`));
     assert.doesNotMatch(sitemap, /private-record-id-do-not-render|private-document-id-do-not-render|private\.example/);
-    assert.doesNotMatch(personHtml + peopleCatalogueHtml + documentHtml, /private-record-id-do-not-render|private-document-id-do-not-render|private-user-id|private raw payload|private raw document payload|private\.example|storagePath/);
+    assert.doesNotMatch(personHtml + peopleCatalogueHtml + documentHtml + placesCatalogueHtml, /private-record-id-do-not-render|private-document-id-do-not-render|private-user-id|private raw payload|private raw document payload|private\.example|storagePath/);
   } finally {
     rmSync(outputDirectory, { recursive: true, force: true });
   }

@@ -416,6 +416,39 @@ function catalogueSeoData(kind, entries) {
   };
 }
 
+function placesSeoData() {
+  const url = `${ZAGULYAKY_SITEMAP_ORIGIN}/zahuliaky/places`;
+  const heading = "Загуляки за населеними пунктами";
+  const description = "Публічна карта зв’язків між населеними пунктами у загуляках: походження людини та місце, де знайдено запис. Лінії показують лише підтверджений зв’язок, а не маршрут.";
+
+  return {
+    kind: "catalogue",
+    url,
+    relativePath: join("zahuliaky", "places", "index.html"),
+    title: `${heading} — карта зв’язків | ${SITE_NAME}`,
+    heading,
+    eyebrow: "Публічна карта зв’язків",
+    collectionUrl: url,
+    collectionTitle: heading,
+    description,
+    summary: "Оберіть населений пункт, щоб побачити місця походження людей, чиї записи знайдено там, і місця, де знайдено записи про вихідців із нього.",
+    facts: [
+      pageFact("У вибірці", "Лише опубліковані картки з підтвердженими точками походження та місця знахідки."),
+      pageFact("Значення ліній", "Географічний зв’язок між двома місцями, а не маршрут або доказ переміщення людини."),
+    ].filter(Boolean),
+    cards: [],
+    structuredData: {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      name: heading,
+      url,
+      description,
+      inLanguage: "uk",
+      isPartOf: { "@type": "WebSite", name: SITE_NAME, url: `${ZAGULYAKY_SITEMAP_ORIGIN}/` },
+    },
+  };
+}
+
 function styleBlock() {
   return `<style data-zagulyaky-static-seo>
     .zagulyaky-static-seo{box-sizing:border-box;min-height:100vh;padding:clamp(24px,5vw,60px);color:#20312d;background:#f4f2ea;font-family:Arial,system-ui,sans-serif}
@@ -459,7 +492,7 @@ export function renderZagulyakyStaticFallback(page) {
   const collectionHref = new URL(page.collectionUrl).pathname;
   const backHref = page.kind === "catalogue" ? "/" : collectionHref;
   const backLabel = page.kind === "catalogue" ? "Перейти на головну" : `До розділу «${page.collectionTitle}»`;
-  return `${styleBlock()}<main class="zagulyaky-static-seo"><div class="zagulyaky-static-seo__inner"><nav aria-label="Публічна навігація"><a href="/">Головна</a><a href="/zahuliaky">Загуляки людей</a><a href="/zahuliaky/documents">Загуляки документів</a><a href="/features">Можливості</a><a href="/faq">FAQ</a></nav><p class="zagulyaky-static-seo__eyebrow">${escapeHtml(page.eyebrow)}</p><h1>${escapeHtml(page.heading)}</h1><p class="zagulyaky-static-seo__description">${escapeHtml(page.description)}</p>${page.summary ? `<p class="zagulyaky-static-seo__summary">${escapeHtml(page.summary)}</p>` : ""}${renderFacts(page.facts)}${renderTranscription(page)}${renderLinks(page.links)}${renderCards(page.cards)}<a class="zagulyaky-static-seo__back" href="${escapeHtml(backHref)}">${escapeHtml(backLabel)}</a></div></main>`;
+  return `${styleBlock()}<main class="zagulyaky-static-seo"><div class="zagulyaky-static-seo__inner"><nav aria-label="Публічна навігація"><a href="/">Головна</a><a href="/zahuliaky">Загуляки людей</a><a href="/zahuliaky/documents">Загуляки документів</a><a href="/zahuliaky/places">Місцевості</a><a href="/features">Можливості</a><a href="/faq">FAQ</a></nav><p class="zagulyaky-static-seo__eyebrow">${escapeHtml(page.eyebrow)}</p><h1>${escapeHtml(page.heading)}</h1><p class="zagulyaky-static-seo__description">${escapeHtml(page.description)}</p>${page.summary ? `<p class="zagulyaky-static-seo__summary">${escapeHtml(page.summary)}</p>` : ""}${renderFacts(page.facts)}${renderTranscription(page)}${renderLinks(page.links)}${renderCards(page.cards)}<a class="zagulyaky-static-seo__back" href="${escapeHtml(backHref)}">${escapeHtml(backLabel)}</a></div></main>`;
 }
 
 function replaceRequired(html, pattern, replacement, label) {
@@ -562,6 +595,7 @@ export async function generateZagulyakySeoPages({
   const pages = [
     catalogueSeoData("person", entries),
     catalogueSeoData("document", entries),
+    placesSeoData(),
     ...entries.map(publicEntrySeoData),
   ];
 
@@ -616,7 +650,7 @@ export async function main({ argumentsList = process.argv.slice(2), env = proces
     }),
   });
   log(
-    `Generated ${result.entries.length} public Zagulyaky detail page(s), 2 catalogue page(s), and ${result.sitemapPath} (${result.indexingMode} indexing data).`,
+    `Generated ${result.entries.length} public Zagulyaky detail page(s), 3 catalogue page(s), and ${result.sitemapPath} (${result.indexingMode} indexing data).`,
   );
   return result;
 }
