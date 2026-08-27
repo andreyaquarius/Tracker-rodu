@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildGedcomAppImport } from "../src/utils/gedcomAppImport.ts";
+import {
+  buildGedcomAppImport,
+  GEDCOM_STRUCTURED_NAMES_CUSTOM_FIELD,
+  parseGedcomStructuredNamesPayload,
+} from "../src/utils/gedcomAppImport.ts";
 import { buildGedcomImportDraft } from "../src/utils/gedcomImport.ts";
 
 test("converts GEDCOM people and family links into app records", () => {
@@ -63,6 +67,59 @@ test("converts GEDCOM people and family links into app records", () => {
     .sort();
   assert.deepEqual(parentTypes, ["батько", "мати"]);
   assert.equal(result.relations.some((relation) => relation.relationType === "дружина"), true);
+});
+
+test("carries every GEDCOM NAME, NICK and textual alias into structured persistence", () => {
+  let id = 0;
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "0 @I1@ INDI",
+    "1 NAME Іван /Каленський/",
+    "2 NICK Івась",
+    "2 LANG uk",
+    "1 NAME Иванъ /Каленскій/",
+    "2 TYPE document",
+    "2 _LANG ru-x-pre1918",
+    "2 _ORTH pre-1918",
+    "1 _AKA Jan /Kaleński/",
+    "1 NICK Янко",
+    "1 ALIA Iwan /Kalinski/",
+    "1 ALIA @I2@",
+    "0 @I2@ INDI",
+    "1 NAME Петро /Інший/",
+    "0 TRLR",
+  ].join("\n"));
+
+  const result = buildGedcomAppImport(draft, {
+    idFactory: () => `id-${++id}`,
+    nowFactory: () => "2026-08-27T00:00:00.000Z",
+  });
+  const person = result.people.find((item) => item.givenName === "Іван");
+
+  assert.ok(person);
+  assert.equal(person.surname, "Каленський");
+  assert.equal(person.givenName, "Іван");
+  assert.match(person.nameVariants, /Иванъ Каленскій/);
+  assert.match(person.nameVariants, /Jan Kaleński/);
+  const names = parseGedcomStructuredNamesPayload(
+    person.customFields[GEDCOM_STRUCTURED_NAMES_CUSTOM_FIELD],
+  );
+  assert.equal(names.length, 5);
+  assert.deepEqual(names.map((name) => name.nameType), [
+    "primary",
+    "document",
+    "alias",
+    "nickname",
+    "alias",
+  ]);
+  assert.equal(names[0]?.nickname, "Івась");
+  assert.equal(names[0]?.languageCode, "uk");
+  assert.equal(names[1]?.originalText, "Иванъ /Каленскій/");
+  assert.equal(names[1]?.orthography, "pre-1918");
+  assert.equal(names[2]?.originalText, "Jan /Kaleński/");
+  assert.equal(names[3]?.nickname, "Янко");
+  assert.equal(names[4]?.originalText, "Iwan /Kalinski/");
+  assert.equal(names.some((name) => name.originalText === "@I2@"), false);
 });
 
 test("projects FAM marriage facts into both partner cards without duplicating an INDI copy", () => {

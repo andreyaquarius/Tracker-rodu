@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import type {
   AppDatabase,
   CustomFieldDefinition,
@@ -180,6 +180,9 @@ export function PersonFormModal({
   dockIndex?: number;
   onFocus?: () => void;
 }) {
+  const draftPersonIdRef = useRef(person?.id ?? createId());
+  const savePendingRef = useRef(false);
+  const [savePending, setSavePending] = useState(false);
   const [form, setForm] = useState<PersonDraft>(() =>
     person
       ? {
@@ -367,6 +370,7 @@ export function PersonFormModal({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (savePendingRef.current) return;
     if (researchRequired && !form.researchId.trim()) {
       window.alert("Оберіть дослідження для цієї особи.");
       return;
@@ -377,7 +381,7 @@ export function PersonFormModal({
       return;
     }
     const timestamp = nowIso();
-    const personId = person?.id ?? createId();
+    const personId = draftPersonIdRef.current;
     const normalizedForm = {
       ...form,
       ...normalizedDates,
@@ -399,10 +403,17 @@ export function PersonFormModal({
       __baseUpdatedAt: person?.updatedAt,
       updatedAt: timestamp,
     } as Person;
-    await onSave({
-      ...finalPerson,
-      events: normalizePersonEvents(eventsForSave, finalPerson),
-    });
+    savePendingRef.current = true;
+    setSavePending(true);
+    try {
+      await onSave({
+        ...finalPerson,
+        events: normalizePersonEvents(eventsForSave, finalPerson),
+      });
+    } finally {
+      savePendingRef.current = false;
+      setSavePending(false);
+    }
   };
 
   return (
@@ -414,7 +425,7 @@ export function PersonFormModal({
       dockIndex={dockIndex}
       onFocus={onFocus}
     >
-      <form onSubmit={submit}>
+      <form onSubmit={submit} aria-busy={savePending}>
         <div className="form-grid">
           <label>
             <span>Дослідження{researchRequired ? " *" : ""}</span>
@@ -686,8 +697,10 @@ export function PersonFormModal({
           ) : null}
         </div>
         <div className="modal-actions">
-          <button type="button" className="button button-ghost" onClick={onClose}>Скасувати</button>
-          <button type="submit" className="button button-primary">Зберегти</button>
+          <button type="button" className="button button-ghost" onClick={onClose} disabled={savePending}>Скасувати</button>
+          <button type="submit" className="button button-primary" disabled={savePending}>
+            {savePending ? "Збереження…" : "Зберегти"}
+          </button>
         </div>
       </form>
     </Modal>

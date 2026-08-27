@@ -11,6 +11,8 @@ import { unstable_usePrompt } from "react-router-dom";
 import type {
   AppDatabase,
   CustomFieldDefinition,
+  DocumentRecord,
+  Finding,
   GeoPoint,
   Person,
   PersonEvent,
@@ -18,6 +20,7 @@ import type {
   PersonGender,
   PersonPrivacyStatus,
   PersonRelation,
+  PersonName,
   PersonStatus,
   Research,
 } from "../../types";
@@ -57,6 +60,7 @@ import type {
   ProjectPersonMarriage,
   ProjectPersonMarriageDraft,
 } from "../../services/projectPersonMarriages.ts";
+import { PersonNamesEditorV2 } from "./PersonNamesEditorV2.tsx";
 
 const genders: PersonGender[] = ["невідомо", "чоловік", "жінка"];
 const CORE_MAP_EVENT_TYPES = new Set<PersonEventType>(["birth", "marriage", "death", "residence"]);
@@ -118,7 +122,14 @@ const validationLabels: Record<string, string> = {
 
 export interface PersonEditorV2Props {
   db: AppDatabase;
+  projectId?: string;
   person: Person | null;
+  personNames?: readonly PersonName[];
+  personNamesLoading?: boolean;
+  personNamesError?: string;
+  personNameDocuments?: readonly DocumentRecord[];
+  personNameFindings?: readonly Finding[];
+  onPersonNamesChanged?: (names: PersonName[]) => void;
   persons?: readonly Person[];
   relations?: readonly PersonRelation[];
   marriages?: readonly ProjectPersonMarriage[];
@@ -503,7 +514,14 @@ function EditorSection({
 
 export function PersonEditorV2({
   db,
+  projectId,
   person,
+  personNames = [],
+  personNamesLoading = false,
+  personNamesError = "",
+  personNameDocuments = [],
+  personNameFindings = [],
+  onPersonNamesChanged,
   persons = [],
   relations = [],
   marriages = [],
@@ -1373,6 +1391,18 @@ export function PersonEditorV2({
                   onChange={(event) => update("surnameVariants", event.target.value)}
                 />
               </label>
+              {person && projectId && onPersonNamesChanged ? (
+                <PersonNamesEditorV2
+                  projectId={projectId}
+                  personId={person.id}
+                  names={personNames}
+                  loading={personNamesLoading}
+                  loadError={personNamesError}
+                  documents={personNameDocuments}
+                  findings={personNameFindings}
+                  onChanged={onPersonNamesChanged}
+                />
+              ) : null}
             </EditorSection>
 
             <EditorSection id={`${editorPrefix}-birth`} title="Народження">

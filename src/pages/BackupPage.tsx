@@ -3,6 +3,7 @@ import type { ActivityActionType, AppDatabase, BackupFile } from "../types";
 import type { SupabaseWorkspace } from "../services/supabaseAuth";
 import { downloadDatabase, readDatabaseBackup } from "../utils/exportImport";
 import {
+  buildProjectBackupSnapshot,
   createProjectBackup,
   deleteProjectBackup,
   downloadProjectBackup,
@@ -143,6 +144,20 @@ export function BackupPage({
       const restored = await downloadProjectBackup(backup.id);
       downloadDatabase(restored, backup.name);
     }, "Резервну копію підготовлено до завантаження.");
+
+  const downloadCurrentBackup = () =>
+    run(async () => {
+      if (!workspace) throw new Error("Спочатку виберіть або створіть проєкт.");
+      const snapshot = await buildProjectBackupSnapshot(workspace.projectId, db);
+      downloadDatabase(snapshot);
+    }, "Резервну копію підготовлено до завантаження.");
+
+  const exportCurrentExcelBackup = () =>
+    run(async () => {
+      if (!workspace) throw new Error("Спочатку виберіть або створіть проєкт.");
+      const snapshot = await buildProjectBackupSnapshot(workspace.projectId, db);
+      exportProjectToExcel(snapshot, workspace.projectName);
+    }, "Excel-копію підготовлено до завантаження.");
 
   const removeBackup = (backup: BackupFile) => {
     if (!window.confirm(`Видалити резервну копію «${backup.name}»?`)) return;
@@ -313,8 +328,8 @@ export function BackupPage({
           <p>Збережіть контрольну копію поточних даних проєкту на комп'ютері.</p>
           <button
             className="button button-secondary"
-            disabled={!workspace}
-            onClick={() => downloadDatabase(db)}
+            disabled={busy || !workspace}
+            onClick={() => void downloadCurrentBackup()}
           >
             Завантажити JSON
           </button>
@@ -355,8 +370,8 @@ export function BackupPage({
           </p>
           <button
             className="button button-secondary"
-            disabled={!workspace}
-            onClick={() => exportProjectToExcel(db, workspace?.projectName ?? "Трекер Роду")}
+            disabled={busy || !workspace}
+            onClick={() => void exportCurrentExcelBackup()}
           >
             Завантажити весь проєкт
           </button>

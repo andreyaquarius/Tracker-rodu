@@ -106,9 +106,10 @@ test("all project bulk import services use bounded mutation batches", () => {
   );
 
   assert.match(peopleSource, /runImportBatches\(chunkPersonImportRows\(personRows\)/);
+  assert.match(peopleSource, /runImportBatches\(chunkPersonImportRows\(personNameRows\)/);
   assert.match(peopleSource, /runImportBatches\(chunkRelationImportRows\(relationRows\)/);
   assert.match(peopleSource, /const PERSON_IMPORT_CONCURRENCY = 1/);
-  assert.equal((peopleSource.match(/runAdaptiveImportBatch\(batch/g) ?? []).length, 2);
+  assert.equal((peopleSource.match(/runAdaptiveImportBatch\(batch/g) ?? []).length, 3);
   assert.match(peopleSource, /const RELATION_IMPORT_CONCURRENCY = 1/);
   assert.match(
     peopleSource,

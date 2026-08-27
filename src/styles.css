@@ -3996,6 +3996,66 @@ tbody tr:hover { background: #fbfaf5; }
 .drive-attach-preview li small {
   color: var(--muted);
 }
+
+.finding-person-name-capture {
+  display: grid;
+  gap: 16px;
+  padding: 22px 24px 24px;
+}
+
+.finding-person-name-capture__intro {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.finding-person-name-capture > label:not(.checkbox-field),
+.finding-person-name-capture > fieldset {
+  display: grid;
+  gap: 7px;
+}
+
+.finding-person-name-capture > label > span,
+.finding-person-name-capture > fieldset > legend {
+  font-weight: 700;
+}
+
+.finding-person-name-capture > label > small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.finding-person-name-capture > fieldset {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.finding-person-name-capture__choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.finding-person-name-capture__choice input {
+  width: auto;
+}
+
+.finding-person-name-capture__confirm {
+  align-items: flex-start;
+}
+
+@media (max-width: 640px) {
+  .finding-person-name-capture {
+    padding: 16px;
+  }
+
+  .finding-person-name-capture .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 .source-add-checking {
   padding: 10px 12px;
   color: var(--green-900);
@@ -6570,6 +6630,11 @@ tbody tr:hover { background: #fbfaf5; }
 .setting-toggle strong, .setting-toggle span { display: block; }
 .setting-toggle span { margin: 4px 0 0; color: var(--muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
 .setting-toggle input { width: 20px; min-height: 20px; }
+.settings-person-name-display { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.settings-person-name-display > div > strong { display: block; color: var(--green-950); }
+.settings-person-name-display > div > p { max-width: 620px; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.settings-person-name-display > label { display: block; max-width: 480px; margin-top: 14px; }
+.settings-person-name-display > label > small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .privacy-panel { max-width: 760px; margin-top: 15px; padding: 22px; display: flex; gap: 16px; }
 .privacy-panel h2, .privacy-panel p { margin-bottom: 4px; }
 .analytics-preferences-button { margin-top: 12px; }

@@ -5,6 +5,10 @@ import { ProductAnalyticsPreferences } from "../components/ProductAnalyticsPrefe
 import { TelegramBotSettings } from "../components/settings/TelegramBotSettings";
 import { openAnalyticsPreferences } from "../services/siteAnalytics";
 import type { SupabaseAccount } from "../services/supabaseAuth";
+import {
+  DEFAULT_PERSON_NAME_DISPLAY_LANGUAGE,
+  normalizePersonNameDisplayMode,
+} from "../utils/personNameDisplay.ts";
 
 export function SettingsPage({
   db,
@@ -33,6 +37,12 @@ export function SettingsPage({
   sectionCreateRequest?: { id: number; parentKey: SectionParentKey };
   onSectionCreateRequestHandled?: () => void;
 }) {
+  const personNameDisplayMode = normalizePersonNameDisplayMode(
+    db.settings.personNameDisplayMode,
+  );
+  const personNameDisplayLanguage = db.settings.personNameDisplayLanguage
+    ?? DEFAULT_PERSON_NAME_DISPLAY_LANGUAGE;
+
   return (
     <>
       <div className="page-heading">
@@ -91,6 +101,77 @@ export function SettingsPage({
               })}
           />
         </label>
+
+        <div className="settings-person-name-display">
+          <div>
+            <strong>Відображення історичних імен</strong>
+            <p>
+              Це лише спосіб показу в картці особи. Поточне ім’я, поля особи та
+              вже збережені налаштування не змінюються.
+            </p>
+          </div>
+
+          <label>
+            <span>Яке ім’я показувати</span>
+            <select
+              value={personNameDisplayMode}
+              disabled={readOnly}
+              onChange={(event) => onChange({
+                ...db,
+                settings: {
+                  ...db.settings,
+                  personNameDisplayMode: normalizePersonNameDisplayMode(event.target.value),
+                },
+              })}
+            >
+              <option value="current">Поточне ім’я картки (як зараз)</option>
+              <option value="primary">Основне історичне ім’я</option>
+              <option value="interface_language">Ім’я мовою інтерфейсу</option>
+              <option value="valid_at_date">Ім’я, чинне на вибрану дату</option>
+              <option value="original">Точне написання з джерела</option>
+              <option value="primary_with_variants">Основне ім’я та всі варіанти</option>
+            </select>
+          </label>
+
+          {personNameDisplayMode === "interface_language" ? (
+            <label>
+              <span>Код мови інтерфейсу</span>
+              <input
+                value={personNameDisplayLanguage}
+                disabled={readOnly}
+                placeholder="uk"
+                inputMode="text"
+                onChange={(event) => onChange({
+                  ...db,
+                  settings: {
+                    ...db.settings,
+                    personNameDisplayLanguage: event.target.value,
+                  },
+                })}
+              />
+              <small>Наприклад: uk, pl, ru, la. Якщо варіанта немає, буде показано основне або поточне ім’я.</small>
+            </label>
+          ) : null}
+
+          {personNameDisplayMode === "valid_at_date" ? (
+            <label>
+              <span>Дата, на яку показувати ім’я</span>
+              <input
+                type="date"
+                value={db.settings.personNameDisplayDate ?? ""}
+                disabled={readOnly}
+                onChange={(event) => onChange({
+                  ...db,
+                  settings: {
+                    ...db.settings,
+                    personNameDisplayDate: event.target.value,
+                  },
+                })}
+              />
+              <small>Використовуються періоди «чинне від / до», зазначені у варіантах імені.</small>
+            </label>
+          ) : null}
+        </div>
       </section>
 
       <TelegramBotSettings account={account} />

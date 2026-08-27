@@ -243,6 +243,7 @@ import {
 } from "./services/projectMetadata";
 import {
   loadProjectPreferences,
+  projectPreferencesFromSettings,
   saveProjectPreferences,
   type ProjectPreferences,
 } from "./services/projectSettings";
@@ -250,6 +251,11 @@ import {
   clearProjectRecords,
   createProjectBackup,
 } from "./services/projectBackups";
+import {
+  preflightProjectPersonNamesRestore,
+  restoreProjectPersonNames,
+  validateProjectPersonNamesForRestore,
+} from "./services/projectPersonNames";
 import {
   subscribeProjectRealtime,
   type ProjectRealtimeEntityChange,
@@ -820,11 +826,7 @@ export default function App() {
   );
   const [dashboardTasks, setDashboardTasks] = useState<ProjectDashboardTask[]>([]);
   const [projectPreferences, setProjectPreferences] = useState<ProjectPreferences>(
-    () => ({
-      researcherName: app.db.settings.researcherName,
-      compactTables: app.db.settings.compactTables,
-      lastAutomaticBackupAt: app.db.settings.lastAutomaticBackupAt,
-    }),
+    () => projectPreferencesFromSettings(app.db.settings),
   );
   const [projectPreferencesReadyFor, setProjectPreferencesReadyFor] =
     useState<string | null>(null);
@@ -1555,11 +1557,7 @@ export default function App() {
     }
 
     const projectId = workspace.projectId;
-    const fallback = {
-      researcherName: app.db.settings.researcherName,
-      compactTables: app.db.settings.compactTables,
-      lastAutomaticBackupAt: app.db.settings.lastAutomaticBackupAt,
-    };
+    const fallback = projectPreferencesFromSettings(app.db.settings);
     setProjectPreferencesReadyFor(null);
     syncedPreferencesRef.current = null;
     setProjectPreferences(fallback);
@@ -1588,6 +1586,9 @@ export default function App() {
     account,
     app.db.settings.compactTables,
     app.db.settings.lastAutomaticBackupAt,
+    app.db.settings.personNameDisplayDate,
+    app.db.settings.personNameDisplayLanguage,
+    app.db.settings.personNameDisplayMode,
     app.db.settings.researcherName,
     describeError,
     notify,
@@ -5473,11 +5474,7 @@ export default function App() {
     }
 
     const projectId = workspace.projectId;
-    setProjectPreferences({
-      researcherName: next.settings.researcherName,
-      compactTables: next.settings.compactTables,
-      lastAutomaticBackupAt: next.settings.lastAutomaticBackupAt,
-    });
+    setProjectPreferences(projectPreferencesFromSettings(next.settings));
     const previousSections = projectCustomSections;
     const previousRecords = projectCustomRecords;
     const nextSections = next.customSections;
@@ -5592,6 +5589,18 @@ export default function App() {
     const documentIds = new Set(next.documents.map((item) => item.id));
     const personIds = new Set(next.persons.map((item) => item.id));
     const findingIds = new Set(next.findings.map((item) => item.id));
+    const hasCompletePersonNames = Array.isArray(next.personNames);
+    const personNames = next.personNames ?? [];
+    if (hasCompletePersonNames) {
+      // Validate every reference before the first destructive RPC. A malformed
+      // historical-name collection must never clear an otherwise valid project.
+      validateProjectPersonNamesForRestore({
+        names: personNames,
+        personIds,
+        documentIds,
+        findingIds,
+      });
+    }
     const personLimit = subscriptionAccess.getCapacityLimit("persons_total");
     if (personLimit && !personLimit.isUnlimited && personLimit.value !== null) {
       const accountUsageWithoutCurrentProject = Math.max(
@@ -5606,6 +5615,11 @@ export default function App() {
       }
     }
 
+    if (hasCompletePersonNames) {
+      onProgress?.("Перевіряємо підтримку історичних імен…", 12);
+      await preflightProjectPersonNamesRestore(projectId);
+    }
+
     onProgress?.("Очищаємо попередні записи цільового проєкту…", 15);
     await clearProjectRecords(projectId);
     onProgress?.("Відновлюємо дослідження…", 24);
@@ -5616,6 +5630,7 @@ export default function App() {
       next.persons,
       next.personRelations,
       researchIds,
+      { importStructuredPersonNames: !hasCompletePersonNames },
     );
     onProgress?.("Відновлюємо документи та матрицю років…", 44);
     await importProjectDocuments(
@@ -5633,7 +5648,14 @@ export default function App() {
       documentIds,
       personIds,
     );
-    onProgress?.("Відновлюємо гіпотези та запити…", 66);
+    if (hasCompletePersonNames) {
+      onProgress?.("Відновлюємо історичні імена…", 62);
+      await restoreProjectPersonNames({
+        projectId,
+        names: personNames,
+      });
+    }
+    onProgress?.("Відновлюємо гіпотези та запити…", 68);
     await importProjectAnalysisRecords(
       projectId,
       next.hypotheses,
@@ -5643,7 +5665,7 @@ export default function App() {
       documentIds,
       findingIds,
     );
-    onProgress?.("Відновлюємо власні розділи та поля…", 76);
+    onProgress?.("Відновлюємо власні розділи та поля…", 77);
     await importProjectCustomStructure(
       projectId,
       next.settings.customFields,
@@ -5651,19 +5673,15 @@ export default function App() {
       next.customSectionRecords,
     );
 
-    const preferences: ProjectPreferences = {
-      researcherName: next.settings.researcherName,
-      compactTables: next.settings.compactTables,
-      lastAutomaticBackupAt: next.settings.lastAutomaticBackupAt,
-    };
-    onProgress?.("Оновлюємо налаштування проєкту…", 82);
+    const preferences = projectPreferencesFromSettings(next.settings);
+    onProgress?.("Оновлюємо налаштування проєкту…", 83);
     try {
       await saveProjectPreferences(projectId, preferences);
     } catch (error) {
       console.warn("Project data restored, but preferences were not updated.", error);
     }
 
-    onProgress?.("Оновлюємо службові дані прикріплених файлів…", 88);
+    onProgress?.("Оновлюємо службові дані прикріплених файлів…", 89);
     const collections: Array<[CollectionKey, AppEntity[]]> = [
       ["researches", next.researches],
       ["documents", next.documents],

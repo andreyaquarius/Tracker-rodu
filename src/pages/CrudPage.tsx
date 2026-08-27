@@ -73,6 +73,11 @@ import {
   taskReminderDateTimeLocalValue,
   taskReminderValidationError,
 } from "../utils/taskReminders";
+import { ensureFindingDocumentPersonName } from "../services/findingPersonNameWorkflow.ts";
+import {
+  createProjectPersonName,
+  listProjectPersonNames,
+} from "../services/projectPersonNames.ts";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -137,6 +142,7 @@ type PersonSeed = {
   draft: PersonInitialDraft;
   participantId?: string;
   participantRole?: string;
+  findingNameCapture?: FindingNameCaptureSource;
 };
 
 type PersonSeedChoice = {
@@ -146,6 +152,21 @@ type PersonSeedChoice = {
   draft: PersonInitialDraft;
   participantId?: string;
   participantRole?: string;
+  originalText?: string;
+};
+
+type FindingNameCaptureSource = {
+  findingId: string;
+  documentId: string | null;
+  originalText: string;
+  normalizedFullName: string;
+};
+
+type FindingNameCapture = FindingNameCaptureSource & {
+  choice: PersonSeedChoice;
+  targetMode: "" | "existing" | "new";
+  existingPersonId: string;
+  confirmed: boolean;
 };
 
 type CreatedFindingPerson = {
@@ -272,6 +293,7 @@ export function CrudPage({
           documents={documents}
           findings={findings}
           persons={persons}
+          projectId={projectId}
           customFieldDefinitions={customFieldDefinitions}
           onAddCustomField={onAddCustomField}
           onDeleteCustomField={onDeleteCustomField}
@@ -307,6 +329,7 @@ export function CrudPage({
           documents={documents}
           findings={findings}
           persons={persons}
+          projectId={projectId}
           customFieldDefinitions={customFieldDefinitions}
           onAddCustomField={onAddCustomField}
           onDeleteCustomField={onDeleteCustomField}
@@ -1297,6 +1320,7 @@ export function EntityModal({
   documents,
   findings,
   persons,
+  projectId = "",
   customFieldDefinitions,
   onAddCustomField,
   onDeleteCustomField,
@@ -1322,6 +1346,7 @@ export function EntityModal({
   documents: DocumentRecord[];
   findings: Finding[];
   persons: Person[];
+  projectId?: string;
   customFieldDefinitions: CustomFieldDefinition[];
   onAddCustomField?: (definition: CustomFieldDefinition) => void;
   onDeleteCustomField?: (definition: CustomFieldDefinition) => void;
@@ -1368,6 +1393,9 @@ export function EntityModal({
   });
   const [personSeed, setPersonSeed] = useState<PersonSeed | null>(null);
   const [personSeedChoices, setPersonSeedChoices] = useState<PersonSeedChoice[] | null>(null);
+  const [findingNameCapture, setFindingNameCapture] = useState<FindingNameCapture | null>(null);
+  const [findingNamePending, setFindingNamePending] = useState(false);
+  const [findingNameError, setFindingNameError] = useState("");
   const [locallyCreatedPersons, setLocallyCreatedPersons] = useState<Person[]>([]);
   const [createdFindingPersons, setCreatedFindingPersons] = useState<CreatedFindingPerson[]>([]);
   const [locallyCreatedRelations, setLocallyCreatedRelations] = useState<PersonRelation[]>([]);
@@ -1411,16 +1439,66 @@ export function EntityModal({
     } as unknown as AppEntity;
   };
 
-  const persistExistingFindingDraft = async (nextForm: FormRecord) => {
-    if (config.collection !== "findings" || !entity || !onPersist) return;
+  const persistExistingFindingDraft = async (nextForm: FormRecord): Promise<boolean> => {
+    if (config.collection !== "findings" || !entity || !onPersist) return false;
     const timestamp = nowIso();
     const entityToPersist = buildEntityForSave(nextForm, timestamp);
     const saved = await onPersist(entityToPersist);
-    if (isEntitySaveResult(saved)) {
-      persistedBaseUpdatedAtRef.current = saved.updatedAt;
-    } else if (saved !== null) {
-      persistedBaseUpdatedAtRef.current = entityToPersist.updatedAt;
+    // This source-link workflow is cloud-only and must receive a concrete
+    // persisted entity. `void` can also mean validation stopped the save.
+    if (!isEntitySaveResult(saved)) return false;
+    persistedBaseUpdatedAtRef.current = saved.updatedAt;
+    return true;
+  };
+
+  const captureFindingNameForChoice = (choice: PersonSeedChoice) => {
+    if (config.collection !== "findings" || !entity?.id) {
+      window.alert("Спочатку збережіть знахідку. Після цього можна прив’язати точне написання імені до особи.");
+      return;
     }
+    if (!projectId) {
+      window.alert("Не вдалося визначити проєкт. Оновіть сторінку та повторіть дію.");
+      return;
+    }
+    setFindingNameError("");
+    setFindingNameCapture({
+      choice,
+      findingId: entity.id,
+      documentId: String(form.documentId ?? "").trim() || null,
+      originalText: choice.originalText ?? String(form.personsText ?? ""),
+      normalizedFullName: String(choice.draft.fullName ?? ""),
+      targetMode: "",
+      existingPersonId: "",
+      confirmed: false,
+    });
+  };
+
+  const persistFindingNameForPerson = async (
+    personId: string,
+    capture: FindingNameCaptureSource,
+  ) => {
+    const parsed = splitPersonName(capture.normalizedFullName);
+    const selected = Array.isArray(form.personIds) ? form.personIds as string[] : [];
+    const nextForm = { ...form, personIds: [...new Set([...selected, personId])] };
+    setForm(nextForm);
+    const findingSaved = await persistExistingFindingDraft(nextForm);
+    if (!findingSaved) {
+      throw new Error("Знахідку не збережено. Історичне написання імені не створено; повторіть дію після збереження знахідки.");
+    }
+    await ensureFindingDocumentPersonName({
+      projectId,
+      personId,
+      findingId: capture.findingId,
+      documentId: capture.documentId,
+      originalText: capture.originalText,
+      normalizedFullName: capture.normalizedFullName,
+      surname: String(parsed.surname ?? ""),
+      givenName: String(parsed.givenName ?? ""),
+      patronymic: String(parsed.patronymic ?? ""),
+    }, {
+      listNames: listProjectPersonNames,
+      createName: createProjectPersonName,
+    });
   };
 
   const fieldRequired = (field: FieldConfig) => {
@@ -1547,12 +1625,18 @@ export function EntityModal({
               onOpenScanViewer={onOpenScanViewer}
               onCreatePerson={() => {
                 if (config.collection === "findings") {
+                  if (!entity?.id) {
+                    window.alert("Спочатку збережіть знахідку. Після збереження відкрийте її ще раз і прив’яжіть точне написання імені до особи.");
+                    return;
+                  }
                   const choices = personSeedChoicesFromFinding(form);
                   if (choices.length > 1) {
                     setPersonSeedChoices(choices);
                     return;
                   }
-                  setPersonSeed(choices[0] ?? createBasicPersonSeed("", String(form.researchId ?? "")));
+                  captureFindingNameForChoice(
+                    choices[0] ?? createFindingPersonSeedChoice("", String(form.researchId ?? "")),
+                  );
                   return;
                 }
                 const seed = config.collection === "tasks"
@@ -1636,7 +1720,7 @@ export function EntityModal({
       ) : null}
       {personSeedChoices && onSavePerson ? (
         <Modal
-          title="Створити особу зі знахідки"
+          title="Вибрати ім’я зі знахідки"
           onClose={() => setPersonSeedChoices(null)}
           mode="window"
           minimizable={false}
@@ -1645,7 +1729,7 @@ export function EntityModal({
           onFocus={onFocus}
         >
           <div className="person-seed-choices">
-            <p>Оберіть, для кого створити картку особи. Дані зі знахідки будуть перенесені у форму автоматично.</p>
+            <p>Оберіть згадану особу. На наступному кроці ви окремо підтвердите точне написання з джерела та нормалізоване ім’я.</p>
             <div>
               {personSeedChoices.map((choice) => (
                 <button
@@ -1653,14 +1737,176 @@ export function EntityModal({
                   type="button"
                   className="person-seed-choice"
                   onClick={() => {
-                    setPersonSeed(choice);
                     setPersonSeedChoices(null);
+                    captureFindingNameForChoice(choice);
                   }}
                 >
                   <strong>{choice.title}</strong>
                   {choice.description ? <span>{choice.description}</span> : null}
                 </button>
               ))}
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+      {findingNameCapture && onSavePerson ? (
+        <Modal
+          title="Ім’я зі збереженої знахідки"
+          onClose={() => {
+            if (findingNamePending) return;
+            setFindingNameCapture(null);
+            setFindingNameError("");
+          }}
+          mode="window"
+          minimizable={false}
+          stackIndex={stackIndex + 20}
+          dockIndex={dockIndex}
+          onFocus={onFocus}
+        >
+          <div className="finding-person-name-capture" aria-busy={findingNamePending}>
+            <p className="finding-person-name-capture__intro">
+              Оригінал зберігається окремо й ніколи не нормалізується автоматично. Виправляйте лише друге поле.
+            </p>
+            <label>
+              <span>Точне написання у джерелі *</span>
+              <textarea
+                rows={3}
+                disabled={findingNamePending}
+                value={findingNameCapture.originalText}
+                onChange={(event) => setFindingNameCapture((current) => current
+                  ? { ...current, originalText: event.target.value, confirmed: false }
+                  : current)}
+              />
+              <small>Пробіли, літери, скорочення та історичний правопис буде збережено саме так, як ви підтвердите.</small>
+            </label>
+            <label>
+              <span>Нормалізоване повне ім’я *</span>
+              <input
+                disabled={findingNamePending}
+                value={findingNameCapture.normalizedFullName}
+                onChange={(event) => setFindingNameCapture((current) => current
+                  ? { ...current, normalizedFullName: event.target.value }
+                  : current)}
+              />
+              <small>Це окреме редаговане написання для відображення та пошуку.</small>
+            </label>
+            <fieldset disabled={findingNamePending}>
+              <legend>До якої картки прив’язати</legend>
+              <label className="finding-person-name-capture__choice">
+                <input
+                  type="radio"
+                  name={`finding-person-target-${findingNameCapture.findingId}`}
+                  checked={findingNameCapture.targetMode === "existing"}
+                  onChange={() => setFindingNameCapture((current) => current
+                    ? { ...current, targetMode: "existing" }
+                    : current)}
+                />
+                <span>Вибрати наявну особу</span>
+              </label>
+              <label className="finding-person-name-capture__choice">
+                <input
+                  type="radio"
+                  name={`finding-person-target-${findingNameCapture.findingId}`}
+                  checked={findingNameCapture.targetMode === "new"}
+                  onChange={() => setFindingNameCapture((current) => current
+                    ? { ...current, targetMode: "new", existingPersonId: "" }
+                    : current)}
+                />
+                <span>Створити нову особу</span>
+              </label>
+            </fieldset>
+            {findingNameCapture.targetMode === "existing" ? (
+              <label>
+                <span>Наявна особа *</span>
+                <select
+                  disabled={findingNamePending}
+                  value={findingNameCapture.existingPersonId}
+                  onChange={(event) => setFindingNameCapture((current) => current
+                    ? { ...current, existingPersonId: event.target.value }
+                    : current)}
+                >
+                  <option value="">Оберіть особу</option>
+                  {availablePersons
+                    .filter((person) => !String(form.researchId ?? "") || person.researchId === String(form.researchId ?? ""))
+                    .sort((left, right) => personDisplayName(left).localeCompare(personDisplayName(right), "uk"))
+                    .map((person) => (
+                      <option key={person.id} value={person.id}>{personDisplayName(person)}</option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="checkbox-field finding-person-name-capture__confirm">
+              <input
+                type="checkbox"
+                disabled={findingNamePending}
+                checked={findingNameCapture.confirmed}
+                onChange={(event) => setFindingNameCapture((current) => current
+                  ? { ...current, confirmed: event.target.checked }
+                  : current)}
+              />
+              <span>Підтверджую, що поле «Точне написання у джерелі» перевірено за збереженою знахідкою.</span>
+            </label>
+            {findingNameError ? <div className="form-error" role="alert">{findingNameError}</div> : null}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button button-ghost"
+                disabled={findingNamePending}
+                onClick={() => {
+                  setFindingNameCapture(null);
+                  setFindingNameError("");
+                }}
+              >
+                Скасувати
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={
+                  findingNamePending
+                  || !findingNameCapture.confirmed
+                  || !findingNameCapture.originalText.trim()
+                  || !findingNameCapture.normalizedFullName.trim()
+                  || !findingNameCapture.targetMode
+                  || (findingNameCapture.targetMode === "existing" && !findingNameCapture.existingPersonId)
+                }
+                onClick={async () => {
+                  const capture = findingNameCapture;
+                  setFindingNameError("");
+                  if (capture.targetMode === "new") {
+                    const parsed = splitPersonName(capture.normalizedFullName);
+                    setPersonSeed({
+                      ...capture.choice,
+                      key: `${capture.choice.key}:confirmed:${capture.findingId}`,
+                      title: String(parsed.fullName ?? capture.choice.title),
+                      draft: { ...capture.choice.draft, ...parsed },
+                      findingNameCapture: {
+                        findingId: capture.findingId,
+                        documentId: capture.documentId,
+                        originalText: capture.originalText,
+                        normalizedFullName: capture.normalizedFullName,
+                      },
+                    });
+                    setFindingNameCapture(null);
+                    return;
+                  }
+                  setFindingNamePending(true);
+                  try {
+                    await persistFindingNameForPerson(capture.existingPersonId, capture);
+                    setFindingNameCapture(null);
+                  } catch (error) {
+                    setFindingNameError(errorMessage(error, "Не вдалося прив’язати написання імені до особи."));
+                  } finally {
+                    setFindingNamePending(false);
+                  }
+                }}
+              >
+                {findingNamePending
+                  ? "Збереження…"
+                  : findingNameCapture.targetMode === "new"
+                    ? "Продовжити до картки особи"
+                    : "Прив’язати написання"}
+              </button>
             </div>
           </div>
         </Modal>
@@ -1708,7 +1954,26 @@ export function EntityModal({
             const selected = Array.isArray(form.personIds) ? form.personIds as string[] : [];
             const nextForm = { ...form, personIds: [...new Set([...selected, linkedPerson.id])] };
             setForm(nextForm);
-            await persistExistingFindingDraft(nextForm);
+            if (personSeed.findingNameCapture) {
+              try {
+                await persistFindingNameForPerson(linkedPerson.id, personSeed.findingNameCapture);
+              } catch (error) {
+                // The person may already be safely persisted. Re-open the capture
+                // against that existing card so a retry cannot create a duplicate person.
+                setFindingNameCapture({
+                  choice: { ...personSeed, description: "" },
+                  ...personSeed.findingNameCapture,
+                  targetMode: "existing",
+                  existingPersonId: linkedPerson.id,
+                  confirmed: true,
+                });
+                setFindingNameError(errorMessage(error, "Картку особи створено, але написання зі знахідки ще не прив’язано. Повторіть прив’язку."));
+                setPersonSeed(null);
+                return;
+              }
+            } else {
+              await persistExistingFindingDraft(nextForm);
+            }
             setPersonSeed(null);
           }}
         />
@@ -1731,6 +1996,10 @@ function isPersonSaveResult(value: Person | null | void): value is Person {
 
 function isEntitySaveResult(value: AppEntity | null | void): value is AppEntity {
   return Boolean(value && typeof value === "object" && "id" in value && "updatedAt" in value);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
 function mergeCreatedFindingPersons(
@@ -2069,6 +2338,15 @@ function createBasicPersonSeed(rawName: string, researchId: string): PersonSeed 
   };
 }
 
+function createFindingPersonSeedChoice(rawName: string, researchId: string): PersonSeedChoice {
+  const seed = createBasicPersonSeed(rawName, researchId);
+  return {
+    ...seed,
+    description: "",
+    originalText: rawName,
+  };
+}
+
 function personSeedChoicesFromFinding(form: FormRecord): PersonSeedChoice[] {
   const participants = Array.isArray(form.participants)
     ? sortFindingParticipants(
@@ -2152,6 +2430,7 @@ function createPersonSeedFromFinding(
     draft,
     participantId: participant?.id,
     participantRole: participant?.role,
+    originalText: rawName,
   };
 }
 
@@ -2920,7 +3199,7 @@ function FormField({
         persons={persons}
         selectedIds={selected}
         researchId={researchId}
-        createLabel={field.key === "personIds" && findingType ? "Створити особу зі знахідки" : "Створити нову особу"}
+        createLabel={field.key === "personIds" && findingType ? "Додати ім’я зі знахідки" : "Створити нову особу"}
         onChange={onChange}
         onCreate={onCreatePerson}
       />

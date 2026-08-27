@@ -1,14 +1,39 @@
-import type { AppSettings } from "../types";
+import type { AppSettings, PersonNameDisplayMode } from "../types";
+import {
+  DEFAULT_PERSON_NAME_DISPLAY_LANGUAGE,
+  normalizePersonNameDisplayMode,
+} from "../utils/personNameDisplay.ts";
 import { getSupabaseClient } from "./supabaseAuth";
 
-export type ProjectPreferences = Pick<
-  AppSettings,
-  "researcherName" | "compactTables" | "lastAutomaticBackupAt"
->;
+export interface ProjectPreferences {
+  researcherName: string;
+  compactTables: boolean;
+  lastAutomaticBackupAt: string | null;
+  personNameDisplayMode: PersonNameDisplayMode;
+  personNameDisplayLanguage: string;
+  personNameDisplayDate: string;
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+export function projectPreferencesFromSettings(settings: AppSettings): ProjectPreferences {
+  return {
+    researcherName: settings.researcherName,
+    compactTables: settings.compactTables,
+    lastAutomaticBackupAt: settings.lastAutomaticBackupAt,
+    personNameDisplayMode: normalizePersonNameDisplayMode(settings.personNameDisplayMode),
+    personNameDisplayLanguage:
+      typeof settings.personNameDisplayLanguage === "string"
+        ? settings.personNameDisplayLanguage
+        : DEFAULT_PERSON_NAME_DISPLAY_LANGUAGE,
+    personNameDisplayDate:
+      typeof settings.personNameDisplayDate === "string"
+        ? settings.personNameDisplayDate
+        : "",
+  };
 }
 
 export async function loadProjectPreferences(
@@ -36,6 +61,17 @@ export async function loadProjectPreferences(
       typeof settings.lastAutomaticBackupAt === "string"
         ? settings.lastAutomaticBackupAt
         : null,
+    personNameDisplayMode: normalizePersonNameDisplayMode(
+      settings.personNameDisplayMode ?? fallback.personNameDisplayMode,
+    ),
+    personNameDisplayLanguage:
+      typeof settings.personNameDisplayLanguage === "string"
+        ? settings.personNameDisplayLanguage
+        : fallback.personNameDisplayLanguage,
+    personNameDisplayDate:
+      typeof settings.personNameDisplayDate === "string"
+        ? settings.personNameDisplayDate
+        : fallback.personNameDisplayDate,
   };
 }
 

@@ -7,6 +7,7 @@ import type {
   Finding,
   Hypothesis,
   Person,
+  PersonName,
   PersonRelation,
   Research,
   ScanAttachment,
@@ -84,6 +85,7 @@ import {
   type ProjectPersonMarriage,
   type ProjectPersonMarriageDraft,
 } from "../../services/projectPersonMarriages.ts";
+import { listProjectPersonNames } from "../../services/projectPersonNames.ts";
 
 export interface PersonsModuleV2Props {
   db: AppDatabase;
@@ -149,6 +151,8 @@ export interface PersonsModuleV2Props {
 
 interface PersonDetailBundle extends PersonLinkedRecords {
   documents: AppDatabase["documents"];
+  personNames: PersonName[];
+  personNamesError: string;
   loading: boolean;
   error: string;
 }
@@ -156,6 +160,8 @@ interface PersonDetailBundle extends PersonLinkedRecords {
 const emptyDetailBundle: PersonDetailBundle = {
   ...emptyPersonLinkedRecords(),
   documents: [],
+  personNames: [],
+  personNamesError: "",
   loading: false,
   error: "",
 };
@@ -486,14 +492,46 @@ export function PersonsModuleV2({
     let active = true;
     setDetail({ ...emptyDetailBundle, loading: true });
     const load = async (): Promise<PersonDetailBundle> => {
-      const linked = projectId
-        ? await listPersonLinkedRecords(projectId, detailPersonId)
-        : linkedRecordsFromMemory(detailPersonId, findings, tasks, hypotheses, archiveRequests);
-      const documentIds = linkedDocumentIds(linked);
+      const linkedPromise = projectId
+        ? listPersonLinkedRecords(projectId, detailPersonId)
+        : Promise.resolve(linkedRecordsFromMemory(detailPersonId, findings, tasks, hypotheses, archiveRequests));
+      let personNamesError = "";
+      const namesPromise = projectId
+        ? listProjectPersonNames(projectId, detailPersonId).catch((error: unknown) => {
+            personNamesError = error instanceof Error
+              ? error.message
+              : "Не вдалося завантажити варіанти імен.";
+            return [];
+          })
+        : Promise.resolve<PersonName[]>([]);
+      const [linked, personNames] = await Promise.all([linkedPromise, namesPromise]);
+      const nameFindingIds = new Set(personNames.flatMap((name) => {
+        const findingId = name.sourceFindingId
+          || (name.sourceType.trim().toLocaleLowerCase("uk-UA") === "finding" ? name.sourceId : null);
+        return findingId ? [findingId] : [];
+      }));
+      const sourceFindings = findings.filter((finding) => nameFindingIds.has(finding.id));
+      const combinedFindings = uniqueById([...linked.findings, ...sourceFindings]);
+      const documentIds = [...new Set([
+        ...linkedDocumentIds({ ...linked, findings: combinedFindings }),
+        ...personNames.flatMap((name) => {
+          const documentId = name.sourceDocumentId
+            || (name.sourceType.trim().toLocaleLowerCase("uk-UA") === "document" ? name.sourceId : null);
+          return documentId ? [documentId] : [];
+        }),
+      ])];
       const documents = projectId
         ? await listProjectDocumentsByIds(projectId, documentIds)
         : db.documents.filter((document) => documentIds.includes(document.id));
-      return { ...linked, documents, loading: false, error: "" };
+      return {
+        ...linked,
+        findings: combinedFindings,
+        documents,
+        personNames,
+        personNamesError,
+        loading: false,
+        error: "",
+      };
     };
     void load()
       .then((value) => {
@@ -512,6 +550,8 @@ export function PersonsModuleV2({
         setDetail({
           ...linked,
           documents: db.documents.filter((document) => documentIds.includes(document.id)),
+          personNames: [],
+          personNamesError: "",
           loading: false,
           error: error instanceof Error
             ? error.message
@@ -542,7 +582,14 @@ export function PersonsModuleV2({
     return (
       <PersonEditorV2
         db={db}
+        projectId={projectId}
         person={target.mode === "new" ? null : routePerson}
+        personNames={detail.personNames}
+        personNamesLoading={detail.loading}
+        personNamesError={detail.personNamesError}
+        personNameDocuments={db.documents}
+        personNameFindings={findings}
+        onPersonNamesChanged={(personNames) => setDetail((current) => ({ ...current, personNames }))}
         persons={persons}
         relations={relations}
         marriages={currentMarriageLoad.marriages}
@@ -583,6 +630,9 @@ export function PersonsModuleV2({
         <PersonProfileV2
           db={db}
           person={routePerson}
+          personNames={detail.personNames}
+          personNamesLoading={detail.loading}
+          personNamesError={detail.personNamesError}
           customFieldDefinitions={customFieldDefinitions}
           research={research}
           persons={persons}
@@ -608,6 +658,8 @@ export function PersonsModuleV2({
           onOpenPhoto={onOpenPhoto}
           onAddEvent={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
           onOpenPerson={(person) => onNavigate({ mode: "profile", personId: person.id })}
+          onOpenDocument={(document) => onOpenRelated("documents", document.id, document)}
+          onOpenFinding={(finding) => onOpenRelated("findings", finding.id, finding)}
           onOpenRelated={(page, record) => onOpenRelated(page, record.id, record)}
           onBrowseRelated={onNavigateRelated}
           onCreateRelated={!readOnly && onCreateRelated
@@ -1083,6 +1135,10 @@ function linkedDocumentIds(records: PersonLinkedRecords): string[] {
     ...records.tasks.map((item) => item.documentId),
     ...records.hypotheses.flatMap((item) => item.documentIds),
   ].filter(Boolean))];
+}
+
+function uniqueById<T extends { id: string }>(items: readonly T[]): T[] {
+  return [...new Map(items.map((item) => [item.id, item])).values()];
 }
 
 function buildLocalPersonSummaries(

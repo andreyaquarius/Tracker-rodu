@@ -1,9 +1,11 @@
 import type {
   CustomFieldValues,
   Person,
+  PersonNameType,
   PersonRelation,
   ScanAttachment,
 } from "../types";
+import type { GedcomImportNameDraft } from "../types/familyTree.ts";
 import { getSupabaseClient } from "./supabaseAuth";
 import {
   PERSON_EVENTS_META_KEY,
@@ -42,6 +44,16 @@ import {
   type GedcomPhotoBackupReplacement,
 } from "./gedcomPhotoBackup.ts";
 import type { GedcomImportDatasetMarker } from "../utils/gedcomImportGroups.ts";
+import {
+  GEDCOM_STRUCTURED_NAMES_CUSTOM_FIELD,
+  parseGedcomStructuredNamesPayload,
+  stableGedcomPersonNameImportId,
+} from "../utils/gedcomAppImport.ts";
+import {
+  GEDCOM_IMPORT_FILE_NAME_CUSTOM_FIELD,
+  GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD,
+  GEDCOM_XREF_CUSTOM_FIELD,
+} from "../utils/gedcomMetadata.ts";
 
 type PersonRow = {
   id: string;
@@ -92,6 +104,53 @@ type RelationRow = {
   updated_at: string;
 };
 
+export interface ProjectPeopleImportOptions extends ImportPhaseProgressOptions {
+  /**
+   * Full project backups restore their authoritative `personNames` collection
+   * separately. Replaying transient GEDCOM metadata in that case would create
+   * a second copy of the same source spellings.
+   */
+  importStructuredPersonNames?: boolean;
+}
+
+type GedcomPersonNameImportRow = {
+  id: string;
+  project_id: string;
+  person_id: string;
+  name_type: PersonNameType;
+  language_code: string;
+  script_code: string;
+  surname: string;
+  given_name: string;
+  patronymic: string;
+  full_name: string;
+  original_text: string;
+  is_primary: false;
+  is_preferred: false;
+  evidence_status: "unknown";
+  confidence: 50;
+  source_document_id: null;
+  source_finding_id: null;
+  notes: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  maiden_surname: string;
+  prefix: string;
+  suffix: string;
+  nickname: string;
+  full_normalized: string;
+  orthography: string;
+  valid_from: null;
+  valid_to: null;
+  date_precision: "unknown";
+  is_searchable: true;
+  source_type: "gedcom";
+  source_id: null;
+  citation_id: null;
+  document_fragment_id: null;
+};
+
 type PersonScanGroups = {
   birthScans: ScanAttachment[];
   marriageScans: ScanAttachment[];
@@ -108,6 +167,7 @@ const LEGACY_RELATION_SELECT =
   "id, project_id, person_id, related_person_id, relation_type, status, evidence_text, notes, created_at, updated_at";
 const SCANS_KEY = PERSON_SCANS_METADATA_KEY;
 const MAIDEN_SURNAME_KEY = "__trackerRoduMaidenSurname";
+const PERSON_NAME_V2_METADATA_KEY = "tracker_person_name_v2";
 const SELECT_BATCH_SIZE = 1000;
 // Persons and relations are fetched together. One range at a time per table
 // keeps the aggregate at two database statements instead of six competing
@@ -148,6 +208,7 @@ function splitCustomFields(value: unknown): {
   delete customFields[SCANS_KEY];
   delete customFields[PERSON_EVENTS_META_KEY];
   delete customFields[MAIDEN_SURNAME_KEY];
+  delete customFields[GEDCOM_STRUCTURED_NAMES_CUSTOM_FIELD];
   return {
     customFields: stripInternalGeoFields(customFields as CustomFieldValues),
     scans: {
@@ -230,6 +291,10 @@ function personToRow(projectId: string, person: Person, researchIds: Set<string>
     .map((part) => part.trim())
     .filter(Boolean)
     .join(" ");
+  const persistedCustomFields = {
+    ...stripInternalGeoFields(person.customFields ?? {}),
+  };
+  delete persistedCustomFields[GEDCOM_STRUCTURED_NAMES_CUSTOM_FIELD];
   return {
     id: person.id,
     project_id: projectId,
@@ -260,7 +325,7 @@ function personToRow(projectId: string, person: Person, researchIds: Set<string>
     privacy_status: normalizePersonPrivacyStatus(person.privacyStatus),
     notes: person.notes,
     custom_fields: {
-      ...stripInternalGeoFields(person.customFields ?? {}),
+      ...persistedCustomFields,
       [MAIDEN_SURNAME_KEY]: person.maidenSurname?.trim() ?? "",
       [SCANS_KEY]: {
         birthScans: person.birthScans ?? [],
@@ -278,6 +343,181 @@ function personToRow(projectId: string, person: Person, researchIds: Set<string>
 
 function normalizePersonPrivacyStatus(value: unknown): Person["privacyStatus"] {
   return value === "project" || value === "public" || value === "confidential" ? value : "private";
+}
+
+/**
+ * Builds non-primary source rows only. The persons projection trigger owns the
+ * single canonical primary row, including for GEDCOM's primary NAME value.
+ */
+export function buildGedcomPersonNameImportRows(
+  projectId: string,
+  persons: readonly Person[],
+  idFactory?: () => string,
+): GedcomPersonNameImportRow[] {
+  return persons.flatMap((person) => {
+    const names = parseGedcomStructuredNamesPayload(
+      person.customFields?.[GEDCOM_STRUCTURED_NAMES_CUSTOM_FIELD],
+    );
+    const gedcomXref = customFieldString(person, GEDCOM_XREF_CUSTOM_FIELD);
+    const importSourceKey = customFieldString(person, GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD);
+    const importFileName = customFieldString(person, GEDCOM_IMPORT_FILE_NAME_CUSTOM_FIELD);
+    return names.map((name, index) => {
+      const nameType = personNameTypeFromGedcom(name.nameType);
+      const maidenSurname = name.nameType === "maiden" ? name.surname : "";
+      const nickname = name.nickname ?? "";
+      const fullName = name.fullName
+        || [name.surname, name.givenName, name.patronymic].filter(Boolean).join(" ");
+      return {
+        id: idFactory?.() ?? stableGedcomPersonNameImportId({
+          projectId,
+          personId: person.id,
+          importSourceKey,
+          gedcomXref,
+          nameIndex: index,
+          name,
+        }),
+        project_id: projectId,
+        person_id: person.id,
+        name_type: nameType,
+        language_code: name.languageCode ?? "",
+        script_code: name.scriptCode ?? "",
+        surname: name.surname,
+        given_name: name.givenName,
+        patronymic: name.patronymic,
+        full_name: fullName,
+        // Keep the exact spelling from the GEDCOM line. Never normalize it.
+        original_text: name.originalText,
+        is_primary: false,
+        is_preferred: false,
+        evidence_status: "unknown",
+        confidence: 50,
+        source_document_id: null,
+        source_finding_id: null,
+        notes: "",
+        metadata: {
+          source: "gedcom_import",
+          originalNameType: name.nameType,
+          gedcomXref,
+          gedcomNameIndex: index,
+          importSourceKey,
+          importFileName,
+          [PERSON_NAME_V2_METADATA_KEY]: {
+            nameType,
+            maidenSurname,
+            prefix: "",
+            suffix: "",
+            nickname,
+            fullNormalized: fullName,
+            orthography: name.orthography ?? "",
+            validFrom: "",
+            validTo: "",
+            datePrecision: "unknown",
+            isSearchable: true,
+            sourceType: "gedcom",
+            sourceId: null,
+            citationId: null,
+            documentFragmentId: null,
+          },
+        },
+        created_at: person.createdAt,
+        updated_at: person.updatedAt,
+        maiden_surname: maidenSurname,
+        prefix: "",
+        suffix: "",
+        nickname,
+        full_normalized: fullName,
+        orthography: name.orthography ?? "",
+        valid_from: null,
+        valid_to: null,
+        date_precision: "unknown",
+        is_searchable: true,
+        source_type: "gedcom",
+        source_id: null,
+        citation_id: null,
+        document_fragment_id: null,
+      };
+    });
+  });
+}
+
+function personNameTypeFromGedcom(value: GedcomImportNameDraft["nameType"]): PersonNameType {
+  return value === "primary" ? "document" : value;
+}
+
+function legacyPersonNameStorageType(value: PersonNameType): string {
+  if ([
+    "primary",
+    "birth",
+    "married",
+    "alias",
+    "original",
+    "transliteration",
+    "religious",
+    "patronymic_variant",
+    "surname_variant",
+    "other",
+  ].includes(value)) return value;
+  if (value === "document" || value === "source_error") return "original";
+  if (value === "maiden" || value === "previous") return "surname_variant";
+  if (value === "nickname") return "alias";
+  return "other";
+}
+
+function legacyGedcomPersonNameRow(row: GedcomPersonNameImportRow): Record<string, unknown> {
+  const legacy = { ...row } as Record<string, unknown>;
+  for (const column of [
+    "maiden_surname",
+    "prefix",
+    "suffix",
+    "nickname",
+    "full_normalized",
+    "orthography",
+    "valid_from",
+    "valid_to",
+    "date_precision",
+    "is_searchable",
+    "source_type",
+    "source_id",
+    "citation_id",
+    "document_fragment_id",
+  ]) {
+    delete legacy[column];
+  }
+  legacy.name_type = legacyPersonNameStorageType(row.name_type);
+  return legacy;
+}
+
+function customFieldString(person: Person, key: string): string {
+  const value = person.customFields?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+export function isMissingHistoricalPersonNameColumnsError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  const code = typeof record.code === "string" ? record.code.toUpperCase() : "";
+  const description = [record.message, record.details, record.hint]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  const historicalColumns = [
+    "maiden_surname",
+    "prefix",
+    "suffix",
+    "nickname",
+    "full_normalized",
+    "orthography",
+    "valid_from",
+    "valid_to",
+    "date_precision",
+    "is_searchable",
+    "source_type",
+    "source_id",
+    "citation_id",
+    "document_fragment_id",
+  ];
+  return (code === "42703" || code === "PGRST204" || description.includes("schema cache"))
+    && historicalColumns.some((column) => description.includes(column));
 }
 
 function relationFromRow(row: RelationRow): PersonRelation {
@@ -563,10 +803,13 @@ export async function importProjectPeople(
   persons: Person[],
   relations: PersonRelation[],
   researchIds: Set<string>,
-  options: ImportPhaseProgressOptions = {},
+  options: ProjectPeopleImportOptions = {},
 ): Promise<void> {
   const client = getSupabaseClient();
   const personRows = persons.map((person) => personToRow(projectId, person, researchIds));
+  const personNameRows = options.importStructuredPersonNames === false
+    ? []
+    : buildGedcomPersonNameImportRows(projectId, persons);
   await runImportBatches(chunkPersonImportRows(personRows), async (batch) => {
     await runAdaptiveImportBatch(batch, async (items) => {
       const { error } = await client
@@ -578,6 +821,32 @@ export async function importProjectPeople(
     concurrency: PERSON_IMPORT_CONCURRENCY,
     beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("persons", options.onProgress),
+  });
+  // Person upserts run first so their projection trigger creates the one
+  // canonical primary row before any GEDCOM spellings are added.
+  let useLegacyPersonNameSchema = false;
+  await runImportBatches(chunkPersonImportRows(personNameRows), async (batch) => {
+    await runAdaptiveImportBatch(batch, async (items) => {
+      let { error } = await client
+        .from("person_names")
+        .upsert(
+          useLegacyPersonNameSchema ? items.map(legacyGedcomPersonNameRow) : items,
+          { onConflict: "id", ignoreDuplicates: true },
+        );
+      if (error && !useLegacyPersonNameSchema && isMissingHistoricalPersonNameColumnsError(error)) {
+        useLegacyPersonNameSchema = true;
+        ({ error } = await client
+          .from("person_names")
+          .upsert(items.map(legacyGedcomPersonNameRow), {
+            onConflict: "id",
+            ignoreDuplicates: true,
+          }));
+      }
+      if (error) throw error;
+    });
+  }, {
+    concurrency: PERSON_IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
   });
   const relationRows = relations.map((relation) => relationToRow(projectId, relation));
   let useLegacyRelationSchema = false;

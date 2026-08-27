@@ -416,6 +416,92 @@ export type PersonStatus =
   | "спростована";
 export type PersonPrivacyStatus = "private" | "project" | "public" | "confidential";
 
+export type KnownPersonNameType =
+  | "primary"
+  | "birth"
+  | "document"
+  | "maiden"
+  | "married"
+  | "previous"
+  | "alias"
+  | "nickname"
+  | "church"
+  | "other_language"
+  | "incorrect"
+  | "variant"
+  | "unknown"
+  // Legacy storage values stay readable and editable after the additive migration.
+  | "religious"
+  | "language_variant"
+  | "transliteration"
+  | "normalized"
+  | "source_error"
+  | "original"
+  | "patronymic_variant"
+  | "surname_variant"
+  | "other";
+
+/**
+ * Built-in values keep autocomplete while a validated custom slug lets future
+ * projects extend the catalogue without a database or client migration.
+ */
+export type PersonNameType = KnownPersonNameType | (string & {});
+
+export type PersonNameDatePrecision =
+  | "exact"
+  | "day"
+  | "month"
+  | "year"
+  | "range"
+  | "circa"
+  | "before"
+  | "after"
+  | "between"
+  | "unknown";
+export type PersonNameEvidenceStatus = "proven" | "likely" | "disputed" | "disproven" | "unknown";
+
+/**
+ * A source-aware spelling of a person's name. Legacy fields on `Person` remain
+ * the default projection used by existing lists, cards and exports.
+ */
+export interface PersonName extends BaseEntity {
+  projectId: EntityId;
+  personId: EntityId;
+  nameType: PersonNameType;
+  languageCode: string;
+  scriptCode: string;
+  surname: string;
+  maidenSurname: string;
+  givenName: string;
+  patronymic: string;
+  prefix: string;
+  suffix: string;
+  nickname: string;
+  /** Legacy display alias retained for existing callers. */
+  fullName: string;
+  fullNormalized: string;
+  originalText: string;
+  orthography: string;
+  validFrom: string;
+  validTo: string;
+  datePrecision: PersonNameDatePrecision;
+  isPrimary: boolean;
+  isPreferred: boolean;
+  isSearchable: boolean;
+  evidenceStatus: PersonNameEvidenceStatus;
+  confidence: number;
+  sourceDocumentId: EntityId | null;
+  sourceFindingId: EntityId | null;
+  sourceType: string;
+  sourceId: EntityId | null;
+  citationId: EntityId | null;
+  documentFragmentId: EntityId | null;
+  notes: string;
+  metadata: Record<string, unknown>;
+  createdBy: EntityId | null;
+  lockVersion: number;
+}
+
 export interface Person extends BaseEntity {
   researchId: EntityId;
   surname: string;
@@ -522,10 +608,25 @@ export interface PersonRelation extends BaseEntity {
   };
 }
 
+export type PersonNameDisplayMode =
+  | "current"
+  | "primary"
+  | "interface_language"
+  | "valid_at_date"
+  | "original"
+  | "primary_with_variants";
+
 export interface AppSettings {
   researcherName: string;
   compactTables: boolean;
   lastAutomaticBackupAt: string | null;
+  /**
+   * Optional for backward compatibility with existing backups and cached
+   * project settings. Missing values always resolve to the legacy card name.
+   */
+  personNameDisplayMode?: PersonNameDisplayMode;
+  personNameDisplayLanguage?: string;
+  personNameDisplayDate?: string;
   customFields: CustomFieldDefinition[];
 }
 
@@ -553,6 +654,12 @@ export interface AppDatabase {
   hypotheses: Hypothesis[];
   archiveRequests: ArchiveRequest[];
   persons: Person[];
+  /**
+   * Optional in the serialized format so every existing version-5 backup
+   * remains readable. New project snapshots populate this collection from
+   * Supabase immediately before they are written.
+   */
+  personNames?: PersonName[];
   personRelations: PersonRelation[];
   customSections: CustomSectionDefinition[];
   customSectionRecords: CustomSectionRecord[];

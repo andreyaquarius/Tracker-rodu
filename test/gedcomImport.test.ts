@@ -49,6 +49,39 @@ test("builds an import draft from GEDCOM individuals and family links", () => {
   assert.equal(draft.partnerRelationships[0].eventDate, "1895");
 });
 
+test("keeps alternative GEDCOM names, nicknames and source spelling without rewriting it", () => {
+  const draft = buildGedcomImportDraft([
+    "0 HEAD",
+    "1 CHAR UTF-8",
+    "0 @I1@ INDI",
+    "1 NAME Іван /Каленський/",
+    "2 TYPE birth",
+    "2 NICK Івась",
+    "2 LANG uk",
+    "1 NAME Иванъ /Каленскій/",
+    "2 TYPE document",
+    "2 _LANG ru-x-pre1918",
+    "2 _ORTH pre-1918",
+    "1 _AKA Jan /Kaleński/",
+    "1 NICK Янко",
+    "1 ALIA @I2@",
+    "0 TRLR",
+  ].join("\n"));
+
+  const names = draft.people[0]?.names ?? [];
+  assert.equal(names.length, 4);
+  assert.equal(names[0]?.nickname, "Івась");
+  assert.equal(names[0]?.languageCode, "uk");
+  assert.equal(names[1]?.nameType, "document");
+  assert.equal(names[1]?.originalText, "Иванъ /Каленскій/");
+  assert.equal(names[1]?.orthography, "pre-1918");
+  assert.equal(names[2]?.nameType, "alias");
+  assert.equal(names[2]?.originalText, "Jan /Kaleński/");
+  assert.equal(names[3]?.nameType, "nickname");
+  assert.equal(names[3]?.nickname, "Янко");
+  assert.equal(names.some((name) => name.originalText === "@I2@"), false);
+});
+
 test("uses GEDCOM PEDI to preserve adoptive parent-child semantics", () => {
   const draft = buildGedcomImportDraft([
     "0 HEAD",

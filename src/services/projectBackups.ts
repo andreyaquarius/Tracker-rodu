@@ -1,5 +1,9 @@
 import type { AppDatabase, BackupFile, BackupType } from "../types";
 import { normalizeDatabase } from "../utils/database";
+import {
+  listAllProjectPersonNames,
+  validateProjectPersonNamesForRestore,
+} from "./projectPersonNames";
 import { getSupabaseClient } from "./supabaseAuth";
 
 const PROJECT_BACKUP_BUCKET = "project-backups";
@@ -22,6 +26,11 @@ export async function createProjectBackup(
   projectId: string,
   db: AppDatabase,
 ): Promise<BackupFile> {
+  // Person names are loaded lazily by the profile UI and therefore are not
+  // guaranteed to be present in `db`. Build the complete snapshot before
+  // rotating existing backups so a read failure cannot discard a good copy.
+  const snapshot = await buildProjectBackupSnapshot(projectId, db);
+
   // The list is newest-first. When seven copies already exist, delete the
   // oldest one before uploading the eighth so the new snapshot is never
   // blocked by the server-side seven-object safety limit.
@@ -32,7 +41,7 @@ export async function createProjectBackup(
 
   const name = backupName();
   const path = `${projectId}/${name}`;
-  const content = JSON.stringify(db, null, 2);
+  const content = JSON.stringify(snapshot, null, 2);
   const blob = new Blob([content], { type: "application/json" });
   const { error } = await getSupabaseClient().storage
     .from(PROJECT_BACKUP_BUCKET)
@@ -50,6 +59,28 @@ export async function createProjectBackup(
     modifiedTime: createdTime,
     size: blob.size,
     type: "automatic",
+  };
+}
+
+/**
+ * Produces the authoritative payload shared by cloud, JSON and Excel backup
+ * flows. `AppDatabase` intentionally keeps historical names optional for
+ * backwards-compatible version-5 files, while every new export includes them.
+ */
+export async function buildProjectBackupSnapshot(
+  projectId: string,
+  db: AppDatabase,
+): Promise<AppDatabase> {
+  const personNames = await listAllProjectPersonNames(projectId);
+  validateProjectPersonNamesForRestore({
+    names: personNames,
+    personIds: new Set(db.persons.map((item) => item.id)),
+    documentIds: new Set(db.documents.map((item) => item.id)),
+    findingIds: new Set(db.findings.map((item) => item.id)),
+  });
+  return {
+    ...db,
+    personNames,
   };
 }
 

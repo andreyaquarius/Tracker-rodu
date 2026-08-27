@@ -10,6 +10,7 @@ import type {
   CustomSectionRecord,
   CustomSectionRecordValue,
   FindingParticipant,
+  PersonName,
   ScanAttachment,
 } from "../types";
 import { nowIso } from "./dateHelpers";
@@ -22,6 +23,12 @@ import { normalizePersonRelation } from "./personRelation";
 import { normalizePersonStatus } from "./personStatus";
 import { normalizeTaskReminderFields } from "./taskReminders";
 import { extractFindingSourceUrl } from "./findingSourceUrl.ts";
+import {
+  DEFAULT_PERSON_NAME_DISPLAY_LANGUAGE,
+  DEFAULT_PERSON_NAME_DISPLAY_MODE,
+  normalizePersonNameDisplayMode,
+} from "./personNameDisplay.ts";
+import { normalizeBackupPersonNames } from "./personNameBackup.ts";
 
 export function createEmptyDatabase(): AppDatabase {
   return {
@@ -37,6 +44,7 @@ export function createEmptyDatabase(): AppDatabase {
     hypotheses: [],
     archiveRequests: [],
     persons: [],
+    personNames: [],
     personRelations: [],
     customSections: [],
     customSectionRecords: [],
@@ -45,6 +53,9 @@ export function createEmptyDatabase(): AppDatabase {
       researcherName: "",
       compactTables: false,
       lastAutomaticBackupAt: null,
+      personNameDisplayMode: DEFAULT_PERSON_NAME_DISPLAY_MODE,
+      personNameDisplayLanguage: DEFAULT_PERSON_NAME_DISPLAY_LANGUAGE,
+      personNameDisplayDate: "",
       customFields: [],
     },
   };
@@ -169,6 +180,11 @@ export function normalizeDatabase(value: unknown): AppDatabase {
     hypotheses,
     archiveRequests,
     persons,
+    // Absence is meaningful: pre-feature version-5 backups have no complete
+    // historical-name payload and must keep the legacy GEDCOM import path.
+    personNames: candidate.personNames === undefined
+      ? undefined
+      : normalizeBackupPersonNames(candidate.personNames),
     personRelations: Array.isArray(candidate.personRelations)
       ? candidate.personRelations.map(normalizePersonRelation)
       : [],
@@ -178,6 +194,17 @@ export function normalizeDatabase(value: unknown): AppDatabase {
     settings: {
       ...empty.settings,
       ...(candidate.settings ?? {}),
+      personNameDisplayMode: normalizePersonNameDisplayMode(
+        candidate.settings?.personNameDisplayMode,
+      ),
+      personNameDisplayLanguage:
+        typeof candidate.settings?.personNameDisplayLanguage === "string"
+          ? candidate.settings.personNameDisplayLanguage
+          : DEFAULT_PERSON_NAME_DISPLAY_LANGUAGE,
+      personNameDisplayDate:
+        typeof candidate.settings?.personNameDisplayDate === "string"
+          ? candidate.settings.personNameDisplayDate
+          : "",
       customFields: normalizeCustomFieldDefinitions(candidate.settings?.customFields),
     },
   };
@@ -194,10 +221,20 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
   const hypotheses = createMap(source.hypotheses);
   const archiveRequests = createMap(source.archiveRequests);
   const persons = createMap(source.persons);
+  const hasCompletePersonNames = Array.isArray(source.personNames);
+  const sourcePersonNames = source.personNames ?? [];
+  const personNames = createMap(sourcePersonNames);
   const personRelations = createMap(source.personRelations);
   const customSections = createMap(source.customSections);
   const customRecords = createMap(source.customSectionRecords);
   const customFieldDefinitions = createMap(source.settings.customFields);
+  const citationIds = createMap(uniqueEntityIds(sourcePersonNames.map((item) => item.citationId)));
+  const documentFragmentIds = createMap(
+    uniqueEntityIds(sourcePersonNames.map((item) => item.documentFragmentId)),
+  );
+  const otherSourceIds = createMap(uniqueEntityIds(sourcePersonNames
+    .map((item) => item.sourceId)
+    .filter((id) => id && !documents.has(id) && !findings.has(id))));
   const sectionFieldIds = new Map<string, string>();
 
   for (const section of source.customSections) {
@@ -226,6 +263,8 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
   };
   const mapReference = (map: Map<string, string>, id: string) =>
     id ? map.get(id) ?? "" : "";
+  const mapNullableRequired = (map: Map<string, string>, id: string | null) =>
+    id ? mapRequired(map, id) : null;
   const mapReferences = (map: Map<string, string>, ids: string[]) =>
     ids.map((id) => map.get(id)).filter((id): id is string => Boolean(id));
   const mapRelationTarget = <T extends string | undefined>(target: T): T => {
@@ -394,6 +433,31 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
         customFields: mapCustomFields("persons", item.customFields),
       };
     }),
+    personNames: hasCompletePersonNames
+      ? sourcePersonNames.map((item) => ({
+        ...item,
+        id: mapRequired(personNames, item.id),
+        // The destination project is supplied by the restore service.
+        projectId: "",
+        personId: mapRequired(persons, item.personId),
+        sourceDocumentId: mapNullableRequired(documents, item.sourceDocumentId),
+        sourceFindingId: mapNullableRequired(findings, item.sourceFindingId),
+        sourceId: item.sourceId
+          ? item.sourceType === "document"
+            ? mapRequired(documents, item.sourceId)
+            : item.sourceType === "finding"
+              ? mapRequired(findings, item.sourceId)
+              : documents.get(item.sourceId)
+                ?? findings.get(item.sourceId)
+                ?? mapRequired(otherSourceIds, item.sourceId)
+          : null,
+        citationId: item.citationId ? citationIds.get(item.citationId) ?? null : null,
+        documentFragmentId: item.documentFragmentId
+          ? documentFragmentIds.get(item.documentFragmentId) ?? null
+          : null,
+        createdBy: null,
+      }))
+      : undefined,
     personRelations: source.personRelations
       .filter(
         (item) => persons.has(item.personId) && persons.has(item.relatedPersonId),
@@ -436,6 +500,11 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
       })),
     },
   };
+}
+
+function uniqueEntityIds(values: Array<string | null>): Array<{ id: string }> {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))]
+    .map((id) => ({ id }));
 }
 
 function normalizeCustomSections(value: unknown): CustomSectionDefinition[] {

@@ -184,6 +184,16 @@ function personDraftFromRecord(
   for (const marriedNameLine of childLines.filter((line) => line.tag === "_MARNM" && line.value)) {
     names.push(marriedNameDraftFromLine(lineLookup, marriedNameLine));
   }
+  const fallbackName = names[0];
+  for (const aliasLine of childLines.filter((line) => (
+    ["NICK", "_AKA", "ALIA"].includes(line.tag) && line.value
+  ))) {
+    // ALIA is also used as an individual-record pointer. Keep that relationship
+    // in the preserved GEDCOM record instead of turning an @I…@ pointer into a
+    // visible name.
+    if (aliasLine.tag === "ALIA" && /^@[^@]+@$/.test(aliasLine.value.trim())) continue;
+    names.push(aliasNameDraftFromLine(lineLookup, aliasLine, fallbackName));
+  }
   const events = childLines
     .map((line) => eventDraftFromLine(lineLookup, line))
     .filter((event): event is GedcomImportEventDraft => Boolean(event));
@@ -471,7 +481,42 @@ function nameDraftFromLine(lineLookup: GedcomLineLookup, line: GedcomLine): Gedc
     patronymic: patronymicFromChild,
     fullName: parsed.fullName,
     originalText: line.value,
+    nickname: childValue(lineLookup, line, "NICK"),
+    languageCode: childValue(lineLookup, line, "LANG") || childValue(lineLookup, line, "_LANG"),
+    scriptCode: childValue(lineLookup, line, "_SCPT") || inferNameScript(line.value),
+    orthography: childValue(lineLookup, line, "_ORTH"),
   };
+}
+
+function aliasNameDraftFromLine(
+  lineLookup: GedcomLineLookup,
+  line: GedcomLine,
+  baseName?: GedcomImportNameDraft,
+): GedcomImportNameDraft {
+  const parsed = parseGedcomNameValue(line.value);
+  const nickname = line.tag === "NICK" ? line.value : "";
+  const fullName = nickname
+    ? [baseName?.surname, nickname, baseName?.patronymic].filter(Boolean).join(" ").trim()
+    : parsed.fullName;
+  return {
+    nameType: nickname ? "nickname" : "alias",
+    surname: nickname ? baseName?.surname ?? "" : parsed.surname,
+    givenName: nickname ? baseName?.givenName ?? "" : parsed.givenName,
+    patronymic: baseName?.patronymic ?? "",
+    fullName: fullName || line.value,
+    originalText: line.value,
+    nickname,
+    languageCode: childValue(lineLookup, line, "LANG") || childValue(lineLookup, line, "_LANG"),
+    scriptCode: childValue(lineLookup, line, "_SCPT") || inferNameScript(line.value),
+    orthography: childValue(lineLookup, line, "_ORTH"),
+  };
+}
+
+function inferNameScript(value: string): string {
+  if (/\p{Script=Hebrew}/u.test(value)) return "Hebr";
+  if (/\p{Script=Cyrillic}/u.test(value)) return "Cyrl";
+  if (/\p{Script=Latin}/u.test(value)) return "Latn";
+  return "Zyyy";
 }
 
 function marriedNameDraftFromLine(
@@ -806,13 +851,29 @@ function gedcomNameTypeToDraft(value: string): FamilyTreePersonNameType {
     case "married":
       return "married";
     case "original":
-      return "original";
+    case "document":
+      return "document";
+    case "nickname":
+    case "nick":
+      return "nickname";
+    case "church":
+    case "religious":
+      return "church";
+    case "other language":
+    case "language":
+      return "other_language";
     case "transliteration":
       return "transliteration";
+    case "normalized":
+      return "normalized";
+    case "incorrect":
+      return "incorrect";
     case "variant":
-      return "alias";
+      return "variant";
     case "aka":
       return "alias";
+    case "unknown":
+      return "unknown";
     default:
       return "primary";
   }

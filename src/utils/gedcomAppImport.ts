@@ -39,6 +39,7 @@ import {
   GEDCOM_UID_CUSTOM_FIELD,
   GEDCOM_VITAL_STATUS_CUSTOM_FIELD,
   GEDCOM_XREF_CUSTOM_FIELD,
+  parseGedcomMetadata,
   stringifyGedcomMetadata,
 } from "./gedcomMetadata.ts";
 import { deriveGedcomImportSourceKey } from "./gedcomImportReconciliation.ts";
@@ -64,6 +65,103 @@ export interface GedcomAppImportBuildResult {
   personIdByXref: Record<string, string>;
   preservedRecords: NonNullable<GedcomImportDraft["preservedRecords"]>;
   importSourceKey: string;
+}
+
+/**
+ * Transient bridge between the synchronous GEDCOM builder and the bulk
+ * project persistence service. It is deliberately stripped before the Person
+ * row is written: the durable representation lives in `person_names`.
+ */
+export const GEDCOM_STRUCTURED_NAMES_CUSTOM_FIELD = "__trackerRoduGedcomStructuredNames";
+
+interface GedcomStructuredNamesPayload {
+  version: 1;
+  names: GedcomImportNameDraft[];
+}
+
+const GEDCOM_IMPORT_NAME_TYPES = new Set<GedcomImportNameDraft["nameType"]>([
+  "primary",
+  "birth",
+  "document",
+  "maiden",
+  "married",
+  "previous",
+  "alias",
+  "nickname",
+  "church",
+  "other_language",
+  "normalized",
+  "incorrect",
+  "variant",
+  "unknown",
+  "original",
+  "transliteration",
+  "religious",
+  "patronymic_variant",
+  "surname_variant",
+  "other",
+]);
+
+/** Reads only the versioned internal payload produced by this importer. */
+export function parseGedcomStructuredNamesPayload(value: unknown): GedcomImportNameDraft[] {
+  const payload = parseGedcomMetadata<unknown>(value, null);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const record = payload as Record<string, unknown>;
+  if (record.version !== 1 || !Array.isArray(record.names)) return [];
+  return record.names
+    .map(normalizeGedcomStructuredName)
+    .filter((name): name is GedcomImportNameDraft => Boolean(name));
+}
+
+export function stableGedcomPersonNameImportId(input: {
+  projectId: string;
+  personId: string;
+  importSourceKey: string;
+  gedcomXref: string;
+  nameIndex: number;
+  name: GedcomImportNameDraft;
+}): string {
+  const hash = structuredNameIdentityHash128(JSON.stringify([
+    "tracker-rodu-gedcom-person-name-v1",
+    input.projectId,
+    input.personId,
+    input.importSourceKey,
+    input.gedcomXref,
+    input.nameIndex,
+    input.name.nameType,
+    input.name.originalText,
+    input.name.fullName,
+    input.name.surname,
+    input.name.givenName,
+    input.name.patronymic,
+    input.name.nickname ?? "",
+  ]));
+  const versioned = `${hash.slice(0, 12)}5${hash.slice(13)}`;
+  const variant = ((Number.parseInt(versioned[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
+  const uuid = `${versioned.slice(0, 16)}${variant}${versioned.slice(17)}`;
+  return [uuid.slice(0, 8), uuid.slice(8, 12), uuid.slice(12, 16), uuid.slice(16, 20), uuid.slice(20)]
+    .join("-");
+}
+
+function structuredNameIdentityHash128(value: string): string {
+  let h1 = 1779033703;
+  let h2 = 3144134277;
+  let h3 = 1013904242;
+  let h4 = 2773480762;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    h1 = h2 ^ Math.imul(h1 ^ code, 597399067);
+    h2 = h3 ^ Math.imul(h2 ^ code, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ code, 951274213);
+    h4 = h1 ^ Math.imul(h4 ^ code, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  return [h1, h2, h3, h4]
+    .map((part) => (part >>> 0).toString(16).padStart(8, "0"))
+    .join("");
 }
 
 export function buildGedcomAppImport(
@@ -435,8 +533,53 @@ function personFromGedcomDraft(
       [GEDCOM_RAW_RECORD_CUSTOM_FIELD]: stringifyGedcomMetadata(preservedRecord ?? null),
       [GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD]: importSourceKey,
       [GEDCOM_IMPORT_FILE_NAME_CUSTOM_FIELD]: importFileName,
+      [GEDCOM_STRUCTURED_NAMES_CUSTOM_FIELD]: stringifyGedcomMetadata({
+        version: 1,
+        names: person.names,
+      } satisfies GedcomStructuredNamesPayload),
     },
   };
+}
+
+function normalizeGedcomStructuredName(value: unknown): GedcomImportNameDraft | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.nameType !== "string"
+    || !GEDCOM_IMPORT_NAME_TYPES.has(record.nameType as GedcomImportNameDraft["nameType"])) {
+    return null;
+  }
+  const name: GedcomImportNameDraft = {
+    nameType: record.nameType as GedcomImportNameDraft["nameType"],
+    surname: stringField(record.surname),
+    givenName: stringField(record.givenName),
+    patronymic: stringField(record.patronymic),
+    fullName: stringField(record.fullName),
+    originalText: stringField(record.originalText),
+  };
+  const nickname = optionalStringField(record.nickname);
+  const languageCode = optionalStringField(record.languageCode);
+  const scriptCode = optionalStringField(record.scriptCode);
+  const orthography = optionalStringField(record.orthography);
+  if (nickname !== undefined) name.nickname = nickname;
+  if (languageCode !== undefined) name.languageCode = languageCode;
+  if (scriptCode !== undefined) name.scriptCode = scriptCode;
+  if (orthography !== undefined) name.orthography = orthography;
+  return [
+    name.surname,
+    name.givenName,
+    name.patronymic,
+    name.fullName,
+    name.originalText,
+    name.nickname ?? "",
+  ].some(Boolean) ? name : null;
+}
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function optionalStringField(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 function birthNameForImportedPerson(

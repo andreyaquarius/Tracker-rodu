@@ -229,8 +229,19 @@ export interface AssociationRelationship {
 export type FamilyTreePersonNameType =
   | "primary"
   | "birth"
+  | "document"
+  | "maiden"
   | "married"
+  | "previous"
   | "alias"
+  | "nickname"
+  | "church"
+  | "other_language"
+  | "normalized"
+  | "incorrect"
+  | "variant"
+  | "unknown"
+  // Legacy values stay valid so existing rows and exports never break.
   | "original"
   | "transliteration"
   | "religious"
@@ -248,16 +259,31 @@ export interface FamilyTreePersonName {
   surname: string;
   givenName: string;
   patronymic: string;
+  maidenSurname?: string;
+  prefix?: string;
+  suffix?: string;
+  nickname?: string;
   fullName: string;
   originalText: string;
+  fullNormalized?: string;
+  orthography?: string;
+  validFrom?: string;
+  validTo?: string;
+  datePrecision?: string;
   isPrimary: boolean;
   isPreferred: boolean;
+  isSearchable?: boolean;
   evidenceStatus: EvidenceStatus;
   confidence: number;
+  sourceType?: string;
+  sourceId?: EntityId | null;
+  citationId?: EntityId | null;
+  documentFragmentId?: string | null;
   sourceDocumentId: EntityId | null;
   sourceFindingId: EntityId | null;
   notes: string;
   metadata: Record<string, unknown>;
+  createdBy?: EntityId | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -545,6 +571,10 @@ export interface GedcomImportNameDraft {
   patronymic: string;
   fullName: string;
   originalText: string;
+  nickname?: string;
+  languageCode?: string;
+  scriptCode?: string;
+  orthography?: string;
 }
 
 export interface GedcomPreservedLine {

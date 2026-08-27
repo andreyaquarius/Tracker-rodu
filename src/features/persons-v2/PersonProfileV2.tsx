@@ -15,6 +15,7 @@ import type {
   Finding,
   Hypothesis,
   Person,
+  PersonName,
   PersonRelation,
   Research,
   ScanAttachment,
@@ -47,6 +48,12 @@ import {
 import { PersonPhotoAlbumV2 } from "./PersonPhotoAlbumV2.tsx";
 import type { ProjectPersonMarriage } from "../../services/projectPersonMarriages.ts";
 import { formatFlexibleDateForDisplay } from "../../utils/dateHelpers.ts";
+import { PersonNamesProfileSectionV2 } from "./PersonNamesProfileSectionV2.tsx";
+import {
+  personNameDisplayOptionsFromSettings,
+  resolvePersonNameDisplay,
+  type ResolvedPersonNameDisplay,
+} from "../../utils/personNameDisplay.ts";
 
 export type PersonProfileTabV2 =
   | "overview"
@@ -79,6 +86,9 @@ type PersonProfileRelatedRecordV2 =
 export interface PersonProfileV2Props {
   db: AppDatabase;
   person: Person;
+  personNames?: readonly PersonName[];
+  personNamesLoading?: boolean;
+  personNamesError?: string;
   customFieldDefinitions?: CustomFieldDefinition[];
   research?: Research | null;
   persons?: readonly Person[];
@@ -151,6 +161,9 @@ const profileTabLabelsV2: Record<PersonProfileTabV2, string> = {
 export function PersonProfileV2({
   db,
   person,
+  personNames = [],
+  personNamesLoading = false,
+  personNamesError = "",
   customFieldDefinitions = [],
   research,
   persons = [],
@@ -193,7 +206,21 @@ export function PersonProfileV2({
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pendingKeyboardFocus = useRef<PersonProfileTabV2 | null>(null);
   const activeTab = controlledTab ?? internalTab;
-  const name = personDisplayName(person);
+  const nameDisplay = useMemo(
+    () => resolvePersonNameDisplay(
+      person,
+      personNames,
+      personNameDisplayOptionsFromSettings(db.settings),
+    ),
+    [
+      db.settings.personNameDisplayDate,
+      db.settings.personNameDisplayLanguage,
+      db.settings.personNameDisplayMode,
+      person,
+      personNames,
+    ],
+  );
+  const name = nameDisplay.label;
   const photos = person.photos ?? [];
   const availablePhotos = photos.filter(isPhotoReferenceAvailable);
   const primaryPhoto = primaryPersonPhoto(photos, person.primaryPhotoId);
@@ -249,9 +276,15 @@ export function PersonProfileV2({
         label: personRelationLabel(relation, person.id, relatedPerson),
       };
     }), [person.id, personsById, relations]);
+  const personNameFindingIds = useMemo(
+    () => new Set(personNames.flatMap((item) => item.sourceFindingId ? [item.sourceFindingId] : [])),
+    [personNames],
+  );
   const linkedFindings = useMemo(
-    () => findings.filter((finding) => finding.personIds.includes(person.id)),
-    [findings, person.id],
+    () => findings.filter((finding) => (
+      finding.personIds.includes(person.id) || personNameFindingIds.has(finding.id)
+    )),
+    [findings, person.id, personNameFindingIds],
   );
   const linkedTasks = useMemo(
     () => tasks.filter((task) => task.personIds.includes(person.id)),
@@ -267,10 +300,11 @@ export function PersonProfileV2({
   );
   const linkedDocumentIds = useMemo(() => new Set([
     ...personDocumentIds,
+    ...personNames.flatMap((item) => item.sourceDocumentId ? [item.sourceDocumentId] : []),
     ...linkedFindings.map((finding) => finding.documentId),
     ...linkedTasks.map((task) => task.documentId),
     ...linkedHypotheses.flatMap((hypothesis) => hypothesis.documentIds),
-  ].filter(Boolean)), [linkedFindings, linkedHypotheses, linkedTasks, personDocumentIds]);
+  ].filter(Boolean)), [linkedFindings, linkedHypotheses, linkedTasks, personDocumentIds, personNames]);
   const linkedDocuments = useMemo(
     () => documents.filter((document) => linkedDocumentIds.has(document.id)),
     [documents, linkedDocumentIds],
@@ -356,6 +390,9 @@ export function PersonProfileV2({
           )}
           <div className="persons-v2-profile__identity-copy">
             <h1 id={`${componentId}-title`}>{name}</h1>
+            {nameDisplay.variantLabels.length ? (
+              <small>Варіанти імені: {nameDisplay.variantLabels.join("; ")}</small>
+            ) : null}
             <p>{personLifeYears(person) || "Роки життя не вказані"} · {person.gender}</p>
             <div className="persons-v2-profile__badges">
               <span className="status-pill">{person.status}</span>
@@ -448,6 +485,10 @@ export function PersonProfileV2({
               tab={tab}
               db={db}
               person={person}
+              personNames={personNames}
+              personNameDisplay={nameDisplay}
+              personNamesLoading={personNamesLoading}
+              personNamesError={personNamesError}
               customFieldDefinitions={customFieldDefinitions}
               places={places.all}
               completeness={completeness}
@@ -487,6 +528,10 @@ interface PersonProfilePanelV2Props {
   tab: PersonProfileTabV2;
   db: AppDatabase;
   person: Person;
+  personNames: readonly PersonName[];
+  personNameDisplay: ResolvedPersonNameDisplay;
+  personNamesLoading: boolean;
+  personNamesError: string;
   customFieldDefinitions: CustomFieldDefinition[];
   places: readonly string[];
   completeness: ReturnType<typeof calculatePersonProfileCompleteness>;
@@ -549,6 +594,10 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
   const {
     db,
     person,
+    personNames,
+    personNameDisplay,
+    personNamesLoading,
+    personNamesError,
     customFieldDefinitions,
     places,
     completeness,
@@ -563,6 +612,7 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
     onSelectTab,
     onOpenPerson,
     onOpenDocument,
+    onOpenFinding,
     onOpenRelated,
     onBrowseRelated,
     photoUrlForPerson,
@@ -572,7 +622,10 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
       <div className="persons-v2-profile__main-column">
         <ProfileSectionV2 title="Основна інформація">
           <dl className="persons-v2-profile__facts-grid">
-            <ProfileFactV2 label="Ім’я при народженні" value={personDisplayName(person)} />
+            <ProfileFactV2
+              label={personNameDisplay.mode === "current" ? "Ім’я при народженні" : "Відображуване ім’я"}
+              value={personNameDisplay.inlineLabel}
+            />
             <ProfileFactV2 label="Дата народження" value={person.birthDate || yearRangeV2(person.birthYearFrom, person.birthYearTo)} />
             <ProfileFactV2 label="Стать" value={person.gender} />
             <ProfileFactV2 label="Місце народження" value={person.birthPlace} />
@@ -582,6 +635,18 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
             <ProfileFactV2 label="Місце смерті" value={person.isLiving ? "—" : person.deathPlace} />
             <ProfileFactV2 label="Причина смерті" value={person.isLiving ? "—" : personDeathCause(person)} />
           </dl>
+        </ProfileSectionV2>
+
+        <ProfileSectionV2 title={`Імена та варіанти (${personNames.length})`}>
+          <PersonNamesProfileSectionV2
+            names={personNames}
+            loading={personNamesLoading}
+            loadError={personNamesError}
+            documents={documents}
+            findings={findings}
+            onOpenDocument={onOpenDocument}
+            onOpenFinding={onOpenFinding}
+          />
         </ProfileSectionV2>
 
         <ProfileSectionV2 title={`Шлюби (${marriages.length || (person.marriageDate || person.marriagePlace ? 1 : 0)})`}>
