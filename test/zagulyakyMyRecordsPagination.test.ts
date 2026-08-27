@@ -15,6 +15,18 @@ const page = readFileSync(
   "utf8",
 );
 
+function effectContaining(marker: string): string {
+  const markerIndex = page.indexOf(marker);
+  assert.notEqual(markerIndex, -1, `expected the page effect to contain ${marker}`);
+  const start = page.lastIndexOf("useEffect(() => {", markerIndex);
+  assert.notEqual(start, -1, `expected ${marker} to be inside a React effect`);
+  const dependencyStart = page.indexOf("\n  }, [", markerIndex);
+  assert.notEqual(dependencyStart, -1, `expected ${marker} effect to declare dependencies`);
+  const end = page.indexOf("]);", dependencyStart);
+  assert.notEqual(end, -1, `expected ${marker} effect dependencies to end`);
+  return page.slice(start, end + 3);
+}
+
 test("private Zagulyaky pagination returns owner-only exact totals and status counters", () => {
   assert.match(migration, /create or replace function public\.get_my_zagulyaky_page_v1\(\s*p_status text default null,\s*p_limit integer default 50,\s*p_offset integer default 0/s);
   assert.match(migration, /current_user_id uuid := auth\.uid\(\)/);
@@ -61,4 +73,33 @@ test("my records can refresh private drafts without depending on Telegram intake
   assert.match(page, /onRefresh=\{refreshMyRecords\}/);
   assert.match(page, /↻ Оновити/);
   assert.match(page, /Створюйте нові записи тут або перевіряйте вже наявні приватні чернетки/);
+});
+
+test("the private My records route never starts the public people catalogue request", () => {
+  const privateEffect = effectContaining("loadMyZagulyaky(accountId");
+  const publicEffect = effectContaining("searchZagulyakyPeople(peopleFilters");
+
+  assert.notEqual(privateEffect, publicEffect, "private and public loaders use distinct effects");
+  assert.match(privateEffect, /if \(activeTab !== "mine"\) return;/);
+  assert.doesNotMatch(privateEffect, /searchZagulyakyPeople|searchZagulyakyDocuments|setTimeout/);
+  assert.match(
+    privateEffect,
+    /\}, \[accountId, activeTab, myRecordsPage, myRecordsPageSize, myRecordsRevision, myRecordsStatus\]\);/,
+  );
+  assert.match(privateEffect, /controller\.abort\(\)/);
+
+  assert.match(publicEffect, /if \(activeTab === "mine"\) return;/);
+  assert.match(publicEffect, /window\.clearTimeout\(timeout\)/);
+  assert.match(publicEffect, /controller\.abort\(\)/);
+  assert.doesNotMatch(publicEffect, /loadMyZagulyaky|myRecordsPage|myRecordsRevision|myRecordsStatus/);
+});
+
+test("the private My records route skips public statistics", () => {
+  assert.match(
+    page,
+    /const shouldLoadPublicStats = activeTab === "people" \|\| activeTab === "documents";/,
+  );
+  const statsEffect = effectContaining("loadZagulyakyStats(controller.signal)");
+  assert.match(statsEffect, /if \(!shouldLoadPublicStats\)/);
+  assert.match(statsEffect, /controller\.abort\(\)/);
 });

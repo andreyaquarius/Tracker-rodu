@@ -69,10 +69,15 @@ export interface LoadMyZagulyakyOptions {
   page?: number;
   pageSize?: number;
   status?: ZagulyakaWorkflowStatus | null;
+  signal?: AbortSignal;
 }
 
-export async function loadZagulyakyStats(): Promise<ZagulyakyStats> {
-  const { data, error } = await getSupabaseClient().rpc("get_zagulyaky_public_stats_v1");
+export async function loadZagulyakyStats(signal?: AbortSignal): Promise<ZagulyakyStats> {
+  throwIfAborted(signal);
+  let request = getSupabaseClient().rpc("get_zagulyaky_public_stats_v1");
+  if (signal) request = request.abortSignal(signal);
+  const { data, error } = await request;
+  throwIfAborted(signal);
   if (error) throw error;
   const row = firstRecord(data);
   return {
@@ -165,9 +170,11 @@ export async function searchZagulyakyPeople(
   filters: ZagulyakyPeopleFilters,
   cursor: ZagulyakySearchCursor | null,
   pageSize: number,
+  signal?: AbortSignal,
 ): Promise<ZagulyakySearchResult<ZagulyakaPersonListItem>> {
+  throwIfAborted(signal);
   const safePageSize = clampPageSize(pageSize);
-  const { data, error } = await getSupabaseClient().rpc("search_zagulyaky_people_v1", {
+  let request = getSupabaseClient().rpc("search_zagulyaky_people_v1", {
     p_query: nullableText(filters.query),
     p_filters: compactObject({
       sourceLocation: filters.originPlace,
@@ -184,6 +191,9 @@ export async function searchZagulyakyPeople(
     p_cursor_published_at: cursor?.publishedAt ?? null,
     p_cursor_id: cursor?.id ?? null,
   });
+  if (signal) request = request.abortSignal(signal);
+  const { data, error } = await request;
+  throwIfAborted(signal);
   if (error) throw error;
   const payload = searchPayload(data);
   return { items: payload.items.map(mapPersonListItem), nextCursor: payload.nextCursor, pageSize: safePageSize };
@@ -193,9 +203,11 @@ export async function searchZagulyakyDocuments(
   filters: ZagulyakyDocumentFilters,
   cursor: ZagulyakySearchCursor | null,
   pageSize: number,
+  signal?: AbortSignal,
 ): Promise<ZagulyakySearchResult<ZagulyakaDocumentListItem>> {
+  throwIfAborted(signal);
   const safePageSize = clampPageSize(pageSize);
-  const { data, error } = await getSupabaseClient().rpc("search_zagulyaky_documents_v1", {
+  let request = getSupabaseClient().rpc("search_zagulyaky_documents_v1", {
     p_query: nullableText([filters.query, filters.documentType].filter(Boolean).join(" ")),
     p_filters: compactObject({
       archiveName: filters.institutionName,
@@ -209,6 +221,9 @@ export async function searchZagulyakyDocuments(
     p_cursor_published_at: cursor?.publishedAt ?? null,
     p_cursor_id: cursor?.id ?? null,
   });
+  if (signal) request = request.abortSignal(signal);
+  const { data, error } = await request;
+  throwIfAborted(signal);
   if (error) throw error;
   const payload = searchPayload(data);
   return { items: payload.items.map(mapDocumentListItem), nextCursor: payload.nextCursor, pageSize: safePageSize };
@@ -230,6 +245,7 @@ export async function loadMyZagulyaky(
   expectedUserId?: string,
   options: LoadMyZagulyakyOptions = {},
 ): Promise<ZagulyakyMyRecordsPage> {
+  throwIfAborted(options.signal);
   const requestedPage = Math.trunc(options.page ?? 1);
   const page = Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1;
   const pageSize = myRecordsPageSize(options.pageSize);
@@ -237,15 +253,18 @@ export async function loadMyZagulyaky(
   const { data, error } = await runAuthenticatedSupabaseRequest(
     client,
     async () => {
-      const result = await client.rpc("get_my_zagulyaky_page_v1", {
+      let request = client.rpc("get_my_zagulyaky_page_v1", {
         p_limit: pageSize,
         p_offset: (page - 1) * pageSize,
         p_status: options.status ?? null,
       });
+      if (options.signal) request = request.abortSignal(options.signal);
+      const result = await request;
       return { data: result.data, error: result.error };
     },
     expectedUserId,
   );
+  throwIfAborted(options.signal);
   if (error) throw error;
   const payload = firstRecord(data);
   const items: ZagulyakaDraftSummary[] = records(value(payload, "items", "records")).map((row) => ({
@@ -1151,7 +1170,7 @@ async function loadRemainingPublicPlaceConnectionPages(
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
-  throw new DOMException("The public Zagulyaky place request was aborted.", "AbortError");
+  throw new DOMException("The Zagulyaky request was aborted.", "AbortError");
 }
 function mapPublicZagulyakySettlement(input: Record<string, unknown>): ZagulyakyPublicSettlement | null {
   const geo = normalizeGeo(value(input, "geo"));

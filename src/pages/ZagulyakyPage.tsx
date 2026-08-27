@@ -139,33 +139,45 @@ export function ZagulyakyPage({
   const [detail, setDetail] = useState<ZagulyakaDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(Boolean(initialRecordSlug));
   const [detailError, setDetailError] = useState("");
-  const requestGeneration = useRef(0);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const accountId = account?.id ?? "";
 
   useEffect(() => {
     setSelectedSlug(initialRecordSlug);
   }, [initialRecordSlug]);
 
   useEffect(() => {
+    if (activeTabRef.current === initialTab) return;
     setActiveTab(initialTab);
     resetPagination(setPage, setCursorHistory, setNextCursor);
     setMyRecordsPage(1);
   }, [initialTab]);
 
+  const shouldLoadPublicStats = activeTab === "people" || activeTab === "documents";
   useEffect(() => {
+    if (!shouldLoadPublicStats) {
+      setStatsLoading(false);
+      return;
+    }
     let active = true;
+    const controller = new AbortController();
     setStatsLoading(true);
-    void loadZagulyakyStats().then((next) => {
+    void loadZagulyakyStats(controller.signal).then((next) => {
       if (active) setStats(next);
     }).catch(() => {
-      if (active) setStats(initialStats);
+      if (active && !controller.signal.aborted) setStats(initialStats);
     }).finally(() => {
       if (active) setStatsLoading(false);
     });
-    return () => { active = false; };
-  }, []);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [shouldLoadPublicStats]);
 
   useEffect(() => {
-    if (activeTab !== "mine" || !account) return;
+    if (activeTab !== "mine" || !accountId) return;
     const refreshAfterReturningToApp = () => {
       if (document.visibilityState === "visible") {
         setMyRecordsRevision((current) => current + 1);
@@ -173,73 +185,83 @@ export function ZagulyakyPage({
     };
     document.addEventListener("visibilitychange", refreshAfterReturningToApp);
     return () => document.removeEventListener("visibilitychange", refreshAfterReturningToApp);
-  }, [account, activeTab]);
+  }, [accountId, activeTab]);
 
   useEffect(() => {
-    if (activeTab === "mine") {
-      if (!account) {
-        ++requestGeneration.current;
-        setLoading(false);
-        setError("");
-        setMyRecords([]);
-        setMyRecordsTotal(null);
-        setMyRecordsOverallTotal(null);
-        setMyRecordsStatusCounts(null);
-        return;
-      }
-      const generation = ++requestGeneration.current;
-      setLoading(true);
+    if (activeTab !== "mine") return;
+    if (!accountId) {
+      setLoading(false);
       setError("");
-      void loadMyZagulyaky(account.id, {
-        page: myRecordsPage,
-        pageSize: myRecordsPageSize,
-        status: myRecordsStatus || null,
-      }).then((result) => {
-        if (requestGeneration.current !== generation) return;
-        setMyRecords(result.items);
-        setMyRecordsPage(result.page);
-        setMyRecordsPageSize(result.pageSize);
-        setMyRecordsTotal(result.total);
-        setMyRecordsOverallTotal(result.overallTotal);
-        setMyRecordsStatusCounts(result.statusCounts);
-      }).catch((loadError) => {
-        if (requestGeneration.current === generation) {
-          setMyRecordsTotal(null);
-          setError(catalogError(loadError));
-        }
-      }).finally(() => {
-        if (requestGeneration.current === generation) setLoading(false);
-      });
+      setMyRecords([]);
+      setMyRecordsTotal(null);
+      setMyRecordsOverallTotal(null);
+      setMyRecordsStatusCounts(null);
       return;
     }
 
+    let active = true;
+    const controller = new AbortController();
+    setLoading(true);
+    setError("");
+    void loadMyZagulyaky(accountId, {
+      page: myRecordsPage,
+      pageSize: myRecordsPageSize,
+      status: myRecordsStatus || null,
+      signal: controller.signal,
+    }).then((result) => {
+      if (!active) return;
+      setMyRecords(result.items);
+      setMyRecordsPage(result.page);
+      setMyRecordsPageSize(result.pageSize);
+      setMyRecordsTotal(result.total);
+      setMyRecordsOverallTotal(result.overallTotal);
+      setMyRecordsStatusCounts(result.statusCounts);
+    }).catch((loadError) => {
+      if (!active || controller.signal.aborted) return;
+      setMyRecordsTotal(null);
+      setError(catalogError(loadError));
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [accountId, activeTab, myRecordsPage, myRecordsPageSize, myRecordsRevision, myRecordsStatus]);
+
+  useEffect(() => {
+    if (activeTab === "mine") return;
     if (activeTab === "places") {
-      ++requestGeneration.current;
       setLoading(false);
       setError("");
       return;
     }
 
-    const generation = ++requestGeneration.current;
+    let active = true;
+    const controller = new AbortController();
     setLoading(true);
     setError("");
     const timeout = window.setTimeout(() => {
       const request = activeTab === "people"
-        ? searchZagulyakyPeople(peopleFilters, cursorHistory[page - 1] ?? null, pageSize)
-        : searchZagulyakyDocuments(documentFilters, cursorHistory[page - 1] ?? null, pageSize);
+        ? searchZagulyakyPeople(peopleFilters, cursorHistory[page - 1] ?? null, pageSize, controller.signal)
+        : searchZagulyakyDocuments(documentFilters, cursorHistory[page - 1] ?? null, pageSize, controller.signal);
       void request.then((result) => {
-        if (requestGeneration.current !== generation) return;
+        if (!active) return;
         if (activeTab === "people") setPeople(result.items as ZagulyakaPersonListItem[]);
         else setDocuments(result.items as ZagulyakaDocumentListItem[]);
         setNextCursor(result.nextCursor);
       }).catch((loadError) => {
-        if (requestGeneration.current === generation) setError(catalogError(loadError));
+        if (active && !controller.signal.aborted) setError(catalogError(loadError));
       }).finally(() => {
-        if (requestGeneration.current === generation) setLoading(false);
+        if (active) setLoading(false);
       });
     }, 320);
-    return () => window.clearTimeout(timeout);
-  }, [account, activeTab, cursorHistory, documentFilters, myRecordsPage, myRecordsPageSize, myRecordsRevision, myRecordsStatus, page, pageSize, peopleFilters]);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [activeTab, cursorHistory, documentFilters, page, pageSize, peopleFilters]);
 
   useEffect(() => {
     if (activeTab !== "mine" || loading || error || myRecordsTotal === null) return;
