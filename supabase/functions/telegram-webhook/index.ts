@@ -3,6 +3,10 @@ import {
   resolveSupabaseSecretKey,
   supabaseServerKeyHeaders,
 } from "../_shared/supabaseApiKeys.ts";
+import {
+  directExternalUrlForPreview,
+  fetchPublicWebPreview,
+} from "../_shared/publicWebPreview.ts";
 
 const MAX_REQUEST_BYTES = 128 * 1024;
 const MAX_MESSAGE_CHARS = 12_000;
@@ -550,6 +554,45 @@ function safeRpcFailure(error: unknown): WebhookProblem {
   return new WebhookProblem("SERVICE_OPERATION_FAILED", 503);
 }
 
+async function resolvePublicWebHostAddresses(hostname: string): Promise<readonly string[]> {
+  const [ipv4, ipv6] = await Promise.all([
+    Deno.resolveDns(hostname, "A").catch(() => [] as string[]),
+    Deno.resolveDns(hostname, "AAAA").catch(() => [] as string[]),
+  ]);
+  return [...ipv4, ...ipv6];
+}
+
+async function enrichMaterializedExternalNote(
+  client: ReturnType<typeof serviceClient>,
+  message: TelegramMessage,
+  noteResult: JsonObject,
+): Promise<void> {
+  const sourceUrl = directExternalUrlForPreview(message.text, message.forwardSource !== null);
+  const noteId = typeof noteResult.noteId === "string" && isUuid(noteResult.noteId)
+    ? noteResult.noteId
+    : null;
+  if (!sourceUrl || !noteId) return;
+
+  try {
+    // The Note already exists before this bounded best-effort request starts.
+    // An unavailable or protected page therefore cannot lose the bookmark.
+    const preview = await fetchPublicWebPreview(sourceUrl, {
+      resolver: resolvePublicWebHostAddresses,
+    });
+    const { error } = await client.rpc("service_apply_telegram_note_preview_v1", {
+      p_note_id: noteId,
+      p_source_url: sourceUrl,
+      p_title: preview.title,
+      p_body_text: preview.bodyText,
+    });
+    if (error) return;
+  } catch {
+    // Link previews are optional. Never log or surface a user URL, upstream
+    // response or network error, and never turn enrichment into a retry of the
+    // already materialized private Note.
+  }
+}
+
 function linkCode(value: string | null | undefined): string {
   const normalized = value?.trim() ?? "";
   // Keep accepting the same conservative token alphabet as the legacy
@@ -693,6 +736,7 @@ async function enqueueMessage(message: TelegramMessage): Promise<BotReply> {
       return { text: "Не вдалося зберегти цей матеріал. Надішліть текст або посилання ще раз." };
     }
     if (noteResult.materialized === true) {
+      await enrichMaterializedExternalNote(client, message, noteResult);
       return {
         text: photoOmitted
           ? "Нотатку збережено у вашому приватному списку. Текст і джерело збережено, а фото навмисно не оброблялося та не зберігалося. Відкрийте «Нотатки» у Трекері Роду та натисніть «Оновити»."
