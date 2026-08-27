@@ -11,6 +11,10 @@ create index if not exists zagulyaky_records_owner_updated_id_idx
 create index if not exists zagulyaky_records_owner_status_updated_id_idx
   on public.zagulyaky_records (created_by, status, updated_at desc, id desc);
 
+-- The deterministic index above has the old two-column owner index as an exact
+-- left prefix, so retaining both would only duplicate write and storage cost.
+drop index if exists public.zagulyaky_records_owner_idx;
+
 create or replace function security_private.get_my_zagulyaky_page_v1(
   p_status text default null,
   p_limit integer default 50,
@@ -147,22 +151,31 @@ set search_path = pg_catalog, public, security_private, pg_temp
 as $function$
   select
     (
-      not (coalesce(p_filters, '{}'::jsonb) ? 'eventRole')
+      nullif(btrim(p_filters ->> 'eventRole'), '') is null
       or exists (
         select 1
         from public.zagulyaky_participants participant
         where participant.record_id = p_record_id
-          and participant.event_role_code = lower(p_filters ->> 'eventRole')
+          and participant.event_role_code = lower(btrim(p_filters ->> 'eventRole'))
       )
     )
     and (
-      not (coalesce(p_filters, '{}'::jsonb) ? 'archiveName')
+      nullif(btrim(p_filters ->> 'archiveName'), '') is null
       or exists (
         select 1
         from public.zagulyaky_record_sources link
         join public.zagulyaky_sources source on source.id = link.source_id
         where link.record_id = p_record_id
-          and coalesce(source.archive_name, '') ilike '%' || (p_filters ->> 'archiveName') || '%'
+          and coalesce(source.archive_name, '') ilike
+            '%' ||
+            replace(
+              replace(
+                replace(btrim(p_filters ->> 'archiveName'), chr(92), chr(92) || chr(92)),
+                '%', chr(92) || '%'
+              ),
+              '_', chr(92) || '_'
+            ) || '%'
+            escape E'\\'
       )
     )
 $function$;
@@ -214,6 +227,9 @@ create index if not exists zagulyaky_sources_catalog_search_trgm_idx
     coalesce(page_to, '') || ' ' ||
     coalesce(citation, '')
   )) extensions.gin_trgm_ops);
+
+create index if not exists zagulyaky_record_sources_source_record_idx
+  on public.zagulyaky_record_sources (source_id, record_id);
 
 create index if not exists zagulyaky_records_catalog_metadata_trgm_idx
   on public.zagulyaky_records using gin ((lower(
@@ -293,6 +309,13 @@ as $function$
 declare
   safe_limit integer := least(greatest(coalesce(p_limit, 20), 1), 50);
   normalized_query text := nullif(btrim(coalesce(p_query, '')), '');
+  search_pattern text;
+  event_type_filter text;
+  event_role_filter text;
+  verification_status_filter text;
+  source_location_pattern text;
+  found_location_pattern text;
+  archive_name_filter text;
   candidate_ids uuid[] := '{}'::uuid[];
   page_ids uuid[] := '{}'::uuid[];
   has_more boolean := false;
@@ -325,6 +348,70 @@ begin
     ) then
     raise exception 'INVALID_ZAGULYAKY_EVENT_ROLE_FILTER' using errcode = '22023';
   end if;
+  if (p_filters ? 'eventType' and (
+      jsonb_typeof(p_filters -> 'eventType') not in ('string', 'null')
+      or char_length(coalesce(p_filters ->> 'eventType', '')) > 80
+    ))
+    or (p_filters ? 'sourceLocation' and (
+      jsonb_typeof(p_filters -> 'sourceLocation') not in ('string', 'null')
+      or char_length(coalesce(p_filters ->> 'sourceLocation', '')) > 500
+    ))
+    or (p_filters ? 'foundLocation' and (
+      jsonb_typeof(p_filters -> 'foundLocation') not in ('string', 'null')
+      or char_length(coalesce(p_filters ->> 'foundLocation', '')) > 500
+    ))
+    or (p_filters ? 'archiveName' and (
+      jsonb_typeof(p_filters -> 'archiveName') not in ('string', 'null')
+      or char_length(coalesce(p_filters ->> 'archiveName', '')) > 500
+    )) then
+    raise exception 'INVALID_ZAGULYAKY_TEXT_FILTER' using errcode = '22023';
+  end if;
+  if p_filters ? 'verificationStatus'
+    and (
+      jsonb_typeof(p_filters -> 'verificationStatus') not in ('string', 'null')
+      or (
+        p_filters ->> 'verificationStatus' is not null
+        and p_filters ->> 'verificationStatus' not in (
+          'unverified', 'plausible', 'corroborated', 'verified', 'disputed'
+        )
+      )
+    ) then
+    raise exception 'INVALID_ZAGULYAKY_VERIFICATION_FILTER' using errcode = '22023';
+  end if;
+
+  -- A JSON null or blank optional text filter means "not selected".  The web
+  -- client normally omits these keys, but treating direct RPC callers the same
+  -- avoids an accidental active predicate that can never match.  Wildcards in
+  -- user filters are escaped so '%' and '_' remain literal characters.
+  event_type_filter := nullif(btrim(p_filters ->> 'eventType'), '');
+  event_role_filter := nullif(btrim(p_filters ->> 'eventRole'), '');
+  verification_status_filter := nullif(btrim(p_filters ->> 'verificationStatus'), '');
+
+  if nullif(btrim(p_filters ->> 'sourceLocation'), '') is not null then
+    source_location_pattern := '%' ||
+      replace(
+        replace(
+          replace(btrim(p_filters ->> 'sourceLocation'), chr(92), chr(92) || chr(92)),
+          '%', chr(92) || '%'
+        ),
+        '_', chr(92) || '_'
+      ) || '%';
+  end if;
+
+  if nullif(btrim(p_filters ->> 'foundLocation'), '') is not null then
+    found_location_pattern := '%' ||
+      replace(
+        replace(
+          replace(btrim(p_filters ->> 'foundLocation'), chr(92), chr(92) || chr(92)),
+          '%', chr(92) || '%'
+        ),
+        '_', chr(92) || '_'
+      ) || '%';
+  end if;
+
+  if nullif(btrim(p_filters ->> 'archiveName'), '') is not null then
+    archive_name_filter := btrim(p_filters ->> 'archiveName');
+  end if;
 
   if normalized_query is null then
     -- This is the hot path on first catalogue load.  Keep it free from search
@@ -340,19 +427,19 @@ begin
           not r.possible_living_person
           or security_private.zagulyaky_has_living_person_clearance_v1(r.id)
         )
-        and (not (p_filters ? 'eventType') or r.event_type = p_filters ->> 'eventType')
-        and (not (p_filters ? 'verificationStatus') or r.verification_status = p_filters ->> 'verificationStatus')
+        and (event_type_filter is null or r.event_type = event_type_filter)
+        and (verification_status_filter is null or r.verification_status = verification_status_filter)
         and (not (p_filters ? 'yearFrom') or coalesce(r.event_year_to, r.event_year_from, 2200) >= (p_filters ->> 'yearFrom')::integer)
         and (not (p_filters ? 'yearTo') or coalesce(r.event_year_from, r.event_year_to, 1) <= (p_filters ->> 'yearTo')::integer)
         and (
-          not (p_filters ? 'sourceLocation')
+          source_location_pattern is null
           or p_filters ? 'originPlaceKey'
-          or coalesce(r.source_location_normalized, r.source_location_text, '') ilike '%' || (p_filters ->> 'sourceLocation') || '%'
+          or coalesce(r.source_location_normalized, r.source_location_text, '') ilike source_location_pattern escape E'\\'
         )
         and (
-          not (p_filters ? 'foundLocation')
+          found_location_pattern is null
           or p_filters ? 'foundPlaceKey'
-          or coalesce(r.found_location_normalized, r.found_location_text, '') ilike '%' || (p_filters ->> 'foundLocation') || '%'
+          or coalesce(r.found_location_normalized, r.found_location_text, '') ilike found_location_pattern escape E'\\'
         )
         and (
           not (p_filters ? 'originPlaceKey')
@@ -362,7 +449,10 @@ begin
           not (p_filters ? 'foundPlaceKey')
           or security_private.zagulyaky_public_place_key_v1(r.found_geo) = lower(p_filters ->> 'foundPlaceKey')
         )
-        and security_private.zagulyaky_matches_catalog_related_filters_v1(r.id, p_filters)
+        and (
+          (event_role_filter is null and archive_name_filter is null)
+          or security_private.zagulyaky_matches_catalog_related_filters_v1(r.id, p_filters)
+        )
         and (
           p_cursor_published_at is null
           or r.published_at < p_cursor_published_at
@@ -378,46 +468,104 @@ begin
     into candidate_ids
     from candidate_rows candidate;
   else
+    -- Treat wildcard characters as user text.  Apart from preventing a single
+    -- '%' from matching the whole catalogue, this keeps trigram selectivity
+    -- predictable for the bounded explicit-search path.
+    search_pattern := '%' ||
+      replace(
+        replace(
+          replace(lower(normalized_query), chr(92), chr(92) || chr(92)),
+          '%', chr(92) || '%'
+        ),
+        '_', chr(92) || '_'
+      ) || '%';
+
     -- Search each public relation once and union only record ids.  This avoids
     -- the old correlated EXISTS work for every record and lets the stored FTS
     -- and compact trigram indexes participate independently.
-    with matching_ids as materialized (
-      select r.id
+    with eligible_rows as materialized (
+      select r.id, r.published_at
       from public.zagulyaky_records r
       where r.kind = p_kind
         and r.status = 'published'
         and r.privacy_status = 'cleared'
-        and r.search_vector @@ websearch_to_tsquery('simple'::regconfig, normalized_query)
+        and (
+          not r.possible_living_person
+          or security_private.zagulyaky_has_living_person_clearance_v1(r.id)
+        )
+        and (event_type_filter is null or r.event_type = event_type_filter)
+        and (verification_status_filter is null or r.verification_status = verification_status_filter)
+        and (not (p_filters ? 'yearFrom') or coalesce(r.event_year_to, r.event_year_from, 2200) >= (p_filters ->> 'yearFrom')::integer)
+        and (not (p_filters ? 'yearTo') or coalesce(r.event_year_from, r.event_year_to, 1) <= (p_filters ->> 'yearTo')::integer)
+        and (
+          source_location_pattern is null
+          or p_filters ? 'originPlaceKey'
+          or coalesce(r.source_location_normalized, r.source_location_text, '') ilike source_location_pattern escape E'\\'
+        )
+        and (
+          found_location_pattern is null
+          or p_filters ? 'foundPlaceKey'
+          or coalesce(r.found_location_normalized, r.found_location_text, '') ilike found_location_pattern escape E'\\'
+        )
+        and (
+          not (p_filters ? 'originPlaceKey')
+          or security_private.zagulyaky_public_place_key_v1(r.origin_geo) = lower(p_filters ->> 'originPlaceKey')
+        )
+        and (
+          not (p_filters ? 'foundPlaceKey')
+          or security_private.zagulyaky_public_place_key_v1(r.found_geo) = lower(p_filters ->> 'foundPlaceKey')
+        )
+        and (
+          (event_role_filter is null and archive_name_filter is null)
+          or security_private.zagulyaky_matches_catalog_related_filters_v1(r.id, p_filters)
+        )
+        and (
+          p_cursor_published_at is null
+          or r.published_at < p_cursor_published_at
+          or (r.published_at = p_cursor_published_at and r.id < p_cursor_id)
+        )
+    ), matching_rows as materialized (
+      (
+        select eligible.id, eligible.published_at
+        from eligible_rows eligible
+        join public.zagulyaky_records r on r.id = eligible.id
+        where r.search_vector @@ websearch_to_tsquery('simple'::regconfig, normalized_query)
+        order by eligible.published_at desc, eligible.id desc
+        limit safe_limit + 1
+      )
 
       union
 
-      select r.id
-      from public.zagulyaky_records r
-      where r.kind = p_kind
-        and r.status = 'published'
-        and r.privacy_status = 'cleared'
-        and lower(r.title) like '%' || lower(normalized_query) || '%'
+      (
+        select eligible.id, eligible.published_at
+        from eligible_rows eligible
+        join public.zagulyaky_records r on r.id = eligible.id
+        where lower(r.title) like search_pattern escape E'\\'
+        order by eligible.published_at desc, eligible.id desc
+        limit safe_limit + 1
+      )
 
       union
 
-      select r.id
-      from public.zagulyaky_records r
-      where r.kind = p_kind
-        and r.status = 'published'
-        and r.privacy_status = 'cleared'
-        and lower(
+      (
+        select eligible.id, eligible.published_at
+        from eligible_rows eligible
+        join public.zagulyaky_records r on r.id = eligible.id
+        where lower(
           coalesce(r.source_location_normalized, r.source_location_text, '') || ' ' ||
           coalesce(r.found_location_normalized, r.found_location_text, '')
-        ) like '%' || lower(normalized_query) || '%'
+        ) like search_pattern escape E'\\'
+        order by eligible.published_at desc, eligible.id desc
+        limit safe_limit + 1
+      )
 
       union
 
-      select r.id
-      from public.zagulyaky_records r
-      where r.kind = p_kind
-        and r.status = 'published'
-        and r.privacy_status = 'cleared'
-        and lower(
+      (
+        select eligible.id, eligible.published_at
+        from eligible_rows eligible
+        join public.zagulyaky_records r on r.id = eligible.id
+        where lower(
           coalesce(r.original_language, '') || ' ' ||
           coalesce(r.event_type, '') || ' ' ||
           coalesce(r.event_date_text, '') || ' ' ||
@@ -426,17 +574,18 @@ begin
           coalesce(r.date_precision, '') || ' ' ||
           coalesce(r.classification_reason, '') || ' ' ||
           coalesce(r.verification_status, '')
-        ) like '%' || lower(normalized_query) || '%'
+        ) like search_pattern escape E'\\'
+        order by eligible.published_at desc, eligible.id desc
+        limit safe_limit + 1
+      )
 
       union
 
-      select participant.record_id
-      from public.zagulyaky_participants participant
-      join public.zagulyaky_records r on r.id = participant.record_id
-      where r.kind = p_kind
-        and r.status = 'published'
-        and r.privacy_status = 'cleared'
-        and lower(
+      (
+        select distinct eligible.id, eligible.published_at
+        from eligible_rows eligible
+        join public.zagulyaky_participants participant on participant.record_id = eligible.id
+        where lower(
           coalesce(participant.original_full_name, '') || ' ' ||
           coalesce(participant.normalized_uk_full_name, '') || ' ' ||
           coalesce(participant.surname, '') || ' ' ||
@@ -455,18 +604,19 @@ begin
           coalesce(participant.role, '') || ' ' ||
           coalesce(participant.event_role_code, '') || ' ' ||
           coalesce(participant.event_role_custom, '')
-        ) like '%' || lower(normalized_query) || '%'
+        ) like search_pattern escape E'\\'
+        order by eligible.published_at desc, eligible.id desc
+        limit safe_limit + 1
+      )
 
       union
 
-      select link.record_id
-      from public.zagulyaky_record_sources link
-      join public.zagulyaky_sources source on source.id = link.source_id
-      join public.zagulyaky_records r on r.id = link.record_id
-      where r.kind = p_kind
-        and r.status = 'published'
-        and r.privacy_status = 'cleared'
-        and lower(
+      (
+        select distinct eligible.id, eligible.published_at
+        from eligible_rows eligible
+        join public.zagulyaky_record_sources link on link.record_id = eligible.id
+        join public.zagulyaky_sources source on source.id = link.source_id
+        where lower(
           coalesce(source.source_type, '') || ' ' ||
           coalesce(source.title, '') || ' ' ||
           coalesce(source.archive_name, '') || ' ' ||
@@ -476,64 +626,32 @@ begin
           coalesce(source.page_from, '') || ' ' ||
           coalesce(source.page_to, '') || ' ' ||
           coalesce(source.citation, '')
-        ) like '%' || lower(normalized_query) || '%'
+        ) like search_pattern escape E'\\'
+        order by eligible.published_at desc, eligible.id desc
+        limit safe_limit + 1
+      )
 
       union
 
-      select discovery.record_id
-      from public.zagulyaky_document_discoveries discovery
-      join public.zagulyaky_records r on r.id = discovery.record_id
-      where r.kind = p_kind
-        and r.status = 'published'
-        and r.privacy_status = 'cleared'
-        and security_private.zagulyaky_document_discovery_catalog_text_v1(
+      (
+        select distinct eligible.id, eligible.published_at
+        from eligible_rows eligible
+        join public.zagulyaky_document_discoveries discovery on discovery.record_id = eligible.id
+        where security_private.zagulyaky_document_discovery_catalog_text_v1(
           discovery.official_location_text,
           discovery.discovered_location_text,
           discovery.record_types,
           discovery.page_from,
           discovery.page_to,
           discovery.notes
-        ) like '%' || lower(normalized_query) || '%'
+        ) like search_pattern escape E'\\'
+        order by eligible.published_at desc, eligible.id desc
+        limit safe_limit + 1
+      )
     ), candidate_rows as (
-      select r.id, r.published_at
-      from matching_ids matched
-      join public.zagulyaky_records r on r.id = matched.id
-      where r.kind = p_kind
-        and r.status = 'published'
-        and r.privacy_status = 'cleared'
-        and (
-          not r.possible_living_person
-          or security_private.zagulyaky_has_living_person_clearance_v1(r.id)
-        )
-        and (not (p_filters ? 'eventType') or r.event_type = p_filters ->> 'eventType')
-        and (not (p_filters ? 'verificationStatus') or r.verification_status = p_filters ->> 'verificationStatus')
-        and (not (p_filters ? 'yearFrom') or coalesce(r.event_year_to, r.event_year_from, 2200) >= (p_filters ->> 'yearFrom')::integer)
-        and (not (p_filters ? 'yearTo') or coalesce(r.event_year_from, r.event_year_to, 1) <= (p_filters ->> 'yearTo')::integer)
-        and (
-          not (p_filters ? 'sourceLocation')
-          or p_filters ? 'originPlaceKey'
-          or coalesce(r.source_location_normalized, r.source_location_text, '') ilike '%' || (p_filters ->> 'sourceLocation') || '%'
-        )
-        and (
-          not (p_filters ? 'foundLocation')
-          or p_filters ? 'foundPlaceKey'
-          or coalesce(r.found_location_normalized, r.found_location_text, '') ilike '%' || (p_filters ->> 'foundLocation') || '%'
-        )
-        and (
-          not (p_filters ? 'originPlaceKey')
-          or security_private.zagulyaky_public_place_key_v1(r.origin_geo) = lower(p_filters ->> 'originPlaceKey')
-        )
-        and (
-          not (p_filters ? 'foundPlaceKey')
-          or security_private.zagulyaky_public_place_key_v1(r.found_geo) = lower(p_filters ->> 'foundPlaceKey')
-        )
-        and security_private.zagulyaky_matches_catalog_related_filters_v1(r.id, p_filters)
-        and (
-          p_cursor_published_at is null
-          or r.published_at < p_cursor_published_at
-          or (r.published_at = p_cursor_published_at and r.id < p_cursor_id)
-        )
-      order by r.published_at desc, r.id desc
+      select matched.id, matched.published_at
+      from matching_rows matched
+      order by matched.published_at desc, matched.id desc
       limit safe_limit + 1
     )
     select coalesce(
