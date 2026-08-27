@@ -12,3 +12,9 @@ supabase/.temp/
 .env.local
 .env.*.local
 *.tsbuildinfo
+
+# One-time Koreni import audit and local rehearsal artifacts.
+/outputs/koreni-zagulyaky-20260826/
+/outputs/koreni-zagulyaky-publishable-20260826/
+/tmp/koreni-supabase-rehearsal-20260827/
+/tmp/koreni-zagulyaky-builder-20260826/
