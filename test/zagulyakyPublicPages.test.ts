@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import {
+  collectStaticZagulyakyEntries,
   generateZagulyakySeoPages,
   publicEntrySeoData,
   renderZagulyakySeoPage,
@@ -241,4 +242,61 @@ test("static SEO generation falls back to catalogue rows only when the bulk inde
   } finally {
     rmSync(outputDirectory, { recursive: true, force: true });
   }
+});
+
+test("static SEO generation may use the public catalogue after exhausted PGRST002 retries", async () => {
+  const calls: string[] = [];
+  const result = await collectStaticZagulyakyEntries({
+    requestRpc: async (rpcName: string) => {
+      calls.push(rpcName);
+      if (rpcName === "list_public_zagulyaky_indexing_v1") {
+        throw new Error(
+          "The public list_public_zagulyaky_indexing_v1 RPC returned HTTP 503 after 6 attempts: PGRST002 — Could not query the database for the schema cache. Retrying.",
+        );
+      }
+      return { items: [], nextCursor: null };
+    },
+  });
+
+  assert.equal(result.indexingMode, "catalogue-fallback");
+  assert.deepEqual(result.entries, []);
+  assert.deepEqual(calls, [
+    "list_public_zagulyaky_indexing_v1",
+    "search_zagulyaky_people_v1",
+    "search_zagulyaky_documents_v1",
+  ]);
+});
+
+test("static SEO generation still fails when the public catalogue fallback is unavailable", async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    collectStaticZagulyakyEntries({
+      requestRpc: async (rpcName: string) => {
+        calls.push(rpcName);
+        if (rpcName === "list_public_zagulyaky_indexing_v1") {
+          throw new Error("HTTP 503: PGRST002 — Could not query the database for the schema cache.");
+        }
+        throw new Error("HTTP 503: upstream service unavailable after retries");
+      },
+    }),
+    /upstream service unavailable after retries/i,
+  );
+  assert.deepEqual(calls, [
+    "list_public_zagulyaky_indexing_v1",
+    "search_zagulyaky_people_v1",
+  ]);
+});
+
+test("static SEO generation does not downgrade on unrelated indexing failures", async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    collectStaticZagulyakyEntries({
+      requestRpc: async (rpcName: string) => {
+        calls.push(rpcName);
+        throw new Error("The public indexing RPC returned a record of the wrong kind.");
+      },
+    }),
+    /wrong kind/i,
+  );
+  assert.deepEqual(calls, ["list_public_zagulyaky_indexing_v1"]);
 });

@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 export const ZAGULYAKY_SITEMAP_ORIGIN = "https://trekerrodu.com.ua";
 export const DEFAULT_ZAGULYAKY_SITEMAP_OUTPUT = "dist/sitemap-zagulyaky.xml";
 export const ZAGULYAKY_SITEMAP_PAGE_SIZE = 50;
+export const DEFAULT_ZAGULYAKY_RPC_MAX_ATTEMPTS = 6;
+export const DEFAULT_ZAGULYAKY_RPC_RETRY_BASE_DELAY_MS = 2_000;
+export const DEFAULT_ZAGULYAKY_RPC_RETRY_MAX_DELAY_MS = 15_000;
+export const DEFAULT_ZAGULYAKY_RPC_TIMEOUT_MS = 30_000;
 const MAX_PAGES_PER_KIND = 20_000;
+const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const TRANSIENT_POSTGREST_CODES = new Set(["PGRST000", "PGRST001", "PGRST002"]);
 
 export const PUBLIC_RPC_BY_KIND = Object.freeze({
   person: "search_zagulyaky_people_v1",
@@ -228,40 +234,152 @@ export async function collectPublishedZagulyakyUrls(options) {
   return entries.map((entry) => entry.url);
 }
 
-export async function requestPublicZagulyakyRpc({ supabaseUrl, publishableKey, rpcName, parameters, fetchImpl = fetch }) {
+function boundedInteger(value, fallback, minimum, maximum) {
+  return Number.isSafeInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : fallback;
+}
+
+function exponentialRetryDelay(attempt, baseDelayMs, maxDelayMs, random) {
+  const exponential = Math.min(maxDelayMs, baseDelayMs * (2 ** Math.max(0, attempt - 1)));
+  const boundedRandom = Math.min(1, Math.max(0, Number(random()) || 0));
+  return Math.min(maxDelayMs, Math.round(exponential * (0.85 + boundedRandom * 0.3)));
+}
+
+function retryAfterDelay(response, attempt, baseDelayMs, maxDelayMs, random) {
+  const retryAfter = response.headers?.get?.("retry-after")?.trim() ?? "";
+  const seconds = Number(retryAfter);
+  if (retryAfter && Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(maxDelayMs, Math.round(seconds * 1_000));
+  }
+  const retryAt = Date.parse(retryAfter);
+  if (retryAfter && Number.isFinite(retryAt)) {
+    return Math.min(maxDelayMs, Math.max(0, retryAt - Date.now()));
+  }
+  return exponentialRetryDelay(attempt, baseDelayMs, maxDelayMs, random);
+}
+
+function delay(delayMs) {
+  return delayMs > 0
+    ? new Promise((resolveDelay) => globalThis.setTimeout(resolveDelay, delayMs))
+    : Promise.resolve();
+}
+
+function errorMessage(error) {
+  return error instanceof Error && error.message.trim()
+    ? error.message.trim()
+    : String(error || "Unknown network error.");
+}
+
+async function rpcHttpFailure(response, rpcName, attempts) {
+  let diagnostic = "";
+  let code = "";
+  try {
+    const payload = await response.json();
+    const row = payload && typeof payload === "object" ? payload : {};
+    code = typeof row.code === "string" ? row.code.trim() : "";
+    const message = typeof row.message === "string" ? row.message.trim() : "";
+    const hint = typeof row.hint === "string" ? row.hint.trim() : "";
+    diagnostic = [code, message, hint].filter(Boolean).join(" — ").slice(0, 600);
+  } catch {
+    // The HTTP status remains useful when a gateway did not return JSON.
+  }
+  const suffix = attempts > 1 ? ` after ${attempts} attempts` : "";
+  return {
+    code,
+    message: `The public ${rpcName} RPC returned HTTP ${response.status}${suffix}${diagnostic ? `: ${diagnostic}` : "."}`,
+  };
+}
+
+/**
+ * Calls only allow-listed, read-only public RPCs. Although PostgREST exposes
+ * them as POST requests, replaying these particular list/search calls is safe.
+ * Bounded retries bridge short database restarts and schema-cache reloads
+ * without hiding permanent authentication, contract, or payload failures.
+ */
+export async function requestPublicZagulyakyRpc({
+  supabaseUrl,
+  publishableKey,
+  rpcName,
+  parameters,
+  fetchImpl = fetch,
+  retryOptions = {},
+}) {
   if (!PUBLIC_ZAGULYAKY_INDEXING_RPCS.includes(rpcName)) {
     throw new Error("The public indexing generator may call only approved public Zagulyaky RPCs.");
   }
   const endpoint = new URL(`/rest/v1/rpc/${rpcName}`, `${supabaseUrl}/`);
-  const response = await fetchImpl(endpoint, {
-    method: "POST",
-    headers: {
-      apikey: publishableKey,
-      Authorization: `Bearer ${publishableKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(parameters),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) {
-    let diagnostic = "";
+  const maxAttempts = boundedInteger(
+    retryOptions.maxAttempts,
+    DEFAULT_ZAGULYAKY_RPC_MAX_ATTEMPTS,
+    1,
+    10,
+  );
+  const baseDelayMs = boundedInteger(
+    retryOptions.baseDelayMs,
+    DEFAULT_ZAGULYAKY_RPC_RETRY_BASE_DELAY_MS,
+    0,
+    60_000,
+  );
+  const maxDelayMs = boundedInteger(
+    retryOptions.maxDelayMs,
+    Math.max(baseDelayMs, DEFAULT_ZAGULYAKY_RPC_RETRY_MAX_DELAY_MS),
+    baseDelayMs,
+    60_000,
+  );
+  const timeoutMs = boundedInteger(
+    retryOptions.timeoutMs,
+    DEFAULT_ZAGULYAKY_RPC_TIMEOUT_MS,
+    1_000,
+    120_000,
+  );
+  const sleep = typeof retryOptions.sleep === "function" ? retryOptions.sleep : delay;
+  const random = typeof retryOptions.random === "function" ? retryOptions.random : Math.random;
+  const onRetry = typeof retryOptions.onRetry === "function" ? retryOptions.onRetry : () => undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let response;
     try {
-      const payload = await response.json();
-      const row = payload && typeof payload === "object" ? payload : {};
-      const code = typeof row.code === "string" ? row.code.trim() : "";
-      const message = typeof row.message === "string" ? row.message.trim() : "";
-      const hint = typeof row.hint === "string" ? row.hint.trim() : "";
-      diagnostic = [code, message, hint].filter(Boolean).join(" — ").slice(0, 600);
-    } catch {
-      // The HTTP status remains useful when a gateway did not return JSON.
+      response = await fetchImpl(endpoint, {
+        method: "POST",
+        headers: {
+          apikey: publishableKey,
+          Authorization: `Bearer ${publishableKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(parameters),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      const reason = errorMessage(error).slice(0, 600);
+      if (attempt === maxAttempts) {
+        throw new Error(`The public ${rpcName} RPC request failed after ${attempt} attempts: ${reason}`, { cause: error });
+      }
+      const delayMs = exponentialRetryDelay(attempt, baseDelayMs, maxDelayMs, random);
+      onRetry({ rpcName, attempt, maxAttempts, delayMs, reason });
+      await sleep(delayMs);
+      continue;
     }
-    throw new Error(`The public ${rpcName} RPC returned HTTP ${response.status}${diagnostic ? `: ${diagnostic}` : "."}`);
+
+    if (!response.ok) {
+      const failure = await rpcHttpFailure(response, rpcName, attempt);
+      const retryable = TRANSIENT_HTTP_STATUSES.has(response.status)
+        || TRANSIENT_POSTGREST_CODES.has(failure.code);
+      if (!retryable || attempt === maxAttempts) throw new Error(failure.message);
+      const delayMs = retryAfterDelay(response, attempt, baseDelayMs, maxDelayMs, random);
+      onRetry({ rpcName, attempt, maxAttempts, delayMs, reason: failure.message });
+      await sleep(delayMs);
+      continue;
+    }
+
+    try {
+      return await response.json();
+    } catch {
+      throw new Error(`The public ${rpcName} RPC did not return JSON.`);
+    }
   }
-  try {
-    return await response.json();
-  } catch {
-    throw new Error(`The public ${rpcName} RPC did not return JSON.`);
-  }
+
+  throw new Error(`The public ${rpcName} RPC exhausted its retry budget.`);
 }
 
 export function writeSitemapAtomically(outputPath, contents) {
@@ -315,6 +433,11 @@ export async function main({ argumentsList = process.argv.slice(2), env = proces
       ...config,
       rpcName,
       parameters,
+      retryOptions: {
+        onRetry: ({ attempt, maxAttempts, delayMs, reason }) => log(
+          `Retrying public ${rpcName} RPC after a transient failure (${attempt}/${maxAttempts}); waiting ${delayMs} ms. ${reason}`,
+        ),
+      },
     }),
   });
   log(`Generated ${result.count} public Zagulyaky detail URL(s) in ${result.output}.`);

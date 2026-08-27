@@ -20,6 +20,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Every run targets the same linked production database. Keep the active
+  # migration alive and queue the latest run instead of allowing overlapping
+  # DDL transactions to block each other and the application.
+  group: deploy-supabase-production
+  cancel-in-progress: false
+
 jobs:
   deploy-edge-functions:
     runs-on: ubuntu-latest
@@ -179,7 +186,35 @@ jobs:
         run: supabase db push --linked --dry-run
 
       - name: Apply database migrations
-        run: supabase db push --linked --yes
+        shell: bash
+        run: |
+          max_attempts=3
+          attempt=1
+
+          while true; do
+            log_file="$RUNNER_TEMP/supabase-db-push-attempt-${attempt}.log"
+
+            set +e
+            supabase db push --linked --yes 2>&1 | tee "$log_file"
+            push_status=${PIPESTATUS[0]}
+            set -e
+
+            if [ "$push_status" -eq 0 ]; then
+              break
+            fi
+
+            # Retry only PostgreSQL lock acquisition timeouts. Syntax,
+            # validation, authorization, and data errors must fail immediately.
+            if [ "$attempt" -ge "$max_attempts" ] \
+              || ! grep -Eq 'ERROR:.*\(SQLSTATE 55P03\)' "$log_file"; then
+              exit "$push_status"
+            fi
+
+            retry_delay=$((attempt * 15))
+            echo "::warning::Database migration hit SQLSTATE 55P03; retrying in ${retry_delay}s (attempt $((attempt + 1))/${max_attempts})."
+            sleep "$retry_delay"
+            attempt=$((attempt + 1))
+          done
 
       - name: Deploy Edge Functions
         run: |

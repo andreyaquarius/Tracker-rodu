@@ -120,3 +120,126 @@ test("build-time public requester permits the bounded indexing facade, not arbit
     /only approved public Zagulyaky RPCs/i,
   );
 });
+
+test("build-time public requester retries PGRST002 schema-cache failures with bounded backoff", async () => {
+  const delays: number[] = [];
+  const retryEvents: Array<{ attempt: number; maxAttempts: number; delayMs: number; reason: string }> = [];
+  const requestBodies: string[] = [];
+  let calls = 0;
+
+  const payload = await requestPublicZagulyakyRpc({
+    supabaseUrl: "https://example.supabase.co",
+    publishableKey: "sb_publishable_fixture",
+    rpcName: "list_public_zagulyaky_indexing_v1",
+    parameters: { p_kind: "person", p_limit: 100, p_cursor_slug: null },
+    fetchImpl: async (_input: string | URL | Request, init?: RequestInit) => {
+      calls += 1;
+      requestBodies.push(String(init?.body));
+      if (calls < 3) {
+        return new Response(JSON.stringify({
+          code: "PGRST002",
+          message: "Could not query the database for the schema cache. Retrying.",
+        }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return Response.json({ items: [], nextCursor: null });
+    },
+    retryOptions: {
+      maxAttempts: 3,
+      baseDelayMs: 200,
+      maxDelayMs: 1_000,
+      random: () => 0.5,
+      sleep: async (delayMs: number) => { delays.push(delayMs); },
+      onRetry: (event: { attempt: number; maxAttempts: number; delayMs: number; reason: string }) => {
+        retryEvents.push(event);
+      },
+    },
+  });
+
+  assert.deepEqual(payload, { items: [], nextCursor: null });
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [200, 400]);
+  assert.deepEqual(retryEvents.map(({ attempt, maxAttempts, delayMs }) => ({ attempt, maxAttempts, delayMs })), [
+    { attempt: 1, maxAttempts: 3, delayMs: 200 },
+    { attempt: 2, maxAttempts: 3, delayMs: 400 },
+  ]);
+  assert.match(retryEvents[0]?.reason ?? "", /HTTP 503.*PGRST002/i);
+  assert.equal(new Set(requestBodies).size, 1, "Every safe retry must replay the same read-only RPC parameters.");
+});
+
+test("build-time public requester does not retry permanent responses and preserves diagnostics", async () => {
+  let calls = 0;
+  await assert.rejects(
+    requestPublicZagulyakyRpc({
+      supabaseUrl: "https://example.supabase.co",
+      publishableKey: "sb_publishable_fixture",
+      rpcName: "search_zagulyaky_people_v1",
+      parameters: { p_query: null, p_filters: {}, p_limit: 50 },
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ code: "PGRST301", message: "Invalid JWT" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+      retryOptions: {
+        sleep: async () => { throw new Error("Permanent responses must not sleep or retry."); },
+      },
+    }),
+    /HTTP 401.*PGRST301.*Invalid JWT/i,
+  );
+  assert.equal(calls, 1);
+});
+
+test("build-time public requester retries network failures but stops at the attempt cap", async () => {
+  const recoveryDelays: number[] = [];
+  let recoveryCalls = 0;
+  const recovered = await requestPublicZagulyakyRpc({
+    supabaseUrl: "https://example.supabase.co",
+    publishableKey: "sb_publishable_fixture",
+    rpcName: "search_zagulyaky_documents_v1",
+    parameters: { p_query: null, p_filters: {}, p_limit: 50 },
+    fetchImpl: async () => {
+      recoveryCalls += 1;
+      if (recoveryCalls === 1) throw new TypeError("temporary connection reset");
+      return Response.json({ items: [], nextCursor: null });
+    },
+    retryOptions: {
+      maxAttempts: 2,
+      baseDelayMs: 50,
+      maxDelayMs: 50,
+      random: () => 0.5,
+      sleep: async (delayMs: number) => { recoveryDelays.push(delayMs); },
+    },
+  });
+  assert.deepEqual(recovered, { items: [], nextCursor: null });
+  assert.equal(recoveryCalls, 2);
+  assert.deepEqual(recoveryDelays, [50]);
+
+  let unavailableCalls = 0;
+  await assert.rejects(
+    requestPublicZagulyakyRpc({
+      supabaseUrl: "https://example.supabase.co",
+      publishableKey: "sb_publishable_fixture",
+      rpcName: "search_zagulyaky_documents_v1",
+      parameters: { p_query: null, p_filters: {}, p_limit: 50 },
+      fetchImpl: async () => {
+        unavailableCalls += 1;
+        return new Response(JSON.stringify({ code: "PGRST002", message: "Schema cache unavailable" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+      retryOptions: {
+        maxAttempts: 3,
+        baseDelayMs: 0,
+        maxDelayMs: 0,
+        sleep: async () => undefined,
+      },
+    }),
+    /HTTP 503 after 3 attempts.*PGRST002/i,
+  );
+  assert.equal(unavailableCalls, 3);
+});

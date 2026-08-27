@@ -126,9 +126,9 @@ function indexingPayload(rawPayload) {
   return { items, nextCursor: nextCursor || null };
 }
 
-function missingIndexingRpc(error) {
+function fallbackEligibleIndexingError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return /\bPGRST202\b|\b42883\b|could not find the function|function .* does not exist|HTTP 404/i.test(message);
+  return /\bPGRST202\b|\b42883\b|could not find the function|function .* does not exist|HTTP 404|\bPGRST002\b|could not query the database for the schema cache/i.test(message);
 }
 
 /**
@@ -177,10 +177,13 @@ export async function collectStaticZagulyakyEntries(options) {
     const entries = await collectPublicZagulyakyIndexingEntries(options);
     return { entries, indexingMode: "full" };
   } catch (error) {
-    if (!missingIndexingRpc(error)) throw error;
+    if (!fallbackEligibleIndexingError(error)) throw error;
     // The code can safely deploy before the accompanying database migration is
-    // applied. It still publishes names/places from the existing public
-    // catalogue; the next deploy gains the public transcription automatically.
+    // applied, or while PostgREST is briefly rebuilding its schema cache after
+    // the bounded retry budget. The fallback must itself complete successfully:
+    // a broad Supabase outage still fails the deploy before old output is cleared.
+    // It publishes names/places from the existing public catalogue; the next
+    // deploy gains the public transcription automatically.
     const entries = await collectPublishedZagulyakyEntries(options);
     return { entries, indexingMode: "catalogue-fallback" };
   }
@@ -647,8 +650,17 @@ export async function main({ argumentsList = process.argv.slice(2), env = proces
       ...config,
       rpcName,
       parameters,
+      retryOptions: {
+        onRetry: ({ attempt, maxAttempts, delayMs, reason }) => log(
+          `Retrying public ${rpcName} RPC after a transient failure (${attempt}/${maxAttempts}); waiting ${delayMs} ms. ${reason}`,
+        ),
+      },
     }),
   });
+  if (result.indexingMode === "catalogue-fallback") {
+    const prefix = env.GITHUB_ACTIONS === "true" ? "::warning::" : "Warning: ";
+    log(`${prefix}The enriched public indexing RPC remained unavailable after bounded retries. Generated privacy-safe catalogue-only pages instead.`);
+  }
   log(
     `Generated ${result.entries.length} public Zagulyaky detail page(s), 3 catalogue page(s), and ${result.sitemapPath} (${result.indexingMode} indexing data).`,
   );

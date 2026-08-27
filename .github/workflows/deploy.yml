@@ -106,6 +106,10 @@ jobs:
       # a privacy-safe static public projection from anonymous catalogue RPCs
       # after Vite has produced its HTML template.
       - name: Generate indexable public Zagulyaky pages and sitemap
+        # The generator retries temporary PostgREST/schema-cache failures and
+        # then attempts its public catalogue fallback. Keep the whole recovery
+        # path bounded if Supabase is broadly unavailable.
+        timeout-minutes: 8
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
