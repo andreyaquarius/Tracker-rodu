@@ -13,48 +13,48 @@ const publicPages = [
   },
   {
     path: "features/index.html",
-    url: "https://trekerrodu.com.ua/features",
+    url: "https://trekerrodu.com.ua/features/",
     title: "Можливості Трекера Роду — інструменти генеалогічного дослідження",
     text: "Інструменти для генеалогічного дослідження",
   },
   {
     path: "pricing/index.html",
-    url: "https://trekerrodu.com.ua/pricing",
+    url: "https://trekerrodu.com.ua/pricing/",
     title: "Тарифи Трекера Роду — Старт, Дослідник і Професійний",
     text: "Тарифи Трекера Роду",
   },
   {
     path: "faq/index.html",
-    url: "https://trekerrodu.com.ua/faq",
+    url: "https://trekerrodu.com.ua/faq/",
     title: "Часті запитання про Трекер Роду",
     text: "Часті запитання про Трекер Роду",
   },
   {
     path: "privacy/index.html",
-    url: "https://trekerrodu.com.ua/privacy",
+    url: "https://trekerrodu.com.ua/privacy/",
     title: "Політика конфіденційності — Трекер Роду",
     text: "Політика конфіденційності",
   },
   {
     path: "terms/index.html",
-    url: "https://trekerrodu.com.ua/terms",
+    url: "https://trekerrodu.com.ua/terms/",
     title: "Умови користування — Трекер Роду",
     text: "Умови користування",
   },
 ];
 
 const privateSitemapUrls = [
-  "https://trekerrodu.com.ua/projects",
-  "https://trekerrodu.com.ua/settings",
-  "https://trekerrodu.com.ua/documents",
-  "https://trekerrodu.com.ua/persons",
-  "https://trekerrodu.com.ua/findings",
-  "https://trekerrodu.com.ua/hypotheses",
-  "https://trekerrodu.com.ua/archive-requests",
-  "https://trekerrodu.com.ua/year-matrix",
-  "https://trekerrodu.com.ua/tasks",
-  "https://trekerrodu.com.ua/zahuliaky/my",
-  "https://trekerrodu.com.ua/admin/zagulyaky",
+  "https://trekerrodu.com.ua/projects/",
+  "https://trekerrodu.com.ua/settings/",
+  "https://trekerrodu.com.ua/documents/",
+  "https://trekerrodu.com.ua/persons/",
+  "https://trekerrodu.com.ua/findings/",
+  "https://trekerrodu.com.ua/hypotheses/",
+  "https://trekerrodu.com.ua/archive-requests/",
+  "https://trekerrodu.com.ua/year-matrix/",
+  "https://trekerrodu.com.ua/tasks/",
+  "https://trekerrodu.com.ua/zahuliaky/my/",
+  "https://trekerrodu.com.ua/admin/zagulyaky/",
 ];
 
 function fail(message) {
@@ -113,9 +113,9 @@ const sitemap = readDistFile("sitemap.xml");
 const sitemapUrls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
 const expectedUrls = [
   ...publicPages.slice(0, 4).map((page) => page.url),
-  "https://trekerrodu.com.ua/zahuliaky",
-  "https://trekerrodu.com.ua/zahuliaky/documents",
-  "https://trekerrodu.com.ua/zahuliaky/places",
+  "https://trekerrodu.com.ua/zahuliaky/",
+  "https://trekerrodu.com.ua/zahuliaky/documents/",
+  "https://trekerrodu.com.ua/zahuliaky/places/",
   ...publicPages.slice(4).map((page) => page.url),
 ];
 if (JSON.stringify(sitemapUrls) !== JSON.stringify(expectedUrls)) {
@@ -130,19 +130,19 @@ const zagulyakyDetailUrls = [...zagulyakySitemap.matchAll(/<loc>(.*?)<\/loc>/g)]
 const zagulyakyCataloguePages = [
   {
     path: "zahuliaky/index.html",
-    url: "https://trekerrodu.com.ua/zahuliaky",
+    url: "https://trekerrodu.com.ua/zahuliaky/",
     title: "Загуляки людей — публічний генеалогічний каталог | Трекер Роду",
     heading: "Загуляки людей",
   },
   {
     path: "zahuliaky/documents/index.html",
-    url: "https://trekerrodu.com.ua/zahuliaky/documents",
+    url: "https://trekerrodu.com.ua/zahuliaky/documents/",
     title: "Загуляки документів — публічний генеалогічний каталог | Трекер Роду",
     heading: "Загуляки документів",
   },
   {
     path: "zahuliaky/places/index.html",
-    url: "https://trekerrodu.com.ua/zahuliaky/places",
+    url: "https://trekerrodu.com.ua/zahuliaky/places/",
     title: "Загуляки за населеними пунктами — карта зв’язків | Трекер Роду",
     heading: "Загуляки за населеними пунктами",
   },
@@ -150,11 +150,11 @@ const zagulyakyCataloguePages = [
 
 expectMatches(zagulyakySitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>/i, "sitemap-zagulyaky.xml");
 for (const url of zagulyakyDetailUrls) {
-  if (!/^https:\/\/trekerrodu\.com\.ua\/zahuliaky\/(?:people|documents)\/[^/?#]+$/.test(url)) {
+  if (!/^https:\/\/trekerrodu\.com\.ua\/zahuliaky\/(?:people|documents)\/[^/?#]+\/$/.test(url)) {
     fail(`sitemap-zagulyaky.xml contains an invalid public detail URL: ${url}`);
     continue;
   }
-  const pathname = new URL(url).pathname.replace(/^\//, "");
+  const pathname = new URL(url).pathname.replace(/^\//, "").replace(/\/$/, "");
   const html = readDistFile(`${pathname}/index.html`);
   expectIncludes(html, `<link rel="canonical" href="${url}"`, `${pathname}/index.html`);
   expectIncludes(html, 'name="robots" content="index, follow"', `${pathname}/index.html`);

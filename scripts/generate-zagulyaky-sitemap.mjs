@@ -131,7 +131,7 @@ export function publicZagulyakaUrl(kind, rawSlug, siteOrigin = ZAGULYAKY_SITEMAP
     throw new Error("The public sitemap origin must be a bare HTTPS origin.");
   }
 
-  url.pathname = `/zahuliaky/${kind === "person" ? "people" : "documents"}/${encodeURIComponent(slug)}`;
+  url.pathname = `/zahuliaky/${kind === "person" ? "people" : "documents"}/${encodeURIComponent(slug)}/`;
   return url.toString();
 }
 

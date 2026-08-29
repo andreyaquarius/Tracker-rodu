@@ -341,31 +341,31 @@ const PUBLIC_PAGE_SEO: Record<PublicPageKey, {
     title: "Політика конфіденційності — Трекер Роду",
     description:
       "Політика конфіденційності Трекера Роду: дані акаунта, Supabase, Google Auth, Google Drive, Gemini, права користувача та видалення акаунта.",
-    canonical: `${SITE_ORIGIN}/privacy`,
+    canonical: `${SITE_ORIGIN}/privacy/`,
   },
   terms: {
     title: "Умови користування — Трекер Роду",
     description:
       "Умови користування Трекером Роду: акаунт, trial, тарифи, оплата, скасування, контент користувача, Google Drive, ШІ-функції та відповідальність.",
-    canonical: `${SITE_ORIGIN}/terms`,
+    canonical: `${SITE_ORIGIN}/terms/`,
   },
   features: {
     title: "Можливості Трекера Роду — інструменти генеалогічного дослідження",
     description:
       "Можливості Трекера Роду для генеалогічного дослідження: документи, особи, знахідки, гіпотези, карта, власні розділи, командна робота й резервні копії.",
-    canonical: `${SITE_ORIGIN}/features`,
+    canonical: `${SITE_ORIGIN}/features/`,
   },
   pricing: {
     title: "Тарифи Трекера Роду — Старт, Дослідник і Професійний",
     description:
       "Тарифи Трекера Роду за кількістю осіб, дерев, редакторів і ШІ-кредитів; 30 днів можливостей Professional без платіжної картки.",
-    canonical: `${SITE_ORIGIN}/pricing`,
+    canonical: `${SITE_ORIGIN}/pricing/`,
   },
   faq: {
     title: "Часті запитання про Трекер Роду",
     description:
       "Відповіді про роботу з Трекером Роду: особи, родове дерево, GEDCOM, документи, Google Drive, тарифи, резервні копії та приватність.",
-    canonical: `${SITE_ORIGIN}/faq`,
+    canonical: `${SITE_ORIGIN}/faq/`,
   },
 };
 
@@ -459,7 +459,7 @@ function applyZagulyakySeo(route: Extract<ReturnType<typeof parseAppRoute>, { ki
         : route.tab === "mine"
           ? "/zahuliaky/my"
           : "/zahuliaky";
-  const canonical = `${SITE_ORIGIN}${canonicalPath}`;
+  const canonical = `${SITE_ORIGIN}${canonicalPath}/`;
 
   // The deployment creates real HTML documents for the public catalogue and
   // its published cards.  When one of those documents was loaded directly,

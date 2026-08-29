@@ -17,6 +17,7 @@ import {
   type AdminZagulyakaClaim,
   type AdminZagulyakaDetail,
   type AdminZagulyakaDuplicateCandidate,
+  type AdminZagulyakaAttachmentAccess,
   type AdminZagulyakaPrivacyClearance,
   type AdminZagulyakaQueueItem,
   type ZagulyakaClaimRecordAction,
@@ -28,9 +29,16 @@ import {
   type ZagulyakaVerificationStatus,
 } from "../../services/zagulyakyAdminService.ts";
 import { zagulyakaEventRoleLabel } from "../../utils/zagulyakyEventRoles";
+import { Modal } from "../Modal";
 import "./ZagulyakyModerationPanel.css";
 
 const PAGE_SIZE = 25;
+
+interface AttachmentPreview extends AdminZagulyakaAttachmentAccess {
+  attachmentId: string;
+  expiresAt: number;
+  expired: boolean;
+}
 
 const STATUS_LABELS: Record<ZagulyakaModerationStatus, string> = {
   draft: "Чернетка",
@@ -246,6 +254,7 @@ export function ZagulyakyModerationPanel() {
   const [consentEvidenceReference, setConsentEvidenceReference] = useState("");
   const [consentPrivateNote, setConsentPrivateNote] = useState("");
   const [attachmentBusyId, setAttachmentBusyId] = useState("");
+  const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null);
   const [claimStatus, setClaimStatus] = useState<ZagulyakaClaimStatus | "">("open");
   const [claimOffset, setClaimOffset] = useState(0);
   const [claims, setClaims] = useState<AdminZagulyakaClaim[]>([]);
@@ -344,6 +353,7 @@ export function ZagulyakyModerationPanel() {
       setDetail(null);
       setPrivacyClearance(null);
       setRecordDuplicates([]);
+      setAttachmentPreview(null);
       return;
     }
     let active = true;
@@ -380,6 +390,17 @@ export function ZagulyakyModerationPanel() {
       });
     return () => { active = false; };
   }, [reviewRefreshKey, selected]);
+
+  useEffect(() => {
+    if (!attachmentPreview || attachmentPreview.expired) return undefined;
+    const remainingMs = Math.max(0, attachmentPreview.expiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setAttachmentPreview((current) => current
+        ? { ...current, expired: true }
+        : null);
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [attachmentPreview]);
 
   useEffect(() => {
     setClaimNote(selectedClaim?.resolutionNote ?? "");
@@ -496,25 +517,21 @@ export function ZagulyakyModerationPanel() {
 
   const runPreviewAttachment = async (attachmentId: string) => {
     if (attachmentBusyId) return;
-    // Open a blank tab synchronously inside the click handler.  This preserves
-    // the browser's user-gesture allowance; opening only after the async RPC
-    // would be blocked by common popup protections.
-    const previewWindow = window.open("", "_blank");
-    if (previewWindow) {
-      try { previewWindow.opener = null; } catch { /* cross-browser hardening only */ }
-    }
     setAttachmentBusyId(attachmentId);
     setError("");
+    setSuccess("");
     try {
       const access = await previewAdminZagulyakaAttachment(attachmentId);
-      if (previewWindow && !previewWindow.closed) {
-        previewWindow.location.replace(access.url);
-      } else {
-        const opened = window.open(access.url, "_blank", "noopener,noreferrer");
-        if (!opened) setSuccess("Посилання на приватний перегляд створено, але браузер заблокував нову вкладку. Дозвольте спливні вікна й повторіть дію.");
-      }
+      const url = safeExternalUrl(access.url);
+      if (!url) throw new Error("ATTACHMENT_NOT_AVAILABLE");
+      setAttachmentPreview({
+        ...access,
+        attachmentId,
+        url,
+        expiresAt: Date.now() + access.expiresIn * 1000,
+        expired: false,
+      });
     } catch (requestError) {
-      previewWindow?.close();
       setError(errorMessage(requestError));
     } finally {
       setAttachmentBusyId("");
@@ -709,6 +726,15 @@ export function ZagulyakyModerationPanel() {
 
   return (
     <div className="zagulyaky-moderation">
+      {attachmentPreview ? (
+        <AttachmentPreviewDialog
+          preview={attachmentPreview}
+          busy={attachmentBusyId === attachmentPreview.attachmentId}
+          error={error}
+          onClose={() => setAttachmentPreview(null)}
+          onRefresh={() => void runPreviewAttachment(attachmentPreview.attachmentId)}
+        />
+      ) : null}
       <section className="admin-panel-card zagulyaky-moderation-intro">
         <div>
           <h2>Модерація публічного каталогу</h2>
@@ -950,6 +976,72 @@ function ReviewEvidence({
       </section>
       <section><h3>Оригінальний текст</h3><p className="zagulyaky-original-text">{detailValue(detail.record, "original_text")}</p></section>
     </div>
+  );
+}
+
+function AttachmentPreviewDialog({
+  preview,
+  busy,
+  error,
+  onClose,
+  onRefresh,
+}: {
+  preview: AttachmentPreview;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const isImage = preview.mimeType.toLowerCase().startsWith("image/");
+  const isPdf = preview.mimeType.toLowerCase() === "application/pdf";
+
+  return (
+    <Modal
+      title={`Приватний перегляд: ${preview.fileName}`}
+      className="zagulyaky-attachment-preview-modal"
+      viewportBounded
+      onClose={onClose}
+    >
+      <div className="zagulyaky-attachment-preview">
+        <p className="zagulyaky-attachment-preview-notice">
+          Файл доступний лише модератору за короткочасним приватним посиланням. Ця дія не створює публічної копії.
+        </p>
+        {error ? <div className="admin-alert error" role="alert">{error}</div> : null}
+        {preview.expired ? (
+          <div className="zagulyaky-attachment-preview-expired" role="status">
+            <strong>Приватне посилання вже втратило чинність.</strong>
+            <span>Оновіть його, щоб продовжити перегляд.</span>
+            <button type="button" className="button button-secondary" disabled={busy} onClick={onRefresh}>
+              {busy ? "Оновлюємо…" : "Оновити приватне посилання"}
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="zagulyaky-attachment-preview-frame">
+              {isImage ? (
+                <img src={preview.url} alt={preview.fileName} referrerPolicy="no-referrer" />
+              ) : isPdf ? (
+                <iframe src={preview.url} title={preview.fileName} referrerPolicy="no-referrer" />
+              ) : (
+                <div className="zagulyaky-attachment-preview-unsupported">
+                  <strong>Для цього типу файлу немає вбудованого перегляду.</strong>
+                  <span>{preview.mimeType || "Тип файлу не вказано"}</span>
+                </div>
+              )}
+            </div>
+            <div className="zagulyaky-attachment-preview-actions">
+              <a className="button button-secondary" href={preview.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+                Відкрити окремо
+              </a>
+              <a className="button button-ghost" href={preview.url} referrerPolicy="no-referrer">
+                Відкрити в цій вкладці
+              </a>
+              <button type="button" className="button button-secondary" onClick={onClose}>Закрити</button>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 

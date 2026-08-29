@@ -154,7 +154,10 @@ export function ZagulyakyPage({
     setMyRecordsPage(1);
   }, [initialTab]);
 
-  const shouldLoadPublicStats = activeTab === "people" || activeTab === "documents";
+  // Counts are part of the persistent public tab navigation. They must also
+  // load on a direct /zahuliaky/places/ visit, where there was no preceding
+  // people/documents render to populate them.
+  const shouldLoadPublicStats = activeTab !== "mine";
   useEffect(() => {
     if (!shouldLoadPublicStats) {
       setStatsLoading(false);
@@ -914,7 +917,9 @@ function MyRecords({
     const withdrawable = ["pending_review", "needs_changes"].includes(item.status);
     const deletable = ["draft", "needs_changes", "withdrawn"].includes(item.status);
     const busy = action?.id === item.id || Boolean(editingLoadingId);
-    return <article key={item.id}><div><span className="eyebrow">{item.kind === "person" ? "Людина" : "Документ"}</span><h3>{item.title}</h3><small>Оновлено {formatDate(item.updatedAt)}</small></div><div><span className={`zagulyaky-status workflow-${item.status}`}>{zagulyakaWorkflowLabels[item.status]}</span>{item.rejectionReason ? <p>{item.rejectionReason}</p> : null}<div className="zagulyaky-my-record-actions">{editable ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => onEdit(item)}>{editingLoadingId === item.id ? "Відкриваємо…" : "Редагувати"}</button> : null}{withdrawable ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => onWithdraw(item)}>{action?.id === item.id && action.type === "withdraw" ? "Відкликаємо…" : "Відкликати"}</button> : null}{deletable ? <button type="button" className="button button-ghost zagulyaky-delete-draft" disabled={busy} onClick={() => onDelete(item)}>{action?.id === item.id && action.type === "delete" ? "Видаляємо…" : "Видалити"}</button> : null}{item.publishedSlug ? <button type="button" className="button button-secondary" onClick={() => onOpenPublic(item)}>Відкрити публічну картку</button> : null}</div></div></article>;
+    const placeLabel = item.foundPlace || item.originPlace;
+    const placeRole = item.foundPlace ? "Де знайдено" : "Походження";
+    return <article key={item.id}><div><span className="eyebrow">{item.kind === "person" ? "Людина" : "Документ"}</span><h3>{item.title}</h3>{placeLabel && placeLabel !== item.title ? <small>{placeRole}: {placeLabel}</small> : null}<small>Оновлено {formatDate(item.updatedAt)}</small></div><div><span className={`zagulyaky-status workflow-${item.status}`}>{zagulyakaWorkflowLabels[item.status]}</span>{item.rejectionReason ? <p>{item.rejectionReason}</p> : null}<div className="zagulyaky-my-record-actions">{editable ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => onEdit(item)}>{editingLoadingId === item.id ? "Відкриваємо…" : "Редагувати"}</button> : null}{withdrawable ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => onWithdraw(item)}>{action?.id === item.id && action.type === "withdraw" ? "Відкликаємо…" : "Відкликати"}</button> : null}{deletable ? <button type="button" className="button button-ghost zagulyaky-delete-draft" disabled={busy} onClick={() => onDelete(item)}>{action?.id === item.id && action.type === "delete" ? "Видаляємо…" : "Видалити"}</button> : null}{item.publishedSlug ? <button type="button" className="button button-secondary" onClick={() => onOpenPublic(item)}>Відкрити публічну картку</button> : null}</div></div></article>;
   })}</div>;
 }
 

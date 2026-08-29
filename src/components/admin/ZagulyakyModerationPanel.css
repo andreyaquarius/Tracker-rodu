@@ -368,6 +368,76 @@
 .zagulyaky-attachment-review article span { margin-top: 0.2rem; color: #687873; font-size: 0.78rem; }
 .zagulyaky-attachment-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.45rem; }
 
+.modal.zagulyaky-attachment-preview-modal {
+  width: min(1080px, 100%);
+}
+
+.zagulyaky-attachment-preview {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.zagulyaky-attachment-preview-notice {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #c9ddd5;
+  border-radius: 0.65rem;
+  color: #31564d;
+  background: #edf6f2;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.zagulyaky-attachment-preview-frame {
+  display: grid;
+  min-height: min(62dvh, 620px);
+  place-items: center;
+  overflow: auto;
+  border: 1px solid #d9ded9;
+  border-radius: 0.75rem;
+  background: #eef0eb;
+}
+
+.zagulyaky-attachment-preview-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: min(62dvh, 620px);
+  object-fit: contain;
+}
+
+.zagulyaky-attachment-preview-frame iframe {
+  width: 100%;
+  min-height: min(62dvh, 620px);
+  border: 0;
+  background: #fff;
+}
+
+.zagulyaky-attachment-preview-unsupported,
+.zagulyaky-attachment-preview-expired {
+  display: grid;
+  justify-items: center;
+  gap: 0.55rem;
+  padding: 2rem;
+  color: #40534d;
+  text-align: center;
+}
+
+.zagulyaky-attachment-preview-expired {
+  min-height: 15rem;
+  place-content: center;
+  border: 1px solid #e4d6ad;
+  border-radius: 0.75rem;
+  background: #fff8e6;
+}
+
+.zagulyaky-attachment-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
 /* Moderator-only links to the original source are not public catalogue data. */
 .zagulyaky-private-source-links > p {
   margin: -0.1rem 0 0.7rem;
@@ -564,6 +634,11 @@
   .zagulyaky-living-clearance { grid-template-columns: 1fr; }
   .zagulyaky-attachment-review article { align-items: stretch; flex-direction: column; }
   .zagulyaky-attachment-actions { justify-content: flex-start; }
+  .zagulyaky-attachment-preview { padding: 0.75rem; }
+  .zagulyaky-attachment-preview-frame,
+  .zagulyaky-attachment-preview-frame iframe { min-height: 52dvh; }
+  .zagulyaky-attachment-preview-actions { justify-content: stretch; }
+  .zagulyaky-attachment-preview-actions > * { flex: 1 1 100%; text-align: center; }
 
   .zagulyaky-moderation-tabs button {
     flex: 1;

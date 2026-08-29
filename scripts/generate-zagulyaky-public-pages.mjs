@@ -228,7 +228,7 @@ export function publicEntrySeoData(entry) {
   const subject = record(field(item, "subject"));
   const discovery = record(field(item, "documentDiscovery", "document_discovery"));
   const siteOrigin = new URL(entry.url).origin;
-  const collectionUrl = `${siteOrigin}/zahuliaky${kind === "document" ? "/documents" : ""}`;
+  const collectionUrl = `${siteOrigin}/zahuliaky${kind === "document" ? "/documents" : ""}/`;
   const collectionTitle = kind === "document" ? "Загуляки документів" : "Загуляки людей";
   const sourceCitation = firstText(field(source, "citation"), field(source, "title"), field(source, "archiveName", "archive_name"));
   const sourceLocation = firstText(
@@ -371,7 +371,7 @@ export function publicEntrySeoData(entry) {
 
 function catalogueSeoData(kind, entries) {
   const isDocument = kind === "document";
-  const url = `${ZAGULYAKY_SITEMAP_ORIGIN}/zahuliaky${isDocument ? "/documents" : ""}`;
+  const url = `${ZAGULYAKY_SITEMAP_ORIGIN}/zahuliaky${isDocument ? "/documents" : ""}/`;
   const heading = isDocument ? "Загуляки документів" : "Загуляки людей";
   const description = isDocument
     ? "Публічний генеалогічний каталог документів і справ, у яких знайдено записи з інших населених пунктів або неочікуваних періодів."
@@ -420,7 +420,7 @@ function catalogueSeoData(kind, entries) {
 }
 
 function placesSeoData() {
-  const url = `${ZAGULYAKY_SITEMAP_ORIGIN}/zahuliaky/places`;
+  const url = `${ZAGULYAKY_SITEMAP_ORIGIN}/zahuliaky/places/`;
   const heading = "Загуляки за населеними пунктами";
   const description = "Публічна карта зв’язків між населеними пунктами у загуляках: походження людини та місце, де знайдено запис. Лінії показують лише підтверджений зв’язок, а не маршрут.";
 
