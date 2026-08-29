@@ -1,4 +1,5 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabaseAuth.ts";
+import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest.ts";
 
 export const PRODUCT_ANALYTICS_CONSENT_VERSION = 2;
 export const PRODUCT_ANALYTICS_CONSENT_KEY = "tracker-rodu-product-analytics-consent-v2";
@@ -52,7 +53,11 @@ export function productAnalyticsConsentGranted(): boolean {
 
 export async function loadMyProductAnalyticsConsent(): Promise<ProductAnalyticsConsentRecord | null> {
   if (!isSupabaseConfigured) return null;
-  const { data, error } = await getSupabaseClient().rpc("get_my_product_analytics_consent");
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(client, async () => {
+    const result = await client.rpc("get_my_product_analytics_consent");
+    return { data: result.data, error: result.error };
+  });
   if (error) throw error;
   const parsed = parseRecord(data);
   const current = parsed && parsed.consentVersion === PRODUCT_ANALYTICS_CONSENT_VERSION
@@ -66,9 +71,13 @@ export async function saveMyProductAnalyticsConsent(
   granted: boolean,
 ): Promise<ProductAnalyticsConsentRecord> {
   if (!isSupabaseConfigured) throw new Error("Supabase is not configured.");
-  const { data, error } = await getSupabaseClient().rpc("set_my_product_analytics_consent", {
-    p_granted: granted,
-    p_consent_version: PRODUCT_ANALYTICS_CONSENT_VERSION,
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(client, async () => {
+    const result = await client.rpc("set_my_product_analytics_consent", {
+      p_granted: granted,
+      p_consent_version: PRODUCT_ANALYTICS_CONSENT_VERSION,
+    });
+    return { data: result.data, error: result.error };
   });
   if (error) throw error;
   const parsed = parseRecord(data);
