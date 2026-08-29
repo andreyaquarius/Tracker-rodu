@@ -141,6 +141,20 @@ select is(jsonb_array_length(public.list_feedback_threads()), 1, 'administrator 
 select is(public.get_feedback_unread_count(), 1, 'administrator sees an unread user message');
 select public.mark_feedback_thread_read((select thread_id from feedback_test_state));
 select is(public.get_feedback_unread_count(), 0, 'administrator can mark the thread read');
+
+-- pgTAP runs this scenario in one transaction, where now() is stable. Move
+-- the author's marker into the past to model the next real PostgREST request.
+reset role;
+update public.feedback_threads
+set author_last_read_at = now() - interval '1 second'
+where id = (select thread_id from feedback_test_state);
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"fb000000-0000-0000-0000-000000000003","role":"authenticated","email":"feedback-admin@example.test"}',
+  true
+);
+
 select lives_ok(
   format(
     'select public.post_feedback_message(%L::uuid, %L)',

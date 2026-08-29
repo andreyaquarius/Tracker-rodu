@@ -4,11 +4,13 @@ import type {
   CustomFieldDefinition,
   GeoPoint,
   Person,
+  PersonEvent,
   PersonEventType,
   PersonGender,
   PersonStatus,
   Research,
 } from "../types";
+import type { HistoricalPlaceFieldValue } from "../types/historicalPlaces.ts";
 import { createId } from "../utils/id";
 import {
   autoFormatFlexibleDateInput,
@@ -25,6 +27,12 @@ import { normalizePersonEvents, personEventLabel } from "../utils/geo";
 import { ScanAttachmentsEditor } from "./ScanAttachments";
 import { normalizePersonPhotoState } from "../utils/personPhotos.ts";
 import { PersonEventsEditor } from "./PersonEventsEditor.tsx";
+import { HistoricalPlaceField } from "./HistoricalPlaceField.tsx";
+import {
+  changePersonEventDisplayPlace,
+  exactPersonEventDateForPlaceLookup,
+  personEventTemporalContextForPlaceLookup,
+} from "../utils/personEventGeo.ts";
 import {
   personEducation,
   personNationality,
@@ -42,6 +50,20 @@ const personDateFields: Array<{ key: PersonDateFieldKey; label: string }> = [
   { key: "marriageDate", label: "Дата шлюбу" },
   { key: "deathDate", label: "Дата смерті" },
 ];
+
+function historicalCorePlaceValue(
+  events: readonly PersonEvent[],
+  type: "birth" | "marriage" | "death",
+  displayText: string,
+): HistoricalPlaceFieldValue {
+  const event = events.find((item) => item.id === type);
+  return {
+    placeId: event?.placeId ?? null,
+    originalText: event?.placeOriginalText ?? displayText,
+    place: null,
+    placeDisplayName: event?.placeCanonicalName ?? "",
+  };
+}
 
 function PersonDateInput({
   label,
@@ -143,6 +165,7 @@ function buildInitialPerson(
 
 export function PersonFormModal({
   person,
+  projectId,
   db,
   researches,
   initialFullName = "",
@@ -162,6 +185,7 @@ export function PersonFormModal({
   onFocus,
 }: {
   person?: Person | null;
+  projectId?: string;
   db: AppDatabase;
   researches: Research[];
   initialFullName?: string;
@@ -347,6 +371,19 @@ export function PersonFormModal({
     deathPlace: form.isLiving ? "" : form.deathPlace,
     residencePlaces: form.residencePlaces,
   };
+  const normalizedEventsForDraft = (draft: PersonDraft) => normalizePersonEvents(
+    draft.events,
+    {
+      id: person?.id ?? "draft",
+      birthDate: draft.birthDate,
+      birthPlace: draft.birthPlace,
+      marriageDate: draft.marriageDate,
+      marriagePlace: draft.marriagePlace,
+      deathDate: draft.isLiving ? "" : draft.deathDate,
+      deathPlace: draft.isLiving ? "" : draft.deathPlace,
+      residencePlaces: draft.residencePlaces,
+    },
+  );
   const personEvents = normalizePersonEvents(form.events, eventPerson);
 
   const updateEventGeo = (type: PersonEventType, geo: GeoPoint | null) => {
@@ -356,10 +393,45 @@ export function PersonFormModal({
   };
 
   const updateEventPlace = (type: PersonEventType, place: string) => {
-    if (type === "birth") update("birthPlace", place);
-    if (type === "marriage") update("marriagePlace", place);
-    if (type === "death") update("deathPlace", place);
-    if (type === "residence") update("residencePlaces", place);
+    const field = type === "birth"
+      ? "birthPlace"
+      : type === "marriage"
+        ? "marriagePlace"
+        : type === "death"
+          ? "deathPlace"
+          : type === "residence"
+            ? "residencePlaces"
+            : null;
+    if (!field) return;
+    setForm((current) => ({
+      ...current,
+      [field]: place,
+      events: changePersonEventDisplayPlace(
+        normalizedEventsForDraft(current),
+        type,
+        place,
+      ),
+    }));
+  };
+
+  const updateHistoricalCorePlace = (
+    type: "birth" | "marriage" | "death",
+    value: HistoricalPlaceFieldValue,
+  ) => {
+    setForm((current) => ({
+      ...current,
+      events: normalizedEventsForDraft(current).map((event) => event.id === type
+        ? {
+            ...event,
+            placeId: value.placeId,
+            placeOriginalText: value.originalText,
+            placeResolutionStatus: value.placeId ? "confirmed" : "unresolved",
+            placeCanonicalName: value.place
+              ? value.place.displayName || value.place.canonicalName
+              : value.placeDisplayName || null,
+          }
+        : event),
+    }));
   };
 
   const updateCoreEventAddress = (type: "birth" | "marriage" | "death", address: string) => {
@@ -539,9 +611,21 @@ export function PersonFormModal({
             onBlur={() => commitDateDraft("birthDate")}
           />
           <label>
-            <span>Місце народження</span>
-            <input value={form.birthPlace} onChange={(event) => update("birthPlace", event.target.value)} />
+            <span>Місце народження для картки та старих експортів</span>
+            <input value={form.birthPlace} onChange={(event) => updateEventPlace("birth", event.target.value)} />
           </label>
+          {projectId ? (
+            <div className="field-wide">
+              <HistoricalPlaceField
+                projectId={projectId}
+                atDate={exactPersonEventDateForPlaceLookup(form.birthDate)}
+                temporalContext={personEventTemporalContextForPlaceLookup(form.birthDate)}
+                label="Народження: точне написання в джерелі та історичне місце"
+                value={historicalCorePlaceValue(personEvents, "birth", form.birthPlace)}
+                onChange={(value) => updateHistoricalCorePlace("birth", value)}
+              />
+            </div>
+          ) : null}
           <label>
             <span>Номер будинку / точна адреса</span>
             <input
@@ -566,9 +650,21 @@ export function PersonFormModal({
             onBlur={() => commitDateDraft("marriageDate")}
           />
           <label>
-            <span>Місце шлюбу</span>
-            <input value={form.marriagePlace} onChange={(event) => update("marriagePlace", event.target.value)} />
+            <span>Місце шлюбу для картки та старих експортів</span>
+            <input value={form.marriagePlace} onChange={(event) => updateEventPlace("marriage", event.target.value)} />
           </label>
+          {projectId ? (
+            <div className="field-wide">
+              <HistoricalPlaceField
+                projectId={projectId}
+                atDate={exactPersonEventDateForPlaceLookup(form.marriageDate)}
+                temporalContext={personEventTemporalContextForPlaceLookup(form.marriageDate)}
+                label="Шлюб: точне написання в джерелі та історичне місце"
+                value={historicalCorePlaceValue(personEvents, "marriage", form.marriagePlace)}
+                onChange={(value) => updateHistoricalCorePlace("marriage", value)}
+              />
+            </div>
+          ) : null}
           <label>
             <span>Номер будинку / точна адреса</span>
             <input
@@ -587,9 +683,21 @@ export function PersonFormModal({
                 onBlur={() => commitDateDraft("deathDate")}
               />
               <label>
-                <span>Місце смерті</span>
-                <input value={form.deathPlace} onChange={(event) => update("deathPlace", event.target.value)} />
+                <span>Місце смерті для картки та старих експортів</span>
+                <input value={form.deathPlace} onChange={(event) => updateEventPlace("death", event.target.value)} />
               </label>
+              {projectId ? (
+                <div className="field-wide">
+                  <HistoricalPlaceField
+                    projectId={projectId}
+                    atDate={exactPersonEventDateForPlaceLookup(form.deathDate)}
+                    temporalContext={personEventTemporalContextForPlaceLookup(form.deathDate)}
+                    label="Смерть: точне написання в джерелі та історичне місце"
+                    value={historicalCorePlaceValue(personEvents, "death", form.deathPlace)}
+                    onChange={(value) => updateHistoricalCorePlace("death", value)}
+                  />
+                </div>
+              ) : null}
               <label>
                 <span>Номер будинку / точна адреса</span>
                 <input
@@ -610,7 +718,7 @@ export function PersonFormModal({
           ) : null}
           <label className="field-wide">
             <span>Місця проживання</span>
-            <textarea rows={3} value={form.residencePlaces} onChange={(event) => update("residencePlaces", event.target.value)} />
+            <textarea rows={3} value={form.residencePlaces} onChange={(event) => updateEventPlace("residence", event.target.value)} />
           </label>
           <fieldset className="geo-events field-wide">
             <legend>Місця подій на карті</legend>
@@ -663,6 +771,7 @@ export function PersonFormModal({
           </label>
           <PersonEventsEditor
             personId={person?.id ?? "draft"}
+            projectId={projectId}
             events={personEvents}
             onChange={(events) => update("events", events)}
           />

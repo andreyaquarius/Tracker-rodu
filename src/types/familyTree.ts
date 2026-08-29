@@ -323,6 +323,9 @@ export interface FamilyTreePersonTimelineEvent {
   dateTo: string;
   dateText: string;
   placeName: string;
+  placeId?: EntityId | null;
+  placeOriginalText?: string;
+  placeResolutionStatus?: "unresolved" | "confirmed" | "needs_review";
   geo: GeoPoint | null;
   eventRole: string;
   evidenceStatus: EvidenceStatus;

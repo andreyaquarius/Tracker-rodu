@@ -9,6 +9,7 @@ import { customSectionKey } from "./sectionHierarchy.ts";
 const pageSegments: Partial<Record<PageKey, string>> = {
   dashboard: "dashboard",
   map: "map",
+  places: "places",
   familyTree: "rodove-derevo",
   researches: "researches",
   documents: "documents",
@@ -71,6 +72,8 @@ export type AppRoute =
       page: PageKey;
       personId?: string;
       personMode?: "profile" | "edit" | "new";
+      placeId?: string;
+      placeMode?: "profile" | "edit" | "new";
       familyTreeView?: "tree" | "statistics";
       unresolvedSectionPath?: boolean;
     }
@@ -266,6 +269,34 @@ export function parseAppRoute(
   }
 
   const standardPage = segmentPages.get(sectionPath[0]);
+  if (standardPage === "places") {
+    if (sectionPath.length === 2 && sectionPath[1] === "new") {
+      return {
+        kind: "project",
+        projectRef,
+        page: "places",
+        placeMode: "new",
+      };
+    }
+    if (sectionPath.length === 2 && sectionPath[1]) {
+      return {
+        kind: "project",
+        projectRef,
+        page: "places",
+        placeId: sectionPath[1],
+        placeMode: "profile",
+      };
+    }
+    if (sectionPath.length === 3 && sectionPath[1] && sectionPath[2] === "edit") {
+      return {
+        kind: "project",
+        projectRef,
+        page: "places",
+        placeId: sectionPath[1],
+        placeMode: "edit",
+      };
+    }
+  }
   if (standardPage === "persons") {
     if (sectionPath.length === 2 && sectionPath[1] === "new") {
       return {
@@ -425,4 +456,18 @@ export function personPath(
   return mode === "edit"
     ? `${base}/${encodedPersonId}/edit`
     : `${base}/${encodedPersonId}`;
+}
+
+export function historicalPlacePath(
+  projectSlug: string,
+  placeId?: string,
+  mode: "profile" | "edit" | "new" = "profile",
+): string {
+  const base = pagePath(projectSlug, "places");
+  if (mode === "new") return `${base}/new`;
+  if (!placeId) return base;
+  const encodedPlaceId = encodeURIComponent(placeId);
+  return mode === "edit"
+    ? `${base}/${encodedPlaceId}/edit`
+    : `${base}/${encodedPlaceId}`;
 }

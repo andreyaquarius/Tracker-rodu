@@ -333,6 +333,7 @@ function moduleLabel(module: PageKey): string {
   const labels: Record<Exclude<PageKey, `custom:${string}`>, string> = {
     dashboard: "Панель огляду",
     map: "Карта",
+    places: "Історичні місця",
     familyTree: "Родове дерево",
     researches: "Дослідження",
     documents: "Документи",
@@ -355,6 +356,7 @@ function activityIcon(module: PageKey): string {
   const icons: Record<Exclude<PageKey, `custom:${string}`>, string> = {
     dashboard: "О",
     map: "К",
+    places: "М",
     familyTree: "Д",
     researches: "Д",
     documents: "Ф",

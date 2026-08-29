@@ -121,7 +121,16 @@ export interface PersonEvent {
   type: PersonEventType;
   title?: string;
   date?: string | null;
+  /** Legacy/display wording kept for existing cards, exports and integrations. */
   placeName?: string | null;
+  /** Optional canonical historical-place identity. It never replaces placeName. */
+  placeId?: EntityId | null;
+  /** Exact wording from the user or source, preserved independently. */
+  placeOriginalText?: string | null;
+  /** Review state of the optional canonical identity. */
+  placeResolutionStatus?: "unresolved" | "confirmed" | "needs_review";
+  /** Display-only snapshot which makes the saved canonical choice understandable offline. */
+  placeCanonicalName?: string | null;
   /** Original fact value, for example an occupation, military unit or book number. */
   value?: string | null;
   /** Age written in the source at the time of the event. */

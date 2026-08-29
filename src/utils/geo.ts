@@ -156,6 +156,33 @@ function normalizePersonEvent(value: unknown, personId: string): PersonEvent | n
   const type = String(record.type ?? "other") as PersonEventType;
   if (!Object.keys(eventLabels).includes(type)) return null;
   const id = typeof record.id === "string" && record.id ? record.id : createId();
+  // These fields are additive. Keeping them absent for legacy payloads is
+  // materially different from sending an explicit `placeId: null`: the
+  // person-save bridge treats the latter as the user's request to unlink a
+  // previously confirmed catalogue place.
+  const historicalPlaceFields: Partial<PersonEvent> = {};
+  if (Object.prototype.hasOwnProperty.call(record, "placeId")) {
+    historicalPlaceFields.placeId = typeof record.placeId === "string" && record.placeId
+      ? record.placeId
+      : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(record, "placeOriginalText")) {
+    historicalPlaceFields.placeOriginalText = typeof record.placeOriginalText === "string"
+      ? record.placeOriginalText
+      : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(record, "placeResolutionStatus")) {
+    historicalPlaceFields.placeResolutionStatus = record.placeResolutionStatus === "confirmed"
+      || record.placeResolutionStatus === "needs_review"
+      ? record.placeResolutionStatus
+      : "unresolved";
+  }
+  if (Object.prototype.hasOwnProperty.call(record, "placeCanonicalName")) {
+    historicalPlaceFields.placeCanonicalName = typeof record.placeCanonicalName === "string"
+      && record.placeCanonicalName
+      ? record.placeCanonicalName
+      : null;
+  }
   return {
     id,
     personId,
@@ -163,6 +190,7 @@ function normalizePersonEvent(value: unknown, personId: string): PersonEvent | n
     title: typeof record.title === "string" ? record.title : personEventLabel(type),
     date: typeof record.date === "string" && record.date ? record.date : null,
     placeName: typeof record.placeName === "string" && record.placeName ? record.placeName : null,
+    ...historicalPlaceFields,
     value: typeof record.value === "string" && record.value ? record.value : null,
     age: typeof record.age === "string" && record.age ? record.age : null,
     cause: typeof record.cause === "string" && record.cause ? record.cause : null,

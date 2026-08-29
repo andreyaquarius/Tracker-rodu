@@ -52,6 +52,7 @@ import { CustomFieldsEditor, CustomFieldsView } from "../components/CustomFields
 import { InlineCustomFieldCreator } from "../components/InlineCustomFieldCreator";
 import { HypothesisAiAgent } from "../components/HypothesisAiAgent";
 import { FindingAiIndexingPanel } from "../components/FindingAiIndexingPanel";
+import { FindingHistoricalPlacePanel } from "../components/FindingHistoricalPlacePanel.tsx";
 import { GeneHelpRequestModal, type GeneHelpInitialRequest } from "../components/GeneHelpRequestModal";
 import {
   definitionsForModule,
@@ -78,6 +79,16 @@ import {
   createProjectPersonName,
   listProjectPersonNames,
 } from "../services/projectPersonNames.ts";
+import {
+  clearFindingDocumentPlace,
+  confirmFindingDocumentPlace,
+  currentConfirmedFindingPlace,
+  findingHistoricalPlaceDecisionFromState,
+  findingHistoricalPlaceContextKey,
+  getFindingDocumentPlace,
+  type FindingDocumentPlaceState,
+  type FindingHistoricalPlaceDecision,
+} from "../services/findingHistoricalPlaceWorkflow.ts";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -1396,6 +1407,11 @@ export function EntityModal({
   const [findingNameCapture, setFindingNameCapture] = useState<FindingNameCapture | null>(null);
   const [findingNamePending, setFindingNamePending] = useState(false);
   const [findingNameError, setFindingNameError] = useState("");
+  const [findingPlaceDecision, setFindingPlaceDecision] = useState<FindingHistoricalPlaceDecision | null>(null);
+  const [findingPlacePersistedState, setFindingPlacePersistedState] = useState<FindingDocumentPlaceState | null>(null);
+  const [findingPlaceLoadPending, setFindingPlaceLoadPending] = useState(false);
+  const [findingPlaceLoadError, setFindingPlaceLoadError] = useState("");
+  const [findingPlaceLoadAttempt, setFindingPlaceLoadAttempt] = useState(0);
   const [locallyCreatedPersons, setLocallyCreatedPersons] = useState<Person[]>([]);
   const [createdFindingPersons, setCreatedFindingPersons] = useState<CreatedFindingPerson[]>([]);
   const [locallyCreatedRelations, setLocallyCreatedRelations] = useState<PersonRelation[]>([]);
@@ -1403,7 +1419,50 @@ export function EntityModal({
   const [savePending, setSavePending] = useState(false);
   const [saveError, setSaveError] = useState("");
   const savePendingRef = useRef(false);
+  const persistedEntityRef = useRef<AppEntity | null>(entity);
   const persistedBaseUpdatedAtRef = useRef<string>(entity?.updatedAt ?? "");
+  const findingPlaceDecisionTouchedRef = useRef(false);
+  const formSnapshotRef = useRef(form);
+  formSnapshotRef.current = form;
+
+  useEffect(() => {
+    if (config.collection !== "findings" || !entity?.id || !projectId.trim()) {
+      setFindingPlacePersistedState(null);
+      setFindingPlaceLoadPending(false);
+      setFindingPlaceLoadError("");
+      return;
+    }
+    let cancelled = false;
+    setFindingPlaceLoadPending(true);
+    setFindingPlaceLoadError("");
+    void getFindingDocumentPlace(entity.id)
+      .then((state) => {
+        if (cancelled) return;
+        setFindingPlacePersistedState(state);
+        if (!findingPlaceDecisionTouchedRef.current) {
+          const current = formSnapshotRef.current;
+          setFindingPlaceDecision(findingHistoricalPlaceDecisionFromState({
+            projectId,
+            documentId: String(current.documentId ?? ""),
+            originalText: String(current.place ?? ""),
+            eventDate: String(current.eventDate ?? ""),
+          }, state));
+        }
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setFindingPlacePersistedState(null);
+        setFindingPlaceLoadError(cause instanceof Error
+          ? cause.message
+          : "Не вдалося завантажити збережене історичне місце.");
+      })
+      .finally(() => {
+        if (!cancelled) setFindingPlaceLoadPending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.collection, entity?.id, findingPlaceLoadAttempt, projectId]);
   const availablePersons = useMemo(
     () => mergePersonsById(persons, locallyCreatedPersons),
     [persons, locallyCreatedPersons],
@@ -1415,12 +1474,13 @@ export function EntityModal({
   const archiveReferenceMissingLabels = missingArchiveReferenceLabels(config.collection, config.fields, form);
 
   const buildEntityForSave = (sourceForm: FormRecord, timestamp = nowIso()): AppEntity => {
+    const persistedEntity = persistedEntityRef.current;
     const findingType = String(sourceForm.findingType ?? "");
     const sourceParticipants = Array.isArray(sourceForm.participants)
       ? sortFindingParticipants(sourceForm.participants as FindingParticipant[], findingType)
       : [];
     return {
-      ...(entity ?? {}),
+      ...(persistedEntity ?? entity ?? {}),
       ...sourceForm,
       ...(config.collection === "findings"
         ? { people: participantSummary(sourceParticipants, findingType), participants: sourceParticipants }
@@ -1432,9 +1492,9 @@ export function EntityModal({
             reminderSentAt: (entity as TaskRecord | null)?.reminderSentAt ?? "",
           })
         : {}),
-      id: entity?.id ?? createId(),
-      createdAt: entity?.createdAt ?? timestamp,
-      __baseUpdatedAt: persistedBaseUpdatedAtRef.current || entity?.updatedAt,
+      id: persistedEntity?.id ?? entity?.id ?? createId(),
+      createdAt: persistedEntity?.createdAt ?? entity?.createdAt ?? timestamp,
+      __baseUpdatedAt: persistedBaseUpdatedAtRef.current || persistedEntity?.updatedAt || entity?.updatedAt,
       updatedAt: timestamp,
     } as unknown as AppEntity;
   };
@@ -1525,6 +1585,16 @@ export function EntityModal({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (savePendingRef.current) return;
+    if (config.collection === "findings" && entity?.id && projectId.trim()) {
+      if (findingPlaceLoadPending) {
+        setSaveError("Дочекайтеся перевірки збереженої прив’язки історичного місця.");
+        return;
+      }
+      if (findingPlaceLoadError) {
+        setSaveError("Не вдалося перевірити збережену прив’язку історичного місця. Натисніть «Повторити» в блоці місця перед збереженням.");
+        return;
+      }
+    }
     const timestamp = nowIso();
     const participants = Array.isArray(form.participants)
       ? form.participants as FindingParticipant[]
@@ -1567,10 +1637,58 @@ export function EntityModal({
     setSavePending(true);
     setSaveError("");
     try {
-      const outcome = await settleEntitySave(() => onSave(buildEntityForSave(form, timestamp)));
+      const entityToSave = buildEntityForSave(form, timestamp);
+      const outcome = await settleEntitySave(() => onSave(entityToSave));
       if (outcome.status === "failed") {
         setSaveError(outcome.message);
         return;
+      }
+      const savedEntity = isEntitySaveResult(outcome.value) ? outcome.value : entityToSave;
+      persistedEntityRef.current = savedEntity;
+      persistedBaseUpdatedAtRef.current = savedEntity.updatedAt;
+
+      if (config.collection === "findings") {
+        const placeContext = {
+          projectId,
+          documentId: String(form.documentId ?? ""),
+          originalText: String(form.place ?? ""),
+          eventDate: String(form.eventDate ?? ""),
+        };
+        const confirmedPlace = currentConfirmedFindingPlace(placeContext, findingPlaceDecision);
+        if (confirmedPlace) {
+          try {
+            await confirmFindingDocumentPlace({
+              ...placeContext,
+              findingId: savedEntity.id,
+              placeId: confirmedPlace.id,
+              expectedFindingUpdatedAt: savedEntity.updatedAt,
+            });
+          } catch (cause) {
+            const details = cause instanceof Error ? cause.message : "Не вдалося прив’язати місце до документа.";
+            setSaveError(`Знахідку збережено, але історичне місце не прив’язано. ${details}`);
+            return;
+          }
+        } else if (findingPlacePersistedState) {
+          const persistedStillMatches = findingPlacePersistedState.documentMatchesFinding
+            && findingPlacePersistedState.link.documentId === placeContext.documentId
+            && findingPlacePersistedState.link.originalText === placeContext.originalText
+            && findingPlaceDecision?.contextKey === findingHistoricalPlaceContextKey(placeContext)
+            && findingPlaceDecision?.place.id === findingPlacePersistedState.link.placeId
+            && findingPlaceDecision?.confirmed
+              === (findingPlacePersistedState.link.resolutionStatus === "confirmed");
+          if (findingPlaceDecisionTouchedRef.current || !persistedStillMatches) {
+            try {
+              await clearFindingDocumentPlace({
+                findingId: savedEntity.id,
+                expectedFindingUpdatedAt: savedEntity.updatedAt,
+              });
+            } catch (cause) {
+              const details = cause instanceof Error ? cause.message : "Не вдалося прибрати попередню прив’язку місця.";
+              setSaveError(`Знахідку збережено, але попередню прив’язку історичного місця не прибрано. ${details}`);
+              return;
+            }
+          }
+        }
       }
       onClose();
     } finally {
@@ -1654,6 +1772,23 @@ export function EntityModal({
               placeName={String(form.place ?? "")}
               onChange={(geo) => setForm((current) => ({ ...current, geo }))}
               onPlaceNameChange={(place) => setForm((current) => ({ ...current, place }))}
+            />
+          ) : null}
+          {config.collection === "findings" ? (
+            <FindingHistoricalPlacePanel
+              projectId={projectId}
+              documentId={String(form.documentId ?? "")}
+              originalText={String(form.place ?? "")}
+              eventDate={String(form.eventDate ?? "")}
+              decision={findingPlaceDecision}
+              persistedState={findingPlacePersistedState}
+              loadPending={findingPlaceLoadPending}
+              loadError={findingPlaceLoadError}
+              onRetryLoad={() => setFindingPlaceLoadAttempt((current) => current + 1)}
+              onDecisionChange={(decision) => {
+                findingPlaceDecisionTouchedRef.current = true;
+                setFindingPlaceDecision(decision);
+              }}
             />
           ) : null}
           <CustomFieldsEditor
@@ -1914,6 +2049,7 @@ export function EntityModal({
       {personSeed !== null && onSavePerson ? (
         <PersonFormModal
           key={personSeed.key}
+          projectId={projectId}
           researches={researches}
           db={db}
           initialFullName={String(personSeed.draft.fullName ?? "")}

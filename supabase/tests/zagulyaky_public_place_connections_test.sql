@@ -162,10 +162,10 @@ begin
 end;
 $visible_point$;
 select is(
-  security_private.zagulyaky_public_place_point_v1(
+  (security_private.zagulyaky_public_place_point_v1(
     '{"displayName":"Пгтап Видима точка, тестовий район, тестова область","latitude":49.0010,"longitude":32.0010,"source":"search","precision":"settlement","provider":"Provider B","externalId":"visible-b"}'::jsonb
-  ) -> 'geo' ->> 'latitude',
-  '49.001',
+  ) -> 'geo' ->> 'latitude')::numeric,
+  49.001::numeric,
   'the public point returns the current visible record coordinate, never a private registry anchor'
 );
 

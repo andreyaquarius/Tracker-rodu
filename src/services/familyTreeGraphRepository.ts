@@ -14,6 +14,7 @@ import type {
 } from "../types/familyTree";
 import type { EntityId, GeoPoint } from "../types";
 import { getSupabaseClient } from "./supabaseAuth.ts";
+import { isMissingHistoricalPlaceEventColumnsError } from "../utils/historicalPlaceEventCompatibility.ts";
 
 export interface FamilyTreePersonProfile {
   id: EntityId;
@@ -328,6 +329,9 @@ type PersonTimelineEventRow = {
   date_to: string;
   date_text: string;
   place_name: string;
+  place_id?: string | null;
+  place_original_text?: string | null;
+  place_resolution_status?: string | null;
   geo: unknown;
   event_role: string;
   evidence_status: string;
@@ -365,6 +369,8 @@ const RESEARCH_ISSUE_SELECT =
 const PERSON_NAME_SELECT =
   "id, project_id, person_id, name_type, language_code, script_code, surname, given_name, patronymic, full_name, original_text, is_primary, is_preferred, evidence_status, confidence, source_document_id, source_finding_id, notes, metadata, created_at, updated_at";
 const PERSON_TIMELINE_EVENT_SELECT =
+  "id, project_id, person_id, event_type, title, event_date, date_from, date_to, date_text, place_name, place_id, place_original_text, place_resolution_status, geo, event_role, evidence_status, confidence, source_document_id, source_finding_id, notes, metadata, created_at, updated_at";
+const PERSON_TIMELINE_EVENT_LEGACY_SELECT =
   "id, project_id, person_id, event_type, title, event_date, date_from, date_to, date_text, place_name, geo, event_role, evidence_status, confidence, source_document_id, source_finding_id, notes, metadata, created_at, updated_at";
 const MAIDEN_SURNAME_KEY = "__trackerRoduMaidenSurname";
 const SELECT_BATCH_SIZE = 1000;
@@ -599,17 +605,26 @@ async function readPersonTimelineEvents(
 ): Promise<FamilyTreePersonTimelineEvent[]> {
   if (!personIds.length) return [];
   const client = getSupabaseClient();
-  const rows = (await Promise.all(chunkArray(personIds, IN_FILTER_BATCH_SIZE).map((chunk) =>
-    selectAllRows<PersonTimelineEventRow>(
-      client
-        .from("person_timeline_events")
-        .select(PERSON_TIMELINE_EVENT_SELECT)
-        .eq("project_id", projectId)
-        .in("person_id", chunk)
-        .order("event_date", { ascending: true })
-        .order("created_at", { ascending: true }),
-    ),
-  ))).flat();
+  const readWithSelect = async (columns: string): Promise<PersonTimelineEventRow[]> => (
+    await Promise.all(chunkArray(personIds, IN_FILTER_BATCH_SIZE).map((chunk) =>
+      selectAllRows<PersonTimelineEventRow>(
+        client
+          .from("person_timeline_events")
+          .select(columns)
+          .eq("project_id", projectId)
+          .in("person_id", chunk)
+          .order("event_date", { ascending: true })
+          .order("created_at", { ascending: true }) as unknown as RangeRequest<PersonTimelineEventRow>,
+      ),
+    ))
+  ).flat();
+  let rows: PersonTimelineEventRow[];
+  try {
+    rows = await readWithSelect(PERSON_TIMELINE_EVENT_SELECT);
+  } catch (error) {
+    if (!isMissingHistoricalPlaceEventColumnsError(error)) throw error;
+    rows = await readWithSelect(PERSON_TIMELINE_EVENT_LEGACY_SELECT);
+  }
   return rows.map(personTimelineEventFromRow);
 }
 
@@ -643,20 +658,13 @@ function isMissingFamilyTreeTableError(error: unknown): boolean {
   const message = "message" in error ? String(error.message ?? "") : "";
   const details = "details" in error ? String(error.details ?? "") : "";
   const text = `${message} ${details}`.toLowerCase();
-  return code === "42P01" ||
-    code === "PGRST205" ||
-    text.includes("family_trees") ||
-    text.includes("family_tree_persons") ||
-    text.includes("family_groups") ||
-    text.includes("family_group_members") ||
-    text.includes("partner_relationships") ||
-    text.includes("parent_sets") ||
-    text.includes("parent_child_relationships") ||
-    text.includes("association_relationships") ||
-    text.includes("tree_layout_positions") ||
-    text.includes("family_tree_research_issues") ||
-    text.includes("person_names") ||
-    text.includes("person_timeline_events");
+  if (code !== "42P01" && code !== "PGRST205") return false;
+  return [
+    "family_trees", "family_tree_persons", "family_groups", "family_group_members",
+    "partner_relationships", "parent_sets", "parent_child_relationships",
+    "association_relationships", "tree_layout_positions", "family_tree_research_issues",
+    "person_names", "person_timeline_events",
+  ].some((tableName) => text.includes(tableName));
 }
 
 function collectPersonIds(input: {
@@ -989,6 +997,12 @@ function personTimelineEventFromRow(row: PersonTimelineEventRow): FamilyTreePers
     dateTo: row.date_to,
     dateText: row.date_text,
     placeName: row.place_name,
+    placeId: row.place_id ?? null,
+    placeOriginalText: row.place_original_text ?? "",
+    placeResolutionStatus: row.place_resolution_status === "confirmed"
+      || row.place_resolution_status === "needs_review"
+      ? row.place_resolution_status
+      : "unresolved",
     geo: (row.geo ?? null) as GeoPoint | null,
     eventRole: row.event_role,
     evidenceStatus: asEvidenceStatus(row.evidence_status),

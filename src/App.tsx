@@ -39,6 +39,7 @@ import { FaqPage, FeaturesPage, PricingPage } from "./pages/PublicMarketingPages
 import { ZagulyakyPage } from "./pages/ZagulyakyPage";
 import { NotesPage } from "./pages/NotesPage";
 import { MapPage } from "./pages/MapPage";
+import { HistoricalPlacesPage } from "./pages/HistoricalPlacesPage";
 import { FamilyTreePage } from "./pages/FamilyTreePage";
 import { FamilyTreeStatisticsPage } from "./pages/FamilyTreeStatisticsPage.tsx";
 import { FamilyTreeErrorBoundary } from "./components/familyTree/FamilyTreeErrorBoundary";
@@ -58,6 +59,7 @@ import {
   canonicalRouteLocation,
   familyTreePath,
   familyTreeStatisticsPath,
+  historicalPlacePath,
   pagePath,
   parseAppRoute,
   parseFamilyTreeRouteFocus,
@@ -1243,8 +1245,10 @@ export default function App() {
     ) {
       return;
     }
-    const canonicalPath = route.page === "persons" && route.personMode
-      ? personPath(requestedWorkspace.projectSlug, route.personId, route.personMode)
+    const canonicalPath = route.page === "places" && route.placeMode
+      ? historicalPlacePath(requestedWorkspace.projectSlug, route.placeId, route.placeMode)
+      : route.page === "persons" && route.personMode
+        ? personPath(requestedWorkspace.projectSlug, route.personId, route.personMode)
       : route.page === "familyTree" && route.familyTreeView === "statistics"
         ? familyTreeStatisticsPath(requestedWorkspace.projectSlug, familyTreeRouteFocus.treeId)
         : pagePath(
@@ -5835,6 +5839,27 @@ export default function App() {
             onOpenRelated={openRelatedRecord}
             initialPersonId={new URLSearchParams(location.search).get("personId")?.trim() ?? ""}
           />
+        );
+      case "places":
+        return workspace ? (
+          <HistoricalPlacesPage
+            mode={route.kind === "project" ? route.placeMode ?? "list" : "list"}
+            placeId={route.kind === "project" ? route.placeId : undefined}
+            projectId={workspace.projectId}
+            projectName={workspace.projectName}
+            readOnly={readOnly}
+            onBackToList={() => routerNavigate(pagePath(workspace.projectSlug, "places"))}
+            onCreatePlace={() => routerNavigate(historicalPlacePath(workspace.projectSlug, undefined, "new"))}
+            onOpenPlace={(placeId) => routerNavigate(historicalPlacePath(workspace.projectSlug, placeId))}
+            onEditPlace={(placeId) => routerNavigate(historicalPlacePath(workspace.projectSlug, placeId, "edit"))}
+            onOpenPerson={(personId) => openRelatedRecord("persons", personId)}
+            onOpenDocument={(documentId) => openRelatedRecord("documents", documentId)}
+            documents={activeDb.documents}
+          />
+        ) : (
+          <section className="panel empty-state">
+            <strong>Оберіть проєкт, щоб відкрити історичні місця.</strong>
+          </section>
         );
       case "familyTree":
         if (!canUseFamilyTreeFeature) {

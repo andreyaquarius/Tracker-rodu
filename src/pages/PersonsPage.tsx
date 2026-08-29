@@ -230,6 +230,7 @@ export function PersonsPage({
       logicalKey: personWindowKey({ windowId: "", kind: "edit", personId: person.id }),
       render: ({ stackIndex, dockIndex, onFocus, close }) => (
         <PersonFormModal
+          projectId={projectId}
           db={db}
           person={person}
           researches={researches}
@@ -256,6 +257,7 @@ export function PersonsPage({
       logicalKey: personWindowKey({ windowId, kind: "new" }),
       render: ({ stackIndex, dockIndex, onFocus, close }) => (
         <PersonFormModal
+          projectId={projectId}
           db={db}
           person={null}
           researches={researches}
