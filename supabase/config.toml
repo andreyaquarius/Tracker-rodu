@@ -4,6 +4,17 @@
 # bundle and is not a secret.
 project_id = "ppiymmsurabwxnzpdasl"
 
+# Keep local migration rehearsals on the same PostgreSQL major version as the
+# current Supabase project. Explicit pinning also makes clean Docker setups
+# reproducible across developer machines.
+[db]
+major_version = 17
+
+[db.seed]
+# Demo fixtures are applied explicitly so a normal local start cannot import
+# catalogue data by accident.
+enabled = false
+
 # All Edge Functions require an authenticated user: each one calls
 # auth.getUser() in code, and the gateway also rejects unauthenticated requests
 # before the function runs. verify_jwt = true is the Supabase default; it is set

@@ -26,6 +26,7 @@ import type {
 } from "../../types";
 import { CustomFieldsEditor } from "../../components/CustomFields";
 import { GeoPlaceField } from "../../components/GeoPlaceField";
+import { HistoricalPlaceField } from "../../components/HistoricalPlaceField.tsx";
 import { InlineCustomFieldCreator } from "../../components/InlineCustomFieldCreator";
 import { PersonEventsEditor } from "../../components/PersonEventsEditor";
 import { ScanAttachmentsEditor } from "../../components/ScanAttachments";
@@ -38,7 +39,13 @@ import {
 import { createId } from "../../utils/id";
 import { normalizeCustomFieldValues } from "../../utils/customFields";
 import { PERSON_EVENT_TYPES, normalizePersonEvents, personEventLabel } from "../../utils/geo";
-import { createPersonMapEvent, updatePersonEventById } from "../../utils/personEventGeo.ts";
+import {
+  changePersonEventDisplayPlace,
+  createPersonMapEvent,
+  exactPersonEventDateForPlaceLookup,
+  personEventTemporalContextForPlaceLookup,
+  updatePersonEventById,
+} from "../../utils/personEventGeo.ts";
 import {
   normalizePersonAvatarCrop,
   normalizePersonPhotoState,
@@ -884,11 +891,39 @@ export function PersonEditorV2({
     fallbackType?: PersonEventType,
   ) => patchEvent(eventId, { geo }, fallbackType);
 
+  const updateEventDisplayPlace = (eventId: string, place: string) => {
+    markEdited();
+    setForm((current) => ({
+      ...current,
+      events: changePersonEventDisplayPlace(
+        normalizedEventsForDraft(current),
+        eventId,
+        place,
+      ),
+    }));
+  };
+
   const updateCoreEventPlace = (type: PersonEventType, place: string) => {
-    if (type === "birth") update("birthPlace", place);
-    if (type === "marriage") update("marriagePlace", place);
-    if (type === "death") update("deathPlace", place);
-    if (type === "residence") update("residencePlaces", place);
+    const field = type === "birth"
+      ? "birthPlace"
+      : type === "marriage"
+        ? "marriagePlace"
+        : type === "death"
+          ? "deathPlace"
+          : type === "residence"
+            ? "residencePlaces"
+            : null;
+    if (!field) return;
+    markEdited();
+    setForm((current) => ({
+      ...current,
+      [field]: place,
+      events: changePersonEventDisplayPlace(
+        normalizedEventsForDraft(current),
+        type,
+        place,
+      ),
+    }));
   };
 
   const addMapEvent = () => {
@@ -1415,7 +1450,7 @@ export function PersonEditorV2({
               />
               <label>
                 <span>Місце народження</span>
-                <input value={form.birthPlace} onChange={(event) => update("birthPlace", event.target.value)} />
+                <input value={form.birthPlace} onChange={(event) => updateCoreEventPlace("birth", event.target.value)} />
               </label>
               <label>
                 <span>Номер будинку / точна адреса</span>
@@ -1568,10 +1603,13 @@ export function PersonEditorV2({
                               <span>Місце шлюбу</span>
                               <input
                                 value={marriage.place}
-                                onChange={(event) => updateMarriageDraft(
-                                  marriage.localId,
-                                  { place: event.target.value },
-                                )}
+                                onChange={(event) => {
+                                  const place = event.target.value;
+                                  updateMarriageDraft(marriage.localId, { place });
+                                  if (marriage.localId === marriageDrafts[0]?.localId) {
+                                    updateCoreEventPlace("marriage", place);
+                                  }
+                                }}
                               />
                             </label>
                             <label>
@@ -1629,7 +1667,7 @@ export function PersonEditorV2({
                   />
                   <label>
                     <span>Місце смерті</span>
-                    <input value={form.deathPlace} onChange={(event) => update("deathPlace", event.target.value)} />
+                    <input value={form.deathPlace} onChange={(event) => updateCoreEventPlace("death", event.target.value)} />
                   </label>
                   <label>
                     <span>Номер будинку / точна адреса</span>
@@ -1748,7 +1786,7 @@ export function PersonEditorV2({
                 <textarea
                   rows={3}
                   value={form.residencePlaces}
-                  onChange={(event) => update("residencePlaces", event.target.value)}
+                  onChange={(event) => updateCoreEventPlace("residence", event.target.value)}
                 />
               </label>
               <fieldset className="geo-events field-wide">
@@ -1757,22 +1795,46 @@ export function PersonEditorV2({
                 {(["birth", "marriage", ...(form.isLiving ? [] : ["death"]), "residence"] as PersonEventType[])
                   .map((type) => {
                     const currentEvent = personEvents.find((item) => item.id === type);
+                    const legacyPlaceName = type === "birth"
+                      ? form.birthPlace
+                      : type === "marriage"
+                        ? form.marriagePlace
+                        : type === "death"
+                          ? form.deathPlace
+                          : form.residencePlaces;
                     return (
-                      <GeoPlaceField
-                        key={type}
-                        label={personEventLabel(type)}
-                        eventType={type}
-                        value={currentEvent?.geo ?? null}
-                        placeName={type === "birth"
-                          ? form.birthPlace
-                          : type === "marriage"
-                            ? form.marriagePlace
-                            : type === "death"
-                              ? form.deathPlace
-                              : form.residencePlaces}
-                        onChange={(geo) => updateEventGeo(type, geo, type)}
-                        onPlaceNameChange={(place) => updateCoreEventPlace(type, place)}
-                      />
+                      <div className="field-wide historical-core-place-fields" key={type}>
+                        <GeoPlaceField
+                          label={personEventLabel(type)}
+                          eventType={type}
+                          value={currentEvent?.geo ?? null}
+                          placeName={legacyPlaceName}
+                          onChange={(geo) => updateEventGeo(type, geo, type)}
+                          onPlaceNameChange={(place) => updateCoreEventPlace(type, place)}
+                        />
+                        {projectId ? (
+                          <HistoricalPlaceField
+                            projectId={projectId}
+                            atDate={exactPersonEventDateForPlaceLookup(currentEvent?.date)}
+                            temporalContext={personEventTemporalContextForPlaceLookup(currentEvent?.date)}
+                            label={`${personEventLabel(type)}: написання в джерелі та історичне місце`}
+                            value={{
+                              placeId: currentEvent?.placeId ?? null,
+                              originalText: currentEvent?.placeOriginalText ?? legacyPlaceName,
+                              place: null,
+                              placeDisplayName: currentEvent?.placeCanonicalName ?? "",
+                            }}
+                            onChange={(placeValue) => patchEvent(type, {
+                              placeId: placeValue.placeId,
+                              placeOriginalText: placeValue.originalText,
+                              placeResolutionStatus: placeValue.placeId ? "confirmed" : "unresolved",
+                              placeCanonicalName: placeValue.place
+                                ? placeValue.place.displayName || placeValue.place.canonicalName
+                                : placeValue.placeDisplayName || null,
+                            }, type)}
+                          />
+                        ) : null}
+                      </div>
                     );
                   })}
                 <div className="person-map-events-heading">
@@ -1851,7 +1913,7 @@ export function PersonEditorV2({
                           value={mapEvent.geo ?? null}
                           placeName={mapEvent.placeName ?? ""}
                           onChange={(geo) => updateEventGeo(mapEvent.id, geo)}
-                          onPlaceNameChange={(place) => patchEvent(mapEvent.id, { placeName: place || null })}
+                          onPlaceNameChange={(place) => updateEventDisplayPlace(mapEvent.id, place)}
                         />
                       </section>
                     ))}
@@ -1886,6 +1948,7 @@ export function PersonEditorV2({
             >
               <PersonEventsEditor
                 personId={persistedPerson?.id ?? "draft"}
+                projectId={projectId}
                 events={personEvents}
                 onChange={(events) => update("events", events)}
               />

@@ -175,6 +175,15 @@ select is(
   'personal knowledge projects generated events as proven'
 );
 
+-- Projection rebuilds schedule a deferred place-restore cleanup trigger. Flush
+-- those completed statement events before test-only trigger DDL takes a lock.
+set constraints all immediate;
+
+alter table public.person_names
+  disable trigger person_names_set_updated_at;
+alter table public.person_timeline_events
+  disable trigger person_timeline_events_set_updated_at;
+
 update public.person_names
 set updated_at = '2000-01-01 00:00:00+00'::timestamptz
 where person_id = 'd8300000-0000-0000-0000-000000000001'
@@ -184,6 +193,13 @@ update public.person_timeline_events
 set updated_at = '2000-01-01 00:00:00+00'::timestamptz
 where person_id = 'd8300000-0000-0000-0000-000000000001'
   and metadata ->> 'source' = 'persons_projection';
+
+alter table public.person_names
+  enable trigger person_names_set_updated_at;
+alter table public.person_timeline_events
+  enable trigger person_timeline_events_set_updated_at;
+
+set constraints all deferred;
 
 -- Mirrors a PostgREST UPSERT whose target list includes every projected
 -- column even though no stored value changed.

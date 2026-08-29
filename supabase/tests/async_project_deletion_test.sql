@@ -187,7 +187,10 @@ values
     'd2000000-0000-0000-0000-000000000003',
     'deletion-admin@example.test',
     'Deletion admin'
-  );
+  )
+on conflict (user_id) do update
+set email = excluded.email,
+    display_name = excluded.display_name;
 
 insert into public.app_admins (user_id, granted_by)
 values (
@@ -212,6 +215,29 @@ values
     'd2000000-0000-0000-0000-000000000001',
     'Backup restore clear test'
   );
+
+-- Exercise the additive historical-place deletion phases and their private
+-- audit ownership contract instead of letting every new phase stay empty.
+insert into public.places (
+  id, project_id, canonical_name, created_by
+) values (
+  'd2000000-0000-0000-0000-000000000201',
+  'd2000000-0000-0000-0000-000000000101',
+  'Deletion place fixture',
+  'd2000000-0000-0000-0000-000000000001'
+);
+
+insert into public.place_names (
+  id, place_id, project_id, name, original_text, is_primary, created_by
+) values (
+  'd2000000-0000-0000-0000-000000000202',
+  'd2000000-0000-0000-0000-000000000201',
+  'd2000000-0000-0000-0000-000000000101',
+  'Deletion place historical name',
+  'Deletion place historical name',
+  true,
+  'd2000000-0000-0000-0000-000000000001'
+);
 
 insert into public.researches (id, project_id, title, created_by)
 select
@@ -373,16 +399,35 @@ select set_config(
   '{"role":"service_role"}',
   true
 );
-select set_config(
-  'test.first_deletion_payload',
-  public.process_project_deletion(
-    current_setting('test.project_deletion_job_id')::uuid,
-    2
-  )::text,
-  true
-);
+do $$
+declare
+  payload jsonb;
+  attempt_count integer := 0;
+  previous_processed_rows bigint := 0;
+begin
+  loop
+    attempt_count := attempt_count + 1;
+    payload := public.process_project_deletion(
+      current_setting('test.project_deletion_job_id')::uuid,
+      2
+    );
+    exit when payload ->> 'phase' = 'researches';
+    previous_processed_rows := (payload ->> 'processedRows')::bigint;
+    if attempt_count >= 128 then
+      raise exception 'PROJECT_DELETION_TEST_DID_NOT_REACH_RESEARCHES';
+    end if;
+  end loop;
+  perform set_config('test.first_deletion_payload', payload::text, true);
+  perform set_config(
+    'test.first_deletion_previous_processed_rows',
+    previous_processed_rows::text,
+    true
+  );
+end;
+$$;
 select is(
-  (current_setting('test.first_deletion_payload')::jsonb ->> 'processedRows')::bigint,
+  (current_setting('test.first_deletion_payload')::jsonb ->> 'processedRows')::bigint
+    - current_setting('test.first_deletion_previous_processed_rows')::bigint,
   2::bigint,
   'one process call deletes no more than the requested two-row batch'
 );
@@ -486,26 +531,73 @@ select is(
   'finalizing',
   'only the service worker can acknowledge completed storage cleanup'
 );
+do $$
+declare
+  payload jsonb;
+  attempt_count integer := 0;
+begin
+  loop
+    attempt_count := attempt_count + 1;
+    payload := public.process_project_deletion(
+      current_setting('test.project_deletion_job_id')::uuid,
+      2
+    );
+    exit when payload ->> 'status' = 'completed';
+    if attempt_count >= 128 then
+      raise exception 'PROJECT_DELETION_TEST_DID_NOT_COMPLETE';
+    end if;
+  end loop;
+  perform set_config('test.final_deletion_payload', payload::text, true);
+end;
+$$;
 select is(
-  public.process_next_project_deletion(2) ->> 'status',
+  current_setting('test.final_deletion_payload')::jsonb ->> 'status',
   'completed',
-  'the service queue step finalizes a storage-cleaned project'
+  'bounded service worker steps finalize a storage-cleaned project across every installed phase'
 );
 
 reset role;
+select ok(
+  not exists (
+    select 1 from public.projects
+    where id = 'd2000000-0000-0000-0000-000000000101'::uuid
+  )
+  and not exists (
+    select 1 from public.places
+    where project_id = 'd2000000-0000-0000-0000-000000000101'::uuid
+  )
+  and not exists (
+    select 1 from public.place_names
+    where project_id = 'd2000000-0000-0000-0000-000000000101'::uuid
+  )
+  and not exists (
+    select 1 from public.place_external_identifiers
+    where project_id = 'd2000000-0000-0000-0000-000000000101'::uuid
+  )
+  and not exists (
+    select 1 from public.place_type_assignments
+    where project_id = 'd2000000-0000-0000-0000-000000000101'::uuid
+  )
+  and not exists (
+    select 1 from public.place_hierarchy_relations
+    where project_id = 'd2000000-0000-0000-0000-000000000101'::uuid
+  )
+  and not exists (
+    select 1 from public.place_change_requests
+    where project_id = 'd2000000-0000-0000-0000-000000000101'::uuid
+  )
+  and not exists (
+    select 1 from security_private.historical_place_audit_log
+    where project_id = 'd2000000-0000-0000-0000-000000000101'::uuid
+  ),
+  'the project row, historical-place children and private audit rows disappear only after every phase finishes'
+);
+
 set local role authenticated;
 select set_config(
   'request.jwt.claims',
   '{"sub":"d2000000-0000-0000-0000-000000000001","role":"authenticated"}',
   true
-);
-select is(
-  (
-    select count(*)::integer from public.projects
-    where id = 'd2000000-0000-0000-0000-000000000101'::uuid
-  ),
-  0,
-  'the project row is removed only after child phases finish'
 );
 select is(
   (

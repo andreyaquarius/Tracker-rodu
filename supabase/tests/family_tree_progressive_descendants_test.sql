@@ -28,7 +28,7 @@ select ok(
 
 select ok(
   lower(pg_get_functiondef(
-    'public.get_family_tree_descendants_frontier_v1(jsonb)'::regprocedure
+    'security_private.get_family_tree_descendants_frontier_v1(jsonb)'::regprocedure
   )) like '%set statement_timeout to ''15s''%',
   'the progressive RPC owns a production statement timeout'
 );
@@ -538,21 +538,18 @@ select is(
   'viewer responses expose the cache permission fingerprint'
 );
 
-select throws_ok(
-  $$
-    select public.get_family_tree_descendants_frontier_v1(
-      '{
-        "treeId":"d2000000-0000-0000-0000-000000000001",
-        "rootPersonId":"d3000000-0000-0000-0000-000000000001",
-        "frontier":{
-          "generation":0,
-          "personIds":["d3000000-0000-0000-0000-000000000001"]
-        },
-        "permissionFingerprint":"project-editor:private-visible:v1"
-      }'::jsonb
-    )
-  $$,
-  '40001',
+select is(
+  public.get_family_tree_descendants_frontier_v1(
+    '{
+      "treeId":"d2000000-0000-0000-0000-000000000001",
+      "rootPersonId":"d3000000-0000-0000-0000-000000000001",
+      "frontier":{
+        "generation":0,
+        "personIds":["d3000000-0000-0000-0000-000000000001"]
+      },
+      "permissionFingerprint":"project-editor:private-visible:v1"
+    }'::jsonb
+  ) ->> 'conflictCode',
   'TREE_PERMISSION_SCOPE_CHANGED',
   'a permission-scope change invalidates progressive traversal state'
 );
@@ -582,21 +579,18 @@ select set_config(
   true
 );
 
-select throws_ok(
-  $$
-    select public.get_family_tree_descendants_frontier_v1(
-      '{
-        "treeId":"d2000000-0000-0000-0000-000000000001",
-        "rootPersonId":"d3000000-0000-0000-0000-000000000001",
-        "frontier":{
-          "generation":0,
-          "personIds":["d3000000-0000-0000-0000-000000000001"]
-        },
-        "knownGraphVersion":"-1"
-      }'::jsonb
-    )
-  $$,
-  '40001',
+select is(
+  public.get_family_tree_descendants_frontier_v1(
+    '{
+      "treeId":"d2000000-0000-0000-0000-000000000001",
+      "rootPersonId":"d3000000-0000-0000-0000-000000000001",
+      "frontier":{
+        "generation":0,
+        "personIds":["d3000000-0000-0000-0000-000000000001"]
+      },
+      "knownGraphVersion":"-1"
+    }'::jsonb
+  ) ->> 'conflictCode',
   'TREE_GRAPH_VERSION_CHANGED',
   'a graph-version change invalidates progressive traversal state'
 );

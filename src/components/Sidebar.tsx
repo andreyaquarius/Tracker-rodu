@@ -15,6 +15,7 @@ import { FeedbackNavBadge } from "./FeedbackNavBadge";
 export type StandardPageKey =
   | "dashboard"
   | "map"
+  | "places"
   | "familyTree"
   | CustomFieldModule
   | "backup"
@@ -25,12 +26,13 @@ export type StandardPageKey =
 export type PageKey = StandardPageKey | `custom:${string}`;
 
 const mainItems: Array<{
-  key: "dashboard" | "map" | "familyTree" | CustomFieldModule;
+  key: "dashboard" | "map" | "places" | "familyTree" | CustomFieldModule;
   label: string;
   icon: NavigationIconName;
 }> = [
   { key: "dashboard", label: "Панель огляду", icon: "dashboard" },
   { key: "map", label: "Карта", icon: "map" },
+  { key: "places", label: "Історичні місця", icon: "landmark" },
   { key: "familyTree", label: "Родове дерево", icon: "tree" },
   { key: "researches", label: "Дослідження", icon: "compass" },
   { key: "documents", label: "Документи", icon: "file-text" },
@@ -51,6 +53,7 @@ const systemItems: Array<{ key: StandardPageKey; label: string; icon: Navigation
 type NavigationIconName =
   | "dashboard"
   | "map"
+  | "landmark"
   | "tree"
   | "compass"
   | "file-text"
@@ -80,6 +83,13 @@ function NavigationIcon({ icon }: { icon: NavigationIconName }) {
       <>
         <path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3z" />
         <path d="M9 3v15M15 6v15" />
+      </>
+    ),
+    landmark: (
+      <>
+        <path d="M3 10h18" />
+        <path d="M5 10V20M9 10V20M15 10V20M19 10V20" />
+        <path d="M2 20h20M12 3l9 5H3z" />
       </>
     ),
     tree: (
@@ -354,7 +364,7 @@ export function Sidebar({
         <nav>
           {mainItems.map((item) => {
             if (item.key === "familyTree" && !showFamilyTree) return null;
-            if (item.key === "dashboard" || item.key === "map" || item.key === "familyTree") {
+            if (item.key === "dashboard" || item.key === "map" || item.key === "places" || item.key === "familyTree") {
               return (
                 <button
                   type="button"

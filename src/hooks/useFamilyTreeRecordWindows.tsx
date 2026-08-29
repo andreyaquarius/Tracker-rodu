@@ -187,6 +187,7 @@ export function useFamilyTreeRecordWindows({
       logicalKey: `edit:${person.id}`,
       render: ({ stackIndex, dockIndex, onFocus, close }) => (
         <PersonFormModal
+          projectId={projectId}
           db={db}
           person={person}
           researches={researches}

@@ -126,7 +126,7 @@ insert into public.zagulyaky_participants (
     'd7100000-0000-4000-8000-000000000002',
     'd7000000-0000-4000-8000-000000000001', 'subject',
     'Друга Анна', 'Друга Анна',
-    null, null, null, 1
+    null, null, '', 1
   );
 
 insert into public.zagulyaky_sources (

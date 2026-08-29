@@ -25,19 +25,19 @@ select has_function(
 );
 select ok(
   pg_get_functiondef(
-    'public.get_family_tree_neighborhood_v2(jsonb)'::regprocedure
+    'public.get_family_tree_neighborhood_v2_feature_impl(jsonb)'::regprocedure
   ) not like '%family_tree_parent_set_scope_id_v1(%',
   'v2 does not perform one parent-set helper call per rendered union'
 );
 select ok(
   pg_get_functiondef(
-    'public.get_family_tree_neighborhood_v2(jsonb)'::regprocedure
+    'public.get_family_tree_neighborhood_v2_feature_impl(jsonb)'::regprocedure
   ) like '%seed_parent_set_ids%',
   'v2 narrows candidate parent sets from the bounded selected people first'
 );
 select ok(
   pg_get_functiondef(
-    'public.get_family_tree_family_children_v1(jsonb)'::regprocedure
+    'public.get_family_tree_family_children_v1_feature_impl(jsonb)'::regprocedure
   ) not like '%page.page_order::text%',
   'family relations are ordered by integer page order rather than text'
 );
@@ -858,21 +858,18 @@ select throws_ok(
 from family_scope_results initial
 where initial.result_kind = 'initial';
 
-select throws_ok(
-  $$
-    select public.get_family_tree_family_children_v1(
-      '{
-        "treeId":"b2000000-0000-0000-0000-000000000001",
-        "scope":{
-          "id":"family-group:b4000000-0000-0000-0000-000000000001",
-          "parentIds":["b3000000-0000-0000-0000-000000000001","b3000000-0000-0000-0000-000000000002"],
-          "familyGroupId":"b4000000-0000-0000-0000-000000000001"
-        },
-        "knownGraphVersion":"0"
-      }'::jsonb
-    )
-  $$,
-  '40001',
+select is(
+  public.get_family_tree_family_children_v1(
+    '{
+      "treeId":"b2000000-0000-0000-0000-000000000001",
+      "scope":{
+        "id":"family-group:b4000000-0000-0000-0000-000000000001",
+        "parentIds":["b3000000-0000-0000-0000-000000000001","b3000000-0000-0000-0000-000000000002"],
+        "familyGroupId":"b4000000-0000-0000-0000-000000000001"
+      },
+      "knownGraphVersion":"0"
+    }'::jsonb
+  ) ->> 'conflictCode',
   'TREE_GRAPH_VERSION_CHANGED',
   'family pagination refuses a stale known graph version'
 );

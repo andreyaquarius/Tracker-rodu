@@ -104,8 +104,11 @@ export function FindingAiIndexingPanel({
     const eventDate = result.result.event.eventDateNormalized
       || result.result.event.eventDateOriginal
       || "";
-    const place = result.result.event.eventPlaceNormalized
-      || result.result.event.eventPlaceOriginal
+    // The finding field is evidence, not a canonical catalogue label. Keep
+    // the literal wording read from the record; the historical-place panel
+    // separately suggests a normalized Place for explicit confirmation.
+    const place = result.result.event.eventPlaceOriginal
+      || result.result.event.eventPlaceNormalized
       || "";
     const summary = result.result.documentUnderstanding.summary
       || result.result.event.recordNumber

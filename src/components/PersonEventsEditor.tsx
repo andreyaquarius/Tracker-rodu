@@ -1,6 +1,12 @@
 import type { PersonEvent, PersonEventType } from "../types";
 import { createId } from "../utils/id";
 import { PERSON_EVENT_TYPES, personEventLabel } from "../utils/geo";
+import {
+  changePersonEventDisplayPlace,
+  exactPersonEventDateForPlaceLookup,
+  personEventTemporalContextForPlaceLookup,
+} from "../utils/personEventGeo.ts";
+import { HistoricalPlaceField } from "./HistoricalPlaceField.tsx";
 
 const CORE_FIELD_EVENTS = new Set<PersonEventType>(["birth", "marriage", "death", "residence"]);
 
@@ -12,10 +18,12 @@ export function PersonEventsEditor({
   personId,
   events,
   onChange,
+  projectId,
 }: {
   personId: string;
   events: PersonEvent[];
   onChange: (events: PersonEvent[]) => void;
+  projectId?: string;
 }) {
   const editableEvents = events.filter((event) => !isSyntheticFieldEvent(event));
 
@@ -98,12 +106,40 @@ export function PersonEventsEditor({
                 />
               </label>
               <label>
-                <span>Місце</span>
+                <span>Місце для картки та старих експортів</span>
                 <input
                   value={event.placeName ?? ""}
-                  onChange={(changeEvent) => updateEvent(event.id, { placeName: changeEvent.target.value || null })}
+                  onChange={(changeEvent) => onChange(changePersonEventDisplayPlace(
+                    events,
+                    event.id,
+                    changeEvent.target.value,
+                  ))}
                 />
               </label>
+              {projectId ? (
+                <div className="field-wide">
+                  <HistoricalPlaceField
+                    projectId={projectId}
+                    atDate={exactPersonEventDateForPlaceLookup(event.date)}
+                    temporalContext={personEventTemporalContextForPlaceLookup(event.date)}
+                    label="Написання в джерелі та історичне місце"
+                    value={{
+                      placeId: event.placeId ?? null,
+                      originalText: event.placeOriginalText ?? event.placeName ?? "",
+                      place: null,
+                      placeDisplayName: event.placeCanonicalName ?? "",
+                    }}
+                    onChange={(placeValue) => updateEvent(event.id, {
+                      placeId: placeValue.placeId,
+                      placeOriginalText: placeValue.originalText,
+                      placeResolutionStatus: placeValue.placeId ? "confirmed" : "unresolved",
+                      placeCanonicalName: placeValue.place
+                        ? placeValue.place.displayName || placeValue.place.canonicalName
+                        : placeValue.placeDisplayName || null,
+                    })}
+                  />
+                </div>
+              ) : null}
               <label>
                 <span>Зміст факту</span>
                 <input
