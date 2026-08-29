@@ -21,6 +21,10 @@ const moderationPanel = readFileSync(
   new URL("../src/components/admin/ZagulyakyModerationPanel.tsx", import.meta.url),
   "utf8",
 );
+const moderationStyles = readFileSync(
+  new URL("../src/components/admin/ZagulyakyModerationPanel.css", import.meta.url),
+  "utf8",
+);
 
 test("a possible living person cannot be cleared or published without recorded consent", () => {
   assert.match(migration, /create table if not exists public\.zagulyaky_privacy_clearances/);
@@ -93,4 +97,28 @@ test("attachment changes are visible to moderated history without exposing stora
   assert.match(moderationPanel, /snapshotAttachmentSummary/);
   assert.match(moderationPanel, /attachment_publish/);
   assert.match(moderationPanel, /attachment_revoke/);
+});
+
+test("moderator preview renders inside the app and does not depend on popup permissions", () => {
+  assert.match(moderationPanel, /function AttachmentPreviewDialog/);
+  assert.match(moderationPanel, /setAttachmentPreview\(\{/);
+  assert.match(moderationPanel, /<img src=\{preview\.url\}/);
+  assert.match(moderationPanel, /<iframe src=\{preview\.url\}/);
+  assert.match(moderationPanel, /href=\{preview\.url\} target="_blank"/);
+  assert.match(moderationPanel, /href=\{preview\.url\} referrerPolicy="no-referrer"/);
+  assert.doesNotMatch(moderationPanel, /window\.open\(/);
+  assert.match(moderationStyles, /\.zagulyaky-attachment-preview-frame/);
+  assert.match(moderationStyles, /max-height: min\(62dvh, 620px\)/);
+});
+
+test("expired moderator preview can be renewed without changing publication state", () => {
+  assert.match(moderationPanel, /expiresAt: Date\.now\(\) \+ access\.expiresIn \* 1000/);
+  assert.match(moderationPanel, /\{ \.\.\.current, expired: true \}/);
+  assert.match(moderationPanel, /Оновити приватне посилання/);
+  assert.match(moderationPanel, /onRefresh=\{\(\) => void runPreviewAttachment\(attachmentPreview\.attachmentId\)\}/);
+
+  const previewStart = moderationPanel.indexOf("function AttachmentPreviewDialog");
+  const previewEnd = moderationPanel.indexOf("function PrivateSourceLinks", previewStart);
+  const previewDialog = moderationPanel.slice(previewStart, previewEnd);
+  assert.doesNotMatch(previewDialog, /publishAdminZagulyakaAttachment|Створити публічну копію/);
 });

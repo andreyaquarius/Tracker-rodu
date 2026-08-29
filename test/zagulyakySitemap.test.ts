@@ -15,9 +15,10 @@ test("static sitemap exposes only the two public Zagulyaky catalogue URLs", () =
   const robots = readFileSync(new URL("../public/robots.txt", import.meta.url), "utf8");
   const urls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
 
-  assert.ok(urls.includes("https://trekerrodu.com.ua/zahuliaky"));
-  assert.ok(urls.includes("https://trekerrodu.com.ua/zahuliaky/documents"));
-  assert.equal(urls.includes("https://trekerrodu.com.ua/zahuliaky/my"), false);
+  assert.ok(urls.includes("https://trekerrodu.com.ua/zahuliaky/"));
+  assert.ok(urls.includes("https://trekerrodu.com.ua/zahuliaky/documents/"));
+  assert.equal(urls.includes("https://trekerrodu.com.ua/zahuliaky/my/"), false);
+  assert.ok(urls.every((url) => new URL(url).pathname.endsWith("/")));
   assert.match(robots, /^Sitemap: https:\/\/trekerrodu\.com\.ua\/sitemap-zagulyaky\.xml$/m);
 });
 
@@ -69,9 +70,9 @@ test("dynamic sitemap uses only public search RPCs, walks cursors, and emits onl
     });
 
     const xml = readFileSync(outputPath, "utf8");
-    assert.match(xml, /https:\/\/trekerrodu\.com\.ua\/zahuliaky\/people\/ivan-kalenskyi/);
-    assert.match(xml, /https:\/\/trekerrodu\.com\.ua\/zahuliaky\/people\/petro-koval/);
-    assert.match(xml, /https:\/\/trekerrodu\.com\.ua\/zahuliaky\/documents\/dako-127/);
+    assert.match(xml, /https:\/\/trekerrodu\.com\.ua\/zahuliaky\/people\/ivan-kalenskyi\//);
+    assert.match(xml, /https:\/\/trekerrodu\.com\.ua\/zahuliaky\/people\/petro-koval\//);
+    assert.match(xml, /https:\/\/trekerrodu\.com\.ua\/zahuliaky\/documents\/dako-127\//);
     assert.doesNotMatch(xml, /Private title must not leak|private-id/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -81,7 +82,7 @@ test("dynamic sitemap uses only public search RPCs, walks cursors, and emits onl
 test("detail URL construction encodes slug input and the generator refuses server keys", () => {
   assert.equal(
     publicZagulyakaUrl("document", "ДАКО 127"),
-    "https://trekerrodu.com.ua/zahuliaky/documents/%D0%94%D0%90%D0%9A%D0%9E%20127",
+    "https://trekerrodu.com.ua/zahuliaky/documents/%D0%94%D0%90%D0%9A%D0%9E%20127/",
   );
   assert.equal(assertPublishableSupabaseKey("sb_publishable_fixture"), "sb_publishable_fixture");
   assert.throws(

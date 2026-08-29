@@ -7,6 +7,7 @@ import type {
   ZagulyakaDraftInput,
   ZagulyakaDraftSummary,
   ZagulyakaEventType,
+  ZagulyakaKind,
   ZagulyakaPersonListItem,
   ZagulyakaSavedPlace,
   ZagulyakaSavedSourcePreset,
@@ -25,6 +26,7 @@ import type {
   ZagulyakySearchResult,
   ZagulyakyStats,
 } from "../types/zagulyaky";
+import { zagulyakyDisplayText } from "../utils/zagulyakyDisplayText";
 import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest";
 import { normalizeGeo } from "../utils/geo";
 import { normalizeZagulyakaEventRoleCode } from "../utils/zagulyakyEventRoles";
@@ -267,18 +269,33 @@ export async function loadMyZagulyaky(
   throwIfAborted(options.signal);
   if (error) throw error;
   const payload = firstRecord(data);
-  const items: ZagulyakaDraftSummary[] = records(value(payload, "items", "records")).map((row) => ({
-    id: text(value(row, "id")),
-    kind: text(value(row, "kind")) === "document" ? "document" : "person",
-    title: text(value(row, "title"), "Без назви"),
-    status: workflowStatus(value(row, "status")),
-    rejectionReason: text(value(row, "moderation_note", "rejectionReason", "rejection_reason")),
-    createdAt: text(value(row, "created_at", "createdAt")),
-    updatedAt: text(value(row, "updated_at", "updatedAt")),
-    submittedAt: nullableString(value(row, "submitted_at", "submittedAt")),
-    publishedSlug: nullableString(value(row, "public_slug", "publishedSlug", "published_slug", "slug")),
-    lockVersion: naturalNumber(value(row, "lock_version", "lockVersion")),
-  }));
+  const items: ZagulyakaDraftSummary[] = records(value(payload, "items", "records")).map((row) => {
+    const kind: ZagulyakaKind = text(value(row, "kind")) === "document" ? "document" : "person";
+    const foundPlace = zagulyakyDisplayText(value(row, "found_location_normalized", "foundLocationNormalized"))
+      || zagulyakyDisplayText(value(row, "found_location_text", "foundLocationText"));
+    const originPlace = zagulyakyDisplayText(value(row, "source_location_normalized", "sourceLocationNormalized"))
+      || zagulyakyDisplayText(value(row, "source_location_text", "sourceLocationText"));
+    return {
+      id: text(value(row, "id")),
+      kind,
+      // Some legacy tabular imports persisted an internal extraction marker in
+      // a display field. Never expose that marker; prefer useful record data
+      // and finally a normal human label.
+      title: zagulyakyDisplayText(value(row, "title"))
+        || foundPlace
+        || originPlace
+        || (kind === "person" ? "Запис про людину" : "Запис про документ"),
+      foundPlace,
+      originPlace,
+      status: workflowStatus(value(row, "status")),
+      rejectionReason: text(value(row, "moderation_note", "rejectionReason", "rejection_reason")),
+      createdAt: text(value(row, "created_at", "createdAt")),
+      updatedAt: text(value(row, "updated_at", "updatedAt")),
+      submittedAt: nullableString(value(row, "submitted_at", "submittedAt")),
+      publishedSlug: nullableString(value(row, "public_slug", "publishedSlug", "published_slug", "slug")),
+      lockVersion: naturalNumber(value(row, "lock_version", "lockVersion")),
+    };
+  });
   for (const item of items) markZagulyakaRecordFresh("author", item.id);
   const total = naturalNumber(value(payload, "total"), items.length);
   return {
@@ -864,7 +881,7 @@ function mapPersonListItem(row: Record<string, unknown>): ZagulyakaPersonListIte
   const primarySource = record(value(row, "primarySource", "primary_source"));
   const originalName = text(value(subject, "originalFullName", "original_full_name"));
   const normalizedNameUk = text(value(subject, "normalizedUkFullName", "normalized_uk_full_name"));
-  const displayName = normalizedNameUk || originalName || text(value(row, "title"), "Без імені");
+  const displayName = normalizedNameUk || originalName || zagulyakyDisplayText(value(row, "title")) || "Без імені";
   const rowEventType = eventType(value(row, "eventType", "event_type"));
   return {
     id: text(value(row, "id")), slug: text(value(row, "slug")), displayName,
@@ -872,8 +889,8 @@ function mapPersonListItem(row: Record<string, unknown>): ZagulyakaPersonListIte
     birthYear: rowEventType === "birth" || rowEventType === "baptism"
       ? nullableInteger(value(row, "eventYearFrom", "event_year_from"))
       : null,
-    originPlace: text(value(row, "sourceLocation", "source_location")),
-    foundPlace: text(value(row, "foundLocation", "found_location")),
+    originPlace: zagulyakyDisplayText(value(row, "sourceLocation", "source_location")),
+    foundPlace: zagulyakyDisplayText(value(row, "foundLocation", "found_location")),
     eventType: rowEventType,
     eventDateLabel: text(value(row, "eventDateText", "event_date_text")),
     eventYear: nullableInteger(value(row, "eventYearFrom", "event_year_from")),
@@ -889,11 +906,14 @@ function mapDocumentListItem(row: Record<string, unknown>): ZagulyakaDocumentLis
   const primarySource = record(value(row, "primarySource", "primary_source"));
   const discovery = record(value(row, "documentDiscovery", "document_discovery"));
   return {
-    id: text(value(row, "id")), slug: text(value(row, "slug")), title: text(value(row, "title"), "Без назви"),
+    id: text(value(row, "id")), slug: text(value(row, "slug")), title: zagulyakyDisplayText(value(row, "title")) || "Без назви",
     documentType: text(value(row, "summary")),
     institutionName: text(value(primarySource, "archiveName", "archive_name")),
     officialPlace: text(value(discovery, "officialLocationText", "official_location_text"), text(value(row, "sourceLocation", "source_location"))),
-    foundPlaces: [text(value(discovery, "discoveredLocationText", "discovered_location_text"), text(value(row, "foundLocation", "found_location")))].filter(Boolean),
+    foundPlaces: [
+      zagulyakyDisplayText(value(discovery, "discoveredLocationText", "discovered_location_text")),
+      zagulyakyDisplayText(value(row, "foundLocation", "found_location")),
+    ].filter((place, index, places) => Boolean(place) && places.indexOf(place) === index),
     actualYearFrom: nullableInteger(value(discovery, "factualYearFrom", "factual_year_from") ?? value(row, "eventYearFrom", "event_year_from")),
     actualYearTo: nullableInteger(value(discovery, "factualYearTo", "factual_year_to") ?? value(row, "eventYearTo", "event_year_to")),
     archiveReference: text(value(primarySource, "citation")),
@@ -913,10 +933,13 @@ function mapDetail(row: Record<string, unknown>): ZagulyakaDetail {
   const discoveries = records(value(row, "documentDiscoveries", "document_discoveries"));
   const discovery = discoveries[0] ?? {};
   const attachments = records(value(row, "publicAttachments", "public_attachments"));
+  const kind: ZagulyakaKind = text(value(row, "kind")) === "document" ? "document" : "person";
   return {
     id: text(value(row, "id")), slug: text(value(row, "slug")),
-    kind: text(value(row, "kind")) === "document" ? "document" : "person",
-    title: text(value(row, "title"), "Без назви"), summary: text(value(row, "summary")),
+    kind,
+    title: zagulyakyDisplayText(value(row, "title"))
+      || (kind === "person" ? "Запис про людину" : "Запис про документ"),
+    summary: text(value(row, "summary")),
     originalText: text(value(row, "originalText", "original_text")),
     normalizedTextUk: text(value(row, "normalizedText", "normalized_text")),
     originalName: text(value(subject, "originalFullName", "original_full_name")),
@@ -930,11 +953,11 @@ function mapDetail(row: Record<string, unknown>): ZagulyakaDetail {
     // The source location may name a church or archive;
     // for a person, the participant's origin wording is the better label for
     // a deliberately confirmed origin pin.
-    originPlace: text(
-      value(subject, "originText", "origin_text"),
-      text(value(row, "sourceLocationNormalized", "sourceLocationText", "source_location_normalized", "source_location_text")),
-    ),
-    foundPlace: text(value(row, "foundLocationNormalized", "foundLocationText", "found_location_normalized", "found_location_text")),
+    originPlace: zagulyakyDisplayText(value(subject, "originText", "origin_text"))
+      || zagulyakyDisplayText(value(row, "sourceLocationNormalized", "source_location_normalized"))
+      || zagulyakyDisplayText(value(row, "sourceLocationText", "source_location_text")),
+    foundPlace: zagulyakyDisplayText(value(row, "foundLocationNormalized", "found_location_normalized"))
+      || zagulyakyDisplayText(value(row, "foundLocationText", "found_location_text")),
     originGeo: normalizeGeo(value(row, "originGeo", "origin_geo")),
     foundGeo: normalizeGeo(value(row, "foundGeo", "found_geo")),
     officialPlace: text(value(discovery, "officialLocationText", "official_location_text")),

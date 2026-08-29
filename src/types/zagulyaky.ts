@@ -364,6 +364,9 @@ export interface ZagulyakaDraftSummary {
   id: string;
   kind: ZagulyakaKind;
   title: string;
+  /** Safe human-readable place metadata for the compact private record card. */
+  foundPlace: string;
+  originPlace: string;
   status: ZagulyakaWorkflowStatus;
   rejectionReason: string;
   createdAt: string;

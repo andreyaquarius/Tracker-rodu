@@ -94,10 +94,10 @@ test("the private My records route never starts the public people catalogue requ
   assert.doesNotMatch(publicEffect, /loadMyZagulyaky|myRecordsPage|myRecordsRevision|myRecordsStatus/);
 });
 
-test("the private My records route skips public statistics", () => {
+test("public statistics load on every public tab, including a direct places route", () => {
   assert.match(
     page,
-    /const shouldLoadPublicStats = activeTab === "people" \|\| activeTab === "documents";/,
+    /const shouldLoadPublicStats = activeTab !== "mine";/,
   );
   const statsEffect = effectContaining("loadZagulyakyStats(controller.signal)");
   assert.match(statsEffect, /if \(!shouldLoadPublicStats\)/);

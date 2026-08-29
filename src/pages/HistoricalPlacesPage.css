@@ -4,6 +4,11 @@
 .historical-places-page .page-heading h1,
 .historical-places-page .page-heading p { overflow-wrap: anywhere; }
 .historical-place-search-panel { display: grid; gap: 9px; padding: 18px; }
+.historical-place-legacy-import { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 18px; border-color: #d5bd72; background: #fff9e7; }
+.historical-place-legacy-import > div { display: grid; min-width: 0; gap: 7px; }
+.historical-place-legacy-import p { margin: 0; line-height: 1.5; }
+.historical-place-legacy-import small { color: var(--muted); }
+.historical-place-legacy-import > .button { flex: 0 0 auto; }
 .historical-place-search-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, minmax(150px, .25fr)); gap: 14px; }
 .historical-place-search-advanced { padding-top: 8px; border-top: 1px solid var(--border); }
 .historical-place-search-advanced > summary { min-height: 38px; cursor: pointer; color: var(--green-900); font-weight: 800; }
@@ -175,6 +180,8 @@
 }
 
 @media (max-width: 560px) {
+  .historical-place-legacy-import { align-items: stretch; flex-direction: column; }
+  .historical-place-legacy-import > .button { width: 100%; white-space: normal; }
   .historical-places-page .page-heading-actions { display: grid; grid-template-columns: 1fr; }
   .historical-places-page .page-heading-actions .button { width: 100%; white-space: normal; }
   .historical-place-form { padding: 16px; }

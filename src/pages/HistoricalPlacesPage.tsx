@@ -27,6 +27,8 @@ import {
   listHistoricalPlaceAudit,
   addHistoricalPlaceRelated,
   addHistoricalPlaceBoundary,
+  bridgeLegacyPersonEventPlaces,
+  type HistoricalPlaceLegacyImportSummary,
   HistoricalPlacesServiceError,
 } from "../services/historicalPlacesService";
 import type {
@@ -170,6 +172,13 @@ function PlacesCatalogue(props: HistoricalPlacesPageProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
+  const [catalogueRevision, setCatalogueRevision] = useState(0);
+  const [legacySummary, setLegacySummary] = useState<HistoricalPlaceLegacyImportSummary | null>(null);
+  const [legacyChecked, setLegacyChecked] = useState(false);
+  const [legacyLoading, setLegacyLoading] = useState(false);
+  const [legacyError, setLegacyError] = useState("");
+  const [legacyMessage, setLegacyMessage] = useState("");
+  const legacyRequestIdRef = useRef(0);
   const temporalContext = useMemo(() => yearTemporalContext(atYear), [atYear]);
   const coordinateFilterError = validateCoordinateSearch(searchLatitude, searchLongitude, searchRadiusKm);
   const coordinateFilterReady = Boolean(searchLatitude.trim() && searchLongitude.trim() && searchRadiusKm.trim() && !coordinateFilterError);
@@ -221,7 +230,69 @@ function PlacesCatalogue(props: HistoricalPlacesPageProps) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [ancestorPlace.placeId, atDate, coordinateFilterError, coordinateFilterReady, props.projectId, query, searchLatitude, searchLongitude, searchRadiusKm, temporalContext]);
+  }, [ancestorPlace.placeId, atDate, catalogueRevision, coordinateFilterError, coordinateFilterReady, props.projectId, query, searchLatitude, searchLongitude, searchRadiusKm, temporalContext]);
+
+  useEffect(() => {
+    legacyRequestIdRef.current += 1;
+    setLegacySummary(null);
+    setLegacyChecked(false);
+    setLegacyLoading(false);
+    setLegacyError("");
+    setLegacyMessage("");
+  }, [props.projectId]);
+
+  const previewLegacyPlaces = () => {
+    if (props.readOnly || legacyLoading) return;
+    const requestId = legacyRequestIdRef.current + 1;
+    legacyRequestIdRef.current = requestId;
+    setLegacyLoading(true);
+    setLegacyError("");
+    setLegacyMessage("");
+    void bridgeLegacyPersonEventPlaces(props.projectId, false)
+      .then((summary) => {
+        if (legacyRequestIdRef.current !== requestId) return;
+        setLegacySummary(summary);
+        setLegacyChecked(true);
+      })
+      .catch((cause: unknown) => {
+        if (legacyRequestIdRef.current === requestId) setLegacyError(errorMessage(cause));
+      })
+      .finally(() => {
+        if (legacyRequestIdRef.current === requestId) setLegacyLoading(false);
+      });
+  };
+
+  const importLegacyPlaces = () => {
+    if (props.readOnly || legacyLoading || !legacySummary?.candidateNames) return;
+    const confirmed = window.confirm(
+      `Перенести ${legacySummary.candidateNames} текстових ${legacySummary.candidateNames === 1 ? "місце" : "місць"} з подій осіб до приватного каталогу проєкту? Оригінальний текст у подіях буде збережено, а нові прив’язки потребуватимуть перевірки.`,
+    );
+    if (!confirmed) return;
+    setLegacyLoading(true);
+    setLegacyError("");
+    setLegacyMessage("");
+    const requestId = legacyRequestIdRef.current + 1;
+    legacyRequestIdRef.current = requestId;
+    void (async () => {
+      const result = await bridgeLegacyPersonEventPlaces(props.projectId, true);
+        if (legacyRequestIdRef.current !== requestId) return;
+        setLegacySummary(result);
+        setLegacyMessage(
+          `Перенесено ${result.linkedEvents} подій; створено ${result.createdPlaces} місць.`,
+        );
+        setCatalogueRevision((revision) => revision + 1);
+        const next = await bridgeLegacyPersonEventPlaces(props.projectId, false);
+        if (legacyRequestIdRef.current !== requestId) return;
+        setLegacySummary(next);
+        setLegacyChecked(true);
+      })()
+      .catch((cause: unknown) => {
+        if (legacyRequestIdRef.current === requestId) setLegacyError(errorMessage(cause));
+      })
+      .finally(() => {
+        if (legacyRequestIdRef.current === requestId) setLegacyLoading(false);
+      });
+  };
 
   return (
     <div className="historical-places-page">
@@ -245,6 +316,60 @@ function PlacesCatalogue(props: HistoricalPlacesPageProps) {
           </button>
         </div>
       </header>
+
+      {!props.readOnly ? (
+        <section className="panel historical-place-legacy-import" aria-live="polite">
+          <div>
+            <strong>Місця зі старих записів осіб</strong>
+            {!legacyChecked && !legacyLoading ? (
+              <p>Перевірте, чи є в раніше створених подіях текстові місця, які ще не пов’язані з каталогом.</p>
+            ) : null}
+            {legacyLoading ? <p>Перевіряємо текстові місця у подіях…</p> : null}
+            {!legacyLoading && legacySummary?.candidateNames ? (
+              <p>
+                Знайдено {legacySummary.candidateNames} назв у {legacySummary.candidateEvents} подіях без прив’язки до каталогу.
+                {legacySummary.placesToCreate > 0 ? ` Нових місць: ${legacySummary.placesToCreate}.` : ""}
+                {legacySummary.existingPlaces > 0 ? ` Уже наявних збігів: ${legacySummary.existingPlaces}.` : ""}
+                {legacySummary.ambiguousNames > 0 ? ` Неоднозначних назв: ${legacySummary.ambiguousNames}; їх буде пропущено.` : ""}
+                {legacySummary.invalidNames > 0 ? ` Надто довгих або некоректних назв: ${legacySummary.invalidNames}; їх буде пропущено.` : ""}
+              </p>
+            ) : null}
+            {!legacyLoading && legacyChecked && !legacySummary?.candidateNames ? (
+              <p>
+                {legacySummary?.ambiguousNames || legacySummary?.invalidNames
+                  ? `Безпечних автоматичних прив’язок не залишилося. Неоднозначних назв: ${legacySummary?.ambiguousNames ?? 0}; некоректних: ${legacySummary?.invalidNames ?? 0}.`
+                  : "Усі придатні текстові місця вже пов’язані з каталогом."}
+              </p>
+            ) : null}
+            <small>Перенесення не змінює написання в джерелі й створює лише приватні місця зі статусом «Потребує перевірки».</small>
+            {legacyMessage ? <div className="historical-place-success">{legacyMessage}</div> : null}
+            {legacyError ? <div className="historical-place-error">{legacyError}</div> : null}
+          </div>
+          {!legacyChecked ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={legacyLoading}
+              onClick={previewLegacyPlaces}
+            >
+              {legacyLoading ? "Перевіряємо…" : "Перевірити старі події"}
+            </button>
+          ) : legacySummary?.candidateNames ? (
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={legacyLoading}
+              onClick={importLegacyPlaces}
+            >
+              {legacyLoading ? "Перенесення…" : legacySummary.hasMore ? "Перенести наступні 50" : "Перенести до каталогу"}
+            </button>
+          ) : (
+            <button type="button" className="button button-secondary" disabled={legacyLoading} onClick={previewLegacyPlaces}>
+              Перевірити знову
+            </button>
+          )}
+        </section>
+      ) : null}
 
       <section className="panel historical-place-search-panel">
         <div className="historical-place-search-grid">

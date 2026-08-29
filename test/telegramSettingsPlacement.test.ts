@@ -5,7 +5,7 @@ import test from "node:test";
 
 const root = process.cwd();
 
-test("Telegram connection controls live in Settings, while the bot is Notes-only", () => {
+test("Telegram connection controls live in Settings and describe the private notes workflow", () => {
   const settingsPage = readFileSync(resolve(root, "src/pages/SettingsPage.tsx"), "utf8");
   const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
   const settings = readFileSync(
@@ -33,7 +33,9 @@ test("Telegram connection controls live in Settings, while the bot is Notes-only
   assert.match(settings, /function telegramBotUrl\(\): string \| null/);
   assert.doesNotMatch(settings, /\?start=/);
   assert.doesNotMatch(settings, /\/start \$\{code\}/);
-  assert.match(settings, /Чернетки Загуляк і обробка фото[\s\S]*?тимчасово вимкнені/);
+  assert.match(settings, /Telegram-бот — це ваша приватна скринька нотаток/);
+  assert.match(settings, /збереже текст, посилання та доступні відомості про джерело[\s\S]*?як приватну Нотатку/);
+  assert.doesNotMatch(settings, /Чернетки Загуляк|обробка фото|тимчасово вимкнен/iu);
   assert.doesNotMatch(settings, /setTelegramAiOptIn/);
   assert.doesNotMatch(settings, /Дозволити ШІ готувати приватні чернетки Загуляк/);
 

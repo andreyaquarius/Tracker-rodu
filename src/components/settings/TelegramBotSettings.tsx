@@ -141,9 +141,9 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
           <span className="eyebrow">Підключення</span>
           <h2 id="telegram-bot-settings-title">Telegram-бот</h2>
           <p>
-            Перешліть допис із Telegram або надішліть посилання з Facebook у приватний чат із ботом.
-            Бот одразу збереже текст або посилання як приватну Нотатку. Чернетки Загуляк і обробка фото
-            через бот тимчасово вимкнені.
+            Telegram-бот — це ваша приватна скринька нотаток. Перешліть допис із Telegram або надішліть
+            посилання з іншого ресурсу, і бот збереже текст, посилання та доступні відомості про джерело
+            як приватну Нотатку.
           </p>
         </div>
         <div className="telegram-bot-settings__actions">

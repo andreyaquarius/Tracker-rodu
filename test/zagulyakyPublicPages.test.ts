@@ -34,7 +34,7 @@ function publicPersonIndexingEntry() {
   return {
     kind: "person",
     slug,
-    url: `${PUBLIC_ORIGIN}/zahuliaky/people/${encodeURIComponent(slug)}`,
+    url: `${PUBLIC_ORIGIN}/zahuliaky/people/${encodeURIComponent(slug)}/`,
     item: {
       slug,
       kind: "person",
@@ -68,7 +68,7 @@ function publicDocumentIndexingEntry() {
   return {
     kind: "document",
     slug,
-    url: `${PUBLIC_ORIGIN}/zahuliaky/documents/${slug}`,
+    url: `${PUBLIC_ORIGIN}/zahuliaky/documents/${slug}/`,
     item: {
       slug,
       kind: "document",
@@ -111,7 +111,8 @@ test("public Zagulyaky static pages contain only escaped public SEO fields", () 
   const html = renderZagulyakySeoPage(viteTemplate, page);
 
   assert.match(html, /<title>Іван &lt;Коваленко&gt; — загуляка \| Трекер Роду<\/title>/);
-  assert.match(html, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/people/${encodeURIComponent("Іван & Петро")}"`));
+  assert.match(html, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/people/${encodeURIComponent("Іван & Петро")}/"`));
+  assert.match(html, new RegExp(`<meta property="og:url" content="${PUBLIC_ORIGIN}/zahuliaky/people/${encodeURIComponent("Іван & Петро")}/"`));
   assert.match(html, /<meta name="robots" content="index, follow" \/>/);
   assert.match(html, /<meta name="zagulyaky-static-seo" content="https:\/\/trekerrodu\.com\.ua\/zahuliaky\/people\//);
   assert.match(html, /"@type":"ProfilePage"/);
@@ -179,21 +180,22 @@ test("static SEO generation uses the enriched public indexing RPC and writes pri
     const placesCatalogueHtml = readFileSync(placesCataloguePath, "utf8");
     const sitemap = readFileSync(sitemapPath, "utf8");
 
-    assert.match(personHtml, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/people/${encodedPersonSlug}"`));
+    assert.match(personHtml, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/people/${encodedPersonSlug}/"`));
     assert.match(personHtml, /Повний оригінальний текст запису про Івана Коваленка\./);
-    assert.match(documentHtml, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/documents/dako-127-1902"`));
+    assert.match(documentHtml, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/documents/dako-127-1902/"`));
     assert.match(documentHtml, /Повний текст опису документа\./);
     assert.match(peopleCatalogueHtml, /<h1>Загуляки людей<\/h1>/);
-    assert.match(peopleCatalogueHtml, new RegExp(`href="/zahuliaky/people/${encodedPersonSlug}"`));
+    assert.match(peopleCatalogueHtml, new RegExp(`href="/zahuliaky/people/${encodedPersonSlug}/"`));
     assert.match(placesCatalogueHtml, /<title>Загуляки за населеними пунктами — карта зв’язків \| Трекер Роду<\/title>/);
-    assert.match(placesCatalogueHtml, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/places"`));
+    assert.match(placesCatalogueHtml, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/places/"`));
+    assert.match(placesCatalogueHtml, new RegExp(`<meta property="og:url" content="${PUBLIC_ORIGIN}/zahuliaky/places/"`));
     assert.match(placesCatalogueHtml, /<h1>Загуляки за населеними пунктами<\/h1>/);
     assert.match(placesCatalogueHtml, /Географічний зв’язок між двома місцями, а не маршрут/);
     assert.match(placesCatalogueHtml, /href="\/zahuliaky\/places">Місцевості<\/a>/);
     assert.match(documentHtml, /<h1>Метрична книга 1902<\/h1>/);
     assert.match(documentHtml, /"@type":"CreativeWork"/);
-    assert.match(sitemap, new RegExp(`<loc>${PUBLIC_ORIGIN}/zahuliaky/people/${encodedPersonSlug}<\/loc>`));
-    assert.match(sitemap, new RegExp(`<loc>${PUBLIC_ORIGIN}/zahuliaky/documents/dako-127-1902<\/loc>`));
+    assert.match(sitemap, new RegExp(`<loc>${PUBLIC_ORIGIN}/zahuliaky/people/${encodedPersonSlug}/<\/loc>`));
+    assert.match(sitemap, new RegExp(`<loc>${PUBLIC_ORIGIN}/zahuliaky/documents/dako-127-1902/<\/loc>`));
     assert.doesNotMatch(sitemap, /private-record-id-do-not-render|private-document-id-do-not-render|private\.example/);
     assert.doesNotMatch(personHtml + peopleCatalogueHtml + documentHtml + placesCatalogueHtml, /private-record-id-do-not-render|private-document-id-do-not-render|private-user-id|private raw payload|private raw document payload|private\.example|storagePath/);
   } finally {

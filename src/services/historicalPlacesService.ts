@@ -74,7 +74,22 @@ type HistoricalPlacesOperation =
   | "merge-preview"
   | "merge"
   | "write"
+  | "legacy-import"
   | "audit";
+
+export interface HistoricalPlaceLegacyImportSummary {
+  candidateNames: number;
+  candidateEvents: number;
+  existingPlaces: number;
+  placesToCreate: number;
+  ambiguousNames: number;
+  invalidNames: number;
+  createdPlaces: number;
+  linkedEvents: number;
+  remainingNames: number;
+  hasMore: boolean;
+  applied: boolean;
+}
 
 const placeScopes = new Set<PlaceScope>(["global", "project"]);
 const placeStatuses = new Set<PlaceStatus>([
@@ -191,6 +206,47 @@ export async function searchPlaces(
 
 /** Compatibility alias for callers that prefer an explicit domain name. */
 export const searchHistoricalPlaces = searchPlaces;
+
+/**
+ * Preview or apply an additive bridge from legacy person-event place text to
+ * the project-private historical-place catalogue. Source wording remains in
+ * `person_timeline_events.place_name`; imported links are marked for review.
+ */
+export async function bridgeLegacyPersonEventPlaces(
+  projectId: string,
+  apply: boolean,
+  signal?: AbortSignal,
+): Promise<HistoricalPlaceLegacyImportSummary> {
+  throwIfAborted(signal);
+  const safeProjectId = requiredText(
+    projectId,
+    "Оберіть проєкт для перенесення текстових місць.",
+    "legacy-import",
+  );
+  let request = getSupabaseClient().rpc("bridge_legacy_person_event_places_v1", {
+    p_project_id: safeProjectId,
+    p_apply: apply,
+    p_limit: 50,
+  });
+  if (signal) request = request.abortSignal(signal);
+  const { data, error } = await request;
+  throwIfAborted(signal);
+  if (error) throw rpcServiceError("legacy-import", error);
+  const row = firstResponseRecord(data, ["result"]);
+  return {
+    candidateNames: nonNegativeInteger(value(row, "candidateNames", "candidate_names"), 0),
+    candidateEvents: nonNegativeInteger(value(row, "candidateEvents", "candidate_events"), 0),
+    existingPlaces: nonNegativeInteger(value(row, "existingPlaces", "existing_places"), 0),
+    placesToCreate: nonNegativeInteger(value(row, "placesToCreate", "places_to_create"), 0),
+    ambiguousNames: nonNegativeInteger(value(row, "ambiguousNames", "ambiguous_names"), 0),
+    invalidNames: nonNegativeInteger(value(row, "invalidNames", "invalid_names"), 0),
+    createdPlaces: nonNegativeInteger(value(row, "createdPlaces", "created_places"), 0),
+    linkedEvents: nonNegativeInteger(value(row, "linkedEvents", "linked_events"), 0),
+    remainingNames: nonNegativeInteger(value(row, "remainingNames", "remaining_names"), 0),
+    hasMore: booleanValue(value(row, "hasMore", "has_more"), false),
+    applied: booleanValue(value(row, "applied"), apply),
+  };
+}
 
 /** Create an unshared place owned by the selected project. */
 export async function createProjectPlace(
@@ -2099,6 +2155,7 @@ function rpcServiceError(
     map: "завантажити карту й часовий контекст місця",
     "merge-preview": "підготувати перегляд об’єднання місць",
     merge: "об’єднати місця",
+    "legacy-import": "перенести текстові місця з подій осіб",
     write: "зберегти зміни історичного місця",
     audit: "завантажити історію змін місця",
   };
