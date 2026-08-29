@@ -107,6 +107,7 @@ test("the editor performs a debounced abortable read-only project lookup", () =>
   assert.match(service, /p_project_id: input\.projectId/);
   assert.match(service, /p_limit: rpcLimit/);
   assert.match(service, /request = request\.abortSignal\(input\.signal\)/);
+  assert.match(service, /runAuthenticatedSupabaseRequest/);
   const searchFunction = service.match(
     /export async function searchProjectPersonNameSuggestions[\s\S]*?\n\}/,
   )?.[0] ?? "";

@@ -7,6 +7,7 @@ import {
 } from "../utils/projectSearchResults";
 import type { ProjectSearchResult } from "../utils/projectSearchResults";
 import { mapHistoricalPersonNameSearchResults } from "../utils/historicalPersonNameSearch.ts";
+import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest.ts";
 
 export {
   mapProjectSearchResults,
@@ -31,15 +32,21 @@ export async function searchProjectRecords(
   const boundedLimit = projectSearchResultLimit(limit);
   const client = getSupabaseClient();
   const [recordsResult, personNamesResult] = await Promise.all([
-    client.rpc("search_project_records", {
-      target_project_id: projectId,
-      search_query: normalizedQuery,
-      result_limit: projectSearchResultLimit(limit),
+    runAuthenticatedSupabaseRequest(client, async () => {
+      const result = await client.rpc("search_project_records", {
+        target_project_id: projectId,
+        search_query: normalizedQuery,
+        result_limit: boundedLimit,
+      });
+      return { data: result.data, error: result.error };
     }),
-    client.rpc("search_project_person_names_v1", {
-      p_project_id: projectId,
-      p_query: normalizedQuery,
-      p_limit: boundedLimit,
+    runAuthenticatedSupabaseRequest(client, async () => {
+      const result = await client.rpc("search_project_person_names_v1", {
+        p_project_id: projectId,
+        p_query: normalizedQuery,
+        p_limit: boundedLimit,
+      });
+      return { data: result.data, error: result.error };
     }),
   ]);
   if (recordsResult.error) throw recordsResult.error;

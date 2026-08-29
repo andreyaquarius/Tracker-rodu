@@ -137,6 +137,11 @@ test("collector requires JWT, independent consent and HMAC pseudonymization", ()
   assert.match(edgeFunction, /new TextEncoder\(\)\.encode\(rawBody\)\.byteLength > MAX_REQUEST_BYTES/);
   assert.match(consentService, /product-analytics-consent-v2/);
   assert.doesNotMatch(consentService, /tracker-rodu-analytics-consent-v1/);
+  assert.match(consentService, /runAuthenticatedSupabaseRequest/);
+  assert.equal(
+    [...consentService.matchAll(/runAuthenticatedSupabaseRequest\(/g)].length,
+    2,
+  );
 });
 
 test("analytics collector backs off after transient failures and discards expired telemetry", () => {
