@@ -117,6 +117,36 @@
 .historical-place-inline-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .historical-place-inline-grid label { display: grid; gap: 6px; }
 .historical-place-success { padding: 10px 12px; color: #155a48; background: #e4f4ed; border-radius: 8px; }
+.historical-place-ai-panel { display: grid; gap: 16px; margin-top: 18px; padding: 18px; background: #f7f8f4; border: 1px solid var(--border); border-radius: 12px; }
+.historical-place-ai-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.historical-place-ai-heading h3 { margin: 5px 0 0; }
+.historical-place-ai-heading p { max-width: 760px; margin: 7px 0 0; color: var(--muted); line-height: 1.5; }
+.historical-place-ai-consent { align-items: flex-start; padding: 12px; background: #fff9e8; border: 1px solid #e4d19a; border-radius: 9px; }
+.historical-place-ai-consent input { flex: 0 0 auto; margin-top: 2px; }
+.historical-place-ai-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; }
+.historical-place-ai-result { display: grid; gap: 14px; padding-top: 15px; border-top: 1px solid var(--border); }
+.historical-place-ai-result > header h4 { margin: 0; }
+.historical-place-ai-result > header p { margin: 6px 0 0; color: var(--muted); }
+.historical-place-ai-result fieldset,
+.historical-place-ai-accepted { display: grid; min-width: 0; gap: 10px; margin: 0; padding: 15px; border: 1px solid var(--border); border-radius: 10px; }
+.historical-place-ai-result legend,
+.historical-place-ai-accepted legend { padding: 0 7px; color: var(--green-900); font-weight: 850; }
+.historical-place-ai-suggestion { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 12px; background: white; border: 1px solid #d7dfdb; border-radius: 9px; }
+.historical-place-ai-suggestion > input { margin-top: 3px; }
+.historical-place-ai-suggestion > div { display: grid; min-width: 0; gap: 4px; }
+.historical-place-ai-suggestion span,
+.historical-place-ai-suggestion small { color: var(--muted); overflow-wrap: anywhere; }
+.historical-place-ai-evidence { display: grid; gap: 5px; margin-top: 5px; }
+.historical-place-ai-evidence blockquote { margin: 0; padding: 9px 11px; color: #334b45; background: #f1f4f1; border-left: 3px solid #83aa9f; border-radius: 0 7px 7px 0; overflow-wrap: anywhere; }
+.historical-place-ai-warnings { margin: 0; padding: 9px 12px 9px 28px; color: #6b5108; background: #fff7d9; border-radius: 8px; }
+.historical-place-ai-accepted { gap: 15px; margin-top: 18px; }
+.historical-place-ai-accepted > p { margin: 0; color: var(--muted); }
+.historical-place-ai-accepted-list { display: grid; gap: 9px; }
+.historical-place-ai-accepted-list > article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px; background: #f5f6f1; border: 1px solid var(--border); border-radius: 9px; }
+.historical-place-ai-accepted-list article > div { display: grid; min-width: 0; gap: 3px; }
+.historical-place-ai-accepted-list article span,
+.historical-place-ai-accepted-list article small { color: var(--muted); overflow-wrap: anywhere; }
+.historical-place-ai-relation-draft { grid-template-columns: minmax(180px, .8fr) minmax(260px, 1.2fr) auto !important; align-items: end !important; }
 .historical-place-conflict { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .historical-place-conflict .button { flex: 0 0 auto; }
 
@@ -176,6 +206,7 @@
   .historical-place-write-grid { grid-template-columns: 1fr; }
   .historical-place-write-grid .wide { grid-column: auto; }
   .historical-place-inline-grid { grid-template-columns: 1fr; }
+  .historical-place-ai-relation-draft { grid-template-columns: 1fr !important; align-items: stretch !important; }
   .historical-place-options { position: static; max-height: 240px; }
 }
 
@@ -204,6 +235,10 @@
   .historical-place-conflict { align-items: stretch; flex-direction: column; }
   .historical-place-inline-create-actions { display: grid; grid-template-columns: 1fr; }
   .historical-place-inline-create-actions .button { width: 100%; }
+  .historical-place-ai-panel { padding: 14px; }
+  .historical-place-ai-actions { display: grid; grid-template-columns: 1fr; }
+  .historical-place-ai-actions .button { width: 100%; }
+  .historical-place-ai-accepted-list > article { grid-template-columns: 1fr; align-items: stretch; }
   .historical-place-audit dd { grid-template-columns: 1fr; }
   .historical-place-audit dd b { transform: rotate(90deg); }
 }

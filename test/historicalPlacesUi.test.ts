@@ -375,9 +375,17 @@ test("new Place and its optional parent are submitted in one atomic RPC payload"
   assert.match(pageSource, /createProjectPlace\(\{[\s\S]*?parentRelation:\s*parentPlace\.placeId\s*\?/u);
   const createFlow = pageSource.slice(
     pageSource.indexOf("const place = await createProjectPlace({"),
-    pageSource.indexOf("props.onOpenPlace(place.id);"),
+    pageSource.indexOf("placeId = place.id;"),
   );
   assert.doesNotMatch(createFlow, /addHistoricalPlaceHierarchy\(/u);
   assert.match(serviceSource, /const parentRelation = input\.parentRelation\s*\?/u);
   assert.match(serviceSource, /\.\.\.\(parentRelation \? \{ parentRelation \} : \{\}\)/u);
+});
+
+test("reviewed AI place relations are matched by the user and persisted only after place creation", () => {
+  assert.match(pageSource, /Для кожного прийнятого ШІ-зв’язку виберіть відповідне місце/u);
+  assert.match(pageSource, /if \(!relatedPlaceId\) throw new Error\(aiRelationError\)/u);
+  assert.match(pageSource, /if \(item\.suggestion\.kind === "administrative_parent"\)[\s\S]*?await addHistoricalPlaceHierarchy\(relationInput\)/u);
+  assert.match(pageSource, /else if \(item\.suggestion\.kind === "parish"\)[\s\S]*?await addHistoricalPlaceParish\(relationInput\)/u);
+  assert.match(pageSource, /else \{[\s\S]*?await addHistoricalPlaceRelated\(relationInput\)/u);
 });

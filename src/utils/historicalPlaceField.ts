@@ -23,7 +23,7 @@ export function historicalPlaceAdministrativeLabel(place: PlaceSummary): string 
 
 export function historicalPlaceTypeLabel(value: string): string {
   const labels: Record<string, string> = {
-    settlement: "населений пункт", hamlet: "хутір", small_settlement: "присілок",
+    settlement: "населений пункт", urban_settlement: "селище", hamlet: "хутір", small_settlement: "присілок",
     village: "село", town: "містечко", city: "місто", sloboda: "слобода",
     colony: "колонія", folwark: "фільварок", estate: "маєток",
     manor: "маєток / двір", parish: "парафія", volost: "волость",

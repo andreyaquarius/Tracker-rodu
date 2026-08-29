@@ -50,6 +50,14 @@ verify_jwt = false
 [functions.search-places]
 verify_jwt = true
 
+# The browser needs an unauthenticated CORS preflight, while the POST handler
+# validates the user JWT and project editor membership again before searching.
+[functions.discover-historical-places]
+verify_jwt = false
+
+[functions.extract-historical-place-context]
+verify_jwt = false
+
 # Authenticated, narrowly allowlisted proxy for GEDCOM photo URLs from the
 # supported MyHeritage CDN. The function also validates auth in code.
 [functions.fetch-gedcom-photo]

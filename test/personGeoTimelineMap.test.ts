@@ -201,11 +201,11 @@ test("keeps house-level reverse geocoding as the default and supports settlement
   const service = source("../src/services/placeSearch.ts");
   const edgeFunction = source("../supabase/functions/search-places/index.ts");
 
-  assert.match(service, /zoom:\s*settlementOnly\s*\?\s*["']15["']\s*:\s*["']18["']/u);
+  assert.match(service, /functions\.invoke\("search-places"/u);
+  assert.match(service, /body:\s*\{ latitude, longitude, settlementOnly \}/u);
+  assert.doesNotMatch(service, /nominatim\.openstreetmap\.org/u);
   assert.match(edgeFunction, /zoom:\s*canonicalSettlement\s*\?\s*["']15["']\s*:\s*["']18["']/u);
-  for (const implementation of [service, edgeFunction]) {
-    assert.match(implementation, /displayName:\s*item\.display_name\s*\|\|\s*label/u);
-  }
+  assert.match(edgeFunction, /displayName:\s*item\.display_name\s*\|\|\s*label/u);
 });
 
 function personEvent(id: string, type: PersonEvent["type"], date: string): PersonEvent {

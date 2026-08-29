@@ -233,6 +233,8 @@ export interface CreateProjectPlaceInput {
   wikidataId?: string | null;
   geonamesId?: string | null;
   externalIds?: Record<string, string>;
+  /** Review provenance for catalogue/AI-assisted creation; never replaces source wording. */
+  metadata?: Record<string, unknown>;
   verificationStatus?: PlaceVerificationStatus;
   status?: PlaceStatus;
   /** Marks a newly entered source wording that still needs identification. */

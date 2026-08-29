@@ -12,6 +12,13 @@ import {
 
 const platformModel = "gemini-3.5-flash";
 
+class RequestError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "RequestError";
+  }
+}
+
 const systemPrompt = `
 Ти — асистент генеалогічного та краєзнавчого дослідника.
 Ти аналізуєш гіпотези на основі наданих даних.
@@ -103,6 +110,55 @@ async function readUserGeminiAccess(
   };
 }
 
+async function readGeminiAccess(
+  admin: Awaited<ReturnType<typeof authenticatedContext>>["admin"],
+  userId: string,
+  encryptionKey: string,
+): Promise<{
+  apiKey: string;
+  model: string;
+  mode: "fast" | "detailed";
+  keySource: "user" | "platform";
+}> {
+  const platformApiKey = (
+    Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || ""
+  ).trim();
+  if (platformApiKey) {
+    return {
+      apiKey: platformApiKey,
+      model: platformModel,
+      mode: "fast",
+      keySource: "platform",
+    };
+  }
+
+  const userAccess = await readUserGeminiAccess(admin, userId, encryptionKey);
+  return { ...userAccess, keySource: "user" };
+}
+
+async function reserveHypothesisReviewCredit(
+  userClient: Awaited<ReturnType<typeof authenticatedContext>>["userClient"],
+  projectId: string,
+  model: string,
+  promptChars: number,
+  hypothesisId: string,
+): Promise<void> {
+  const { error } = await userClient.rpc("begin_ai_credit_usage", {
+    target_project_id: projectId,
+    feature_key: "hypothesis_review",
+    credits_requested: 1,
+    input_chars: promptChars,
+    output_chars: 0,
+    model,
+    metadata: { hypothesisId },
+  });
+  if (!error) return;
+  if (isAiCreditLimitReached(error)) {
+    throw new RequestError(402, "Використано всі доступні ШІ-кредити цього місяця.");
+  }
+  throw error;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -132,47 +188,12 @@ Deno.serve(async (request) => {
     if (membershipError) throw membershipError;
     if (!membership) return json({ error: "У вас немає доступу до цього проєкту." }, 403);
 
-    let mode = input.mode ? normalizeMode(input.mode) : "fast";
-    let apiKey = "";
-    let model = platformModel;
-    let keySource: "user" | "platform" = "user";
-    const platformApiKey = (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "").trim();
-
-    if (!platformApiKey) {
-      const userAccess = await readUserGeminiAccess(admin, user.id, encryptionKey);
-      mode = input.mode ? normalizeMode(input.mode) : userAccess.mode;
-      apiKey = userAccess.apiKey;
-      model = userAccess.model;
-    } else {
-      const { error: usageError } = await userClient.rpc(
-        "begin_ai_credit_usage",
-        {
-          target_project_id: hypothesis.project_id,
-          feature_key: "hypothesis_review",
-          credits_requested: 1,
-          input_chars: 0,
-          output_chars: 0,
-          model: platformModel,
-          metadata: { hypothesisId },
-        },
-      );
-      if (usageError) {
-        if (!isAiCreditLimitReached(usageError)) throw usageError;
-        try {
-          const userAccess = await readUserGeminiAccess(admin, user.id, encryptionKey);
-          keySource = "user";
-          mode = input.mode ? normalizeMode(input.mode) : userAccess.mode;
-          apiKey = userAccess.apiKey;
-          model = userAccess.model;
-        } catch {
-          throw new Error("Використано всі ШІ-кредити цього місяця. Додайте власний API-ключ Google AI Studio в налаштуваннях ШІ-агента, щоб продовжити.");
-        }
-      } else {
-        keySource = "platform";
-        apiKey = platformApiKey;
-        model = platformModel;
-      }
-    }
+    const { apiKey, model, keySource, mode: savedMode } = await readGeminiAccess(
+      admin,
+      user.id,
+      encryptionKey,
+    );
+    const mode = input.mode ? normalizeMode(input.mode) : savedMode;
 
     const { data: links, error: linksError } = await admin
       .from("hypothesis_links")
@@ -294,6 +315,13 @@ ${detailInstruction}
 Дані для аналізу:
 ${limitText(JSON.stringify(context), mode === "detailed" ? 50000 : 22000)}`;
 
+    await reserveHypothesisReviewCredit(
+      userClient,
+      hypothesis.project_id,
+      model,
+      prompt.length,
+      hypothesisId,
+    );
     const result = await callGemini(
       apiKey,
       model,
@@ -337,6 +365,12 @@ ${limitText(JSON.stringify(context), mode === "detailed" ? 50000 : 22000)}`;
       result,
     });
   } catch (error) {
+    if (error instanceof RequestError) {
+      return json({ error: error.message }, error.status);
+    }
+    if (isAiCreditLimitReached(error)) {
+      return json({ error: "Використано всі доступні ШІ-кредити цього місяця." }, 402);
+    }
     return json({ error: errorMessage(error, "Не вдалося перевірити гіпотезу.") }, 400);
   }
 });

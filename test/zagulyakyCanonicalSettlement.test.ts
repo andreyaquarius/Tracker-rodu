@@ -14,25 +14,19 @@ test("Zagulyaky opt into canonical settlement search without changing exact map 
   const personEditor = source("../src/features/persons-v2/PersonEditorV2.tsx");
 
   assert.match(placeSearch, /export interface PlaceSearchOptions\s*\{\s*settlementOnly\?: boolean;/su);
-  assert.match(placeSearch, /params\.set\("featureType", "settlement"\)/u);
+  assert.match(placeSearch, /body:\s*\{ query: normalized, settlementOnly \}/u);
+  assert.match(placeSearch, /body:\s*\{ latitude, longitude, settlementOnly \}/u);
+  assert.doesNotMatch(placeSearch, /nominatim\.openstreetmap\.org/u);
+  assert.doesNotMatch(placeSearch, /\bfetch\s*\(/u);
   assert.match(edgeFunction, /params\.set\("featureType", "settlement"\)/u);
-  assert.match(placeSearch, /zoom: settlementOnly \? "15" : "18"/u);
   assert.match(edgeFunction, /zoom: canonicalSettlement \? "15" : "18"/u);
-  assert.match(placeSearch, /params\.set\("layer", "address"\)/u);
   assert.match(edgeFunction, /params\.set\("layer", "address"\)/u);
 
-  for (const implementation of [placeSearch, edgeFunction]) {
-    assert.match(implementation, /osm_type\?: string;/u);
-    assert.match(implementation, /function stableExternalId\(item: NominatimResult\)/u);
-    assert.match(implementation, /relation: "R"/u);
-    assert.match(implementation, /if \(prefix && osmId\) return `\$\{prefix\}\$\{osmId\}`;/u);
-    assert.match(implementation, /externalId: externalId \|\| null/u);
-  }
-
-  assert.match(
-    placeSearch,
-    /const resultLatitude = settlementOnly \? Number\(item\.lat\) : latitude;[\s\S]*?const resultLongitude = settlementOnly \? Number\(item\.lon\) : longitude;/u,
-  );
+  assert.match(edgeFunction, /osm_type\?: string;/u);
+  assert.match(edgeFunction, /function stableExternalId\(item: NominatimResult\)/u);
+  assert.match(edgeFunction, /relation: "R"/u);
+  assert.match(edgeFunction, /if \(prefix && osmId\) return `\$\{prefix\}\$\{osmId\}`;/u);
+  assert.match(edgeFunction, /externalId: externalId \|\| null/u);
   assert.match(
     edgeFunction,
     /const resultLatitude = settlementOnly \? Number\(item\.lat\) : latitude;[\s\S]*?source: settlementOnly \? "search" : "map_click"/u,

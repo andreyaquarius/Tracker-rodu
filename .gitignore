@@ -8,6 +8,7 @@ dist/
 .codex-*.log
 supabase/.branches/
 supabase/.temp/
+.supabase-home/
 .env
 .env.local
 .env.*.local

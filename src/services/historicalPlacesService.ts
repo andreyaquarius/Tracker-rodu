@@ -302,6 +302,7 @@ export async function createProjectPlace(
     wikidataId: nullableText(input.wikidataId),
     geonamesId: nullableText(input.geonamesId),
     externalIds: externalIds(input.externalIds),
+    metadata: record(input.metadata),
     verificationStatus: verificationStatuses.has(input.verificationStatus as PlaceVerificationStatus)
       ? input.verificationStatus
       : "unverified",
@@ -1010,6 +1011,7 @@ function createProjectPlaceRequiresV2(input: CreateProjectPlaceInput): boolean {
     || Boolean(nullableText(input.wikidataId))
     || Boolean(nullableText(input.geonamesId))
     || Object.keys(input.externalIds ?? {}).length > 0
+    || Object.keys(input.metadata ?? {}).length > 0
     || (input.verificationStatus !== undefined && input.verificationStatus !== "unverified")
     || (input.status !== undefined && input.status !== derivedLegacyStatus)
     || (input.names ?? []).some((name) => name.nameType === "pre_reform" || name.nameType === "soviet");

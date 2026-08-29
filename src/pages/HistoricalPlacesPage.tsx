@@ -55,6 +55,10 @@ import type {
   PlaceVerificationStatus,
 } from "../types/historicalPlaces";
 import { HistoricalPlaceField } from "../components/HistoricalPlaceField";
+import { HistoricalPlaceDiscoveryPanel } from "../components/HistoricalPlaceDiscoveryPanel";
+import { HistoricalPlaceAiExtractionPanel } from "../components/HistoricalPlaceAiExtractionPanel";
+import type { ConfirmedHistoricalPlaceDraft } from "../types/historicalPlaceDiscovery";
+import type { HistoricalPlaceAiAcceptedDraft } from "../types/historicalPlaceAi";
 import {
   historicalPlaceAdministrativeLabel,
   historicalPlaceProfileMatchesDate,
@@ -81,7 +85,7 @@ interface HistoricalPlacesPageProps {
 }
 
 const PLACE_TYPE_OPTIONS = [
-  "settlement", "hamlet", "small_settlement", "village", "town", "city", "sloboda",
+  "settlement", "urban_settlement", "hamlet", "small_settlement", "village", "town", "city", "sloboda",
   "colony", "folwark", "estate", "manor", "parish", "volost", "county",
   "governorate", "okrug", "district", "region", "community", "country",
   "cemetery", "church", "monastery", "military_unit", "other",
@@ -487,6 +491,13 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
   const [wikidataId, setWikidataId] = useState("");
   const [geonamesId, setGeonamesId] = useState("");
   const [externalIdsText, setExternalIdsText] = useState("{}");
+  const [currentCountry, setCurrentCountry] = useState("");
+  const [currentAdmin, setCurrentAdmin] = useState("");
+  const [discoverySourceMetadata, setDiscoverySourceMetadata] = useState<ConfirmedHistoricalPlaceDraft["sourceMetadata"] | null>(null);
+  const [acceptedAiDrafts, setAcceptedAiDrafts] = useState<HistoricalPlaceAiAcceptedDraft[]>([]);
+  const [aiRelationPlaces, setAiRelationPlaces] = useState<Record<string, HistoricalPlaceFieldValue>>({});
+  const [createdPlaceId, setCreatedPlaceId] = useState("");
+  const savedAiRelationKeysRef = useRef(new Set<string>());
   const [parentPlace, setParentPlace] = useState<HistoricalPlaceFieldValue>({ placeId: null, place: null, originalText: "" });
   const [parentValidFrom, setParentValidFrom] = useState("");
   const [parentValidTo, setParentValidTo] = useState("");
@@ -502,17 +513,89 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
   const externalIdsResult = parseExternalIdsInput(externalIdsText);
   const parentDateError = dateRangeError(parentValidFrom, parentValidTo);
   const sourceNameDateError = dateRangeError(sourceNameValidFrom, sourceNameValidTo);
+  const acceptedAiNames = acceptedAiDrafts.flatMap((draft) =>
+    draft.nameSuggestions.map((suggestion) => ({ draft, suggestion })),
+  );
+  const acceptedAiRelations = acceptedAiDrafts.flatMap((draft) =>
+    draft.relationSuggestions.map((suggestion) => ({
+      draft,
+      suggestion,
+      key: `${draft.contextKey}:${suggestion.suggestionId}`,
+    })),
+  );
+  const aiRelationError = acceptedAiRelations.some((item) => !aiRelationPlaces[item.key]?.placeId)
+    ? "Для кожного прийнятого ШІ-зв’язку виберіть відповідне місце з каталогу або вилучіть цю пропозицію."
+    : "";
+
+  const applyConfirmedDiscovery = (draft: ConfirmedHistoricalPlaceDraft) => {
+    setCanonicalName(draft.canonicalName);
+    setModernName(draft.modernName);
+    setPlaceType(draft.placeType);
+    setLatitude(draft.latitude === null ? "" : String(draft.latitude));
+    setLongitude(draft.longitude === null ? "" : String(draft.longitude));
+    setCurrentCountry(draft.currentCountry);
+    setCurrentAdmin(draft.currentAdmin);
+    setWikidataId(draft.wikidataId ?? "");
+    setGeonamesId(draft.geonamesId ?? "");
+    setExternalIdsText(JSON.stringify({
+      ...(externalIdsResult.error ? {} : externalIdsResult.value),
+      ...draft.externalIds,
+    }, null, 2));
+    setDiscoverySourceMetadata(draft.sourceMetadata);
+  };
+
+  const acceptAiDraft = (draft: HistoricalPlaceAiAcceptedDraft) => {
+    setAcceptedAiDrafts((current) => {
+      const previous = current.find((item) => item.contextKey === draft.contextKey);
+      if (!previous) return [...current, draft];
+      const names = new Map(previous.nameSuggestions.map((item) => [item.suggestionId, item]));
+      for (const item of draft.nameSuggestions) names.set(item.suggestionId, item);
+      const relations = new Map(previous.relationSuggestions.map((item) => [item.suggestionId, item]));
+      for (const item of draft.relationSuggestions) relations.set(item.suggestionId, item);
+      const merged = {
+        ...previous,
+        ...draft,
+        nameSuggestions: [...names.values()],
+        relationSuggestions: [...relations.values()],
+        placeTypeSuggestion: draft.placeTypeSuggestion ?? previous.placeTypeSuggestion,
+      };
+      return current.map((item) => item.contextKey === draft.contextKey ? merged : item);
+    });
+    if (draft.placeTypeSuggestion) setPlaceType(draft.placeTypeSuggestion.placeType);
+  };
+
+  const removeAcceptedAiName = (contextKey: string, suggestionId: string) => {
+    setAcceptedAiDrafts((current) => current
+      .map((draft) => draft.contextKey === contextKey
+        ? { ...draft, nameSuggestions: draft.nameSuggestions.filter((item) => item.suggestionId !== suggestionId) }
+        : draft)
+      .filter((draft) => draft.nameSuggestions.length || draft.relationSuggestions.length || draft.placeTypeSuggestion));
+  };
+
+  const removeAcceptedAiRelation = (contextKey: string, suggestionId: string) => {
+    const key = `${contextKey}:${suggestionId}`;
+    setAcceptedAiDrafts((current) => current
+      .map((draft) => draft.contextKey === contextKey
+        ? { ...draft, relationSuggestions: draft.relationSuggestions.filter((item) => item.suggestionId !== suggestionId) }
+        : draft)
+      .filter((draft) => draft.nameSuggestions.length || draft.relationSuggestions.length || draft.placeTypeSuggestion));
+    setAiRelationPlaces((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (saving || props.readOnly) return;
-    if (coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError) {
-      setError(coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError);
+    if (coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError || aiRelationError) {
+      setError(coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError || aiRelationError);
       return;
     }
     setSaving(true);
     setError("");
-    const names = originalText.trim() ? [{
+    const manualNames = originalText.trim() ? [{
       // Keep the literal source wording immutable, but use the canonical value
       // for display/search normalization. Otherwise a source phrase such as
       // "деревни Новая Слобода" replaces the user-entered place title.
@@ -531,8 +614,39 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
       note: sourceNameNote,
       isPrimary: false,
     }] : [];
+    const aiNames = acceptedAiNames.map(({ draft, suggestion }) => ({
+      name: suggestion.normalizedName || suggestion.originalText,
+      originalText: suggestion.originalText,
+      languageCode: ["unknown", "other"].includes(suggestion.languageCode) ? "" : suggestion.languageCode,
+      nameType: suggestion.nameType,
+      validFrom: null,
+      validTo: null,
+      validFromText: suggestion.validFromText,
+      validToText: suggestion.validToText,
+      datePrecision: suggestion.datePrecision,
+      sourceDocumentId: draft.sourceDocumentId,
+      sourceReference: aiSourceReference(draft, suggestion.sourceQuote),
+      confidence: Math.round(suggestion.confidence * 100),
+      note: `Підтверджена користувачем ШІ-підказка ${draft.jobId}. ${suggestion.warnings.join(" ")}`.trim(),
+      metadata: {
+        aiReview: {
+          contextKey: draft.contextKey,
+          jobId: draft.jobId,
+          model: draft.model,
+          promptVersion: draft.promptVersion,
+          schemaVersion: draft.schemaVersion,
+          sourceTextSha256: draft.sourceTextSha256,
+          suggestionId: suggestion.suggestionId,
+          verifiedQuote: suggestion.verifiedQuote,
+        },
+      },
+      isPrimary: false,
+    }));
+    const names = dedupePlaceNameDrafts([...manualNames, ...aiNames]);
     void (async () => {
-      const place = await createProjectPlace({
+      let placeId = createdPlaceId;
+      if (!placeId) {
+        const place = await createProjectPlace({
         projectId: props.projectId,
         canonicalName,
         modernName,
@@ -547,8 +661,32 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
         wikidataId: wikidataId.trim() || null,
         geonamesId: geonamesId.trim() || null,
         externalIds: externalIdsResult.value,
-        currentAdmin: parentPlace.place?.displayName || parentPlace.placeDisplayName || "",
-        currentCountry: parentPlace.place?.placeType === "country" ? parentPlace.place.displayName : "",
+        currentAdmin: parentPlace.place?.displayName || parentPlace.placeDisplayName || currentAdmin,
+        currentCountry: parentPlace.place?.placeType === "country" ? parentPlace.place.displayName : currentCountry,
+        metadata: {
+          ...(discoverySourceMetadata ? {
+            discovery: {
+              confirmedAt: new Date().toISOString(),
+              ...discoverySourceMetadata,
+            },
+          } : {}),
+          ...(acceptedAiDrafts.length ? {
+            aiAssistance: {
+              reviewedByUser: true,
+              jobs: acceptedAiDrafts.map((draft) => ({
+                contextKey: draft.contextKey,
+                jobId: draft.jobId,
+                model: draft.model,
+                promptVersion: draft.promptVersion,
+                schemaVersion: draft.schemaVersion,
+                sourceTextSha256: draft.sourceTextSha256,
+                acceptedNameSuggestionIds: draft.nameSuggestions.map((item) => item.suggestionId),
+                acceptedRelationSuggestionIds: draft.relationSuggestions.map((item) => item.suggestionId),
+                acceptedPlaceTypeSuggestionId: draft.placeTypeSuggestion?.suggestionId ?? null,
+              })),
+            },
+          } : {}),
+        },
         names,
         parentRelation: parentPlace.placeId ? {
           parentPlaceId: parentPlace.placeId,
@@ -563,8 +701,44 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
           sourceReference: parentSource,
           confidence: clampConfidence(parentConfidence),
         } : undefined,
-      });
-      props.onOpenPlace(place.id);
+        });
+        placeId = place.id;
+        setCreatedPlaceId(placeId);
+      }
+
+      try {
+        for (const item of acceptedAiRelations) {
+          if (savedAiRelationKeysRef.current.has(item.key)) continue;
+          const relatedPlaceId = aiRelationPlaces[item.key]?.placeId;
+          if (!relatedPlaceId) throw new Error(aiRelationError);
+          const relationInput = {
+            placeId,
+            relatedPlaceId,
+            relationType: item.suggestion.relationType,
+            religion: item.suggestion.religion ?? undefined,
+            validFromText: item.suggestion.validFromText,
+            validToText: item.suggestion.validToText,
+            validFromPrecision: item.suggestion.datePrecision,
+            validToPrecision: item.suggestion.datePrecision,
+            sourceDocumentId: item.draft.sourceDocumentId,
+            sourceReference: aiSourceReference(item.draft, item.suggestion.sourceQuote),
+            originalText: item.suggestion.sourceQuote,
+            confidence: Math.round(item.suggestion.confidence * 100),
+            note: `Підтверджена користувачем ШІ-підказка ${item.draft.jobId}; пов’язане місце зіставлено вручну.`,
+          };
+          if (item.suggestion.kind === "administrative_parent") {
+            await addHistoricalPlaceHierarchy(relationInput);
+          } else if (item.suggestion.kind === "parish") {
+            await addHistoricalPlaceParish(relationInput);
+          } else {
+            await addHistoricalPlaceRelated(relationInput);
+          }
+          savedAiRelationKeysRef.current.add(item.key);
+        }
+      } catch (cause) {
+        throw new Error(`Місце вже створено, але не всі підтверджені зв’язки додано. ${errorMessage(cause)}`);
+      }
+      props.onOpenPlace(placeId);
     })().catch((cause: unknown) => {
       setError(errorMessage(cause));
     }).finally(() => setSaving(false));
@@ -590,6 +764,12 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
             <span>Сучасна назва</span>
             <input maxLength={500} value={modernName} onChange={(event) => setModernName(event.target.value)} />
           </label>
+          <HistoricalPlaceDiscoveryPanel
+            query={canonicalName}
+            projectId={props.projectId}
+            disabled={props.readOnly || saving}
+            onConfirmedSuggestion={applyConfirmedDiscovery}
+          />
           <label>
             <span>Тип місця *</span>
             <select required value={placeType} onChange={(event) => setPlaceType(event.target.value)}>
@@ -613,6 +793,14 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
           <label>
             <span>Довгота</span>
             <input type="number" min={-180} max={180} step="any" value={longitude} onChange={(event) => setLongitude(event.target.value)} />
+          </label>
+          <label>
+            <span>Сучасна країна</span>
+            <input maxLength={500} value={currentCountry} onChange={(event) => setCurrentCountry(event.target.value)} />
+          </label>
+          <label>
+            <span>Сучасна адміністративна належність</span>
+            <input maxLength={2000} value={currentAdmin} onChange={(event) => setCurrentAdmin(event.target.value)} />
           </label>
           <label className="field-wide">
             <span>Короткий опис</span>
@@ -647,13 +835,84 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
             <label><span>Джерело / цитата</span><input value={parentSource} onChange={(event) => setParentSource(event.target.value)} /></label>
           </fieldset>
         </div>
-        {coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError || error ? (
-          <div className="historical-place-error" role="alert">{coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError || error}</div>
+        <HistoricalPlaceAiExtractionPanel
+          projectId={props.projectId}
+          target={{ canonicalName, modernName }}
+          documents={props.documents}
+          temporalContext={sourceNameValidFrom || sourceNameValidTo || sourceNameValidFromText || sourceNameValidToText ? {
+            periodFrom: sourceNameValidFrom || null,
+            periodTo: sourceNameValidTo || null,
+            originalText: [sourceNameValidFromText, sourceNameValidToText].filter(Boolean).join(" — "),
+            precision: sourceNamePrecision,
+          } : null}
+          disabled={props.readOnly || saving || Boolean(createdPlaceId)}
+          onAccept={acceptAiDraft}
+        />
+        {acceptedAiNames.length || acceptedAiRelations.length || acceptedAiDrafts.some((draft) => draft.placeTypeSuggestion) ? (
+          <fieldset className="historical-place-ai-accepted">
+            <legend>Прийняті ШІ-підказки у чернетці</legend>
+            <p>Назви буде збережено разом із цитатою. Для кожного зв’язку обов’язково зіставте місце з каталогом.</p>
+            {acceptedAiDrafts.some((draft) => draft.placeTypeSuggestion) ? (
+              <div className="historical-place-ai-accepted-list">
+                <strong>Тип місця</strong>
+                {acceptedAiDrafts.flatMap((draft) => draft.placeTypeSuggestion
+                  ? [{ draft, suggestion: draft.placeTypeSuggestion }]
+                  : []).map(({ draft, suggestion }) => (
+                    <article key={`${draft.contextKey}:${suggestion.suggestionId}`}>
+                      <div>
+                        <b>{historicalPlaceTypeLabel(suggestion.placeType)}</b>
+                        <span>Поле «Тип місця» вже оновлено у формі.</span>
+                        <small>«{suggestion.sourceQuote}» · {Math.round(suggestion.confidence * 100)}%</small>
+                      </div>
+                    </article>
+                  ))}
+              </div>
+            ) : null}
+            {acceptedAiNames.length ? (
+              <div className="historical-place-ai-accepted-list">
+                <strong>Варіанти назви</strong>
+                {acceptedAiNames.map(({ draft, suggestion }) => (
+                  <article key={`${draft.contextKey}:${suggestion.suggestionId}`}>
+                    <div>
+                      <b>{suggestion.normalizedName || suggestion.originalText}</b>
+                      <span>У джерелі: {suggestion.originalText}</span>
+                      <small>«{suggestion.sourceQuote}» · {Math.round(suggestion.confidence * 100)}%</small>
+                    </div>
+                    <button type="button" className="button button-ghost" disabled={Boolean(createdPlaceId)} onClick={() => removeAcceptedAiName(draft.contextKey, suggestion.suggestionId)}>Вилучити</button>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+            {acceptedAiRelations.length ? (
+              <div className="historical-place-ai-accepted-list">
+                <strong>Зв’язки, які потрібно зіставити</strong>
+                {acceptedAiRelations.map(({ draft, suggestion, key }) => (
+                  <article className="historical-place-ai-relation-draft" key={key}>
+                    <div>
+                      <b>{suggestion.relatedPlaceOriginalText}</b>
+                      <span>{aiRelationKindLabel(suggestion.kind)} · «{suggestion.sourceQuote}»</span>
+                    </div>
+                    <HistoricalPlaceField
+                      value={aiRelationPlaces[key] ?? { placeId: null, place: null, originalText: suggestion.relatedPlaceOriginalText }}
+                      onChange={(value) => setAiRelationPlaces((current) => ({ ...current, [key]: value }))}
+                      projectId={props.projectId}
+                      label="Відповідне місце в каталозі"
+                    />
+                    <button type="button" className="button button-ghost" disabled={Boolean(createdPlaceId)} onClick={() => removeAcceptedAiRelation(draft.contextKey, suggestion.suggestionId)}>Вилучити</button>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+          </fieldset>
+        ) : null}
+        {createdPlaceId ? <div className="historical-place-success" role="status">Місце створено. Завершіть додавання підтверджених зв’язків і повторіть збереження.</div> : null}
+        {coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError || aiRelationError || error ? (
+          <div className="historical-place-error" role="alert">{coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError || aiRelationError || error}</div>
         ) : null}
         <div className="historical-place-form-actions">
           <button type="button" className="button button-secondary" onClick={props.onBackToList}>Скасувати</button>
-          <button type="submit" className="button button-primary" disabled={saving || props.readOnly || Boolean(coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError) || !canonicalName.trim()}>
-            {saving ? "Зберігаємо…" : "Створити місце"}
+          <button type="submit" className="button button-primary" disabled={saving || props.readOnly || Boolean(coordinateError || externalIdsResult.error || parentDateError || sourceNameDateError || aiRelationError) || !canonicalName.trim()}>
+            {saving ? "Зберігаємо…" : createdPlaceId ? "Завершити зв’язки" : "Створити місце"}
           </button>
         </div>
       </form>
@@ -2008,6 +2267,31 @@ function yearTemporalContext(yearInput: string) {
 function clampConfidence(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 50;
+}
+
+function aiSourceReference(draft: HistoricalPlaceAiAcceptedDraft, sourceQuote: string): string {
+  return [
+    draft.sourceReference,
+    draft.sourcePage ? `Сторінка/аркуш: ${draft.sourcePage}` : "",
+    sourceQuote ? `Цитата: ${sourceQuote}` : "",
+  ].filter(Boolean).join(" · ").slice(0, 2_000);
+}
+
+function dedupePlaceNameDrafts<T extends { originalText?: string; nameType?: string }>(items: T[]): T[] {
+  const result = new Map<string, T>();
+  for (const item of items) {
+    const key = `${item.nameType ?? ""}|${item.originalText?.trim().toLocaleLowerCase("uk-UA") ?? ""}`;
+    if (!result.has(key)) result.set(key, item);
+  }
+  return [...result.values()];
+}
+
+function aiRelationKindLabel(value: string): string {
+  return ({
+    administrative_parent: "Історична адміністративна належність",
+    parish: "Парафіяльний зв’язок",
+    related: "Інший зв’язок місць",
+  } as Record<string, string>)[value] ?? "Інший зв’язок місць";
 }
 
 function parseExternalIdsInput(input: string): { value: Record<string, string>; error: string } {
