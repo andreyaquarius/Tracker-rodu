@@ -38,6 +38,7 @@ import {
   primaryParticipantName,
   sortFindingParticipants,
 } from "../utils/findingParticipants";
+import { findingLinkedPersonIds } from "../utils/findingParticipantLinks";
 import { PersonSelector } from "../components/PersonSelector";
 import { PersonFormModal, type PersonInitialDraft } from "../components/PersonFormModal";
 import {
@@ -855,7 +856,7 @@ function findingPersonFolderName(record: Record<string, unknown>, persons: Perso
   const participantName = primaryParticipantName(participants, String(record.findingType ?? ""));
   if (participantName) return participantName;
 
-  const personIds = Array.isArray(record.personIds) ? record.personIds as string[] : [];
+  const personIds = findingLinkedPersonIds(record as unknown as Pick<Finding, "personIds" | "participants">);
   const linkedPerson = persons.find((person) => personIds.includes(person.id));
   if (linkedPerson) return personDisplayName(linkedPerson);
 
@@ -1193,13 +1194,26 @@ function DetailValue({
       : [];
     return (
       <div className="participant-details">
-        {participants.map((participant) => (
-          <div key={participant.id}>
-            <strong>{participant.role}</strong>
-            <span>{participant.name}</span>
-            {participant.notes ? <small>{participant.notes}</small> : null}
-          </div>
-        ))}
+        {participants.map((participant) => {
+          const linkedPerson = participant.personId
+            ? persons.find((person) => person.id === participant.personId)
+            : null;
+          return (
+            <div key={participant.id}>
+              <strong>{participant.role}</strong>
+              <span>{participant.name}</span>
+              {linkedPerson ? (
+                <small className="participant-person-card">
+                  Картка:
+                  <RelatedButton onClick={() => onOpenRelated?.("persons", linkedPerson.id)}>
+                    {personName(linkedPerson)}
+                  </RelatedButton>
+                </small>
+              ) : null}
+              {participant.notes ? <small>{participant.notes}</small> : null}
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -1536,10 +1550,23 @@ export function EntityModal({
   const persistFindingNameForPerson = async (
     personId: string,
     capture: FindingNameCaptureSource,
+    sourceForm: FormRecord = form,
+    participantId?: string,
   ) => {
     const parsed = splitPersonName(capture.normalizedFullName);
-    const selected = Array.isArray(form.personIds) ? form.personIds as string[] : [];
-    const nextForm = { ...form, personIds: [...new Set([...selected, personId])] };
+    const selected = Array.isArray(sourceForm.personIds) ? sourceForm.personIds as string[] : [];
+    const linkedParticipants = participantId && Array.isArray(sourceForm.participants)
+      ? (sourceForm.participants as FindingParticipant[]).map((participant) =>
+          participant.id === participantId ? { ...participant, personId } : participant
+        )
+      : sourceForm.participants;
+    const nextForm = {
+      ...sourceForm,
+      participants: linkedParticipants,
+      personIds: participantId
+        ? selected.filter((linkedPersonId) => linkedPersonId !== personId)
+        : [...new Set([...selected, personId])],
+    };
     setForm(nextForm);
     const findingSaved = await persistExistingFindingDraft(nextForm);
     if (!findingSaved) {
@@ -1741,6 +1768,12 @@ export function EntityModal({
                   : undefined
               }
               onOpenScanViewer={onOpenScanViewer}
+              onParticipantPersonUnlink={(personId) => setForm((current) => ({
+                ...current,
+                personIds: Array.isArray(current.personIds)
+                  ? (current.personIds as string[]).filter((id) => id !== personId)
+                  : [],
+              }))}
               onCreatePerson={() => {
                 if (config.collection === "findings") {
                   if (!entity?.id) {
@@ -1748,13 +1781,15 @@ export function EntityModal({
                     return;
                   }
                   const choices = personSeedChoicesFromFinding(form);
+                  if (!choices.length) {
+                    window.alert("Усі учасники з іменами вже прив’язані до карток осіб.");
+                    return;
+                  }
                   if (choices.length > 1) {
                     setPersonSeedChoices(choices);
                     return;
                   }
-                  captureFindingNameForChoice(
-                    choices[0] ?? createFindingPersonSeedChoice("", String(form.researchId ?? "")),
-                  );
+                  captureFindingNameForChoice(choices[0]);
                   return;
                 }
                 const seed = config.collection === "tasks"
@@ -2027,7 +2062,12 @@ export function EntityModal({
                   }
                   setFindingNamePending(true);
                   try {
-                    await persistFindingNameForPerson(capture.existingPersonId, capture);
+                    await persistFindingNameForPerson(
+                      capture.existingPersonId,
+                      capture,
+                      form,
+                      capture.choice.participantId,
+                    );
                     setFindingNameCapture(null);
                   } catch (error) {
                     setFindingNameError(errorMessage(error, "Не вдалося прив’язати написання імені до особи."));
@@ -2088,11 +2128,29 @@ export function EntityModal({
               }
             }
             const selected = Array.isArray(form.personIds) ? form.personIds as string[] : [];
-            const nextForm = { ...form, personIds: [...new Set([...selected, linkedPerson.id])] };
+            const linkedParticipants = personSeed.participantId && Array.isArray(form.participants)
+              ? (form.participants as FindingParticipant[]).map((participant) =>
+                  participant.id === personSeed.participantId
+                    ? { ...participant, personId: linkedPerson.id }
+                    : participant
+                )
+              : form.participants;
+            const nextForm = {
+              ...form,
+              participants: linkedParticipants,
+              personIds: personSeed.participantId
+                ? selected.filter((personId) => personId !== linkedPerson.id)
+                : [...new Set([...selected, linkedPerson.id])],
+            };
             setForm(nextForm);
             if (personSeed.findingNameCapture) {
               try {
-                await persistFindingNameForPerson(linkedPerson.id, personSeed.findingNameCapture);
+                await persistFindingNameForPerson(
+                  linkedPerson.id,
+                  personSeed.findingNameCapture,
+                  nextForm,
+                  personSeed.participantId,
+                );
               } catch (error) {
                 // The person may already be safely persisted. Re-open the capture
                 // against that existing card so a retry cannot create a duplicate person.
@@ -2484,12 +2542,13 @@ function createFindingPersonSeedChoice(rawName: string, researchId: string): Per
 }
 
 function personSeedChoicesFromFinding(form: FormRecord): PersonSeedChoice[] {
-  const participants = Array.isArray(form.participants)
-    ? sortFindingParticipants(
-        form.participants as FindingParticipant[],
-        String(form.findingType ?? ""),
-      ).filter((participant) => participant.name.trim())
+  const sourceParticipants = Array.isArray(form.participants)
+    ? form.participants as FindingParticipant[]
     : [];
+  const participants = sortFindingParticipants(
+    sourceParticipants,
+    String(form.findingType ?? ""),
+  ).filter((participant) => participant.name.trim() && !participant.personId);
   if (participants.length > 1) {
     return participants.map((participant, index) => ({
       ...createPersonSeedFromFinding(form, participant),
@@ -2497,7 +2556,12 @@ function personSeedChoicesFromFinding(form: FormRecord): PersonSeedChoice[] {
       description: [participant.role, participant.notes].filter(Boolean).join(" · "),
     }));
   }
-  return [createPersonSeedFromFinding(form, participants[0] ?? null)];
+  if (participants.length) return [createPersonSeedFromFinding(form, participants[0])];
+  if (sourceParticipants.some((participant) => participant.personId)) return [];
+  const legacyName = String(form.personsText || form.people || "").trim();
+  return legacyName
+    ? [createFindingPersonSeedChoice(legacyName, String(form.researchId ?? ""))]
+    : [];
 }
 
 function createPersonSeedFromFinding(
@@ -3261,6 +3325,7 @@ function FormField({
   scanDriveFolderPath,
   scanUploadBlockedMessage,
   onCreatePerson,
+  onParticipantPersonUnlink,
   onOpenScanViewer,
   onChange,
 }: {
@@ -3281,6 +3346,7 @@ function FormField({
   scanDriveFolderPath?: string[];
   scanUploadBlockedMessage?: string;
   onCreatePerson: () => void;
+  onParticipantPersonUnlink: (personId: string) => void;
   onOpenScanViewer?: (
     scan: ScanAttachment,
     context?: DocumentScanViewerContext,
@@ -3304,7 +3370,10 @@ function FormField({
       <ParticipantsEditor
         participants={participants}
         findingType={findingType}
+        persons={persons}
+        researchId={researchId}
         required={required}
+        onPersonUnlink={onParticipantPersonUnlink}
         onChange={onChange}
       />
     );
@@ -3599,12 +3668,18 @@ function personName(person: Person): string {
 function ParticipantsEditor({
   participants,
   findingType,
+  persons,
+  researchId,
   required,
+  onPersonUnlink,
   onChange,
 }: {
   participants: FindingParticipant[];
   findingType: string;
+  persons: Person[];
+  researchId: string;
   required?: boolean;
+  onPersonUnlink: (personId: string) => void;
   onChange: (value: FormValue) => void;
 }) {
   const roles = participantRoles(findingType);
@@ -3625,8 +3700,21 @@ function ParticipantsEditor({
     ));
   };
   const removeParticipant = (id: string) => {
+    const removed = participants.find((participant) => participant.id === id);
+    if (removed?.personId) onPersonUnlink(removed.personId);
     onChange(participants.filter((participant) => participant.id !== id));
   };
+  const participantPersonIds = new Set(
+    participants.map((participant) => participant.personId).filter(Boolean),
+  );
+  const selectablePersons = persons
+    .filter((person) =>
+      !researchId ||
+      !person.researchId ||
+      person.researchId === researchId ||
+      participantPersonIds.has(person.id)
+    )
+    .sort((left, right) => personName(left).localeCompare(personName(right), "uk"));
 
   return (
     <fieldset className="participants-editor field-wide">
@@ -3666,6 +3754,33 @@ function ParticipantsEditor({
                     onChange={(event) => updateParticipant(participant.id, { name: event.target.value })}
                   />
                 </label>
+                <label className="participant-person-link">
+                  <span>Картка особи</span>
+                  <select
+                    value={participant.personId ?? ""}
+                    onChange={(event) => {
+                      const personId = event.target.value;
+                      const selectedPerson = persons.find((person) => person.id === personId);
+                      if (participant.personId && participant.personId !== personId) {
+                        onPersonUnlink(participant.personId);
+                      }
+                      updateParticipant(participant.id, {
+                        personId: personId || undefined,
+                        ...(!participant.name.trim() && selectedPerson
+                          ? { name: personName(selectedPerson) }
+                          : {}),
+                      });
+                    }}
+                  >
+                    <option value="">Не прив’язано — лише текст</option>
+                    {selectablePersons.map((person) => (
+                      <option key={person.id} value={person.id}>
+                        {participantPersonOptionLabel(person)}
+                      </option>
+                    ))}
+                  </select>
+                  <small>Необов’язково. Написання з джерела збережеться окремо.</small>
+                </label>
                 <label className="participant-notes">
                   <span>Уточнення</span>
                   <input
@@ -3694,6 +3809,13 @@ function ParticipantsEditor({
       )}
     </fieldset>
   );
+}
+
+function participantPersonOptionLabel(person: Person): string {
+  const lifeDetails = [person.birthDate || person.birthYearFrom, person.birthPlace]
+    .filter(Boolean)
+    .join(", ");
+  return lifeDetails ? `${personName(person)} — ${lifeDetails}` : personName(person);
 }
 
 function searchableValue(value: unknown): string {

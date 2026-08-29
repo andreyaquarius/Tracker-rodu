@@ -12,7 +12,6 @@ test("family tree graph cache key is stable for the same tree view", () => {
     maxDepth: 4,
     maxDepthUp: 4,
     maxDepthDown: 4,
-    includeAssociations: false,
     includeDisproven: true,
     includePrivateLiving: true,
     problemsMode: true,
@@ -31,4 +30,19 @@ test("family tree graph cache key separates root person and mode", () => {
 
   assert.notEqual(familyTreeGraphQueryKey(base), familyTreeGraphQueryKey({ ...base, rootPersonId: "other" }));
   assert.notEqual(familyTreeGraphQueryKey(base), familyTreeGraphQueryKey({ ...base, mode: "ancestors" }));
+});
+
+test("legacy includeAssociations input cannot split the classic graph cache", () => {
+  const base: FamilyTreeGraphQuery = {
+    projectId: "project",
+    treeId: "tree",
+    rootPersonId: "root",
+    mode: "family",
+  };
+  const legacyQuery = {
+    ...base,
+    includeAssociations: true,
+  } as FamilyTreeGraphQuery;
+
+  assert.equal(familyTreeGraphQueryKey(legacyQuery), familyTreeGraphQueryKey(base));
 });

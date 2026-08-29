@@ -375,7 +375,6 @@ export interface FamilyTreeGraphQuery {
   maxDepthUp?: number;
   /** Окрема глибина поколінь униз (family-режим); типово maxDepth. */
   maxDepthDown?: number;
-  includeAssociations?: boolean;
   includeDisproven?: boolean;
   includePrivateLiving?: boolean;
   problemsMode?: boolean;

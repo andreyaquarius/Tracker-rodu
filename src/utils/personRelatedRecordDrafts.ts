@@ -15,6 +15,7 @@ export function findingDraftForPerson(person: Person): Record<string, unknown> {
     personsText: name,
     participants: [{
       id: createId(),
+      personId: person.id,
       role: "Згадана особа",
       name,
       notes: "Додано з картки особи",

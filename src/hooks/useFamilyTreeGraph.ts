@@ -79,7 +79,6 @@ export function familyTreeGraphQueryKey(query: FamilyTreeGraphQuery): string {
     unlimitedDepth: Boolean(query.unlimitedDepth),
     maxDepthUp: query.maxDepthUp ?? null,
     maxDepthDown: query.maxDepthDown ?? null,
-    includeAssociations: Boolean(query.includeAssociations),
     includeDisproven: Boolean(query.includeDisproven),
     includePrivateLiving: Boolean(query.includePrivateLiving),
     problemsMode: Boolean(query.problemsMode),

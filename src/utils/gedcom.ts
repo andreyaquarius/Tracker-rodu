@@ -32,6 +32,7 @@ import {
   parseGedcomMetadata,
 } from "./gedcomMetadata.ts";
 import { resolvedFindingSourceUrl } from "./findingSourceUrl.ts";
+import { findingLinkedPersonIds } from "./findingParticipantLinks.ts";
 
 type GedcomFamily = {
   key: string;
@@ -768,7 +769,7 @@ function indexFindingsByPerson(findings: Finding[]): Map<string, Finding[]> {
   for (const finding of findings) {
     // A malformed source row may repeat one person id. The previous `.filter`
     // emitted that finding once, so keep the same output contract here.
-    for (const personId of new Set(finding.personIds ?? [])) {
+    for (const personId of findingLinkedPersonIds(finding)) {
       const existing = result.get(personId);
       if (existing) existing.push(finding);
       else result.set(personId, [finding]);

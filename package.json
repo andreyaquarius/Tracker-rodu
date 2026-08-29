@@ -10,7 +10,7 @@
     "preview": "vite preview --configLoader runner",
     "lint": "tsc --noEmit --pretty false",
     "typecheck": "tsc --noEmit --pretty false",
-    "test": "node --test \"test/**/*.test.ts\"",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\"",
     "test:integration": "node --test \"test/integration/**/*.test.ts\"",
     "test:db": "supabase test db --local",
     "test:e2e": "node --test \"test/e2e/**/*.test.ts\"",

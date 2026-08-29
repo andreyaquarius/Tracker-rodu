@@ -1,5 +1,4 @@
 import type {
-  AssociationRelationship,
   EvidenceStatus,
   FamilyTree,
   FamilyTreeEdgeDto,
@@ -91,9 +90,6 @@ export function buildFamilyTreeGraphDto(
   );
   const visiblePartnerRelationships = data.partnerRelationships
     .filter((relationship) => relationshipIsVisible(relationship.evidenceStatus, query));
-  const visibleAssociationRelationships = data.associationRelationships
-    .filter((relationship) => relationshipIsVisible(relationship.evidenceStatus, query));
-
   const occurrences = annotateHiddenRelativeCounts(
     finalizeOccurrences(
       createOccurrenceSeeds({
@@ -125,7 +121,6 @@ export function buildFamilyTreeGraphDto(
     occurrenceByPerson,
     parentChildRelationships: visibleParentChildRelationships,
     partnerRelationships: visiblePartnerRelationships,
-    associationRelationships: query.includeAssociations ? visibleAssociationRelationships : [],
   });
   const groups = buildGroups(data, occurrencePersonIds);
   const issues = [
@@ -700,7 +695,6 @@ function buildEdges(input: {
   occurrenceByPerson: Map<EntityId, FamilyTreeOccurrenceDto>;
   parentChildRelationships: ParentChildRelationship[];
   partnerRelationships: PartnerRelationship[];
-  associationRelationships: AssociationRelationship[];
 }): FamilyTreeEdgeDto[] {
   const occurrencePersonIds = new Set(input.occurrences.map((occurrence) => occurrence.personId));
   const edges: FamilyTreeEdgeDto[] = [];
@@ -733,21 +727,6 @@ function buildEdges(input: {
     const from = input.occurrenceByPerson.get(relationship.personAId);
     const to = input.occurrenceByPerson.get(relationship.personBId);
     edges.push(edgeFromPartner(relationship, from?.id, to?.id, style));
-  }
-
-  for (const relationship of input.associationRelationships) {
-    if (!occurrencePersonIds.has(relationship.personAId) || !occurrencePersonIds.has(relationship.personBId)) continue;
-    const style = resolveFamilyTreeEdgeStyle({
-      kind: "association",
-      relationshipType: relationship.associationType,
-      evidenceStatus: relationship.evidenceStatus,
-      includeDisproven: input.query.includeDisproven,
-      problemsMode: input.query.problemsMode,
-    });
-    if (style.visibility === "hidden") continue;
-    const from = input.occurrenceByPerson.get(relationship.personAId);
-    const to = input.occurrenceByPerson.get(relationship.personBId);
-    edges.push(edgeFromAssociation(relationship, from?.id, to?.id, style));
   }
 
   return edges;
@@ -858,30 +837,6 @@ function edgeFromPartner(
   };
 }
 
-function edgeFromAssociation(
-  relationship: AssociationRelationship,
-  fromOccurrenceId: string | undefined,
-  toOccurrenceId: string | undefined,
-  style: FamilyTreeEdgeStyleDto,
-): FamilyTreeEdgeDto {
-  return {
-    id: ["association", relationship.id, fromOccurrenceId, toOccurrenceId].filter(Boolean).join(":"),
-    kind: "association",
-    relationshipId: relationship.id,
-    fromPersonId: relationship.personAId,
-    toPersonId: relationship.personBId,
-    fromOccurrenceId,
-    toOccurrenceId,
-    relationshipType: relationship.associationType,
-    evidenceStatus: relationship.evidenceStatus,
-    confidence: relationship.confidence,
-    sourceDocumentId: relationship.sourceDocumentId,
-    sourceFindingId: relationship.sourceFindingId,
-    style,
-    metadata: relationship.metadata,
-  };
-}
-
 function buildGroups(
   data: FamilyTreeGraphRepositoryData,
   includedPersonIds: Set<EntityId>,
@@ -940,7 +895,6 @@ function validationIssues(data: FamilyTreeGraphRepositoryData): FamilyTreeIssueD
   return validateFamilyGraph({
     parentChildRelationships: data.parentChildRelationships,
     partnerRelationships: data.partnerRelationships,
-    associationRelationships: data.associationRelationships,
   }).map(mapGraphIssue);
 }
 
@@ -1240,7 +1194,6 @@ function countHiddenDisprovenEdges(
   return [
     ...data.parentChildRelationships,
     ...data.partnerRelationships,
-    ...data.associationRelationships,
   ].filter((relationship) => relationship.evidenceStatus === "disproven").length;
 }
 

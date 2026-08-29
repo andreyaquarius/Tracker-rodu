@@ -1,5 +1,4 @@
 import type {
-  AssociationRelationship,
   EvidenceStatus,
   FamilyGroup,
   FamilyGroupMember,
@@ -89,7 +88,6 @@ export interface FamilyTreeGraphRepositoryData {
   partnerRelationships: PartnerRelationship[];
   parentSets: ParentSet[];
   parentChildRelationships: ParentChildRelationship[];
-  associationRelationships: AssociationRelationship[];
   layoutPositions: TreeLayoutPosition[];
   researchIssues: FamilyTreeResearchIssueRecord[];
   personNames: FamilyTreePersonName[];
@@ -243,26 +241,6 @@ type ParentChildRelationshipRow = {
   updated_at: string;
 };
 
-type AssociationRelationshipRow = {
-  id: string;
-  project_id: string;
-  tree_id: string;
-  person_a_id: string;
-  person_b_id: string;
-  association_type: string;
-  person_a_role_label: string;
-  person_b_role_label: string;
-  evidence_status: string;
-  confidence: number;
-  privacy_status: string;
-  source_document_id: string | null;
-  source_finding_id: string | null;
-  notes: string;
-  metadata: unknown;
-  created_at: string;
-  updated_at: string;
-};
-
 type TreeLayoutPositionRow = {
   id: string;
   project_id: string;
@@ -360,8 +338,6 @@ const PARENT_SET_SELECT =
   "id, project_id, tree_id, child_id, family_group_id, set_type, is_preferred_for_display, is_default_for_pedigree, display_order, notes, metadata, created_at, updated_at";
 const PARENT_CHILD_RELATIONSHIP_SELECT =
   "id, project_id, tree_id, parent_id, child_id, parent_set_id, family_group_id, relationship_type, parent_role_label, start_date, end_date, evidence_status, confidence, is_primary_for_display, is_bloodline, is_legal, is_social, privacy_status, source_document_id, source_finding_id, notes, metadata, created_at, updated_at";
-const ASSOCIATION_RELATIONSHIP_SELECT =
-  "id, project_id, tree_id, person_a_id, person_b_id, association_type, person_a_role_label, person_b_role_label, evidence_status, confidence, privacy_status, source_document_id, source_finding_id, notes, metadata, created_at, updated_at";
 const TREE_LAYOUT_POSITION_SELECT =
   "id, project_id, tree_id, view_key, person_id, occurrence_key, x, y, is_collapsed, metadata, updated_at";
 const RESEARCH_ISSUE_SELECT =
@@ -415,7 +391,6 @@ export async function readFamilyTreeGraphData(query: {
     partnerRelationshipRows,
     parentSetRows,
     parentChildRelationshipRows,
-    associationRelationshipRows,
     layoutPositionRows,
     researchIssueRows,
   ] = await Promise.all([
@@ -465,13 +440,6 @@ export async function readFamilyTreeGraphData(query: {
         .eq("project_id", query.projectId)
         .eq("tree_id", treeId),
     ),
-    selectAllRows<AssociationRelationshipRow>(
-      client
-        .from("association_relationships")
-        .select(ASSOCIATION_RELATIONSHIP_SELECT)
-        .eq("project_id", query.projectId)
-        .eq("tree_id", treeId),
-    ),
     selectAllRows<TreeLayoutPositionRow>(
       client
         .from("tree_layout_positions")
@@ -500,8 +468,6 @@ export async function readFamilyTreeGraphData(query: {
   const parentSets = parentSetRows.map(parentSetFromRow);
   const parentChildRelationships = parentChildRelationshipRows
     .map(parentChildRelationshipFromRow);
-  const associationRelationships = associationRelationshipRows
-    .map(associationRelationshipFromRow);
   const layoutPositions = layoutPositionRows.map(layoutPositionFromRow);
   const researchIssues = researchIssueRows.map(researchIssueFromRow);
 
@@ -513,7 +479,6 @@ export async function readFamilyTreeGraphData(query: {
     partnerRelationships,
     parentSets,
     parentChildRelationships,
-    associationRelationships,
     layoutPositions,
     researchIssues,
   });
@@ -534,7 +499,6 @@ export async function readFamilyTreeGraphData(query: {
     partnerRelationships,
     parentSets,
     parentChildRelationships,
-    associationRelationships,
     layoutPositions,
     researchIssues,
     personNames,
@@ -552,7 +516,6 @@ function emptyRepositoryData(): FamilyTreeGraphRepositoryData {
     partnerRelationships: [],
     parentSets: [],
     parentChildRelationships: [],
-    associationRelationships: [],
     layoutPositions: [],
     researchIssues: [],
     personNames: [],
@@ -662,7 +625,7 @@ function isMissingFamilyTreeTableError(error: unknown): boolean {
   return [
     "family_trees", "family_tree_persons", "family_groups", "family_group_members",
     "partner_relationships", "parent_sets", "parent_child_relationships",
-    "association_relationships", "tree_layout_positions", "family_tree_research_issues",
+    "tree_layout_positions", "family_tree_research_issues",
     "person_names", "person_timeline_events",
   ].some((tableName) => text.includes(tableName));
 }
@@ -675,7 +638,6 @@ function collectPersonIds(input: {
   partnerRelationships: PartnerRelationship[];
   parentSets: ParentSet[];
   parentChildRelationships: ParentChildRelationship[];
-  associationRelationships: AssociationRelationship[];
   layoutPositions: TreeLayoutPosition[];
   researchIssues: FamilyTreeResearchIssueRecord[];
 }): EntityId[] {
@@ -695,10 +657,6 @@ function collectPersonIds(input: {
   input.parentChildRelationships.forEach((row) => {
     ids.add(row.parentId);
     ids.add(row.childId);
-  });
-  input.associationRelationships.forEach((row) => {
-    ids.add(row.personAId);
-    ids.add(row.personBId);
   });
   input.layoutPositions.forEach((row) => ids.add(row.personId));
   input.researchIssues.forEach((row) => {
@@ -892,28 +850,6 @@ function parentChildRelationshipFromRow(row: ParentChildRelationshipRow): Parent
     isBloodline: row.is_bloodline,
     isLegal: row.is_legal,
     isSocial: row.is_social,
-    privacyStatus: asPrivacyStatus(row.privacy_status),
-    sourceDocumentId: row.source_document_id,
-    sourceFindingId: row.source_finding_id,
-    notes: row.notes,
-    metadata: asRecord(row.metadata),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function associationRelationshipFromRow(row: AssociationRelationshipRow): AssociationRelationship {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    treeId: row.tree_id,
-    personAId: row.person_a_id,
-    personBId: row.person_b_id,
-    associationType: row.association_type as AssociationRelationship["associationType"],
-    personARoleLabel: row.person_a_role_label,
-    personBRoleLabel: row.person_b_role_label,
-    evidenceStatus: asEvidenceStatus(row.evidence_status),
-    confidence: row.confidence,
     privacyStatus: asPrivacyStatus(row.privacy_status),
     sourceDocumentId: row.source_document_id,
     sourceFindingId: row.source_finding_id,

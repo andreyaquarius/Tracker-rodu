@@ -23,6 +23,7 @@ import type {
 } from "../../types";
 import { CustomFieldsView } from "../../components/CustomFields";
 import { normalizeCustomFieldValues } from "../../utils/customFields";
+import { findingLinksPerson } from "../../utils/findingParticipantLinks";
 import {
   buildPersonTimeline,
   calculatePersonProfileCompleteness,
@@ -282,7 +283,7 @@ export function PersonProfileV2({
   );
   const linkedFindings = useMemo(
     () => findings.filter((finding) => (
-      finding.personIds.includes(person.id) || personNameFindingIds.has(finding.id)
+      findingLinksPerson(finding, person.id) || personNameFindingIds.has(finding.id)
     )),
     [findings, person.id, personNameFindingIds],
   );

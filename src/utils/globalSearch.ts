@@ -15,6 +15,7 @@ import type {
   TaskRecord,
   YearMatrixRecord,
 } from "../types";
+import { findingLinkedPersonIds } from "./findingParticipantLinks";
 import type { PageKey } from "../components/Sidebar";
 import { primaryParticipantName } from "./findingParticipants";
 import { customRecordSearchText, customRecordTitle } from "./customSections";
@@ -393,9 +394,11 @@ function relationText(context: SearchBuildContext, entity: AppEntity): string {
   const findingIds = Array.isArray(record.findingIds)
     ? record.findingIds.filter((value): value is string => typeof value === "string" && Boolean(value))
     : [];
-  const personIds = Array.isArray(record.personIds)
-    ? record.personIds.filter((value): value is string => typeof value === "string" && Boolean(value))
-    : [];
+  const personIds = Array.isArray(record.participants)
+    ? findingLinkedPersonIds(entity as Finding)
+    : Array.isArray(record.personIds)
+      ? record.personIds.filter((value): value is string => typeof value === "string" && Boolean(value))
+      : [];
   if (!ids.length && !findingIds.length && !personIds.length) return "";
 
   const related: string[] = [];

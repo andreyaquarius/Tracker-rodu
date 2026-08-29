@@ -19,6 +19,7 @@ import {
   taskReminderValidationError,
 } from "./taskReminders";
 import { PERSON_STATUSES } from "./personStatus.ts";
+import { parseFindingParticipantTableCell } from "./findingParticipantTableCell";
 
 export interface ImportTableRow {
   sourceRowNumber: number;
@@ -452,8 +453,15 @@ function buildRecordFromRow({
   }
 
   if (collection === "findings") {
+    const validPersonIds = new Set(db.persons.map((person) => person.id));
     const participants = participantInputs
-      .map(parseParticipantCell)
+      .map((value) => parseParticipantCell(
+        value,
+        validPersonIds,
+        (personId) => warnings.push(
+          `Рядок ${row.sourceRowNumber}: картку особи «${personId}» для учасника не знайдено в цьому проєкті; текст імпортовано без прив’язки.`,
+        ),
+      ))
       .filter((participant): participant is FindingParticipant => Boolean(participant));
     const findingType = String(record.findingType ?? "");
     if (participants.length) record.participants = sortFindingParticipants(participants, findingType);
@@ -538,9 +546,16 @@ function coerceFieldValue(
   if (field.type === "documents") return resolveMany(value, db.documents, documentLabel);
   if (field.type === "findings") return resolveMany(value, db.findings, findingLabel);
   if (field.type === "participants") {
+    const validPersonIds = new Set(db.persons.map((person) => person.id));
     return value
       .split(/\n+/)
-      .map(parseParticipantCell)
+      .map((entry) => parseParticipantCell(
+        entry,
+        validPersonIds,
+        (personId) => warnings.push(
+          `Рядок ${rowNumber}: картку особи «${personId}» для учасника не знайдено в цьому проєкті; прив’язку пропущено.`,
+        ),
+      ))
       .filter((participant): participant is FindingParticipant => Boolean(participant));
   }
   return value;
@@ -599,20 +614,14 @@ function resolveMany<T extends { id: string }>(
     .filter(Boolean);
 }
 
-function parseParticipantCell(value: string | undefined): FindingParticipant | null {
-  const text = String(value ?? "").trim();
-  if (!text) return null;
-  const parts = text.split(/\n|:/).map((part) => part.trim()).filter(Boolean);
-  if (!parts.length) return null;
-  if (parts.length === 1) {
-    return { id: createId(), role: "основна особа", name: parts[0], notes: "" };
-  }
-  return {
-    id: createId(),
-    role: parts[0] || "основна особа",
-    name: parts[1] || parts[0],
-    notes: parts.slice(2).join("; "),
-  };
+function parseParticipantCell(
+  value: string | undefined,
+  validPersonIds?: ReadonlySet<string>,
+  onRejectedPersonId?: (personId: string) => void,
+): FindingParticipant | null {
+  const parsed = parseFindingParticipantTableCell(value, createId(), validPersonIds);
+  if (parsed.rejectedPersonId) onRejectedPersonId?.(parsed.rejectedPersonId);
+  return parsed.participant;
 }
 
 function participantColumnIndex(label: string): number | null {

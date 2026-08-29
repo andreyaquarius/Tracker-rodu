@@ -20,6 +20,10 @@ import { Modal } from "../components/Modal";
 import { PersonFormModal } from "../components/PersonFormModal";
 import { ScanAttachmentsView } from "../components/ScanAttachments";
 import { createId } from "../utils/id";
+import {
+  findingLinkedPersonIds,
+  findingLinksPerson,
+} from "../utils/findingParticipantLinks";
 import { formatDateForDisplay, nowIso } from "../utils/dateHelpers";
 import type { PageKey } from "../components/Sidebar";
 import { deleteScanFile, getScanPreviewSource } from "../services/scanStorage";
@@ -331,7 +335,7 @@ export function PersonsPage({
         (!surname || surnames.includes(surname))
       )).map(({ person }) => person);
   }, [genderFilter, persons, placeFilter, researchFilter, search, searchablePersons, statusFilter, surnameFilter]);
-  const findingCounts = useMemo(() => linkedCountByPerson(findings), [findings]);
+  const findingCounts = useMemo(() => linkedFindingCountByPerson(findings), [findings]);
   const taskCounts = useMemo(() => linkedCountByPerson(tasks), [tasks]);
   const hypothesisCounts = useMemo(() => linkedCountByPerson(hypotheses), [hypotheses]);
   const paginationResetKey = [
@@ -636,7 +640,7 @@ export function PersonCardModal({
     records: PersonLinkedRecords;
   } | null>(null);
   const localLinkedRecords = useMemo<PersonLinkedRecords>(() => ({
-    findings: findings.filter((item) => item.personIds?.includes(person.id)),
+    findings: findings.filter((item) => findingLinksPerson(item, person.id)),
     tasks: tasks.filter((item) => item.personIds?.includes(person.id)),
     hypotheses: hypotheses.filter((item) => item.personIds?.includes(person.id)),
     archiveRequests: archiveRequests.filter((item) => item.personIds?.includes(person.id)),
@@ -1528,6 +1532,16 @@ function linkedCountByPerson(records: Array<{ personIds?: string[] }>): Map<stri
   const counts = new Map<string, number>();
   for (const record of records) {
     for (const personId of new Set(record.personIds ?? [])) {
+      counts.set(personId, (counts.get(personId) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function linkedFindingCountByPerson(findings: readonly Finding[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const finding of findings) {
+    for (const personId of findingLinkedPersonIds(finding)) {
       counts.set(personId, (counts.get(personId) ?? 0) + 1);
     }
   }

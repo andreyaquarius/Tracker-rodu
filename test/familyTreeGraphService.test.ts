@@ -243,7 +243,6 @@ function data(overrides: Partial<FamilyTreeGraphRepositoryData> = {}): FamilyTre
     partnerRelationships: [],
     parentSets: [],
     parentChildRelationships: [],
-    associationRelationships: [],
     layoutPositions: [],
     researchIssues: [],
     personNames: profiles.map((item) => name(item.id, item.fullName)),
@@ -257,6 +256,26 @@ test("available persons include project people outside the currently rendered gr
 
   assert.equal(graph.nodes.some((node) => node.personId === "isolated"), false);
   assert.equal(graph.availablePersons.some((node) => node.personId === "isolated"), true);
+});
+
+test("classic graph builder ignores association data injected by a legacy caller", () => {
+  const legacyData = {
+    ...data(),
+    associationRelationships: [{
+      id: "legacy-context-edge",
+      personAId: "root",
+      personBId: "isolated",
+      associationType: "witness",
+      evidenceStatus: "proven",
+      confidence: 100,
+    }],
+  } as FamilyTreeGraphRepositoryData & { associationRelationships: unknown[] };
+
+  const graph = buildFamilyTreeGraphDto(query(), legacyData);
+
+  assert.equal(graph.edges.some((edge) => edge.kind === "association"), false);
+  assert.equal(graph.nodes.some((node) => node.personId === "isolated"), false);
+  assert.equal(graph.stats.edges, 0);
 });
 
 test("does not warn when the owner views private living people", () => {

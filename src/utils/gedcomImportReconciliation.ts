@@ -15,6 +15,7 @@ import {
   parseGedcomMetadata,
 } from "./gedcomMetadata.ts";
 import { extractFindingSourceUrl, stripFindingSourceUrls } from "./findingSourceUrl.ts";
+import { findingLinkedPersonIds } from "./findingParticipantLinks.ts";
 
 export interface GedcomImportReconciliationPayload {
   people: Person[];
@@ -160,6 +161,12 @@ function remapFinding(
     ...finding,
     documentId,
     personIds: finding.personIds.map((id) => personIds.get(id) ?? id),
+    participants: finding.participants.map((participant) => ({
+      ...participant,
+      personId: participant.personId
+        ? personIds.get(participant.personId) ?? participant.personId
+        : undefined,
+    })),
     fragmentSelection: finding.fragmentSelection
       ? {
           ...finding.fragmentSelection,
@@ -230,7 +237,7 @@ function findingIdentityKeys(finding: Finding, includeLegacy = true): string[] {
     finding.archive,
     finding.fund,
   );
-  const people = [...finding.personIds].sort();
+  const people = findingLinkedPersonIds(finding).sort();
   let body: string;
 
   if (citation) {

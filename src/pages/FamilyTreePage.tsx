@@ -288,7 +288,6 @@ export function LegacyFamilyTreePage({
       rootPersonId: toolbarState.rootPersonId || undefined,
       mode: "family",
       unlimitedDepth: true,
-      includeAssociations: true,
       includeDisproven: true,
       includePrivateLiving: true,
       problemsMode: true,
@@ -1717,8 +1716,10 @@ function normalizeSearchText(value: string): string {
 }
 
 function edgeAllowed(edge: FamilyTreeEdgeDto, state: FamilyTreeToolbarState): boolean {
+  // The classic pedigree renderer is intentionally limited to family-role
+  // relationships. Context/social associations belong to their own views.
+  if (edge.kind === "association") return false;
   if (state.relationshipScope === "direct" && edge.kind !== "parent_child") return false;
-  if (state.relationshipScope === "family" && edge.kind === "association") return false;
   if (!state.includeDisputed && (edge.evidenceStatus === "disputed" || edge.evidenceStatus === "unknown")) {
     return false;
   }

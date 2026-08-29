@@ -10,6 +10,11 @@ import { getSupabaseClient } from "./supabaseAuth";
 import { FINDING_GEO_META_KEY, normalizeGeo, stripInternalGeoFields } from "../utils/geo";
 import { sortFindingParticipants } from "../utils/findingParticipants";
 import {
+  findingParticipantFromStorage,
+  findingParticipantPersonIdForStorage,
+  findingStandalonePersonIds,
+} from "../utils/findingParticipantLinks";
+import {
   discardOptionalProjectCache,
   saveOptionalProjectCache,
 } from "../utils/projectCache";
@@ -268,7 +273,7 @@ function findingToRow(
     custom_fields: {
       ...stripInternalGeoFields(finding.customFields ?? {}),
       [FINDING_META_KEY]: {
-        personIds: finding.personIds.filter((id) => personIds.has(id)),
+        personIds: findingStandalonePersonIds(finding).filter((id) => personIds.has(id)),
         scans: finding.scans ?? [],
         fragmentSelection: finding.fragmentSelection ?? null,
         [FINDING_GEO_META_KEY]: finding.geo ?? null,
@@ -283,12 +288,13 @@ function participantToRow(
   projectId: string,
   findingId: string,
   participant: FindingParticipant,
+  validPersonIds?: ReadonlySet<string>,
 ) {
   return {
     id: participant.id,
     project_id: projectId,
     finding_id: findingId,
-    person_id: null,
+    person_id: findingParticipantPersonIdForStorage(participant, validPersonIds),
     name: participant.name,
     role: participant.role,
     notes: participant.notes,
@@ -341,12 +347,7 @@ export async function listProjectWorkRecords(projectId: string): Promise<{
   }
   const participantMap = new Map<string, FindingParticipant[]>();
   for (const row of participantRows) {
-    const participant: FindingParticipant = {
-      id: row.id,
-      name: row.name,
-      role: row.role,
-      notes: row.notes,
-    };
+    const participant = findingParticipantFromStorage(row);
     participantMap.set(row.finding_id, [
       ...(participantMap.get(row.finding_id) ?? []),
       participant,
@@ -368,10 +369,15 @@ export async function listPersonWorkRecords(
   personId: string,
 ): Promise<{ tasks: TaskRecord[]; findings: Finding[] }> {
   const client = getSupabaseClient();
-  const [taskLinksResult, findingsResult] = await Promise.all([
+  const [taskLinksResult, participantLinksResult, findingsResult] = await Promise.all([
     client
       .from("task_persons")
       .select("task_id")
+      .eq("project_id", projectId)
+      .eq("person_id", personId),
+    client
+      .from("finding_participants")
+      .select("finding_id")
       .eq("project_id", projectId)
       .eq("person_id", personId),
     client
@@ -385,12 +391,31 @@ export async function listPersonWorkRecords(
       .order("id", { ascending: true }),
   ]);
   if (taskLinksResult.error) throw taskLinksResult.error;
+  if (participantLinksResult.error) throw participantLinksResult.error;
   if (findingsResult.error) throw findingsResult.error;
 
   const taskIds = [...new Set(
     (taskLinksResult.data as Array<{ task_id: string }>).map((row) => row.task_id),
   )];
-  const findingRows = findingsResult.data as FindingRow[];
+  const participantFindingIds = [...new Set(
+    (participantLinksResult.data as Array<{ finding_id: string }>).map((row) => row.finding_id),
+  )];
+  const participantFindingsResult = participantFindingIds.length
+    ? await client
+        .from("findings")
+        .select(FINDING_SELECT)
+        .eq("project_id", projectId)
+        .in("id", participantFindingIds)
+    : { data: [] as FindingRow[], error: null };
+  if (participantFindingsResult.error) throw participantFindingsResult.error;
+  const findingRows = [...new Map(
+    [
+      ...(findingsResult.data as FindingRow[]),
+      ...(participantFindingsResult.data as FindingRow[]),
+    ].map((row) => [row.id, row]),
+  ).values()].sort((left, right) =>
+    right.updated_at.localeCompare(left.updated_at) || left.id.localeCompare(right.id)
+  );
   const findingIds = findingRows.map((row) => row.id);
   const [tasksResult, allTaskLinksResult, participantsResult] = await Promise.all([
     taskIds.length
@@ -433,7 +458,7 @@ export async function listPersonWorkRecords(
   for (const row of participantsResult.data as FindingParticipantRow[]) {
     participantsByFinding.set(row.finding_id, [
       ...(participantsByFinding.get(row.finding_id) ?? []),
-      { id: row.id, name: row.name, role: row.role, notes: row.notes },
+      findingParticipantFromStorage(row),
     ]);
   }
 
@@ -497,10 +522,7 @@ export async function getProjectFinding(
   if (participantResult.error) throw participantResult.error;
   if (!findingResult.data) return null;
   const participants = (participantResult.data as FindingParticipantRow[]).map((row) => ({
-    id: row.id,
-    name: row.name,
-    role: row.role,
-    notes: row.notes,
+    ...findingParticipantFromStorage(row),
   }));
   return findingFromRow(findingResult.data as FindingRow, participants);
 }
@@ -586,8 +608,26 @@ async function replaceTaskPersons(
 async function replaceFindingParticipants(
   projectId: string,
   finding: Finding,
-): Promise<void> {
+  candidatePersonIds: ReadonlySet<string>,
+): Promise<ReadonlySet<string>> {
   const client = getSupabaseClient();
+  const requestedPersonIds = [...new Set(
+    finding.participants
+      .map((participant) => findingParticipantPersonIdForStorage(participant, candidatePersonIds))
+      .filter((personId): personId is string => Boolean(personId)),
+  )];
+  const validPersonIds = new Set<string>();
+  if (requestedPersonIds.length) {
+    const personResult = await client
+      .from("persons")
+      .select("id")
+      .eq("project_id", projectId)
+      .in("id", requestedPersonIds);
+    if (personResult.error) throw personResult.error;
+    for (const row of personResult.data as Array<{ id: string }>) {
+      validPersonIds.add(row.id);
+    }
+  }
   const existing = await client
     .from("finding_participants")
     .select("id")
@@ -608,16 +648,17 @@ async function replaceFindingParticipants(
     if (deleteError) throw deleteError;
   }
 
-  if (!finding.participants.length) return;
+  if (!finding.participants.length) return validPersonIds;
   const { error } = await client
     .from("finding_participants")
     .upsert(
       finding.participants.map((participant) =>
-        participantToRow(projectId, finding.id, participant),
+        participantToRow(projectId, finding.id, participant, validPersonIds),
       ),
       { onConflict: "id" },
     );
   if (error) throw error;
+  return validPersonIds;
 }
 
 async function replaceImportedTaskPersons(
@@ -668,6 +709,7 @@ async function replaceImportedFindingParticipants(
   client: ReturnType<typeof getSupabaseClient>,
   projectId: string,
   findings: Finding[],
+  validPersonIds: ReadonlySet<string>,
   options: ImportPhaseProgressOptions,
 ): Promise<void> {
   const findingIds = findings.map((finding) => finding.id);
@@ -689,7 +731,9 @@ async function replaceImportedFindingParticipants(
   });
 
   const rows = findings.flatMap((finding) =>
-    finding.participants.map((participant) => participantToRow(projectId, finding.id, participant)),
+    finding.participants.map((participant) =>
+      participantToRow(projectId, finding.id, participant, validPersonIds)
+    ),
   );
   await runImportBatches(chunkImportRows(rows), async (batch) => {
     const { error } = await client
@@ -744,7 +788,7 @@ export async function importProjectWorkRecords(
     onProgress: withImportPhase("findings", options.onProgress),
   });
   if (findings.length) {
-    await replaceImportedFindingParticipants(client, projectId, findings, options);
+    await replaceImportedFindingParticipants(client, projectId, findings, personIds, options);
   }
 }
 
@@ -792,8 +836,17 @@ export async function saveProjectFinding(
     .select(FINDING_SELECT)
     .single();
   if (error) throw error;
-  await replaceFindingParticipants(projectId, finding);
-  return findingFromRow(data as FindingRow, finding.participants);
+  const validParticipantPersonIds = await replaceFindingParticipants(projectId, finding, personIds);
+  return findingFromRow(
+    data as FindingRow,
+    finding.participants.map((participant) => ({
+      ...participant,
+      personId: findingParticipantPersonIdForStorage(
+        participant,
+        validParticipantPersonIds,
+      ) ?? undefined,
+    })),
+  );
 }
 
 export async function deleteProjectFinding(

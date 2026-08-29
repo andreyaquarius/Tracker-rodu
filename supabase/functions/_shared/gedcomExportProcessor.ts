@@ -591,6 +591,7 @@ function mapFinding(row: FindingRow, participantRows: FindingParticipantRow[]): 
     personIds,
     participants: participantRows.map((participant) => ({
       id: participant.id,
+      personId: participant.person_id ?? undefined,
       name: participant.name,
       role: participant.role,
       notes: participant.notes,

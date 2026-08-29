@@ -690,6 +690,21 @@ function baseUpdatedAt(entity: object): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function withoutFindingPersonLinks(
+  finding: Finding,
+  removedPersonIds: ReadonlySet<string>,
+): Finding {
+  return {
+    ...finding,
+    personIds: finding.personIds.filter((personId) => !removedPersonIds.has(personId)),
+    participants: finding.participants.map((participant) =>
+      participant.personId && removedPersonIds.has(participant.personId)
+        ? { ...participant, personId: undefined }
+        : participant
+    ),
+  };
+}
+
 const GEDCOM_IMPORT_PHASE_RANGES: Record<
   ImportPhaseProgress["phase"],
   { step: string; start: number; end: number }
@@ -3661,7 +3676,11 @@ export default function App() {
         finding,
         new Set(projectResearches.map((research) => research.id)),
         new Set(projectDocuments.map((document) => document.id)),
-        new Set([...projectPersons.map((person) => person.id), ...finding.personIds]),
+        new Set([
+          ...projectPersons.map((person) => person.id),
+          ...finding.personIds,
+          ...finding.participants.flatMap((participant) => participant.personId ? [participant.personId] : []),
+        ]),
       ))
       .then(async (saved) => {
         if (externalPdfViewerV2Enabled && documentReferenceDraft) {
@@ -4874,10 +4893,7 @@ export default function App() {
     }));
     const nextFindings = projectFindings
       .filter((finding) => !removedFindingIds.has(finding.id))
-      .map((finding) => ({
-        ...finding,
-        personIds: finding.personIds.filter((personId) => !removedIds.has(personId)),
-      }));
+      .map((finding) => withoutFindingPersonLinks(finding, removedIds));
     const nextHypotheses = projectHypotheses.map((hypothesis) => ({
       ...hypothesis,
       personIds: hypothesis.personIds.filter((personId) => !removedIds.has(personId)),
@@ -4976,10 +4992,9 @@ export default function App() {
           ...task,
           personIds: task.personIds.filter((personId) => !removedIds.has(personId)),
         })),
-        findings: current.findings.map((finding) => ({
-          ...finding,
-          personIds: finding.personIds.filter((personId) => !removedIds.has(personId)),
-        })),
+        findings: current.findings.map((finding) =>
+          withoutFindingPersonLinks(finding, removedIds)
+        ),
         hypotheses: current.hypotheses.map((hypothesis) => ({
           ...hypothesis,
           personIds: hypothesis.personIds.filter((personId) => !removedIds.has(personId)),
@@ -5067,10 +5082,7 @@ export default function App() {
         )),
         findings: current.findings
           .filter((finding) => !removedFindingIds.has(finding.id))
-          .map((finding) => ({
-            ...finding,
-            personIds: finding.personIds.filter((personId) => !removedPersonIds.has(personId)),
-          })),
+          .map((finding) => withoutFindingPersonLinks(finding, removedPersonIds)),
         tasks: current.tasks.map((task) => ({
           ...task,
           personIds: task.personIds.filter((personId) => !removedPersonIds.has(personId)),

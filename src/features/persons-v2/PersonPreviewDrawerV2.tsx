@@ -27,6 +27,7 @@ import {
   personAvatarImageStyle,
   primaryPersonPhoto,
 } from "../../utils/personPhotos.ts";
+import { findingLinksPerson } from "../../utils/findingParticipantLinks";
 
 export interface PersonPreviewDrawerV2Props {
   person: Person | null;
@@ -172,7 +173,7 @@ export function PersonPreviewDrawerV2({
     const relatedPerson = personsById.get(relatedId);
     return relatedPerson ? [{ relation, person: relatedPerson }] : [];
   });
-  const linkedFindings = findings.filter((finding) => finding.personIds.includes(person.id));
+  const linkedFindings = findings.filter((finding) => findingLinksPerson(finding, person.id));
   const linkedTasks = tasks.filter((task) => task.personIds.includes(person.id));
   const linkedHypotheses = hypotheses.filter((hypothesis) => hypothesis.personIds.includes(person.id));
   const linkedArchiveRequests = archiveRequests.filter((request) => request.personIds.includes(person.id));

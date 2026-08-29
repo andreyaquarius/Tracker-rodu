@@ -80,6 +80,7 @@ test("finding draft includes an explicit participant and the generic dispatcher 
     (direct.participants as Array<Record<string, unknown>>)[0],
     {
       id: (direct.participants as Array<{ id: string }>)[0].id,
+      personId: "person-1",
       role: "Згадана особа",
       name: "Каленський Андрій Іванович",
       notes: "Додано з картки особи",

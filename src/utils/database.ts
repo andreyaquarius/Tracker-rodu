@@ -12,16 +12,16 @@ import type {
   FindingParticipant,
   PersonName,
   ScanAttachment,
-} from "../types";
-import { nowIso } from "./dateHelpers";
-import { createId } from "./id";
-import { participantSummary, sortFindingParticipants } from "./findingParticipants";
-import { normalizeCustomFieldValues } from "./customFields";
-import { normalizeGeo, normalizePersonEvents, syncPersonEventsFromFields } from "./geo";
-import { normalizePersonGender } from "./personGender";
-import { normalizePersonRelation } from "./personRelation";
-import { normalizePersonStatus } from "./personStatus";
-import { normalizeTaskReminderFields } from "./taskReminders";
+} from "../types/index.ts";
+import { nowIso } from "./dateHelpers.ts";
+import { createId } from "./id.ts";
+import { participantSummary, sortFindingParticipants } from "./findingParticipants.ts";
+import { normalizeCustomFieldValues } from "./customFields.ts";
+import { normalizeGeo, normalizePersonEvents, syncPersonEventsFromFields } from "./geo.ts";
+import { normalizePersonGender } from "./personGender.ts";
+import { normalizePersonRelation } from "./personRelation.ts";
+import { normalizePersonStatus } from "./personStatus.ts";
+import { normalizeTaskReminderFields } from "./taskReminders.ts";
 import { extractFindingSourceUrl } from "./findingSourceUrl.ts";
 import {
   DEFAULT_PERSON_NAME_DISPLAY_LANGUAGE,
@@ -382,6 +382,9 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
       participants: item.participants.map((participant) => ({
         ...participant,
         id: createId(),
+        personId: participant.personId
+          ? mapReference(persons, participant.personId) || undefined
+          : undefined,
       })),
       scans: mapScans(item.scans),
       fragmentSelection: item.fragmentSelection
@@ -678,6 +681,9 @@ function normalizeParticipants(value: unknown, peopleText: unknown): FindingPart
       .filter((item): item is Partial<FindingParticipant> => Boolean(item && typeof item === "object"))
       .map((item) => ({
         id: typeof item.id === "string" && item.id ? item.id : createId(),
+        personId: typeof item.personId === "string" && item.personId.trim()
+          ? item.personId.trim()
+          : undefined,
         role: typeof item.role === "string" && item.role ? item.role : "Інша особа",
         name: typeof item.name === "string" ? item.name : "",
         notes: typeof item.notes === "string" ? item.notes : "",

@@ -13,10 +13,26 @@ export function graphForDisplayMode(
   mode: FamilyTreeGraphMode,
   options: FamilyTreeVisibilityOptions = {},
 ): FamilyTreeGraphDto {
-  if (!graph.rootPersonId) return { ...graph, mode };
+  // Defense in depth: the classic renderer never consumes context/social
+  // association edges, even if an older cache or external caller injects one.
+  const familyGraph = graphWithoutAssociationEdges(graph);
+  if (!familyGraph.rootPersonId) return { ...familyGraph, mode };
   const expandedPersonIds = new Set(options.expandedPersonIds ?? []);
-  const includedPersonIds = visiblePersonIdsForMode(graph, mode, { expandedPersonIds });
-  return graphWithPeople(graph, includedPersonIds, mode, expandedPersonIds);
+  const includedPersonIds = visiblePersonIdsForMode(familyGraph, mode, { expandedPersonIds });
+  return graphWithPeople(familyGraph, includedPersonIds, mode, expandedPersonIds);
+}
+
+function graphWithoutAssociationEdges(graph: FamilyTreeGraphDto): FamilyTreeGraphDto {
+  const edges = graph.edges.filter((edge) => edge.kind !== "association");
+  if (edges.length === graph.edges.length) return graph;
+  return {
+    ...graph,
+    edges,
+    stats: {
+      ...graph.stats,
+      edges: edges.length,
+    },
+  };
 }
 
 export function visiblePersonIdsForMode(

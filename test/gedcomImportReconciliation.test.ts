@@ -108,6 +108,11 @@ test("reuses committed IDs and remaps root, archive map and dependent records on
     finding.personIds.every((id) => result.people.some((person) => person.id === id))
   ), true);
   assert.equal(result.findings.every((finding) =>
+    finding.participants.every((participant) =>
+      !participant.personId || result.people.some((person) => person.id === participant.personId)
+    )
+  ), true);
+  assert.equal(result.findings.every((finding) =>
     !finding.documentId || result.documents.some((document) => document.id === finding.documentId)
   ), true);
 });

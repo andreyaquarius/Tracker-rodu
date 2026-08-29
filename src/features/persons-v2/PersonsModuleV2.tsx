@@ -52,6 +52,11 @@ import {
   primaryPersonPhoto,
 } from "../../utils/personPhotos.ts";
 import {
+  findingLinkedPersonIds,
+  findingLinksAnyPerson,
+  findingLinksPerson,
+} from "../../utils/findingParticipantLinks";
+import {
   type PersonRouteTarget,
   type PersonSaveHandler,
 } from "./contracts";
@@ -746,7 +751,7 @@ export function PersonsModuleV2({
       relations: summary?.relationCount ?? relations.filter((relation) => (
         relation.personId === person.id || relation.relatedPersonId === person.id
       )).length,
-      findings: summary?.findingCount ?? findings.filter((finding) => finding.personIds.includes(person.id)).length,
+      findings: summary?.findingCount ?? findings.filter((finding) => findingLinksPerson(finding, person.id)).length,
       tasks: summary?.taskCount ?? tasks.filter((task) => task.personIds.includes(person.id)).length,
       hypotheses: summary?.hypothesisCount ?? hypotheses.filter((hypothesis) => hypothesis.personIds.includes(person.id)).length,
       archiveRequests: summary?.archiveRequestCount ?? archiveRequests.filter((request) => request.personIds.includes(person.id)).length,
@@ -807,7 +812,7 @@ export function PersonsModuleV2({
       relations: relations.filter((relation) => (
         selectedIds.has(relation.personId) || selectedIds.has(relation.relatedPersonId)
       )).length,
-      findings: findings.filter((finding) => finding.personIds.some((id) => selectedIds.has(id))).length,
+      findings: findings.filter((finding) => findingLinksAnyPerson(finding, selectedIds)).length,
       tasks: tasks.filter((task) => task.personIds.some((id) => selectedIds.has(id))).length,
       hypotheses: hypotheses.filter((hypothesis) => hypothesis.personIds.some((id) => selectedIds.has(id))).length,
       archiveRequests: archiveRequests.filter((request) => request.personIds.some((id) => selectedIds.has(id))).length,
@@ -1122,7 +1127,7 @@ function linkedRecordsFromMemory(
   archiveRequests: readonly ArchiveRequest[],
 ): PersonLinkedRecords {
   return {
-    findings: findings.filter((item) => item.personIds.includes(personId)),
+    findings: findings.filter((item) => findingLinksPerson(item, personId)),
     tasks: tasks.filter((item) => item.personIds.includes(personId)),
     hypotheses: hypotheses.filter((item) => item.personIds.includes(personId)),
     archiveRequests: archiveRequests.filter((item) => item.personIds.includes(personId)),
@@ -1182,7 +1187,7 @@ function buildLocalPersonSummaries(
     hypothesis.documentIds.forEach((id) => addDocument(documents, personId, id));
   }));
   archiveRequests.forEach((request) => request.personIds.forEach((personId) => update(personId, "archiveRequestCount")));
-  findings.forEach((finding) => finding.personIds.forEach((personId) => {
+  findings.forEach((finding) => findingLinkedPersonIds(finding).forEach((personId) => {
     update(personId, "findingCount");
     if (finding.documentId) addDocument(documents, personId, finding.documentId);
   }));

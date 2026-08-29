@@ -16,7 +16,6 @@ export interface FamilyTreeAdminSummary {
     surnames: number;
     partnerRelationships: number;
     parentChildRelationships: number;
-    associationRelationships: number;
     livingPersons: number;
     deceasedPersons: number;
     unknownVitalStatusPersons: number;
@@ -89,7 +88,6 @@ const FAMILY_TREE_SCOPED_DELETE_TABLES = [
   "legacy_person_relation_graph_edges",
   "family_tree_research_issues",
   "tree_layout_positions",
-  "association_relationships",
   "parent_child_relationships",
   "partner_relationships",
   "parent_sets",
@@ -119,7 +117,6 @@ export async function readFamilyTreeAdminSummaries(projectId: EntityId): Promise
     groupsResult,
     partnersResult,
     parentChildrenResult,
-    associationsResult,
     issuesResult,
     mergeHistoryResult,
   ] = await Promise.all([
@@ -144,11 +141,6 @@ export async function readFamilyTreeAdminSummaries(projectId: EntityId): Promise
       .eq("project_id", projectId)
       .in("tree_id", treeIds),
     client
-      .from("association_relationships")
-      .select("id, tree_id")
-      .eq("project_id", projectId)
-      .in("tree_id", treeIds),
-    client
       .from("family_tree_research_issues")
       .select("id, tree_id")
       .eq("project_id", projectId)
@@ -163,7 +155,7 @@ export async function readFamilyTreeAdminSummaries(projectId: EntityId): Promise
       .limit(25),
   ]);
 
-  for (const result of [membersResult, groupsResult, partnersResult, parentChildrenResult, associationsResult, issuesResult, mergeHistoryResult]) {
+  for (const result of [membersResult, groupsResult, partnersResult, parentChildrenResult, issuesResult, mergeHistoryResult]) {
     if (result.error) {
       if (isMissingFamilyTreeTableError(result.error)) return [];
       throw result.error;
@@ -200,7 +192,6 @@ export async function readFamilyTreeAdminSummaries(projectId: EntityId): Promise
         surnames: surnames.length,
         partnerRelationships: countByTree(partnersResult.data, tree.id),
         parentChildRelationships: countByTree(parentChildrenResult.data, tree.id),
-        associationRelationships: countByTree(associationsResult.data, tree.id),
         livingPersons: memberPeople.filter(isLivingAdminPerson).length,
         deceasedPersons: memberPeople.filter(isDeceasedAdminPerson).length,
         unknownVitalStatusPersons: memberPeople.filter(isUnknownVitalStatusAdminPerson).length,

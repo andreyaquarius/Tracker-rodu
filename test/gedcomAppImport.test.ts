@@ -611,6 +611,7 @@ test("keeps MyHeritage numeric citation ROLE as metadata instead of a human part
   }).findings[0];
 
   assert.equal(finding.participants[0].role, "Основна особа");
+  assert.equal(finding.participants[0].personId, finding.personIds[0]);
   assert.match(finding.participants[0].notes, /Зовнішній ідентифікатор ролі: 40001:2036248047:/);
   assert.doesNotMatch(finding.notes, /Роль: 40001/);
 });

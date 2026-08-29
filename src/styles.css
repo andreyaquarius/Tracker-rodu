@@ -4972,9 +4972,10 @@ tbody tr:hover { background: #fbfaf5; }
 .participants-heading p { margin: 4px 0 0; color: #445650; font-size: 11px; }
 .participant-list { display: grid; gap: 10px; }
 .participant-row {
-  display: grid; grid-template-columns: 30px minmax(140px, .8fr) minmax(190px, 1.15fr) minmax(220px, 1.4fr) 36px;
+  display: grid; grid-template-columns: 30px minmax(130px, .7fr) minmax(180px, 1fr) minmax(210px, 1.2fr) minmax(210px, 1.2fr) 36px;
   align-items: end; gap: 9px; padding: 12px; background: white; border: 1px solid #e2e3dd; border-radius: 10px;
 }
+.participant-person-link small { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.35; }
 .participant-number { align-self: center; display: grid; place-items: center; width: 28px; height: 28px; color: var(--green-800); background: var(--green-100); border-radius: 50%; font-size: 10px; font-weight: 800; }
 .participant-remove { align-self: end; }
 .participant-empty { width: 100%; padding: 24px; color: var(--muted); background: white; border: 1px dashed #cbd3cf; border-radius: 9px; font-size: 11px; }
@@ -4984,6 +4985,8 @@ tbody tr:hover { background: #fbfaf5; }
 .participant-details strong { color: #263733; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .participant-details span { color: #263733; font-size: 12px; font-weight: 700; }
 .participant-details small { grid-column: 2; color: var(--muted); line-height: 1.5; }
+.participant-details .participant-person-card { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.participant-details .participant-person-card .related-record-button { padding: 3px 6px; font-size: 11px; }
 .finding-ai-panel {
   margin: 18px 0 0;
   padding: 18px;
@@ -9063,6 +9066,7 @@ tbody tr:hover { background: #fbfaf5; }
   .login-header { align-items: flex-start; margin-bottom: 50px; }
   .login-card { margin: 30px auto; }
   .participant-row { grid-template-columns: 30px 1fr 1fr 36px; }
+  .participant-person-link { grid-column: 2 / 4; }
   .participant-notes { grid-column: 2 / 4; }
 }
 
@@ -9168,6 +9172,7 @@ tbody tr:hover { background: #fbfaf5; }
   .participants-heading { align-items: stretch; flex-direction: column; }
   .participant-row { grid-template-columns: 28px 1fr 36px; }
   .participant-row > label { grid-column: 2; }
+  .participant-person-link { grid-column: 2; }
   .participant-notes { grid-column: 2; }
   .participant-remove { grid-column: 3; grid-row: 1; }
   .participant-details > div { grid-template-columns: 1fr; }

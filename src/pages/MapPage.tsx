@@ -5,6 +5,7 @@ import type { AppDatabase, Finding, GeoPoint, Person, PersonEvent, PersonEventTy
 import type { PageKey } from "../components/Sidebar";
 import { geoMarkerColor } from "../utils/geo";
 import { primaryParticipantName } from "../utils/findingParticipants";
+import { findingLinkedPersonIds } from "../utils/findingParticipantLinks";
 import { formatDateForDisplay } from "../utils/dateHelpers";
 import { personTimelineEventDisplayTitle } from "../features/persons-v2/presentation.ts";
 import { personEventIconSvgMarkup, personEventVisual } from "../utils/personEventVisuals.ts";
@@ -175,6 +176,7 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
   }
   for (const finding of db.findings) {
     if (!hasCoordinates(finding.geo)) continue;
+    const linkedPersonIds = findingLinkedPersonIds(finding);
     const title = findingTitle(finding);
     const subtitle = [finding.findingType, formatDateForDisplay(finding.eventDate)]
       .filter(Boolean).join(" · ") || "Знахідка";
@@ -189,7 +191,7 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
       place,
       settlement,
       researchId: finding.researchId,
-      personIds: finding.personIds,
+      personIds: linkedPersonIds,
       searchText: [
         title,
         subtitle,
@@ -210,7 +212,7 @@ function buildMarkers(db: AppDatabase): TrackerMapMarker[] {
         finding.conclusion,
         finding.notes,
         finding.geo.displayName,
-        finding.personIds.map((id) => peopleIndex.get(id) ?? "").join(" "),
+        linkedPersonIds.map((id) => peopleIndex.get(id) ?? "").join(" "),
       ].join(" ").toLocaleLowerCase("uk"),
       relatedPage: "findings",
       relatedId: finding.id,

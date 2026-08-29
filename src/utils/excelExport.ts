@@ -445,6 +445,7 @@ function findingParticipantColumns(
         participant.role,
         participant.name,
         participant.notes,
+        participant.personId ? `ID картки особи: ${participant.personId}` : "",
       ].filter(Boolean).join("\n");
     },
   }));

@@ -323,6 +323,11 @@ export interface Finding extends BaseEntity {
 
 export interface FindingParticipant {
   id: EntityId;
+  /**
+   * Optional link to the canonical person card. Older findings and names that
+   * have not been reconciled yet intentionally remain text-only.
+   */
+  personId?: EntityId;
   role: string;
   name: string;
   notes: string;

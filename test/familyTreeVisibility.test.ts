@@ -240,6 +240,24 @@ test("descendants display mode keeps descendants and their partners without pull
   assert.equal(personIds.has("grandfather"), false);
 });
 
+test("classic display pipeline drops association edges even from a legacy cached graph", () => {
+  const fixture = graphFixture();
+  const graph: FamilyTreeGraphDto = {
+    ...fixture,
+    rootPersonId: null,
+    edges: [...fixture.edges, association("root", "sibling")],
+    stats: {
+      ...fixture.stats,
+      edges: fixture.edges.length + 1,
+    },
+  };
+
+  const visible = graphForDisplayMode(graph, "family");
+
+  assert.equal(visible.edges.some((edge) => edge.kind === "association"), false);
+  assert.equal(visible.stats.edges, fixture.edges.length);
+});
+
 function visiblePersonIds(graph: FamilyTreeGraphDto): Set<string> {
   return new Set(graph.nodes.map((node) => node.personId));
 }
@@ -493,5 +511,22 @@ function partner(fromPersonId: string, toPersonId: string): FamilyTreeEdgeDto {
     confidence: 100,
     style: { lineStyle: "solid", visibility: "visible" },
     metadata: {},
+  };
+}
+
+function association(fromPersonId: string, toPersonId: string): FamilyTreeEdgeDto {
+  return {
+    id: `association-${fromPersonId}-${toPersonId}`,
+    kind: "association",
+    relationshipId: `association-${fromPersonId}-${toPersonId}`,
+    fromPersonId,
+    toPersonId,
+    fromOccurrenceId: `occ:${fromPersonId}`,
+    toOccurrenceId: `occ:${toPersonId}`,
+    relationshipType: "witness",
+    evidenceStatus: "proven",
+    confidence: 100,
+    style: { lineStyle: "dashed", visibility: "visible" },
+    metadata: { source: "context" },
   };
 }

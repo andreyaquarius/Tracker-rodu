@@ -213,6 +213,10 @@ select is(
   'publication complete accepts the copied public object without 22P02'
 );
 
+-- Browser roles intentionally have no direct table ACLs. Inspect the durable
+-- state as the test owner after exercising the public RPC as authenticated.
+reset role;
+
 select ok(
   exists (
     select 1
@@ -227,6 +231,8 @@ select ok(
   'publication complete stores the public derivative metadata'
 );
 
+set local role authenticated;
+
 select is(
   public.admin_revoke_zagulyaka_attachment_publication_v2(
     '8b200000-0000-4000-8000-000000000001'
@@ -234,6 +240,8 @@ select is(
   'false',
   'publication revoke queues cleanup without 22P02'
 );
+
+reset role;
 
 select ok(
   exists (

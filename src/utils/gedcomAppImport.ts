@@ -44,6 +44,7 @@ import {
 } from "./gedcomMetadata.ts";
 import { deriveGedcomImportSourceKey } from "./gedcomImportReconciliation.ts";
 import { extractFindingSourceUrl, stripFindingSourceUrls } from "./findingSourceUrl.ts";
+import { findingLinkedPersonIds } from "./findingParticipantLinks.ts";
 import { isGedcomPersonPhotoMedia, personPhotosFromGedcomMedia } from "./personPhotos.ts";
 
 export interface GedcomAppImportBuildOptions {
@@ -408,7 +409,7 @@ function uniqueImportedFindings(findings: Finding[]): Finding[] {
     const custom = finding.customFields ?? {};
     const key = JSON.stringify([
       custom.__gedcomCitation ? "citation" : "event",
-      [...(finding.personIds ?? [])].sort(),
+      findingLinkedPersonIds(finding).sort(),
       finding.documentId,
       finding.findingType,
       finding.eventDate,
@@ -748,6 +749,7 @@ function findingFromGedcomCitation(input: {
   const participantRole = humanGedcomCitationRole(input.citation.role);
   const participants: FindingParticipant[] = input.personIds.map((personId, index) => ({
     id: input.idFactory(),
+    personId,
     role: index === 0 ? participantRole || "Основна особа" : "Пов’язана особа",
     name: input.personNames[index] || personId,
     notes: [
@@ -898,6 +900,7 @@ function findingFromGedcomEvent(input: {
   const people = input.peopleNames.filter(Boolean).join("; ");
   const participants: FindingParticipant[] = input.personIds.map((personId, index) => ({
     id: input.idFactory(),
+    personId,
     role: participantRoleFromGedcomEvent(effectiveEventType, index),
     name: input.peopleNames[index] ?? personId,
     notes: `GEDCOM: ${input.sourceXref}`,
