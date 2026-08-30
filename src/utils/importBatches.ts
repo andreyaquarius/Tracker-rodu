@@ -38,7 +38,8 @@ export type ImportPhase =
   | "task-person-insert"
   | "findings"
   | "finding-participant-delete"
-  | "finding-participant-upsert";
+  | "finding-participant-upsert"
+  | "finding-participant-target-link";
 
 export interface ImportPhaseProgress extends ImportBatchProgress {
   phase: ImportPhase;

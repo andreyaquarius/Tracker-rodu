@@ -33,9 +33,13 @@ import { DataTable } from "../components/DataTable";
 import { Modal } from "../components/Modal";
 import type { EntityConfig, FieldConfig } from "./entityConfigs";
 import {
+  autoSocialRelationForParticipantRole,
+  contextTargetParticipantsForRole,
   participantRoles,
+  participantSocialRoleNeedsClarification,
   participantSummary,
   primaryParticipantName,
+  suggestedContextTargetParticipantId,
   sortFindingParticipants,
 } from "../utils/findingParticipants";
 import { findingLinkedPersonIds } from "../utils/findingParticipantLinks";
@@ -2231,9 +2235,6 @@ function relationsFromFindingPeople(
   const genericParents = created.filter((item) => isGenericParentRole(item.participantRole));
   const stepfathers = created.filter((item) => isStepfatherRole(item.participantRole));
   const stepmothers = created.filter((item) => isStepmotherRole(item.participantRole));
-  const godfathers = created.filter((item) => isGodfatherRole(item.participantRole));
-  const godmothers = created.filter((item) => isGodmotherRole(item.participantRole));
-  const midwives = created.filter((item) => isMidwifeRole(item.participantRole));
   const grooms = eventType === "marriage" ? created.filter((item) => isGroomRole(item.participantRole)) : [];
   const brides = eventType === "marriage" ? created.filter((item) => isBrideRole(item.participantRole)) : [];
   const groomFathers = created.filter((item) => isGroomFatherRole(item.participantRole));
@@ -2242,20 +2243,12 @@ function relationsFromFindingPeople(
   const brideMothers = created.filter((item) => isBrideMotherRole(item.participantRole));
   const deceasedPeople = created.filter((item) => isDeceasedRole(item.participantRole));
   const spouseParticipants = created.filter((item) => isSpouseParticipantRole(item.participantRole));
-  const informants = created.filter((item) => isInformantRole(item.participantRole));
   const householdHeads = created.filter((item) => isHouseholdHeadRole(item.participantRole));
   const householdSpouses = created.filter((item) => isHouseholdSpouseRole(item.participantRole));
   const sons = created.filter((item) => isSonRole(item.participantRole));
   const daughters = created.filter((item) => isDaughterRole(item.participantRole));
   const siblings = created.filter((item) => isSiblingRole(item.participantRole));
   const relatives = created.filter((item) => isRelativeRole(item.participantRole));
-  const servants = created.filter((item) => isServantRole(item.participantRole));
-  const guardians = created.filter((item) => isGuardianRole(item.participantRole));
-  const wards = created.filter((item) => isWardRole(item.participantRole));
-  const witnesses = created.filter((item) => isWitnessRole(item.participantRole));
-  const pledgers = created.filter((item) => isPledgerRole(item.participantRole));
-  const priests = created.filter((item) => isPriestRole(item.participantRole));
-  const officials = created.filter((item) => isOfficialRole(item.participantRole));
   const timestamp = nowIso();
   const evidenceText = findingRelationEvidenceText(form);
   const notes = "Створено автоматично зі знахідки після створення пов’язаних осіб.";
@@ -2303,13 +2296,6 @@ function relationsFromFindingPeople(
     }
   };
 
-  const addContextRelations = (mainPeople: CreatedFindingPerson[]) => {
-    addMany(mainPeople, witnesses, "свідок");
-    addMany(mainPeople, pledgers, "поручитель");
-    addMany(mainPeople, priests, (priest) => isExactPriestRole(priest.participantRole) ? "священник" : "духовна особа");
-    addMany(mainPeople, officials, "посадова особа");
-  };
-
   for (const child of children) {
     for (const father of fathers) {
       add(child.person.id, father.person.id, "батько");
@@ -2326,13 +2312,6 @@ function relationsFromFindingPeople(
     for (const stepmother of stepmothers) {
       add(child.person.id, stepmother.person.id, "мачуха");
     }
-    for (const godfather of godfathers) {
-      add(child.person.id, godfather.person.id, "хрещений");
-    }
-    for (const godmother of godmothers) {
-      add(child.person.id, godmother.person.id, "хрещена");
-    }
-    addMany([child], midwives, "повитуха");
   }
 
   if (eventType === "birth" || eventType === "baptism" || eventType === "death" || eventType === "burial") {
@@ -2357,10 +2336,6 @@ function relationsFromFindingPeople(
   }
 
   const marriagePeople = [...grooms, ...brides];
-  if (marriagePeople.length) {
-    addContextRelations(marriagePeople);
-  }
-
   const deathPeople = deceasedPeople.length
     ? deceasedPeople
     : eventType === "death" || eventType === "burial"
@@ -2371,10 +2346,6 @@ function relationsFromFindingPeople(
     addMany([deceased], mothers, "мати");
     addMany([deceased], genericParents, "батько або мати");
     addMany([deceased], spouseParticipants, (spouse) => spouseRelationTypeFromRole(spouse.participantRole));
-    addMany([deceased], informants, "особа, яка повідомила");
-  }
-  if (deathPeople.length) {
-    addContextRelations(deathPeople);
   }
 
   for (const head of householdHeads) {
@@ -2384,13 +2355,6 @@ function relationsFromFindingPeople(
     addMany([head], genericParents, "батько або мати");
     addMany([head], siblings, "брат або сестра");
     addMany([head], relatives, "родич");
-    addMany([head], servants, "наймит або служник");
-    addMany([head], wards, "підопічний");
-    addMany(guardians, [head], "опікун");
-  }
-
-  for (const guardian of guardians) {
-    addMany(wards, [guardian], "опікун");
   }
 
   const genericMainPeople = primaryCreatedPeopleForRelations(created, eventType);
@@ -2401,11 +2365,6 @@ function relationsFromFindingPeople(
     addMany(genericMainPeople, spouseParticipants, (spouse) => spouseRelationTypeFromRole(spouse.participantRole));
     addMany(genericMainPeople, siblings, "брат або сестра");
     addMany(genericMainPeople, relatives, "родич");
-    addContextRelations(genericMainPeople);
-  }
-
-  if (children.length && !marriagePeople.length && !deathPeople.length) {
-    addContextRelations(children);
   }
 
   return additions;
@@ -2851,11 +2810,6 @@ function isGuardianRole(role: string): boolean {
   return roleHasAny(normalizedRole, ["опікун", "піклувальник", "guardian"]);
 }
 
-function isWardRole(role: string): boolean {
-  const normalizedRole = normalizeRole(role);
-  return roleHasAny(normalizedRole, ["підопічний", "підопічна", "ward"]);
-}
-
 function isStepfatherRole(role: string): boolean {
   const normalizedRole = normalizeRole(role);
   return roleHasAny(normalizedRole, ["вітчим", "stepfather"]);
@@ -2878,12 +2832,7 @@ function isPledgerRole(role: string): boolean {
 
 function isPriestRole(role: string): boolean {
   const normalizedRole = normalizeRole(role);
-  return roleHasAny(normalizedRole, ["священ", "духовна особа", "духовний", "ієрей", "дяк", "псалом", "priest", "clergy"]);
-}
-
-function isExactPriestRole(role: string): boolean {
-  const normalizedRole = normalizeRole(role);
-  return roleHasAny(normalizedRole, ["священ", "ієрей", "priest"]);
+  return roleHasAny(normalizedRole, ["священ", "духовна особа", "духовний", "ієрей", "дяк", "псалом", "рабин", "равин", "пастор", "priest", "clergy", "rabbi", "pastor"]);
 }
 
 function isOfficialRole(role: string): boolean {
@@ -2891,13 +2840,29 @@ function isOfficialRole(role: string): boolean {
   return roleHasAny(normalizedRole, ["посадова особа", "укладач", "реєстратор", "суддя", "командир", "представник", "official", "registrar", "judge"]);
 }
 
+function isNeighborRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["сусід", "сусідка", "neighbor"]);
+}
+
+function isHouseholdMemberRole(role: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  return roleHasAny(normalizedRole, ["член господарства", "мешканець господарства", "household member"]);
+}
+
 function isContextOnlyRole(role: string): boolean {
-  return isWitnessRole(role) ||
+  return isGodfatherRole(role) ||
+    isGodmotherRole(role) ||
+    isWitnessRole(role) ||
     isPledgerRole(role) ||
     isPriestRole(role) ||
     isOfficialRole(role) ||
     isMidwifeRole(role) ||
-    isInformantRole(role);
+    isInformantRole(role) ||
+    isServantRole(role) ||
+    isGuardianRole(role) ||
+    isNeighborRole(role) ||
+    isHouseholdMemberRole(role);
 }
 
 function extractGivenNameForPatronymic(rawName: string): string {
@@ -3702,7 +3667,13 @@ function ParticipantsEditor({
   const removeParticipant = (id: string) => {
     const removed = participants.find((participant) => participant.id === id);
     if (removed?.personId) onPersonUnlink(removed.personId);
-    onChange(participants.filter((participant) => participant.id !== id));
+    onChange(
+      participants
+        .filter((participant) => participant.id !== id)
+        .map((participant) => participant.contextTargetParticipantId === id
+          ? { ...participant, contextTargetParticipantId: undefined }
+          : participant),
+    );
   };
   const participantPersonIds = new Set(
     participants.map((participant) => participant.personId).filter(Boolean),
@@ -3722,6 +3693,10 @@ function ParticipantsEditor({
         <div>
           <legend>Учасники запису{required ? " *" : ""}</legend>
           <p>Додайте всіх осіб, згаданих у джерелі, та вкажіть їхню роль.</p>
+          <p>
+            Точні неродинні ролі автоматично з’являться в «Соціальному колі» після
+            збереження, якщо обидва учасники прив’язані до карток осіб.
+          </p>
         </div>
         <button type="button" className="button button-secondary" onClick={addParticipant}>
           + Додати особу
@@ -3733,6 +3708,29 @@ function ParticipantsEditor({
             const availableRoles = participant.role && !roles.includes(participant.role)
               ? [...roles, participant.role]
               : roles;
+            const needsRoleClarification = participantSocialRoleNeedsClarification(
+              participant.role,
+              findingType,
+            );
+            const socialDefinition = needsRoleClarification
+              ? null
+              : autoSocialRelationForParticipantRole(participant.role);
+            const compatibleTargets = socialDefinition
+              ? contextTargetParticipantsForRole(participant, participants, findingType)
+              : [];
+            const inferredTargetId = socialDefinition
+              ? suggestedContextTargetParticipantId(participant, participants, findingType)
+              : undefined;
+            const explicitTargetId = participant.contextTargetParticipantId ?? "";
+            const explicitTargetIsCompatible = compatibleTargets.some(
+              (candidate) => candidate.id === explicitTargetId,
+            );
+            const incompatibleExplicitTarget = Boolean(explicitTargetId && !explicitTargetIsCompatible);
+            const effectiveTargetId = explicitTargetIsCompatible ? explicitTargetId : "";
+            const effectiveTarget = participants.find((candidate) => candidate.id === effectiveTargetId);
+            const socialLinkReady = Boolean(
+              socialDefinition && participant.personId && effectiveTarget?.personId,
+            );
             return (
               <div className="participant-row" key={participant.id}>
                 <span className="participant-number">{index + 1}</span>
@@ -3740,10 +3738,32 @@ function ParticipantsEditor({
                   <span>Роль</span>
                   <select
                     value={participant.role}
-                    onChange={(event) => updateParticipant(participant.id, { role: event.target.value })}
+                    onChange={(event) => {
+                      const role = event.target.value;
+                      const changedParticipant = {
+                        ...participant,
+                        role,
+                        contextTargetParticipantId: undefined,
+                      };
+                      updateParticipant(participant.id, {
+                        role,
+                        contextTargetParticipantId: suggestedContextTargetParticipantId(
+                          changedParticipant,
+                          participants.map((item) => item.id === participant.id
+                            ? changedParticipant
+                            : item),
+                          findingType,
+                        ),
+                      });
+                    }}
                   >
                     {availableRoles.map((role) => <option key={role}>{role}</option>)}
                   </select>
+                  {needsRoleClarification ? (
+                    <small className="participant-role-warning">
+                      Уточніть конкретну роль, щоб зв’язок безпечно з’явився в соціальному колі.
+                    </small>
+                  ) : null}
                 </label>
                 <label>
                   <span>ПІБ або ім’я</span>
@@ -3779,8 +3799,40 @@ function ParticipantsEditor({
                       </option>
                     ))}
                   </select>
-                  <small>Необов’язково. Написання з джерела збережеться окремо.</small>
+                  <small>
+                    {socialDefinition
+                      ? "Картка потрібна для автоматичного зв’язку; написання з джерела збережеться окремо."
+                      : "Необов’язково. Написання з джерела збережеться окремо."}
+                  </small>
                 </label>
+                {socialDefinition ? (
+                  <label className="participant-context-target">
+                    <span>Для кого виконувалась роль</span>
+                    <select
+                      value={effectiveTargetId}
+                      required={compatibleTargets.length > 0 || incompatibleExplicitTarget}
+                      onChange={(event) => updateParticipant(participant.id, {
+                        contextTargetParticipantId: event.target.value || undefined,
+                      })}
+                    >
+                      <option value="">Оберіть конкретного учасника</option>
+                      {compatibleTargets.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {participantContextTargetLabel(candidate)}
+                          </option>
+                        ))}
+                    </select>
+                    <small>
+                      {socialLinkReady
+                        ? "Після збереження зв’язок автоматично з’явиться в соціальному колі."
+                        : incompatibleExplicitTarget
+                          ? "Попередню ціль видалено або вона несумісна з роллю. Оберіть учасника заново."
+                        : inferredTargetId && !participant.contextTargetParticipantId
+                          ? "Знайдено одну можливу ціль. Підтвердьте її вибір і прив’яжіть картки обох осіб."
+                          : "Оберіть учасника та прив’яжіть картки обох осіб."}
+                    </small>
+                  </label>
+                ) : null}
                 <label className="participant-notes">
                   <span>Уточнення</span>
                   <input
@@ -3816,6 +3868,12 @@ function participantPersonOptionLabel(person: Person): string {
     .filter(Boolean)
     .join(", ");
   return lifeDetails ? `${personName(person)} — ${lifeDetails}` : personName(person);
+}
+
+function participantContextTargetLabel(participant: FindingParticipant): string {
+  const identity = participant.name.trim() || "Особа без імені";
+  const cardStatus = participant.personId ? "картка прив’язана" : "без картки особи";
+  return `${identity} — ${participant.role || "роль не вказано"} · ${cardStatus}`;
 }
 
 function searchableValue(value: unknown): string {

@@ -3,6 +3,7 @@ import type { Finding, FindingParticipant } from "../types/index.ts";
 export interface StoredFindingParticipant {
   id: string;
   person_id: string | null;
+  context_target_participant_id?: string | null;
   name: string;
   role: string;
   notes: string;
@@ -15,6 +16,9 @@ export function findingParticipantFromStorage(
   return {
     id: row.id,
     personId: row.person_id ?? undefined,
+    ...(row.context_target_participant_id
+      ? { contextTargetParticipantId: row.context_target_participant_id }
+      : {}),
     name: row.name,
     role: row.role,
     notes: row.notes,

@@ -72,6 +72,17 @@ jobs:
             "test/integration/externalPdfViewerCoreIntegration.test.ts"
           npm run test:e2e
 
+      - name: Verify context graph rollout contracts
+        run: |
+          node --test --test-concurrency=1 \
+            "test/churchRole*.test.ts" \
+            "test/context*.test.ts" \
+            "test/findingAiSocialRoles.test.ts" \
+            "test/findingLegacyRelationIsolation.test.ts" \
+            "test/personContext*.test.ts" \
+            "test/personSocialCircleGraphPresentation.test.ts" \
+            "test/researchGraph*.test.ts"
+
       - name: Verify PDF worker container
         run: docker build --tag tracker-rodu-pdf-worker:test services/pdf-export-worker
 

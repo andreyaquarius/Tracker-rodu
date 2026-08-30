@@ -14,6 +14,10 @@ import {
   normalizeDatabase,
 } from "../src/utils/database.ts";
 import { parseFindingParticipantTableCell } from "../src/utils/findingParticipantTableCell.ts";
+import {
+  resolvedContextTargetParticipantId,
+  suggestedContextTargetParticipantId,
+} from "../src/utils/findingParticipants.ts";
 
 test("legacy text-only participants and canonical person links both hydrate safely", () => {
   assert.deepEqual(
@@ -37,11 +41,12 @@ test("legacy text-only participants and canonical person links both hydrate safe
     findingParticipantFromStorage({
       id: "participant-2",
       person_id: "person-2",
+      context_target_participant_id: "participant-child",
       name: "Петро Іванович",
       role: "Хрещений батько",
       notes: "",
-    }).personId,
-    "person-2",
+    }).contextTargetParticipantId,
+    "participant-child",
   );
 });
 
@@ -97,6 +102,50 @@ test("the finding editor exposes an optional existing-person selector per partic
   assert.match(crudPage, /participant\.id === personSeed\.participantId[\s\S]*?personId: linkedPerson\.id/);
   assert.match(crudPage, /participant\.name\.trim\(\) && !participant\.personId/);
   assert.match(crudPage, /onPersonUnlink\(participant\.personId\)/);
+  assert.match(crudPage, /<span>Для кого виконувалась роль<\/span>/);
+  assert.match(crudPage, /contextTargetParticipantId:\s*event\.target\.value \|\| undefined/);
+  assert.match(crudPage, /suggestedContextTargetParticipantId/);
+  assert.match(crudPage, /Попередню ціль видалено або вона несумісна/u);
+});
+
+test("finding participant storage persists and hydrates an exact social target", () => {
+  const workRecords = readFileSync(
+    new URL("../src/services/projectWorkRecords.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(workRecords, /context_target_participant_id/);
+  assert.match(workRecords, /resolvedContextTargetParticipantId\(participant, participants, findingType\)/);
+  assert.match(workRecords, /FINDING_PARTICIPANT_SELECT/);
+});
+
+test("removing a social target clears it without serializing a different unique target", () => {
+  const participants = [
+    { id: "child-a", role: "Дитина", name: "Марія", notes: "" },
+    { id: "child-b", role: "Дитина", name: "Олена", notes: "" },
+    {
+      id: "godmother",
+      role: "Хрещена мати",
+      name: "Ганна",
+      notes: "",
+      contextTargetParticipantId: "child-a",
+    },
+  ];
+  const afterRemoval = participants
+    .filter((participant) => participant.id !== "child-a")
+    .map((participant) => participant.contextTargetParticipantId === "child-a"
+      ? { ...participant, contextTargetParticipantId: undefined }
+      : participant);
+  const godmother = afterRemoval.find((participant) => participant.id === "godmother");
+  assert.ok(godmother);
+  assert.equal(
+    resolvedContextTargetParticipantId(godmother, afterRemoval, "хрещення") ?? null,
+    null,
+  );
+  assert.equal(
+    suggestedContextTargetParticipantId(godmother, afterRemoval, "хрещення"),
+    "child-b",
+    "The UI may offer child B, but storage must not choose it without confirmation.",
+  );
 });
 
 test("person cards merge legacy finding links with participant person_id links", () => {
@@ -185,13 +234,22 @@ test("project backup import remaps participant person links to cloned person ids
     researchId: "",
     documentId: "",
     personIds: ["person-source"],
-    participants: [{
-      id: "participant-source",
-      personId: "person-source",
-      role: "Свідок",
-      name: "Петро",
-      notes: "",
-    }],
+    participants: [
+      {
+        id: "participant-source",
+        personId: "person-source",
+        role: "Дитина",
+        name: "Петро",
+        notes: "",
+      },
+      {
+        id: "participant-godmother",
+        contextTargetParticipantId: "participant-source",
+        role: "Хрещена мати",
+        name: "Марія",
+        notes: "",
+      },
+    ],
     scans: [],
     customFields: {},
   } as (typeof source.findings)[number]];
@@ -200,6 +258,11 @@ test("project backup import remaps participant person links to cloned person ids
   assert.notEqual(cloned.persons[0].id, "person-source");
   assert.equal(cloned.findings[0].personIds[0], cloned.persons[0].id);
   assert.equal(cloned.findings[0].participants[0].personId, cloned.persons[0].id);
+  assert.notEqual(cloned.findings[0].participants[0].id, "participant-source");
+  assert.equal(
+    cloned.findings[0].participants[1].contextTargetParticipantId,
+    cloned.findings[0].participants[0].id,
+  );
 });
 
 test("database normalization preserves an optional participant person link", () => {
@@ -217,4 +280,39 @@ test("database normalization preserves an optional participant person link", () 
 
   const normalized = normalizeDatabase(source);
   assert.equal(normalized.findings[0].participants[0].personId, "person-source");
+});
+
+test("database normalization removes a dangling or self social target", () => {
+  const source = createEmptyDatabase();
+  source.findings = [{
+    id: "finding-source",
+    participants: [
+      {
+        id: "participant-valid",
+        contextTargetParticipantId: "participant-target",
+        role: "Хрещена мати",
+        name: "Ганна",
+        notes: "",
+      },
+      {
+        id: "participant-target",
+        contextTargetParticipantId: "participant-target",
+        role: "Дитина",
+        name: "Марія",
+        notes: "",
+      },
+      {
+        id: "participant-dangling",
+        contextTargetParticipantId: "missing",
+        role: "Повитуха",
+        name: "Олена",
+        notes: "",
+      },
+    ],
+  } as (typeof source.findings)[number]];
+
+  const participants = normalizeDatabase(source).findings[0].participants;
+  assert.equal(participants[0].contextTargetParticipantId, "participant-target");
+  assert.equal(participants[1].contextTargetParticipantId, undefined);
+  assert.equal(participants[2].contextTargetParticipantId, undefined);
 });

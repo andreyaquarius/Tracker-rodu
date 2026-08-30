@@ -9,7 +9,7 @@ import {
   personPath,
 } from "../src/utils/appRoutes.ts";
 
-test("parses routed person profile, editor and new-person paths", () => {
+test("parses routed person profile, editor, context and new-person paths", () => {
   assert.deepEqual(parseAppRoute("/projects/kalenski/persons/person-1"), {
     kind: "project",
     projectRef: "kalenski",
@@ -24,6 +24,37 @@ test("parses routed person profile, editor and new-person paths", () => {
     personId: "person-1",
     personMode: "edit",
   });
+  assert.deepEqual(parseAppRoute("/projects/kalenski/persons/person-1/context"), {
+    kind: "project",
+    projectRef: "kalenski",
+    page: "persons",
+    personId: "person-1",
+    personMode: "context",
+  });
+  assert.deepEqual(parseAppRoute("/projects/kalenski/persons/person-1/context/documentary"), {
+    kind: "project",
+    projectRef: "kalenski",
+    page: "persons",
+    personId: "person-1",
+    personMode: "context",
+    contextView: "documentary",
+  });
+  assert.deepEqual(parseAppRoute("/projects/kalenski/persons/person-1/context/ritual"), {
+    kind: "project",
+    projectRef: "kalenski",
+    page: "persons",
+    personId: "person-1",
+    personMode: "context",
+    contextView: "ritual",
+  });
+  assert.deepEqual(parseAppRoute("/projects/kalenski/persons/person-1/context/research"), {
+    kind: "project",
+    projectRef: "kalenski",
+    page: "persons",
+    personId: "person-1",
+    personMode: "context",
+    contextView: "research",
+  });
   assert.deepEqual(parseAppRoute("/projects/kalenski/persons/new"), {
     kind: "project",
     projectRef: "kalenski",
@@ -36,6 +67,19 @@ test("builds encoded person paths", () => {
   assert.equal(personPath("Рід Каленських"), "/projects/%D0%A0%D1%96%D0%B4%20%D0%9A%D0%B0%D0%BB%D0%B5%D0%BD%D1%81%D1%8C%D0%BA%D0%B8%D1%85/persons");
   assert.equal(personPath("kalenski", "person/1"), "/projects/kalenski/persons/person%2F1");
   assert.equal(personPath("kalenski", "person/1", "edit"), "/projects/kalenski/persons/person%2F1/edit");
+  assert.equal(personPath("kalenski", "person/1", "context"), "/projects/kalenski/persons/person%2F1/context");
+  assert.equal(
+    personPath("kalenski", "person/1", "context", "documentary"),
+    "/projects/kalenski/persons/person%2F1/context/documentary",
+  );
+  assert.equal(
+    personPath("kalenski", "person/1", "context", "ritual"),
+    "/projects/kalenski/persons/person%2F1/context/ritual",
+  );
+  assert.equal(
+    personPath("kalenski", "person/1", "context", "research"),
+    "/projects/kalenski/persons/person%2F1/context/research",
+  );
   assert.equal(personPath("kalenski", undefined, "new"), "/projects/kalenski/persons/new");
 });
 

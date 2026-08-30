@@ -362,40 +362,48 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
       personIds: mapReferences(persons, item.personIds),
       customFields: mapCustomFields("tasks", item.customFields),
     })),
-    findings: source.findings.map((item) => ({
-      ...item,
-      sourceUrl: extractFindingSourceUrl(
-        item.sourceUrl,
-        item.file,
-        item.page,
-        item.summary,
-        item.description,
-        item.transcription,
-        item.notes,
-        item.archive,
-        item.fund,
-      ),
-      id: mapRequired(findings, item.id),
-      researchId: mapReference(researches, item.researchId),
-      documentId: mapReference(documents, item.documentId),
-      personIds: mapReferences(persons, item.personIds),
-      participants: item.participants.map((participant) => ({
-        ...participant,
-        id: createId(),
-        personId: participant.personId
-          ? mapReference(persons, participant.personId) || undefined
+    findings: source.findings.map((item) => {
+      const participantIds = new Map(
+        item.participants.map((participant) => [participant.id, createId()]),
+      );
+      return {
+        ...item,
+        sourceUrl: extractFindingSourceUrl(
+          item.sourceUrl,
+          item.file,
+          item.page,
+          item.summary,
+          item.description,
+          item.transcription,
+          item.notes,
+          item.archive,
+          item.fund,
+        ),
+        id: mapRequired(findings, item.id),
+        researchId: mapReference(researches, item.researchId),
+        documentId: mapReference(documents, item.documentId),
+        personIds: mapReferences(persons, item.personIds),
+        participants: item.participants.map((participant) => ({
+          ...participant,
+          id: participantIds.get(participant.id) ?? createId(),
+          personId: participant.personId
+            ? mapReference(persons, participant.personId) || undefined
+            : undefined,
+          contextTargetParticipantId: participant.contextTargetParticipantId
+            ? participantIds.get(participant.contextTargetParticipantId)
+            : undefined,
+        })),
+        scans: mapScans(item.scans),
+        fragmentSelection: item.fragmentSelection
+          ? {
+              ...item.fragmentSelection,
+              documentId: mapReference(documents, item.fragmentSelection.documentId) || mapReference(documents, item.documentId),
+            }
           : undefined,
-      })),
-      scans: mapScans(item.scans),
-      fragmentSelection: item.fragmentSelection
-        ? {
-            ...item.fragmentSelection,
-            documentId: mapReference(documents, item.fragmentSelection.documentId) || mapReference(documents, item.documentId),
-          }
-        : undefined,
-      geo: item.geo,
-      customFields: mapCustomFields("findings", item.customFields),
-    })),
+        geo: item.geo,
+        customFields: mapCustomFields("findings", item.customFields),
+      };
+    }),
     hypotheses: source.hypotheses.map((item) => ({
       ...item,
       id: mapRequired(hypotheses, item.id),
@@ -677,17 +685,29 @@ function normalizeCustomFieldDefinitions(value: unknown): CustomFieldDefinition[
 
 function normalizeParticipants(value: unknown, peopleText: unknown): FindingParticipant[] {
   if (Array.isArray(value)) {
-    return value
+    const participants = value
       .filter((item): item is Partial<FindingParticipant> => Boolean(item && typeof item === "object"))
       .map((item) => ({
         id: typeof item.id === "string" && item.id ? item.id : createId(),
         personId: typeof item.personId === "string" && item.personId.trim()
           ? item.personId.trim()
           : undefined,
+        contextTargetParticipantId:
+          typeof item.contextTargetParticipantId === "string" && item.contextTargetParticipantId.trim()
+            ? item.contextTargetParticipantId.trim()
+            : undefined,
         role: typeof item.role === "string" && item.role ? item.role : "Інша особа",
         name: typeof item.name === "string" ? item.name : "",
         notes: typeof item.notes === "string" ? item.notes : "",
       }));
+    const participantIds = new Set(participants.map((participant) => participant.id));
+    return participants.map((participant) => {
+      const targetId = participant.contextTargetParticipantId;
+      if (!targetId || targetId === participant.id || !participantIds.has(targetId)) {
+        return { ...participant, contextTargetParticipantId: undefined };
+      }
+      return participant;
+    });
   }
   if (typeof peopleText === "string" && peopleText.trim()) {
     return [{

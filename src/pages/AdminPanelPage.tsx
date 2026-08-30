@@ -54,6 +54,7 @@ interface AdminPanelPageProps {
   onNavigate: (page: AdminPage) => void;
   onBack: () => void;
   onSignOut: () => void;
+  onFeatureFlagsChanged?: () => void;
 }
 
 const EMPTY_OVERVIEW: AdminAnalyticsOverview = {
@@ -475,7 +476,22 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
     );
   } else if (currentPage === "analytics") pageContent = analyticsReport;
   else if (currentPage === "subscriptions") pageContent = <AdminSubscriptions rows={subscriptions} onChanged={refreshSubscriptions} />;
-  else if (currentPage === "features") pageContent = <AdminFeatureFlags flags={featureFlags} loadError="" onChanged={refreshFeatures} />;
+  else if (currentPage === "features") pageContent = (
+    <AdminFeatureFlags
+      flags={featureFlags}
+      loadError=""
+      onChanged={async () => {
+        try {
+          await refreshFeatures();
+        } finally {
+          // The mutation may have succeeded even if refreshing this list
+          // failed. Re-resolve the signed-in account's effective access in
+          // either case so the application cannot keep a stale permission.
+          props.onFeatureFlagsChanged?.();
+        }
+      }}
+    />
+  );
   else if (currentPage === "announcements") pageContent = <AdminAnnouncements announcements={announcements} loadError="" onChanged={refreshAnnouncements} />;
   else if (currentPage === "feedback") pageContent = props.account ? <FeedbackPage account={props.account} isAdmin /> : <div className="admin-alert">Обліковий запис недоступний.</div>;
   else if (currentPage === "zagulyaky") pageContent = <ZagulyakyModerationPanel />;

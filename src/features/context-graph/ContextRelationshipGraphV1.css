@@ -1,0 +1,669 @@
+.context-relationship-graph-v1 {
+  --relationship-border: var(--line, #deddd5);
+  --relationship-paper: var(--paper, #fffdf8);
+  --relationship-ink: var(--green-950, #102f2a);
+  --relationship-muted: var(--muted, #53625d);
+  background: var(--relationship-paper);
+  border: 1px solid var(--relationship-border);
+  border-radius: 1rem;
+  box-shadow: 0 14px 34px rgba(16, 47, 42, 0.06);
+  color: var(--relationship-ink);
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.context-relationship-graph-v1__toolbar {
+  align-items: center;
+  background: var(--relationship-paper);
+  border-bottom: 1px solid var(--relationship-border);
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  min-height: 3.65rem;
+  padding: 0.45rem 0.65rem 0.45rem 0.85rem;
+}
+
+.context-relationship-graph-v1__title {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.context-relationship-graph-v1__title h2 {
+  font-size: clamp(1rem, 1.6vw, 1.22rem);
+  line-height: 1.2;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-relationship-graph-v1__title span {
+  color: var(--relationship-muted);
+  font-size: 0.68rem;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-relationship-graph-v1__controls {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.35rem;
+}
+
+.context-relationship-graph-v1__mode,
+.context-relationship-graph-v1__zoom {
+  align-items: center;
+  background: #edf4f1;
+  border: 1px solid #d1dfda;
+  border-radius: 0.65rem;
+  display: inline-flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+}
+
+.context-relationship-graph-v1__toolbar button,
+.context-relationship-graph-v1__details button {
+  border-radius: 0.5rem;
+  font-weight: 800;
+  min-height: 2.25rem;
+}
+
+.context-relationship-graph-v1__toolbar button {
+  background: transparent;
+  border: 0;
+  color: var(--relationship-ink);
+  min-width: 2.25rem;
+  padding: 0.3rem 0.55rem;
+}
+
+.context-relationship-graph-v1__mode button[aria-pressed="true"] {
+  background: var(--green-900, #173f38);
+  color: #fff;
+  box-shadow: 0 2px 7px rgba(16, 47, 42, 0.16);
+}
+
+.context-relationship-graph-v1__zoom output {
+  color: var(--relationship-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  min-width: 2.75rem;
+  text-align: center;
+}
+
+.context-relationship-graph-v1__toolbar .context-relationship-graph-v1__reset {
+  background: #fff;
+  border: 1px solid #cbd5d1;
+  padding-inline: 0.7rem;
+}
+
+.context-relationship-graph-v1__toolbar .context-relationship-graph-v1__fullscreen {
+  background: var(--green-900, #173f38);
+  color: #fff;
+  font-size: 1rem;
+  min-width: 2.3rem;
+  padding-inline: 0.45rem;
+}
+
+.context-relationship-graph-v1__limit {
+  background: #fff4d9;
+  border-bottom: 1px solid #e5cb8e;
+  color: #735419;
+  font-size: 0.75rem;
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+}
+
+.context-relationship-graph-v1__workspace {
+  min-height: clamp(34rem, 72vh, 56rem);
+  position: relative;
+}
+
+.context-relationship-graph-v1__canvas {
+  background-color: #f7f8f4;
+  background-image:
+    radial-gradient(circle at 50% 48%, rgba(201, 139, 52, 0.09), transparent 34%),
+    linear-gradient(rgba(24, 63, 56, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(24, 63, 56, 0.035) 1px, transparent 1px);
+  background-size: auto, 32px 32px, 32px 32px;
+  min-height: clamp(34rem, 72vh, 56rem);
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+}
+
+.context-relationship-graph-v1__canvas.is-3d {
+  perspective: 900px;
+  touch-action: none;
+}
+
+.context-relationship-graph-v1__canvas.is-dragging-scene {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.context-relationship-graph-v1__canvas:focus-visible {
+  outline: 3px solid rgba(201, 139, 52, 0.62);
+  outline-offset: -3px;
+}
+
+.context-relationship-graph-v1__canvas svg {
+  display: block;
+  height: 100%;
+  min-height: clamp(34rem, 72vh, 56rem);
+  min-width: min(100%, 48rem);
+  width: 100%;
+}
+
+.context-relationship-graph-v1__canvas-help {
+  backdrop-filter: blur(8px);
+  background: rgba(255, 253, 248, 0.88);
+  border: 1px solid rgba(203, 213, 209, 0.9);
+  border-radius: 999px;
+  bottom: 0.7rem;
+  color: var(--relationship-muted);
+  font-size: 0.68rem;
+  left: 0.7rem;
+  margin: 0;
+  max-width: calc(100% - 1.4rem);
+  padding: 0.4rem 0.65rem;
+  pointer-events: none;
+  position: absolute;
+  z-index: 3;
+}
+
+.context-relationship-graph-v1__edges marker path {
+  fill: #5f7770;
+}
+
+.context-relationship-graph-v1__edge {
+  cursor: pointer;
+}
+
+.context-relationship-graph-v1__edge-line {
+  fill: none;
+  stroke: #789189;
+  stroke-linecap: round;
+  stroke-width: 2.2;
+  transition: stroke 150ms ease, stroke-width 150ms ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.context-relationship-graph-v1__edge.is-dashed .context-relationship-graph-v1__edge-line {
+  stroke-dasharray: 6 5;
+  stroke-opacity: 0.72;
+  stroke-width: 1.5;
+}
+
+.context-relationship-graph-v1__edge-hit {
+  fill: none;
+  pointer-events: stroke;
+  stroke: transparent;
+  stroke-width: 14;
+  vector-effect: non-scaling-stroke;
+}
+
+.context-relationship-graph-v1__edge-label-card {
+  cursor: pointer;
+}
+
+.context-relationship-graph-v1__edge-label-card rect {
+  fill: #fffdf8;
+  fill-opacity: 0.98;
+  filter: drop-shadow(0 2px 4px rgba(16, 47, 42, 0.13));
+  stroke: #b8c8c3;
+  stroke-width: 1.25;
+  transition: fill 150ms ease, stroke 150ms ease, stroke-width 150ms ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.context-relationship-graph-v1__edge-label-card text {
+  fill: #183f38;
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  font-size: 11.5px;
+  font-kerning: normal;
+  font-weight: 800;
+  letter-spacing: 0;
+  pointer-events: none;
+  text-rendering: geometricPrecision;
+}
+
+.context-relationship-graph-v1__edge-label-leader {
+  fill: none;
+  pointer-events: none;
+  stroke: #789189;
+  stroke-dasharray: 3 3;
+  stroke-linecap: round;
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.context-relationship-graph-v1__edge:hover .context-relationship-graph-v1__edge-line,
+.context-relationship-graph-v1__edge:focus-visible .context-relationship-graph-v1__edge-line,
+.context-relationship-graph-v1__edge.is-selected .context-relationship-graph-v1__edge-line {
+  stroke: #b5751d;
+  stroke-width: 4;
+}
+
+.context-relationship-graph-v1__edge:hover .context-relationship-graph-v1__edge-label-card rect,
+.context-relationship-graph-v1__edge:focus-visible .context-relationship-graph-v1__edge-label-card rect,
+.context-relationship-graph-v1__edge.is-selected .context-relationship-graph-v1__edge-label-card rect {
+  fill: #fff8e9;
+  stroke: #b5751d;
+  stroke-width: 2;
+}
+
+.context-relationship-graph-v1__edge:focus-visible,
+.context-relationship-graph-v1__node:focus-visible {
+  outline: none;
+}
+
+.context-relationship-graph-v1__node {
+  cursor: grab;
+  touch-action: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.context-relationship-graph-v1__node.is-dragging {
+  cursor: grabbing;
+}
+
+.context-relationship-graph-v1__node-card {
+  fill: #fffdf8;
+  filter: drop-shadow(0 3px 6px rgba(16, 47, 42, 0.1));
+  stroke: var(--context-relationship-node-color, #22574d);
+  stroke-width: 1.75;
+  transition: fill 150ms ease, stroke-width 150ms ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.context-relationship-graph-v1__node-accent {
+  fill: var(--context-relationship-node-color, #22574d);
+  pointer-events: none;
+  stroke: none;
+}
+
+.context-relationship-graph-v1__node.is-group .context-relationship-graph-v1__node-card {
+  fill: #f5f0df;
+  stroke: #52746b;
+}
+
+.context-relationship-graph-v1__node.is-center .context-relationship-graph-v1__node-card {
+  fill: var(--green-900, #173f38);
+  stroke: #c98b34;
+  stroke-width: 2.5;
+}
+
+.context-relationship-graph-v1__node.is-center .context-relationship-graph-v1__node-accent {
+  fill: #e4b15c;
+}
+
+.context-relationship-graph-v1__node:hover .context-relationship-graph-v1__node-card,
+.context-relationship-graph-v1__node:focus-visible .context-relationship-graph-v1__node-card,
+.context-relationship-graph-v1__node.is-selected .context-relationship-graph-v1__node-card {
+  stroke: #c07c20;
+  stroke-width: 3;
+}
+
+.context-relationship-graph-v1__node-label {
+  fill: var(--relationship-ink);
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  font-size: 11px;
+  font-kerning: normal;
+  font-weight: 850;
+  letter-spacing: 0;
+  pointer-events: none;
+  text-rendering: geometricPrecision;
+}
+
+.context-relationship-graph-v1__node.is-center .context-relationship-graph-v1__node-label {
+  fill: #fff;
+}
+
+.context-relationship-graph-v1__node .context-relationship-graph-v1__node-kind {
+  fill: #63736e;
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  font-size: 8.25px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  text-rendering: geometricPrecision;
+}
+
+.context-relationship-graph-v1__node .context-relationship-graph-v1__node-kind.is-role {
+  fill: #315e55;
+  font-size: 8.5px;
+  font-weight: 800;
+}
+
+.context-relationship-graph-v1__node.is-center .context-relationship-graph-v1__node-kind {
+  fill: #d5e7e1;
+}
+
+.context-relationship-graph-v1__canvas.is-dragging .context-relationship-graph-v1__node-card,
+.context-relationship-graph-v1__canvas.is-dragging .context-relationship-graph-v1__edge-label-card rect,
+.context-relationship-graph-v1__canvas.is-dragging .context-relationship-graph-v1__edge-line {
+  transition: none;
+}
+
+.context-relationship-graph-v1__details {
+  backdrop-filter: blur(12px);
+  background: rgba(255, 253, 248, 0.95);
+  border: 1px solid rgba(203, 213, 209, 0.94);
+  border-radius: 0.85rem;
+  box-shadow: 0 12px 30px rgba(16, 47, 42, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: calc(100% - 1.5rem);
+  min-width: 0;
+  overflow: auto;
+  padding: 0.8rem;
+  position: absolute;
+  right: 0.75rem;
+  top: 0.75rem;
+  width: min(17rem, calc(100% - 1.5rem));
+  z-index: 4;
+}
+
+.context-relationship-graph-v1__details-eyebrow {
+  color: #96651f;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.context-relationship-graph-v1__details h3,
+.context-relationship-graph-v1__details p,
+.context-relationship-graph-v1__details dl {
+  margin: 0;
+}
+
+.context-relationship-graph-v1__details h3 {
+  overflow-wrap: anywhere;
+}
+
+.context-relationship-graph-v1__details p {
+  color: var(--relationship-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.context-relationship-graph-v1__details dl > div {
+  align-items: baseline;
+  background: #f4f5f0;
+  border-radius: 0.55rem;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  padding: 0.55rem 0.65rem;
+}
+
+.context-relationship-graph-v1__details dt {
+  color: var(--relationship-muted);
+  font-size: 0.69rem;
+}
+
+.context-relationship-graph-v1__details dd {
+  font-weight: 800;
+  margin: 0;
+}
+
+.context-relationship-graph-v1__details-relations {
+  display: grid;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.context-relationship-graph-v1__details-relations li {
+  border-top: 1px solid #ebe9e1;
+  display: grid;
+  gap: 0.1rem;
+  padding-top: 0.45rem;
+}
+
+.context-relationship-graph-v1__details-relations strong {
+  font-size: 0.72rem;
+}
+
+.context-relationship-graph-v1__details-relations span {
+  color: var(--relationship-muted);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.context-relationship-graph-v1__details button {
+  background: var(--green-900, #173f38);
+  border: 1px solid var(--green-900, #173f38);
+  color: #fff;
+  margin-top: auto;
+  padding: 0.55rem 0.8rem;
+}
+
+.context-relationship-graph-v1 button:focus-visible,
+.context-relationship-graph-v1__fallback summary:focus-visible {
+  outline: 3px solid rgba(201, 139, 52, 0.62);
+  outline-offset: 2px;
+}
+
+.context-relationship-graph-v1__fallback {
+  border-top: 1px solid var(--relationship-border);
+}
+
+.context-relationship-graph-v1__fallback > summary {
+  color: var(--green-800, #22574d);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 800;
+  min-height: 2.9rem;
+  padding: 0.8rem 1rem;
+}
+
+.context-relationship-graph-v1__fallback[open] > summary {
+  border-bottom: 1px solid var(--relationship-border);
+}
+
+.context-relationship-graph-v1__fallback > div {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 1rem;
+}
+
+.context-relationship-graph-v1__fallback h3 {
+  font-size: 0.9rem;
+  margin: 0 0 0.55rem;
+}
+
+.context-relationship-graph-v1__fallback ul {
+  display: grid;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  max-height: 18rem;
+  overflow: auto;
+  padding: 0;
+}
+
+.context-relationship-graph-v1__fallback li {
+  min-width: 0;
+}
+
+.context-relationship-graph-v1__fallback button {
+  background: #f7f6f1;
+  border: 1px solid var(--relationship-border);
+  border-radius: 0.55rem;
+  color: var(--relationship-ink);
+  display: grid;
+  gap: 0.15rem;
+  min-height: 2.8rem;
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  width: 100%;
+}
+
+.context-relationship-graph-v1__fallback button strong,
+.context-relationship-graph-v1__fallback button span {
+  overflow-wrap: anywhere;
+}
+
+.context-relationship-graph-v1:fullscreen {
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+}
+
+.context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__canvas,
+.context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__canvas svg {
+  height: 100%;
+  min-height: 0;
+}
+
+.context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__fallback {
+  flex: 0 1 auto;
+  max-height: 45vh;
+}
+
+.context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__fallback[open] {
+  overflow: auto;
+}
+
+.context-relationship-graph-v1__fallback button span {
+  color: var(--relationship-muted);
+  font-size: 0.7rem;
+}
+
+@media (max-width: 860px) {
+  .context-relationship-graph-v1__toolbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .context-relationship-graph-v1__title {
+    flex: 1 1 18rem;
+  }
+
+  .context-relationship-graph-v1__controls {
+    flex-wrap: wrap;
+  }
+
+  .context-relationship-graph-v1__canvas {
+    border-bottom: 1px solid var(--relationship-border);
+    min-height: clamp(30rem, 66vh, 46rem);
+  }
+
+  .context-relationship-graph-v1__canvas svg {
+    min-height: clamp(30rem, 66vh, 46rem);
+  }
+
+  .context-relationship-graph-v1__details {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    max-height: none;
+    min-height: 9rem;
+    position: static;
+    width: auto;
+  }
+
+  .context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__workspace {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    overflow: hidden;
+  }
+
+  .context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__canvas,
+  .context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__canvas svg {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .context-relationship-graph-v1:fullscreen .context-relationship-graph-v1__details {
+    border-top: 1px solid var(--relationship-border);
+    max-height: min(32vh, 16rem);
+    min-height: 0;
+    overflow: auto;
+    position: static;
+  }
+}
+
+@media (max-width: 620px) {
+  .context-relationship-graph-v1__toolbar {
+    align-items: stretch;
+    display: grid;
+    padding: 0.6rem;
+  }
+
+  .context-relationship-graph-v1__controls {
+    display: grid;
+    gap: 0.35rem;
+    grid-template-columns: auto auto minmax(4.5rem, 1fr) auto;
+    width: 100%;
+  }
+
+  .context-relationship-graph-v1__mode,
+  .context-relationship-graph-v1__zoom {
+    justify-content: center;
+  }
+
+  .context-relationship-graph-v1__toolbar button {
+    min-height: 44px;
+  }
+
+  .context-relationship-graph-v1__toolbar .context-relationship-graph-v1__reset {
+    min-width: 0;
+  }
+
+  .context-relationship-graph-v1__workspace,
+  .context-relationship-graph-v1__canvas,
+  .context-relationship-graph-v1__canvas svg {
+    min-height: 27rem;
+  }
+
+  .context-relationship-graph-v1__canvas-help {
+    border-radius: 0.6rem;
+    bottom: 0.5rem;
+    left: 0.5rem;
+    max-width: calc(100% - 1rem);
+    white-space: normal;
+  }
+
+  .context-relationship-graph-v1__fallback > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .context-relationship-graph-v1__fallback ul {
+    max-height: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-relationship-graph-v1 *,
+  .context-relationship-graph-v1 *::before,
+  .context-relationship-graph-v1 *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

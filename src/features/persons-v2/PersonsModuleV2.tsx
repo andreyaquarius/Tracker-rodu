@@ -14,6 +14,7 @@ import type {
   TaskRecord,
 } from "../../types";
 import type { PageKey } from "../../components/Sidebar";
+import type { ResearchGraphTargetOption } from "../../types/contextGraph.ts";
 import { Modal } from "../../components/Modal";
 import { TableDataImportButton } from "../../components/TableDataImportButton";
 import { GedcomImportButton } from "../../components/GedcomImportButton";
@@ -76,6 +77,7 @@ import {
 } from "../../utils/gedcomImportGroups.ts";
 import { GedcomImportManagerV2 } from "./GedcomImportManagerV2.tsx";
 import {
+  getProjectPerson,
   listProjectGedcomImportDatasets,
   type ProjectPersonRootReplacement,
   type ProjectPersonRootRequirement,
@@ -91,6 +93,8 @@ import {
   type ProjectPersonMarriageDraft,
 } from "../../services/projectPersonMarriages.ts";
 import { listProjectPersonNames } from "../../services/projectPersonNames.ts";
+import { PersonContextWorkspaceV1 } from "../context-graph/PersonContextWorkspaceV1.tsx";
+import type { PersonContextGraphAccess } from "../../utils/contextGraphFeatureAccess.ts";
 
 export interface PersonsModuleV2Props {
   db: AppDatabase;
@@ -131,6 +135,7 @@ export interface PersonsModuleV2Props {
     relation: PersonRelation,
   ) => Promise<PersonRelation | null> | PersonRelation | null | void;
   onOpenRelated: (page: PageKey, entityId: string, entity?: AppEntity) => void;
+  onOpenPlace?: (placeId: string) => void;
   onNavigateRelated?: (page: PageKey) => void;
   onCreateRelated?: (
     page: PersonCreatableRelatedPage,
@@ -142,6 +147,7 @@ export interface PersonsModuleV2Props {
   canAddCustomField?: boolean;
   customFieldLimitMessage?: string;
   readOnly?: boolean;
+  canManageShareLinks?: boolean;
   canCreate?: boolean;
   canCreateTree?: boolean;
   canImportTable?: boolean;
@@ -152,6 +158,7 @@ export interface PersonsModuleV2Props {
   directAncestorIds?: ReadonlySet<string>;
   pedigreeContext?: ProjectPersonPedigreeContext;
   pedigreeCacheScope?: string;
+  contextGraphAccess?: PersonContextGraphAccess;
 }
 
 interface PersonDetailBundle extends PersonLinkedRecords {
@@ -174,7 +181,185 @@ const emptyPersonFamilyOrder: ReadonlyMap<string, number> = new Map();
 const emptyPersonIdSet: ReadonlySet<string> = new Set();
 const emptyPersonKinship: ReadonlyMap<string, PersonKinshipDescriptor> = new Map();
 
-export function PersonsModuleV2({
+export function PersonsModuleV2(props: PersonsModuleV2Props) {
+  if (props.target.mode === "context") {
+    if (props.contextGraphAccess !== "enabled") {
+      return (
+        <PersonContextFeatureGateV2
+          loading={props.contextGraphAccess === "loading"}
+          onBack={() => props.onNavigate({ mode: "profile", personId: props.target.personId })}
+        />
+      );
+    }
+    return <PersonContextRouteV2 {...props} />;
+  }
+  return <PersonsModuleV2StandardRoutes {...props} />;
+}
+
+function PersonContextFeatureGateV2({
+  loading,
+  onBack,
+}: {
+  loading: boolean;
+  onBack: () => void;
+}) {
+  return (
+    <section className="panel empty-state persons-v2-missing" aria-live="polite">
+      <strong>{loading ? "Перевіряємо доступ до тестової функції…" : "Функція поки недоступна"}</strong>
+      <p>{loading
+        ? "Модуль не завантажуватиме зв’язки, доки сервер не підтвердить доступ."
+        : "«Зв’язки та оточення» зараз відкриті лише для приватного тестування."}</p>
+      <button type="button" className="button button-secondary" onClick={onBack}>
+        ← До картки особи
+      </button>
+    </section>
+  );
+}
+
+function PersonContextRouteV2({
+  db,
+  projectId,
+  persons,
+  target,
+  onNavigate,
+  onOpenRelated,
+  onOpenPlace,
+  readOnly = false,
+  canManageShareLinks = false,
+}: PersonsModuleV2Props) {
+  const listedRoutePerson = persons.find((person) => person.id === target.personId) ?? null;
+  const routePersonLookup = useProjectRoutePerson(projectId, target.personId, listedRoutePerson);
+  const routePerson = routePersonLookup.person;
+  const contextView = target.contextView ?? "social";
+  const contextPersons = routePerson && !listedRoutePerson
+    ? [routePerson, ...persons]
+    : persons;
+  const researchTargets = useMemo<ResearchGraphTargetOption[]>(
+    () => contextView === "research"
+      ? buildResearchGraphTargetOptions(db, contextPersons)
+      : [],
+    [contextPersons, contextView, db.documents, db.findings, db.hypotheses],
+  );
+  if (!routePerson) {
+    if (routePersonLookup.loading || routePersonLookup.error) {
+      return (
+        <RoutePersonLookupV2
+          loading={routePersonLookup.loading}
+          error={routePersonLookup.error}
+          onRetry={routePersonLookup.retry}
+          onBack={() => onNavigate({ mode: "list" })}
+        />
+      );
+    }
+    return <MissingPersonV2 onBack={() => onNavigate({ mode: "list" })} />;
+  }
+
+  if (!projectId) {
+    return (
+      <section className="panel empty-state">
+        <strong>Зв’язки та оточення недоступні</strong>
+        <p>Для перегляду людей, родів і документів потрібен синхронізований проєкт.</p>
+        <button type="button" className="button button-secondary" onClick={() => onNavigate({ mode: "profile", personId: routePerson.id })}>
+          ← До картки особи
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <PersonContextWorkspaceV1
+      projectId={projectId}
+      center={routePerson}
+      persons={contextPersons}
+      researchTargets={researchTargets}
+      contextView={contextView}
+      canEdit={!readOnly}
+      readOnly={readOnly}
+      canManageShareLinks={canManageShareLinks}
+      onBack={() => onNavigate({ mode: "profile", personId: routePerson.id })}
+      onChangeView={(view) => onNavigate({
+        mode: "context",
+        personId: routePerson.id,
+        contextView: view,
+      })}
+      onFocusPerson={(personId) => onNavigate({
+        mode: "context",
+        personId,
+        contextView,
+      })}
+      onOpenPerson={(personId) => onNavigate({ mode: "profile", personId })}
+      onOpenDocument={(documentId) => onOpenRelated("documents", documentId)}
+      onOpenFinding={(findingId) => onOpenRelated("findings", findingId)}
+      onOpenPlace={onOpenPlace}
+      onOpenHypothesis={(hypothesisId) => onOpenRelated("hypotheses", hypothesisId)}
+    />
+  );
+}
+
+function buildResearchGraphTargetOptions(
+  db: AppDatabase,
+  persons: readonly Person[],
+): ResearchGraphTargetOption[] {
+  const options: ResearchGraphTargetOption[] = [];
+  const places = new Map<string, ResearchGraphTargetOption>();
+  persons.forEach((person) => {
+    const personLabel = personDisplayNameForDeleteV2(person);
+    options.push({
+      entityType: "person",
+      entityId: person.id,
+      label: personLabel,
+      secondaryLabel: [person.birthDate, person.deathDate].filter(Boolean).join(" — "),
+    });
+    person.events.forEach((event) => {
+      if (event.id) {
+        options.push({
+          entityType: "event",
+          entityId: event.id,
+          label: event.title?.trim() || event.type || "Подія",
+          secondaryLabel: [event.date, event.placeCanonicalName || event.placeName, personLabel]
+            .filter(Boolean)
+            .join(" · "),
+          ownerPersonId: person.id,
+        });
+      }
+      if (event.placeId && !places.has(event.placeId)) {
+        places.set(event.placeId, {
+          entityType: "place",
+          entityId: event.placeId,
+          label: event.placeCanonicalName?.trim() || event.placeName?.trim() || "Історичне місце",
+          secondaryLabel: "Місце з події особи",
+        });
+      }
+    });
+  });
+  db.documents.forEach((document) => options.push({
+    entityType: "document",
+    entityId: document.id,
+    label: document.title.trim() || "Документ",
+    secondaryLabel: [document.yearFrom, document.yearTo, document.place].filter(Boolean).join(" · "),
+  }));
+  db.findings.forEach((finding) => options.push({
+    entityType: "finding",
+    entityId: finding.id,
+    label: finding.summary.trim() || finding.description.trim() || finding.findingType || "Знахідка",
+    secondaryLabel: [finding.eventDate, finding.place].filter(Boolean).join(" · "),
+  }));
+  db.hypotheses.forEach((hypothesis) => options.push({
+    entityType: "hypothesis",
+    entityId: hypothesis.id,
+    label: hypothesis.title.trim() || "Гіпотеза",
+    secondaryLabel: [hypothesis.status, hypothesis.probability].filter(Boolean).join(" · "),
+  }));
+  options.push(...places.values());
+  const unique = new Map<string, ResearchGraphTargetOption>();
+  options.forEach((option) => {
+    const key = `${option.entityType}:${option.entityId}`;
+    if (!unique.has(key)) unique.set(key, option);
+  });
+  return [...unique.values()];
+}
+
+function PersonsModuleV2StandardRoutes({
   db,
   projectId,
   persons,
@@ -218,6 +403,7 @@ export function PersonsModuleV2({
   directAncestorIds,
   pedigreeContext,
   pedigreeCacheScope = "",
+  contextGraphAccess = "disabled",
 }: PersonsModuleV2Props) {
   const [previewPersonId, setPreviewPersonId] = useState("");
   const [deletingPersons, setDeletingPersons] = useState(false);
@@ -240,9 +426,16 @@ export function PersonsModuleV2({
     marriages: [],
     error: "",
   });
+  const listedRoutePerson = persons.find((person) => person.id === target.personId) ?? null;
+  const routePersonLookup = useProjectRoutePerson(projectId, target.personId, listedRoutePerson);
+  const routePerson = routePersonLookup.person;
+  const routePersons = routePerson && !listedRoutePerson
+    ? [routePerson, ...persons]
+    : persons;
   const detailPersonId = target.personId || previewPersonId;
-  const detailPerson = persons.find((person) => person.id === detailPersonId) ?? null;
-  const routePerson = persons.find((person) => person.id === target.personId) ?? null;
+  const detailPerson = detailPersonId === target.personId
+    ? routePerson
+    : persons.find((person) => person.id === detailPersonId) ?? null;
   const [detail, setDetail] = useState<PersonDetailBundle>(emptyDetailBundle);
   const localSummaries = useMemo(
     () => buildLocalPersonSummaries(persons, relations, findings, tasks, hypotheses, archiveRequests),
@@ -582,6 +775,16 @@ export function PersonsModuleV2({
       );
     }
     if (target.mode === "edit" && !routePerson) {
+      if (routePersonLookup.loading || routePersonLookup.error) {
+        return (
+          <RoutePersonLookupV2
+            loading={routePersonLookup.loading}
+            error={routePersonLookup.error}
+            onRetry={routePersonLookup.retry}
+            onBack={() => onNavigate({ mode: "list" })}
+          />
+        );
+      }
       return <MissingPersonV2 onBack={() => onNavigate({ mode: "list" })} />;
     }
     return (
@@ -595,7 +798,7 @@ export function PersonsModuleV2({
         personNameDocuments={db.documents}
         personNameFindings={findings}
         onPersonNamesChanged={(personNames) => setDetail((current) => ({ ...current, personNames }))}
-        persons={persons}
+        persons={routePersons}
         relations={relations}
         marriages={currentMarriageLoad.marriages}
         marriagesLoading={currentMarriageLoad.status === "loading"}
@@ -626,7 +829,19 @@ export function PersonsModuleV2({
   }
 
   if (target.mode === "profile") {
-    if (!routePerson) return <MissingPersonV2 onBack={() => onNavigate({ mode: "list" })} />;
+    if (!routePerson) {
+      if (routePersonLookup.loading || routePersonLookup.error) {
+        return (
+          <RoutePersonLookupV2
+            loading={routePersonLookup.loading}
+            error={routePersonLookup.error}
+            onRetry={routePersonLookup.retry}
+            onBack={() => onNavigate({ mode: "list" })}
+          />
+        );
+      }
+      return <MissingPersonV2 onBack={() => onNavigate({ mode: "list" })} />;
+    }
     const research = researches.find((item) => item.id === routePerson.researchId) ?? null;
     return (
       <>
@@ -640,7 +855,7 @@ export function PersonsModuleV2({
           personNamesError={detail.personNamesError}
           customFieldDefinitions={customFieldDefinitions}
           research={research}
-          persons={persons}
+          persons={routePersons}
           relations={relations}
           marriages={currentMarriageLoad.marriages}
           marriagesLoading={currentMarriageLoad.status === "loading"}
@@ -659,6 +874,9 @@ export function PersonsModuleV2({
             ? (person) => void deleteOnePerson(person)
             : undefined}
           onShowInTree={onShowInTree}
+          onOpenContext={contextGraphAccess === "enabled"
+            ? (person) => onNavigate({ mode: "context", personId: person.id })
+            : undefined}
           onOpenMap={onOpenMap}
           onOpenPhoto={onOpenPhoto}
           onAddEvent={readOnly ? undefined : (person) => onNavigate({ mode: "edit", personId: person.id })}
@@ -1066,6 +1284,107 @@ function RootPersonDeletionDialogV2({
         </div>
       </div>
     </Modal>
+  );
+}
+
+interface ProjectRoutePersonLookup {
+  person: Person | null;
+  loading: boolean;
+  error: string;
+  retry: () => void;
+}
+
+function useProjectRoutePerson(
+  projectId: string | undefined,
+  personId: string | undefined,
+  listedPerson: Person | null,
+): ProjectRoutePersonLookup {
+  const requestKey = `${projectId ?? ""}\u001f${personId ?? ""}`;
+  const [retryVersion, setRetryVersion] = useState(0);
+  const [load, setLoad] = useState<{
+    requestKey: string;
+    person: Person | null;
+    loading: boolean;
+    error: string;
+  }>({
+    requestKey: "",
+    person: null,
+    loading: false,
+    error: "",
+  });
+
+  useEffect(() => {
+    if (listedPerson || !projectId || !personId) return undefined;
+
+    let active = true;
+    setLoad({ requestKey, person: null, loading: true, error: "" });
+    void getProjectPerson(projectId, personId)
+      .then((person) => {
+        if (!active) return;
+        setLoad((current) => current.requestKey === requestKey
+          ? {
+              requestKey,
+              person,
+              loading: false,
+              error: person ? "" : "Особу не знайдено або вона недоступна.",
+            }
+          : current);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setLoad((current) => current.requestKey === requestKey
+          ? {
+              requestKey,
+              person: null,
+              loading: false,
+              error: error instanceof Error
+                ? error.message
+                : "Не вдалося завантажити особу.",
+            }
+          : current);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [listedPerson, personId, projectId, requestKey, retryVersion]);
+
+  const requiresLookup = Boolean(projectId && personId && !listedPerson);
+  const isCurrentRequest = load.requestKey === requestKey;
+  return {
+    person: listedPerson ?? (isCurrentRequest ? load.person : null),
+    loading: requiresLookup && (!isCurrentRequest || load.loading),
+    error: requiresLookup && isCurrentRequest ? load.error : "",
+    retry: useCallback(() => setRetryVersion((current) => current + 1), []),
+  };
+}
+
+function RoutePersonLookupV2({
+  loading,
+  error,
+  onRetry,
+  onBack,
+}: {
+  loading: boolean;
+  error: string;
+  onRetry: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <section className="panel empty-state persons-v2-missing" aria-live="polite">
+      <strong>{loading ? "Завантажуємо особу…" : "Не вдалося відкрити особу."}</strong>
+      {error ? <p role="alert">{error}</p> : <p>Отримуємо лише потрібну картку, без завантаження всього каталогу.</p>}
+      <div className="modal-actions">
+        <button type="button" className="button button-secondary" onClick={onBack}>
+          Повернутися до осіб
+        </button>
+        {!loading && error ? (
+          <button type="button" className="button button-primary" onClick={onRetry}>
+            Повторити
+          </button>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

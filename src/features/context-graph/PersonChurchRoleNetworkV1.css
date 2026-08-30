@@ -1,0 +1,718 @@
+.church-role-network-v1 {
+  --church-border: var(--line, #deddd5);
+  --church-paper: var(--paper, #fffdf8);
+  --church-ink: var(--green-950, #102f2a);
+  --church-muted: var(--muted, #53645f);
+  --church-accent: var(--green-900, #173f38);
+  color: var(--church-ink);
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.church-role-network-v1__header,
+.church-role-network-v1__research-note,
+.church-role-network-v1__filters,
+.church-role-network-v1__graph-scope,
+.church-role-network-v1__result-details,
+.church-role-network-v1__list,
+.church-role-network-v1__empty,
+.church-role-network-v1__limit,
+.church-role-network-v1__skeleton {
+  background: var(--church-paper);
+  border: 1px solid var(--church-border);
+  border-radius: 1rem;
+}
+
+.church-role-network-v1__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 1.15rem;
+}
+
+.church-role-network-v1__header h2,
+.church-role-network-v1__header p,
+.church-role-network-v1__card h3,
+.church-role-network-v1__card p {
+  margin: 0;
+}
+
+.church-role-network-v1__header h2 {
+  font-family: var(--font-display, Georgia, serif);
+  font-size: clamp(1.5rem, 2.5vw, 2.15rem);
+  line-height: 1.08;
+  margin-top: 0.25rem;
+}
+
+.church-role-network-v1__header p {
+  color: var(--church-muted);
+  line-height: 1.55;
+  margin-top: 0.65rem;
+  max-width: 74ch;
+}
+
+.church-role-network-v1__eyebrow,
+.church-role-network-v1__filters label > span,
+.church-role-network-v1__card header > div > span {
+  color: var(--gold-800, #8d5a13);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.church-role-network-v1__total {
+  align-items: center;
+  background: color-mix(in srgb, var(--church-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--church-accent) 18%, var(--church-border));
+  border-radius: 0.8rem;
+  display: grid;
+  min-width: 9rem;
+  padding: 0.7rem 0.9rem;
+  text-align: center;
+}
+
+.church-role-network-v1__total strong {
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 1.45rem;
+}
+
+.church-role-network-v1__total span {
+  color: var(--church-muted);
+  font-size: 0.76rem;
+}
+
+.church-role-network-v1__research-note {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--gold-200, #f3dfac) 42%, var(--church-paper));
+  border-color: color-mix(in srgb, var(--gold-700, #9e6819) 28%, var(--church-border));
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.9rem 1rem;
+}
+
+.church-role-network-v1__research-note span {
+  color: var(--church-muted);
+  line-height: 1.45;
+}
+
+.church-role-network-v1__filters {
+  align-items: center;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: auto minmax(220px, 1fr) auto auto;
+  padding: 0.45rem 0.55rem;
+  position: relative;
+  z-index: 6;
+}
+
+.church-role-network-v1__filters h2 {
+  display: grid;
+  gap: 0.08rem;
+  font-size: 0.98rem;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.church-role-network-v1__filters h2 > span {
+  white-space: nowrap;
+}
+
+.church-role-network-v1__filters label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.church-role-network-v1__filters > label.is-wide > span {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.church-role-network-v1__filters input,
+.church-role-network-v1__filters select,
+.church-role-network-v1 button {
+  font: inherit;
+}
+
+.church-role-network-v1__filters input,
+.church-role-network-v1__filters select {
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--church-accent) 20%, var(--church-border));
+  border-radius: 0.65rem;
+  color: var(--church-ink);
+  min-height: 2.25rem;
+  padding: 0.35rem 0.55rem;
+  width: 100%;
+}
+
+.church-role-network-v1__advanced-filters {
+  grid-column: auto;
+  min-width: 0;
+  position: relative;
+}
+
+.church-role-network-v1__advanced-filters summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 0.15rem 0.55rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  list-style: none;
+  min-height: 2.25rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.church-role-network-v1__advanced-filters summary::-webkit-details-marker {
+  display: none;
+}
+
+.church-role-network-v1__advanced-filters summary::before {
+  align-items: center;
+  border: 1px solid var(--church-border);
+  border-radius: 50%;
+  content: "+";
+  display: inline-flex;
+  font-size: 1.05rem;
+  font-weight: 900;
+  height: 1.45rem;
+  justify-content: center;
+  width: 1.45rem;
+}
+
+.church-role-network-v1__advanced-filters[open] summary::before {
+  content: "−";
+}
+
+.church-role-network-v1__advanced-filters summary > span {
+  font-weight: 850;
+}
+
+.church-role-network-v1__advanced-filters summary > small {
+  display: none;
+}
+
+.church-role-network-v1__advanced-grid {
+  align-items: end;
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  background: var(--church-paper);
+  border: 1px solid var(--church-border);
+  border-radius: 0.8rem;
+  box-shadow: 0 12px 30px rgba(16, 47, 42, 0.14);
+  padding: 0.75rem;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.45rem);
+  width: min(34rem, calc(100vw - 2rem));
+}
+
+.church-role-network-v1 button {
+  background: transparent;
+  border: 1px solid var(--church-border);
+  border-radius: 0.65rem;
+  color: var(--church-ink);
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.church-role-network-v1 button.is-primary,
+.church-role-network-v1__filter-actions button.is-primary {
+  background: var(--church-accent);
+  border-color: var(--church-accent);
+  color: #fff;
+}
+
+.church-role-network-v1 button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.church-role-network-v1 button:not(:disabled):hover,
+.church-role-network-v1 button:not(:disabled):focus-visible,
+.church-role-network-v1 input:focus-visible,
+.church-role-network-v1 select:focus-visible,
+.church-role-network-v1 summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--church-accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.church-role-network-v1__filter-actions {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(2, auto);
+}
+
+.church-role-network-v1__message {
+  align-items: center;
+  border: 1px solid var(--church-border);
+  border-radius: 0.8rem;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.75rem 0.9rem;
+}
+
+.church-role-network-v1__message.is-error {
+  background: #fff0ed;
+  border-color: #e8a99d;
+  color: #8a2517;
+}
+
+.church-role-network-v1__surname-warning {
+  color: #684914;
+  font-size: 0.62rem;
+  font-weight: 750;
+  line-height: 1.15;
+  margin: 0;
+  max-width: 22ch;
+}
+
+.church-role-network-v1__graph-limit-note {
+  background: color-mix(in srgb, #d99a20 12%, var(--church-paper));
+  border: 1px solid color-mix(in srgb, #d99a20 35%, var(--church-border));
+  border-radius: 0.65rem;
+  color: #684914;
+  font-size: 0.78rem;
+  font-weight: 750;
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+}
+
+.church-role-network-v1__graph-scope {
+  background: color-mix(in srgb, var(--church-accent) 5%, var(--church-paper));
+  overflow: hidden;
+}
+
+.church-role-network-v1__graph-scope > summary {
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 800;
+  min-height: 2.15rem;
+  padding: 0.42rem 0.65rem;
+}
+
+.church-role-network-v1__graph-scope > div {
+  border-top: 1px solid var(--church-border);
+  display: grid;
+  font-size: 0.76rem;
+  gap: 0.2rem;
+  padding: 0.65rem;
+}
+
+.church-role-network-v1__graph-scope span {
+  color: var(--church-muted);
+  line-height: 1.45;
+}
+
+.church-role-network-v1__result-details {
+  overflow: clip;
+}
+
+.church-role-network-v1__result-details > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  min-height: 3.25rem;
+  padding: 0.65rem 0.85rem;
+}
+
+.church-role-network-v1__result-details > summary > span {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.church-role-network-v1__result-details > summary small {
+  color: var(--church-muted);
+  font-weight: 600;
+}
+
+.church-role-network-v1__result-details > summary b {
+  background: color-mix(in srgb, var(--church-accent) 9%, transparent);
+  border-radius: 999px;
+  min-width: 2rem;
+  padding: 0.25rem 0.5rem;
+  text-align: center;
+}
+
+.church-role-network-v1__result-details > .church-role-network-v1__list {
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--church-border);
+}
+
+.church-role-network-v1__list {
+  display: grid;
+  gap: 0.75rem;
+  max-height: none;
+  overflow: visible;
+  padding: 0.75rem;
+}
+
+.church-role-network-v1__card {
+  background: color-mix(in srgb, var(--church-accent) 3%, var(--church-paper));
+  border: 1px solid var(--church-border);
+  border-radius: 0.85rem;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+}
+
+.church-role-network-v1__card.is-selected {
+  border-color: var(--church-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--church-accent) 15%, transparent);
+}
+
+.church-role-network-v1__card > header {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.church-role-network-v1__card h3 {
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 1.2rem;
+  margin-top: 0.18rem;
+  overflow-wrap: anywhere;
+}
+
+.church-role-network-v1__card header small {
+  color: var(--church-muted);
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.church-role-network-v1__card > header > strong {
+  background: color-mix(in srgb, var(--church-accent) 10%, transparent);
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.55rem;
+}
+
+.church-role-network-v1__role-summary {
+  color: var(--church-muted);
+  line-height: 1.45;
+}
+
+.church-role-network-v1__card > dl {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.church-role-network-v1__card > dl > div {
+  background: var(--church-paper);
+  border: 1px solid var(--church-border);
+  border-radius: 0.65rem;
+  padding: 0.55rem;
+}
+
+.church-role-network-v1__card dt {
+  color: var(--church-muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.church-role-network-v1__card dd {
+  font-weight: 900;
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.church-role-network-v1__direction-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.church-role-network-v1__direction-summary span,
+.church-role-network-v1__sample-meta span,
+.church-role-network-v1__sample-meta time {
+  background: color-mix(in srgb, var(--church-accent) 7%, transparent);
+  border-radius: 999px;
+  color: var(--church-muted);
+  font-size: 0.75rem;
+  padding: 0.28rem 0.5rem;
+}
+
+.church-role-network-v1__ambiguous {
+  background: #fff5dc;
+  border: 1px solid #e7c983;
+  border-radius: 0.65rem;
+  color: #74510c;
+  padding: 0.65rem;
+}
+
+.church-role-network-v1__samples,
+.church-role-network-v1__sources {
+  border-top: 1px solid var(--church-border);
+}
+
+.church-role-network-v1__samples summary,
+.church-role-network-v1__sources summary {
+  cursor: pointer;
+  font-weight: 900;
+  min-height: 44px;
+  padding: 0.7rem 0;
+}
+
+.church-role-network-v1__samples ul,
+.church-role-network-v1__sources ul {
+  display: grid;
+  gap: 0.55rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.church-role-network-v1__sample {
+  background: var(--church-paper);
+  border: 1px solid var(--church-border);
+  border-radius: 0.7rem;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem;
+}
+
+.church-role-network-v1__sample p {
+  line-height: 1.45;
+}
+
+.church-role-network-v1__sample p button {
+  border: 0;
+  color: var(--church-accent);
+  min-height: 0;
+  padding: 0.15rem;
+  text-decoration: underline;
+  text-underline-offset: 0.16rem;
+}
+
+.church-role-network-v1__sample-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.church-role-network-v1__sample-actions {
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.church-role-network-v1__sample-actions button {
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.church-role-network-v1__sources li > button,
+.church-role-network-v1__sources li > div,
+.church-role-network-v1__sample > button,
+.church-role-network-v1__sample > div:not(.church-role-network-v1__sample-meta):not(.church-role-network-v1__sample-actions) {
+  align-items: center;
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 44px;
+  text-align: left;
+  width: 100%;
+}
+
+.church-role-network-v1__sources span,
+.church-role-network-v1__sample > button span,
+.church-role-network-v1__sample > div > span {
+  color: var(--gold-800, #8d5a13);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.church-role-network-v1__sources b,
+.church-role-network-v1__sample > button b,
+.church-role-network-v1__sample > div > b {
+  overflow-wrap: anywhere;
+}
+
+.church-role-network-v1__empty {
+  align-items: center;
+  display: grid;
+  justify-items: center;
+  min-height: 17rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.church-role-network-v1__empty > span {
+  color: color-mix(in srgb, var(--church-accent) 40%, transparent);
+  font-size: 3rem;
+}
+
+.church-role-network-v1__empty p {
+  color: var(--church-muted);
+  margin: 0.4rem 0 0.9rem;
+  max-width: 52ch;
+}
+
+.church-role-network-v1__notice,
+.church-role-network-v1__more {
+  background: color-mix(in srgb, var(--church-accent) 6%, var(--church-paper));
+  border: 1px solid var(--church-border);
+  border-radius: 0.8rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+}
+
+.church-role-network-v1__more {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.church-role-network-v1__more p {
+  margin: 0;
+}
+
+.church-role-network-v1__limit {
+  background: #fff5dc;
+  border-color: #e7c983;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.9rem 1rem;
+}
+
+.church-role-network-v1__limit ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.church-role-network-v1__limit span {
+  color: var(--church-muted);
+}
+
+.church-role-network-v1__skeleton {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.42fr) minmax(320px, 0.88fr);
+  padding: 0.75rem;
+}
+
+.church-role-network-v1__skeleton span {
+  animation: church-role-pulse 1.2s ease-in-out infinite;
+  background: color-mix(in srgb, var(--church-accent) 9%, var(--church-paper));
+  border-radius: 0.75rem;
+  display: block;
+  min-height: 8rem;
+}
+
+.church-role-network-v1__skeleton > span.is-graph {
+  min-height: 32rem;
+}
+
+.church-role-network-v1__skeleton > div {
+  display: grid;
+  gap: 0.65rem;
+}
+
+@keyframes church-role-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (max-width: 1100px) {
+  .church-role-network-v1__filters {
+    grid-template-columns: auto minmax(180px, 1fr) auto auto;
+  }
+}
+
+@media (max-width: 860px) {
+  .church-role-network-v1__skeleton {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .church-role-network-v1__list {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 680px) {
+  .church-role-network-v1__header {
+    display: grid;
+  }
+
+  .church-role-network-v1__total {
+    grid-template-columns: auto 1fr;
+    text-align: left;
+  }
+
+  .church-role-network-v1__filters,
+  .church-role-network-v1__filters label.is-wide,
+  .church-role-network-v1__filter-actions {
+    grid-column: auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .church-role-network-v1__filter-actions {
+    display: grid;
+  }
+
+  .church-role-network-v1__advanced-filters {
+    grid-column: 1;
+  }
+
+  .church-role-network-v1__advanced-grid {
+    grid-template-columns: minmax(0, 1fr);
+    position: static;
+    width: auto;
+  }
+
+  .church-role-network-v1__list {
+    padding: 0.55rem;
+  }
+
+  .church-role-network-v1__card > header,
+  .church-role-network-v1__more,
+  .church-role-network-v1__message {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .church-role-network-v1__card > header > strong {
+    justify-self: start;
+  }
+
+  .church-role-network-v1__card > dl,
+  .church-role-network-v1__sample-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .church-role-network-v1 button,
+  .church-role-network-v1 summary,
+  .church-role-network-v1__filters input,
+  .church-role-network-v1__filters select {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .church-role-network-v1__skeleton span {
+    animation: none;
+    transition: none;
+  }
+}

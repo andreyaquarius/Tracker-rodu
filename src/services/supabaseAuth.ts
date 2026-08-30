@@ -100,28 +100,70 @@ function createConcurrencyLimitedFetch(maxConcurrent: number): typeof fetch {
     })) as typeof fetch;
 }
 
-const supabase = isSupabaseConfigured
+function createAuthenticatedSupabaseClient() {
+  return createClient(supabaseUrl, publishableKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+    global: {
+      fetch: createConcurrencyLimitedFetch(MAX_CONCURRENT_REQUESTS),
+    },
+  });
+}
+
+// Deliberately lazy. Importing the application for the anonymous shared-graph
+// route must not initialize GoTrue, read a persisted account, or start token
+// refresh work. Authenticated application code creates this client on demand.
+let supabase: ReturnType<typeof createAuthenticatedSupabaseClient> | null = null;
+
+const anonymousNoStoreFetch: typeof fetch = ((
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+) => fetch(input, {
+  ...init,
+  cache: "no-store",
+  credentials: "omit",
+  referrerPolicy: "no-referrer",
+})) as typeof fetch;
+
+/**
+ * Dedicated client for anonymous bearer projections. It never reads or
+ * refreshes the signed-in account session, so an owner and a guest receive
+ * the exact same privacy-sanitized response.
+ */
+const anonymousSupabase = isSupabaseConfigured
   ? createClient(supabaseUrl, publishableKey, {
       auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        storageKey: "tracker-rodu-public-share-anon-v1",
       },
-      global: {
-        fetch: createConcurrencyLimitedFetch(MAX_CONCURRENT_REQUESTS),
-      },
+      global: { fetch: anonymousNoStoreFetch },
     })
   : null;
 
 function requireSupabase() {
-  if (!supabase) {
+  if (!isSupabaseConfigured) {
     throw new Error("На сайті не налаштовано підключення до сервера.");
+  }
+  if (!supabase) {
+    supabase = createAuthenticatedSupabaseClient();
   }
   return supabase;
 }
 
 export function getSupabaseClient() {
   return requireSupabase();
+}
+
+export function getAnonymousSupabaseClient() {
+  if (!anonymousSupabase) {
+    throw new Error("На сайті не налаштовано підключення до сервера.");
+  }
+  return anonymousSupabase;
 }
 
 function applicationUrl(): string {
@@ -411,8 +453,8 @@ export async function updateSupabasePassword(password: string): Promise<void> {
 }
 
 export async function getSupabaseSession(): Promise<Session | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase.auth.getSession();
+  if (!isSupabaseConfigured) return null;
+  const { data, error } = await requireSupabase().auth.getSession();
   if (error) throw error;
   return data.session;
 }
@@ -625,14 +667,14 @@ export function getAccountFromSession(session: Session | null): SupabaseAccount 
 export function onSupabaseAuthChange(
   callback: (session: Session | null, event: AuthChangeEvent) => void,
 ): Subscription | null {
-  if (!supabase) return null;
-  const { data } = supabase.auth.onAuthStateChange((event, session) => callback(session, event));
+  if (!isSupabaseConfigured) return null;
+  const { data } = requireSupabase().auth.onAuthStateChange((event, session) => callback(session, event));
   return data.subscription;
 }
 
 export async function signOutFromSupabase(): Promise<void> {
-  if (!supabase) return;
-  const { error } = await supabase.auth.signOut();
+  if (!isSupabaseConfigured) return;
+  const { error } = await requireSupabase().auth.signOut();
   if (error) throw error;
 }
 

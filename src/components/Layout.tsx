@@ -18,6 +18,7 @@ import {
 interface LayoutProps {
   page: PageKey | null;
   familyTreeView?: "tree" | "statistics";
+  focusedPersonContext?: boolean;
   onNavigate: (page: PageKey) => void;
   onOpenZagulyaky: () => void;
   onOpenNotes: () => void;
@@ -59,7 +60,7 @@ export function Layout(props: LayoutProps) {
       ? "page family-tree-statistics-host"
       : "page family-tree-page"
     : props.page === "persons"
-      ? "page persons-v2-page"
+      ? `page persons-v2-page${props.focusedPersonContext ? " person-context-page" : ""}`
       : "page";
 
   useEffect(() => {
@@ -106,7 +107,9 @@ export function Layout(props: LayoutProps) {
               ? isFamilyTreeStatistics
                 ? "main-shell main-shell-family-tree main-shell-family-tree-statistics"
                 : "main-shell main-shell-family-tree"
-              : "main-shell"
+              : props.focusedPersonContext
+                ? "main-shell main-shell-person-context"
+                : "main-shell"
           }
         >
           <TopBar

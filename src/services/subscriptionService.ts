@@ -191,7 +191,18 @@ export interface AppFeatureFlag {
   title: string;
   description: string;
   isEnabled: boolean;
+  supportsPrivatePreview: boolean;
+  isPreviewEnabled: boolean;
+  isEffectivelyEnabled: boolean;
   updatedAt: string | null;
+}
+
+export interface AppFeatureAccess {
+  key: string;
+  globalEnabled: boolean;
+  supportsPrivatePreview: boolean;
+  previewEnabled: boolean;
+  effectiveEnabled: boolean;
 }
 
 export async function loadAppFeatureFlags(): Promise<Record<string, boolean>> {
@@ -201,6 +212,33 @@ export async function loadAppFeatureFlags(): Promise<Record<string, boolean>> {
   return Object.fromEntries(
     Object.entries(data as Record<string, unknown>).map(([key, value]) => [key, Boolean(value)]),
   );
+}
+
+export async function loadMyAppFeatureAccess(key: string): Promise<AppFeatureAccess> {
+  const { data, error } = await getSupabaseClient().rpc("get_my_app_feature_access_v1", {
+    p_feature_key: key,
+  });
+  if (error) throw error;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Не вдалося перевірити доступ до тестової функції.");
+  }
+  const row = data as Record<string, unknown>;
+  if (
+    row.key !== key
+    || typeof row.globalEnabled !== "boolean"
+    || typeof row.supportsPrivatePreview !== "boolean"
+    || typeof row.previewEnabled !== "boolean"
+    || typeof row.effectiveEnabled !== "boolean"
+  ) {
+    throw new Error("Сервер повернув некоректне рішення щодо тестової функції.");
+  }
+  return {
+    key: row.key,
+    globalEnabled: row.globalEnabled,
+    supportsPrivatePreview: row.supportsPrivatePreview,
+    previewEnabled: row.previewEnabled,
+    effectiveEnabled: row.effectiveEnabled,
+  };
 }
 
 export async function loadAdminSubscriptions(): Promise<AdminSubscriptionRow[]> {
@@ -226,6 +264,9 @@ export async function loadAdminFeatureFlags(): Promise<AppFeatureFlag[]> {
     title: String(row.title ?? row.key),
     description: String(row.description ?? ""),
     isEnabled: Boolean(row.is_enabled),
+    supportsPrivatePreview: Boolean(row.supports_private_preview),
+    isPreviewEnabled: Boolean(row.is_preview_enabled),
+    isEffectivelyEnabled: Boolean(row.is_effectively_enabled),
     updatedAt: nullableString(row.updated_at),
   }));
 }
@@ -237,6 +278,17 @@ export async function adminSetFeatureFlag(input: {
   const { error } = await getSupabaseClient().rpc("admin_set_feature_flag", {
     target_key: input.key,
     target_is_enabled: input.isEnabled,
+  });
+  if (error) throw error;
+}
+
+export async function adminSetMyFeaturePreview(input: {
+  key: string;
+  isEnabled: boolean;
+}): Promise<void> {
+  const { error } = await getSupabaseClient().rpc("admin_set_my_feature_preview_v1", {
+    p_feature_key: input.key,
+    p_is_enabled: input.isEnabled,
   });
   if (error) throw error;
 }

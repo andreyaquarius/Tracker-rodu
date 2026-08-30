@@ -140,6 +140,64 @@ p { color: var(--muted); line-height: 1.7; }
   width: 28px;
   height: 28px;
 }
+.main-shell-person-context .topbar {
+  min-height: 54px;
+  padding: 7px 18px;
+}
+.main-shell-person-context .topbar-brand span {
+  max-width: min(30vw, 330px);
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.main-shell-person-context .topbar-brand small { margin-top: 1px; }
+.main-shell-person-context .connection-summary { display: none; }
+.main-shell-person-context .desktop-sidebar-toggle,
+.main-shell-person-context .announcement-menu summary {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+}
+.main-shell-person-context .drive-connection-button,
+.main-shell-person-context .help-topbar-button,
+.main-shell-person-context .account-menu summary {
+  min-height: 36px;
+}
+.main-shell-person-context .account-menu summary img,
+.main-shell-person-context .account-avatar {
+  width: 28px;
+  height: 28px;
+}
+.main-shell-person-context .drive-connection-button {
+  min-width: 36px;
+  width: 36px;
+  padding: 0;
+  justify-content: center;
+}
+.main-shell-person-context .drive-connection-button span:not(.drive-connection-dot),
+.main-shell-person-context .help-topbar-button span,
+.main-shell-person-context .account-name,
+.main-shell-person-context .account-chevron {
+  display: none;
+}
+.main-shell-person-context .help-topbar-button {
+  min-width: 36px;
+  width: 36px;
+  padding: 0;
+  justify-content: center;
+}
+.main-shell-person-context .account-menu summary {
+  padding-right: 5px;
+}
+.person-context-page {
+  padding-top: 10px;
+  padding-bottom: 28px;
+}
+.person-context-page > .subscription-notice {
+  margin-bottom: 8px;
+  padding: 7px 11px;
+}
 .topbar {
   position: sticky; top: 0; z-index: 90; min-height: 76px; padding: 12px 34px;
   display: flex; justify-content: space-between; align-items: center; gap: 20px;
@@ -4972,10 +5030,13 @@ tbody tr:hover { background: #fbfaf5; }
 .participants-heading p { margin: 4px 0 0; color: #445650; font-size: 11px; }
 .participant-list { display: grid; gap: 10px; }
 .participant-row {
-  display: grid; grid-template-columns: 30px minmax(130px, .7fr) minmax(180px, 1fr) minmax(210px, 1.2fr) minmax(210px, 1.2fr) 36px;
+  display: grid; grid-template-columns: 30px minmax(130px, .7fr) minmax(180px, 1fr) minmax(210px, 1.2fr) minmax(210px, 1.2fr) minmax(210px, 1.2fr) 36px;
   align-items: end; gap: 9px; padding: 12px; background: white; border: 1px solid #e2e3dd; border-radius: 10px;
 }
-.participant-person-link small { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.participant-person-link small,
+.participant-context-target small,
+.participant-role-warning { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.participant-role-warning { color: #985527; font-weight: 700; }
 .participant-number { align-self: center; display: grid; place-items: center; width: 28px; height: 28px; color: var(--green-800); background: var(--green-100); border-radius: 50%; font-size: 10px; font-weight: 800; }
 .participant-remove { align-self: end; }
 .participant-empty { width: 100%; padding: 24px; color: var(--muted); background: white; border: 1px dashed #cbd3cf; border-radius: 9px; font-size: 11px; }
@@ -6896,6 +6957,13 @@ tbody tr:hover { background: #fbfaf5; }
   color: var(--muted);
   font-size: 11px;
 }
+.feature-flag-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .feature-flag-toggle {
   flex: 0 0 auto;
   min-width: 122px;
@@ -7036,6 +7104,7 @@ tbody tr:hover { background: #fbfaf5; }
     align-items: stretch;
     flex-direction: column;
   }
+  .feature-flag-actions { width: 100%; }
   .feature-flag-toggle { width: 100%; }
   .announcement-admin-grid,
   .announcement-editor-row {
@@ -9067,6 +9136,7 @@ tbody tr:hover { background: #fbfaf5; }
   .login-card { margin: 30px auto; }
   .participant-row { grid-template-columns: 30px 1fr 1fr 36px; }
   .participant-person-link { grid-column: 2 / 4; }
+  .participant-context-target { grid-column: 2 / 4; }
   .participant-notes { grid-column: 2 / 4; }
 }
 
@@ -9173,6 +9243,7 @@ tbody tr:hover { background: #fbfaf5; }
   .participant-row { grid-template-columns: 28px 1fr 36px; }
   .participant-row > label { grid-column: 2; }
   .participant-person-link { grid-column: 2; }
+  .participant-context-target { grid-column: 2; }
   .participant-notes { grid-column: 2; }
   .participant-remove { grid-column: 3; grid-row: 1; }
   .participant-details > div { grid-template-columns: 1fr; }

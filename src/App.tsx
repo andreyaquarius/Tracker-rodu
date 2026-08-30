@@ -40,6 +40,7 @@ import { ZagulyakyPage } from "./pages/ZagulyakyPage";
 import { NotesPage } from "./pages/NotesPage";
 import { MapPage } from "./pages/MapPage";
 import { HistoricalPlacesPage } from "./pages/HistoricalPlacesPage";
+import { SharedResearchGraphPage } from "./features/context-graph/SharedResearchGraphPage.tsx";
 import { FamilyTreePage } from "./pages/FamilyTreePage";
 import { FamilyTreeStatisticsPage } from "./pages/FamilyTreeStatisticsPage.tsx";
 import { FamilyTreeErrorBoundary } from "./components/familyTree/FamilyTreeErrorBoundary";
@@ -65,6 +66,7 @@ import {
   parseFamilyTreeRouteFocus,
   personPath,
   projectDashboardPath,
+  researchGraphShareTokenFromLocation,
 } from "./utils/appRoutes";
 import {
   createSupabaseWorkspace,
@@ -113,9 +115,15 @@ import { useSubscription } from "./hooks/useSubscription";
 import {
   beginTableImport,
   loadAppFeatureFlags,
+  loadMyAppFeatureAccess,
   subscriptionErrorCode,
   subscriptionErrorMessage,
+  type AppFeatureAccess,
 } from "./services/subscriptionService";
+import {
+  PERSON_CONTEXT_GRAPHS_FEATURE_KEY,
+  resolvePersonContextGraphAccess,
+} from "./utils/contextGraphFeatureAccess.ts";
 import {
   assertFamilyTreeFeatureAccess,
 } from "./services/familyTreeFeatureAccess";
@@ -690,6 +698,18 @@ function baseUpdatedAt(entity: object): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function removeMetaName(name: string): void {
+  document.head.querySelector<HTMLMetaElement>(`meta[name="${name}"]`)?.remove();
+}
+
+function applySharedGraphSeo(): void {
+  document.title = "Спільний дослідницький граф — Трекер Роду";
+  upsertMetaName("description", "Безпечний публічний зріз дослідницького графа без живих і непублічних осіб.");
+  upsertMetaName("robots", "noindex, nofollow, noarchive, nosnippet, noimageindex");
+  upsertMetaName("referrer", "no-referrer");
+  upsertCanonical(null);
+}
+
 function withoutFindingPersonLinks(
   finding: Finding,
   removedPersonIds: ReadonlySet<string>,
@@ -718,7 +738,12 @@ const GEDCOM_IMPORT_PHASE_RANGES: Record<
   "task-person-insert": { step: "Оновлюємо учасників завдань", start: 61, end: 62 },
   findings: { step: "Зберігаємо знахідки", start: 58, end: 68 },
   "finding-participant-delete": { step: "Оновлюємо учасників знахідок", start: 68, end: 71 },
-  "finding-participant-upsert": { step: "Зберігаємо учасників знахідок", start: 71, end: 74 },
+  "finding-participant-upsert": { step: "Зберігаємо учасників знахідок", start: 71, end: 73 },
+  "finding-participant-target-link": {
+    step: "Пов’язуємо соціальні ролі учасників",
+    start: 73,
+    end: 74,
+  },
 };
 
 function reportGedcomImportBatchProgress(
@@ -773,6 +798,13 @@ export default function App() {
   const [scanViewer, setScanViewer] = useState<AppDocumentScanViewer | null>(null);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
+  const [featureFlagsOwnerId, setFeatureFlagsOwnerId] = useState("");
+  const [featureFlagsStatus, setFeatureFlagsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [contextGraphFeatureAccess, setContextGraphFeatureAccess] = useState<AppFeatureAccess | null>(null);
+  const [featureFlagsRevision, setFeatureFlagsRevision] = useState(0);
+  const refreshAppFeatureFlags = useCallback(() => {
+    setFeatureFlagsRevision((current) => current + 1);
+  }, []);
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
   const [productAnalyticsConsentOwnerId, setProductAnalyticsConsentOwnerId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
@@ -824,9 +856,13 @@ export default function App() {
   const isPublicContentRoute = route.kind === "public" || (
     isZagulyakyRoute && !isPrivateZagulyakyRoute
   );
+  const isSensitiveSharedGraphRoute = route.kind === "graph-share";
   // Zagulyaky and the account-level Notes inbox are standalone from a
   // workspace perspective, so neither may trigger project dashboard loads.
-  const skipsWorkspaceState = route.kind === "public" || isZagulyakyRoute || route.kind === "notes";
+  const skipsWorkspaceState = route.kind === "public"
+    || isZagulyakyRoute
+    || route.kind === "notes"
+    || isSensitiveSharedGraphRoute;
   const familyTreeRouteFocus = useMemo(
     () => parseFamilyTreeRouteFocus(location.search),
     [location.search],
@@ -849,7 +885,6 @@ export default function App() {
     useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
   const [upgradeReason, setUpgradeReason] = useState<UpgradeReason | null>(null);
-  const workspaceSetupRef = useRef<Promise<void> | null>(null);
   const passwordRecoveryRef = useRef(false);
   const lastPreparedUserRef = useRef<string | null>(null);
   const knownWorkspaceIdsRef = useRef<{
@@ -889,13 +924,13 @@ export default function App() {
     ));
   }, [workspace?.projectId]);
   const subscriptionAccess = useSubscription(
-    workspace?.projectId,
+    isSensitiveSharedGraphRoute ? undefined : workspace?.projectId,
     // Subscription and administrator access belong to the signed-in account,
     // not to the current workspace.  Standalone account screens such as
     // /notes still render the profile menu, so they must resolve this context
     // even though `skipsWorkspaceState` correctly suppresses project data.
-    Boolean(account),
-    account?.id ?? "",
+    !isSensitiveSharedGraphRoute && Boolean(account),
+    isSensitiveSharedGraphRoute ? "" : account?.id ?? "",
   );
   const canDeleteAccount = Boolean(subscriptionAccess.context) && !subscriptionAccess.isAdmin;
 
@@ -914,10 +949,21 @@ export default function App() {
     let active = true;
     if (!account || skipsWorkspaceState) {
       setFeatureFlags({});
+      setFeatureFlagsOwnerId(account?.id ?? "");
+      setFeatureFlagsStatus("idle");
+      setContextGraphFeatureAccess(null);
       return () => {
         active = false;
       };
     }
+    const requestedAccountId = account.id;
+    setFeatureFlags({});
+    setFeatureFlagsOwnerId(requestedAccountId);
+    setFeatureFlagsStatus("loading");
+    setContextGraphFeatureAccess(null);
+    // Load the established global flags independently. Their failure must not
+    // affect the private preview, and their latency must not keep its route in
+    // a loading state after the account-specific access RPC has resolved.
     void loadAppFeatureFlags()
       .then((flags) => {
         if (active) setFeatureFlags(flags);
@@ -925,10 +971,23 @@ export default function App() {
       .catch(() => {
         if (active) setFeatureFlags({});
       });
+    void loadMyAppFeatureAccess(PERSON_CONTEXT_GRAPHS_FEATURE_KEY)
+      .then((contextAccess) => {
+        if (!active) return;
+        setContextGraphFeatureAccess(contextAccess);
+        setFeatureFlagsStatus("ready");
+      })
+      .catch(() => {
+        if (!active) return;
+        // A missing or temporarily unavailable preview RPC fails only this
+        // beta module closed without disabling unrelated production flags.
+        setContextGraphFeatureAccess(null);
+        setFeatureFlagsStatus("error");
+      });
     return () => {
       active = false;
     };
-  }, [account?.id, skipsWorkspaceState]);
+  }, [account?.id, featureFlagsRevision, skipsWorkspaceState]);
 
   // Family Tree and Persons V2 are core authenticated modules. Subscription
   // limits still control creation capacity; project RLS still controls which
@@ -944,6 +1003,15 @@ export default function App() {
   const personsModuleV2Enabled = canUsePersonsModuleV2({
     canUseFamilyTreeFeature,
   });
+  const personContextGraphAccess = resolvePersonContextGraphAccess({
+    authenticated: Boolean(account),
+    requestResolved: featureFlagsOwnerId === account?.id
+      && (featureFlagsStatus === "ready" || featureFlagsStatus === "error"),
+    effectiveEnabled: featureFlagsStatus === "ready"
+      && contextGraphFeatureAccess?.effectiveEnabled === true,
+  });
+  const contextGraphPublicSharingEnabled = featureFlagsStatus === "ready"
+    && contextGraphFeatureAccess?.globalEnabled === true;
   useEffect(() => {
     const projectId = workspace?.projectId;
     if (!personsModuleV2Enabled || !projectId) return;
@@ -1051,6 +1119,11 @@ export default function App() {
   const shouldLoadAnalysis = route.kind !== "admin" && !skipsWorkspaceState && requestedDataGroups.has("analysis");
 
   useEffect(() => {
+    if (route.kind === "graph-share") {
+      applySharedGraphSeo();
+      return;
+    }
+    removeMetaName("referrer");
     if (route.kind === "public") {
       applyPublicSeo(route.page);
       return;
@@ -1099,20 +1172,28 @@ export default function App() {
       !passwordRecovery &&
       route.kind !== "root" &&
       !isPublicContentRoute &&
+      !isSensitiveSharedGraphRoute &&
       route.kind !== "admin";
     setAuthenticatedEngagementEnabled(privateAuthenticatedSession);
-  }, [account, isPublicContentRoute, passwordRecovery, route.kind]);
+  }, [account, isPublicContentRoute, isSensitiveSharedGraphRoute, passwordRecovery, route.kind]);
 
   const productAnalyticsPage = useMemo(() => productAnalyticsPageCode(route), [route]);
 
   useEffect(() => {
+    if (isSensitiveSharedGraphRoute) {
+      setProductAnalyticsEnabled(false);
+      return;
+    }
     setProductAnalyticsPage(productAnalyticsPage);
-  }, [productAnalyticsPage]);
+  }, [isSensitiveSharedGraphRoute, productAnalyticsPage]);
 
   useEffect(() => {
     let active = true;
     setProductAnalyticsConsentOwnerId(null);
     setProductAnalyticsEnabled(false);
+    if (isSensitiveSharedGraphRoute) return () => {
+      active = false;
+    };
     if (!account) return () => {
       active = false;
     };
@@ -1126,7 +1207,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [account?.id]);
+  }, [account?.id, isSensitiveSharedGraphRoute]);
 
   useEffect(() => {
     const productAnalyticsAllowed = Boolean(account)
@@ -1136,11 +1217,13 @@ export default function App() {
       && !subscriptionAccess.isAdmin
       && route.kind !== "root"
       && !isPublicContentRoute
+      && !isSensitiveSharedGraphRoute
       && route.kind !== "admin";
     setProductAnalyticsEnabled(productAnalyticsAllowed);
   }, [
     account,
     isPublicContentRoute,
+    isSensitiveSharedGraphRoute,
     productAnalyticsConsentOwnerId,
     passwordRecovery,
     route.kind,
@@ -1263,7 +1346,12 @@ export default function App() {
     const canonicalPath = route.page === "places" && route.placeMode
       ? historicalPlacePath(requestedWorkspace.projectSlug, route.placeId, route.placeMode)
       : route.page === "persons" && route.personMode
-        ? personPath(requestedWorkspace.projectSlug, route.personId, route.personMode)
+        ? personPath(
+            requestedWorkspace.projectSlug,
+            route.personId,
+            route.personMode,
+            route.contextView,
+          )
       : route.page === "familyTree" && route.familyTreeView === "statistics"
         ? familyTreeStatisticsPath(requestedWorkspace.projectSlug, familyTreeRouteFocus.treeId)
         : pagePath(
@@ -1305,12 +1393,13 @@ export default function App() {
         : `${location.pathname}${location.search}${location.hash}`;
       rememberPrivatePostAuthReturn(returnPath);
     }
-    if (route.kind === "root" || isPublicContentRoute) return;
+    if (route.kind === "root" || isPublicContentRoute || isSensitiveSharedGraphRoute) return;
     routerNavigate("/", { replace: true });
   }, [
     account,
     authReady,
     isPublicContentRoute,
+    isSensitiveSharedGraphRoute,
     location.hash,
     location.pathname,
     location.search,
@@ -1320,9 +1409,26 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    // A bearer-share viewer is deliberately isolated from the signed-in app.
+    // Do not restore a session, report auth analytics, or load/ensure any
+    // workspace while this route is active. Leaving it reruns this effect and
+    // performs a fresh authenticated preparation from an empty local scope.
+    if (isSensitiveSharedGraphRoute) {
+      setAccount(null);
+      setWorkspace(null);
+      setWorkspaces([]);
+      setIsAccountSigningIn(false);
+      setAuthReady(true);
+      setOnboarded(false);
+      lastPreparedUserRef.current = null;
+      return;
+    }
     if (!isSupabaseConfigured) return;
 
     let active = true;
+    // Effect-owned on purpose: a setup started before entering the sensitive
+    // share route must never be reused when returning to the workspace.
+    let workspaceSetup: Promise<void> | null = null;
     const prepareWorkspace = async (session: Awaited<ReturnType<typeof getSupabaseSession>>) => {
       if (passwordRecoveryRef.current) return;
       if (!session) {
@@ -1370,8 +1476,8 @@ export default function App() {
         return;
       }
 
-      if (workspaceSetupRef.current) {
-        await workspaceSetupRef.current;
+      if (workspaceSetup) {
+        await workspaceSetup;
         setAuthReady(true);
         return;
       }
@@ -1388,7 +1494,7 @@ export default function App() {
 
       setIsAccountSigningIn(true);
       const authAnalyticsPromise = reportPendingAuthSuccess().catch(() => false);
-      workspaceSetupRef.current = (async () => {
+      workspaceSetup = (async () => {
         await authAnalyticsPromise;
         if (!active) return;
         setAccount(currentAccount);
@@ -1446,9 +1552,9 @@ export default function App() {
       })();
 
       try {
-        await workspaceSetupRef.current;
+        await workspaceSetup;
       } finally {
-        workspaceSetupRef.current = null;
+        workspaceSetup = null;
         if (active) {
           setIsAccountSigningIn(false);
           setAuthReady(true);
@@ -1502,7 +1608,7 @@ export default function App() {
       active = false;
       subscription?.unsubscribe();
     };
-  }, []);
+  }, [isSensitiveSharedGraphRoute]);
 
   const notify = useCallback((message: string, error = false) => {
     if (toastTimerRef.current !== null) {
@@ -2684,7 +2790,6 @@ export default function App() {
       setWorkspaces([]);
       setAuthReady(true);
       lastPreparedUserRef.current = null;
-      workspaceSetupRef.current = null;
       setOnboarded(false);
       setLoginError("");
       routerNavigate("/", { replace: true });
@@ -2747,7 +2852,6 @@ export default function App() {
     setWorkspaces([]);
     setAuthReady(true);
     lastPreparedUserRef.current = null;
-    workspaceSetupRef.current = null;
     setOnboarded(false);
     setLoginError("");
     setIsAccountSigningIn(false);
@@ -3062,6 +3166,18 @@ export default function App() {
     }
     setTeamOpen(false);
   };
+
+  if (route.kind === "graph-share") {
+    return (
+      <SharedResearchGraphPage
+        token={researchGraphShareTokenFromLocation(
+          location.pathname,
+          location.search,
+          location.hash,
+        )}
+      />
+    );
+  }
 
   if (route.kind === "public") {
     if (route.page === "privacy") return <PrivacyPage />;
@@ -6052,13 +6168,19 @@ export default function App() {
                     ? route.personMode
                     : "list",
                   personId: route.kind === "project" ? route.personId : undefined,
+                  contextView: route.kind === "project" ? route.contextView : undefined,
                 }}
                 onNavigate={(target, options) => {
                   if (!workspace) return;
                   routerNavigate(
                     target.mode === "list"
                       ? pagePath(workspace.projectSlug, "persons", projectCustomSections)
-                      : personPath(workspace.projectSlug, target.personId, target.mode),
+                      : personPath(
+                          workspace.projectSlug,
+                          target.personId,
+                          target.mode,
+                          target.contextView,
+                        ),
                     { replace: options?.replace },
                   );
                 }}
@@ -6077,6 +6199,10 @@ export default function App() {
                 onBackupGedcomPhotos={workspace ? backupImportedGedcomPhotos : undefined}
                 onSaveRelation={saveRelation}
                 onOpenRelated={openRelatedRecord}
+                onOpenPlace={(placeId) => {
+                  if (!workspace) return;
+                  routerNavigate(historicalPlacePath(workspace.projectSlug, placeId));
+                }}
                 onNavigateRelated={navigate}
                 onCreateRelated={createRelatedRecord}
                 customFieldDefinitions={activeDb.settings.customFields.filter(
@@ -6087,6 +6213,8 @@ export default function App() {
                 canAddCustomField={canCreateCustomField}
                 customFieldLimitMessage={customFieldLimitMessage}
                 readOnly={readOnly}
+                canManageShareLinks={workspace?.role === "owner" && contextGraphPublicSharingEnabled}
+                contextGraphAccess={personContextGraphAccess}
                 canCreate={canCreateStandardSection(standardSectionQuotaKeys.persons)}
                 canCreateTree={subscriptionAccess.canCreateFamilyTree}
                 canImportTable={subscriptionAccess.canImportTable}
@@ -6175,6 +6303,7 @@ export default function App() {
             loading={subscriptionAccess.loading}
             error={subscriptionAccess.error}
             onRefresh={subscriptionAccess.refreshSubscription}
+            onFeatureFlagsChanged={refreshAppFeatureFlags}
           />
         );
       case "feedback":
@@ -6188,7 +6317,10 @@ export default function App() {
     }
   })();
 
-  const structuredContent = isHierarchyPage(page) ? (
+  const isFocusedPersonContext = page === "persons"
+    && route.kind === "project"
+    && route.personMode === "context";
+  const structuredContent = isHierarchyPage(page) && !isFocusedPersonContext ? (
     <>
       <SectionHierarchyHeader
         page={page}
@@ -6213,6 +6345,7 @@ export default function App() {
         }}
         onBack={() => routerNavigate("/projects")}
         onSignOut={() => void signOutAccount()}
+        onFeatureFlagsChanged={refreshAppFeatureFlags}
       />
     );
   }
@@ -6250,6 +6383,7 @@ export default function App() {
     <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
         page={route.kind === "projects" || route.kind === "notes" ? null : page}
+        focusedPersonContext={isFocusedPersonContext}
         familyTreeView={
           route.kind === "project" && route.page === "familyTree"
             ? route.familyTreeView ?? "tree"

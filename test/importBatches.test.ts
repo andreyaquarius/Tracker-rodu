@@ -18,6 +18,7 @@ import {
   runAdaptiveImportBatch,
   runImportBatches,
 } from "../src/utils/importBatches.ts";
+import { prepareFindingParticipantImportPasses } from "../src/utils/findingParticipantImport.ts";
 
 const encoder = new TextEncoder();
 
@@ -123,6 +124,26 @@ test("all project bulk import services use bounded mutation batches", () => {
     workRecordsSource,
     /for \(const finding of findings\)\s*\{\s*await replaceFindingParticipants/,
   );
+  assert.match(workRecordsSource, /finding-participant-target-link/);
+});
+
+test("participant import creates all rows before linking cross-batch social targets", () => {
+  const rows = Array.from({ length: 250 }, (_, index) => ({
+    id: `participant-${index}`,
+    finding_id: `finding-${Math.floor(index / 5)}`,
+    context_target_participant_id: index === 0 ? "participant-249" : null,
+  }));
+
+  const passes = prepareFindingParticipantImportPasses(rows);
+
+  assert.equal(passes.baseRows.length, 250);
+  assert.equal(
+    passes.baseRows.every((row) => row.context_target_participant_id === null),
+    true,
+  );
+  assert.deepEqual(passes.targetRows, [rows[0]]);
+  assert.equal(passes.targetRows[0]?.context_target_participant_id, "participant-249");
+  assert.notEqual(passes.baseRows[0], rows[0]);
 });
 
 test("runs import batches with bounded concurrency and monotonic progress", async () => {

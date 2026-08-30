@@ -1,6 +1,7 @@
 import type { Person } from "../../types";
 
-export type PersonsModuleV2Mode = "list" | "profile" | "edit" | "new";
+export type PersonsModuleV2Mode = "list" | "profile" | "edit" | "context" | "new";
+export type PersonContextView = "social" | "ritual" | "documentary" | "research";
 
 export type PersonSaveHandler = (
   person: Person,
@@ -9,6 +10,7 @@ export type PersonSaveHandler = (
 export interface PersonRouteTarget {
   mode: PersonsModuleV2Mode;
   personId?: string;
+  contextView?: PersonContextView;
 }
 
 export async function savePersonAndClose(

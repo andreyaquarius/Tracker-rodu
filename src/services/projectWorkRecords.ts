@@ -8,7 +8,10 @@ import type {
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
 import { FINDING_GEO_META_KEY, normalizeGeo, stripInternalGeoFields } from "../utils/geo";
-import { sortFindingParticipants } from "../utils/findingParticipants";
+import {
+  resolvedContextTargetParticipantId,
+  sortFindingParticipants,
+} from "../utils/findingParticipants";
 import {
   findingParticipantFromStorage,
   findingParticipantPersonIdForStorage,
@@ -33,6 +36,9 @@ import {
   normalizeTaskReminderFields,
 } from "../utils/taskReminders.ts";
 import { extractFindingSourceUrl } from "../utils/findingSourceUrl.ts";
+import { prepareFindingParticipantImportPasses } from "../utils/findingParticipantImport.ts";
+
+export { prepareFindingParticipantImportPasses } from "../utils/findingParticipantImport.ts";
 
 type TaskRow = {
   id: string;
@@ -95,6 +101,7 @@ type FindingParticipantRow = {
   id: string;
   finding_id: string;
   person_id: string | null;
+  context_target_participant_id: string | null;
   name: string;
   role: string;
   notes: string;
@@ -104,6 +111,8 @@ const TASK_SELECT =
   "id, project_id, research_id, person_name, title, description, place, year_from, year_to, document_type, document_id, status, priority, deadline, reminder_at, reminder_in_app, reminder_email, reminder_sent_at, notes, custom_fields, created_at, updated_at";
 const FINDING_SELECT =
   "id, project_id, research_id, document_id, finding_type, event_date, people, persons_text, place, archive, fund, description, file_reference, page, source_url, summary, transcription, conclusion, reliability, needs_review, notes, custom_fields, created_at, updated_at";
+const FINDING_PARTICIPANT_SELECT =
+  "id, finding_id, person_id, context_target_participant_id, name, role, notes";
 const FINDING_META_KEY = "__trackerRoduFindingMeta";
 const IMPORT_REFERENCE_BATCH_ITEMS = 100;
 const IMPORT_REFERENCE_BATCH_BYTES = 20_000;
@@ -288,6 +297,8 @@ function participantToRow(
   projectId: string,
   findingId: string,
   participant: FindingParticipant,
+  participants: readonly FindingParticipant[],
+  findingType: string,
   validPersonIds?: ReadonlySet<string>,
 ) {
   return {
@@ -295,6 +306,8 @@ function participantToRow(
     project_id: projectId,
     finding_id: findingId,
     person_id: findingParticipantPersonIdForStorage(participant, validPersonIds),
+    context_target_participant_id:
+      resolvedContextTargetParticipantId(participant, participants, findingType) ?? null,
     name: participant.name,
     role: participant.role,
     notes: participant.notes,
@@ -329,7 +342,7 @@ export async function listProjectWorkRecords(projectId: string): Promise<{
       ),
       selectRowsByCursor<FindingParticipantRow>(
         () => client.from("finding_participants")
-          .select("id, finding_id, person_id, name, role, notes")
+          .select(FINDING_PARTICIPANT_SELECT)
           .eq("project_id", projectId).order("id", { ascending: true }),
         "id",
         (row) => row.id,
@@ -437,7 +450,7 @@ export async function listPersonWorkRecords(
     findingIds.length
       ? client
           .from("finding_participants")
-          .select("id, finding_id, person_id, name, role, notes")
+          .select(FINDING_PARTICIPANT_SELECT)
           .eq("project_id", projectId)
           .in("finding_id", findingIds)
           .order("id", { ascending: true })
@@ -513,7 +526,7 @@ export async function getProjectFinding(
       .maybeSingle(),
     client
       .from("finding_participants")
-      .select("id, finding_id, person_id, name, role, notes")
+      .select(FINDING_PARTICIPANT_SELECT)
       .eq("project_id", projectId)
       .eq("finding_id", findingId)
       .order("id", { ascending: true }),
@@ -653,7 +666,14 @@ async function replaceFindingParticipants(
     .from("finding_participants")
     .upsert(
       finding.participants.map((participant) =>
-        participantToRow(projectId, finding.id, participant, validPersonIds),
+        participantToRow(
+          projectId,
+          finding.id,
+          participant,
+          finding.participants,
+          finding.findingType,
+          validPersonIds,
+        ),
       ),
       { onConflict: "id" },
     );
@@ -732,10 +752,18 @@ async function replaceImportedFindingParticipants(
 
   const rows = findings.flatMap((finding) =>
     finding.participants.map((participant) =>
-      participantToRow(projectId, finding.id, participant, validPersonIds)
+      participantToRow(
+        projectId,
+        finding.id,
+        participant,
+        finding.participants,
+        finding.findingType,
+        validPersonIds,
+      )
     ),
   );
-  await runImportBatches(chunkImportRows(rows), async (batch) => {
+  const passes = prepareFindingParticipantImportPasses(rows);
+  await runImportBatches(chunkImportRows(passes.baseRows), async (batch) => {
     const { error } = await client
       .from("finding_participants")
       .upsert(batch, { onConflict: "id" });
@@ -744,6 +772,16 @@ async function replaceImportedFindingParticipants(
     concurrency: FINDING_IMPORT_CONCURRENCY,
     beforeBatch: options.beforeBatch,
     onProgress: withImportPhase("finding-participant-upsert", options.onProgress),
+  });
+  await runImportBatches(chunkImportRows(passes.targetRows), async (batch) => {
+    const { error } = await client
+      .from("finding_participants")
+      .upsert(batch, { onConflict: "id" });
+    if (error) throw error;
+  }, {
+    concurrency: FINDING_IMPORT_CONCURRENCY,
+    beforeBatch: options.beforeBatch,
+    onProgress: withImportPhase("finding-participant-target-link", options.onProgress),
   });
 }
 

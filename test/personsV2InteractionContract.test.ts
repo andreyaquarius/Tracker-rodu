@@ -100,7 +100,7 @@ test("persons V2 preview no longer becomes a partial fixed overlay at the deskto
 });
 
 test("persons V2 uses the full desktop workspace and fits list columns without a wide-screen scrollbar", () => {
-  assert.match(layout, /props\.page === "persons"[\s\S]*?"page persons-v2-page"/u);
+  assert.match(layout, /props\.page === "persons"[\s\S]*?page persons-v2-page/u);
   assert.match(styles, /\.persons-v2-page\s*\{[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*none;/u);
   assert.match(styles, /\.persons-v2-catalog-shell\s*\{[\s\S]*?max-width:\s*100%;[\s\S]*?min-width:\s*0;/u);
   assert.match(styles, /@container persons-catalog-shell \(min-width: 1181px\)[\s\S]*?\.persons-v2-list table\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?table-layout:\s*fixed;/u);

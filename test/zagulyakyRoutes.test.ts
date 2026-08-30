@@ -110,7 +110,7 @@ test("private Zaguliaky drafts and standalone Notes are auth-only without worksp
   );
   assert.match(
     appSource,
-    /const skipsWorkspaceState = route\.kind === "public" \|\| isZagulyakyRoute \|\| route\.kind === "notes";/,
+    /const skipsWorkspaceState = route\.kind === "public"[\s\S]*?\|\| isZagulyakyRoute[\s\S]*?\|\| route\.kind === "notes"[\s\S]*?\|\| isSensitiveSharedGraphRoute;/,
     "private catalogue drafts and Notes must remain independent from a selected project",
   );
   assert.match(

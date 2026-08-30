@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  adminSetMyFeaturePreview,
   adminSetFeatureFlag,
   adminSetSubscription,
   cancelMySubscription,
@@ -39,6 +40,7 @@ interface SubscriptionPageProps {
   loading: boolean;
   error: string;
   onRefresh: () => Promise<unknown>;
+  onFeatureFlagsChanged?: () => void;
 }
 
 const limitLabels: Record<PlanLimitKey, string> = {
@@ -81,6 +83,7 @@ export function SubscriptionPage({
   loading,
   error,
   onRefresh,
+  onFeatureFlagsChanged,
 }: SubscriptionPageProps) {
   const [plans, setPlans] = useState<Array<{ plan: SubscriptionPlan; limits: PlanLimit[] }>>([]);
   const [adminRows, setAdminRows] = useState<AdminSubscriptionRow[]>([]);
@@ -317,7 +320,10 @@ export function SubscriptionPage({
           <AdminFeatureFlags
             flags={featureFlags}
             loadError={featureFlagsError}
-            onChanged={refreshPage}
+            onChanged={async () => {
+              await refreshPage();
+              onFeatureFlagsChanged?.();
+            }}
           />
           <AdminSubscriptions rows={adminRows} onChanged={refreshPage} />
         </>
@@ -604,14 +610,30 @@ export function AdminFeatureFlags({ flags, loadError, onChanged }: {
   const [busyKey, setBusyKey] = useState("");
   const [error, setError] = useState("");
 
-  const toggle = async (flag: AppFeatureFlag) => {
-    setBusyKey(flag.key);
+  const toggleGlobal = async (flag: AppFeatureFlag) => {
+    setBusyKey(`global:${flag.key}`);
     setError("");
     try {
       await adminSetFeatureFlag({ key: flag.key, isEnabled: !flag.isEnabled });
       await onChanged();
     } catch (toggleError) {
       setError(toggleError instanceof Error ? toggleError.message : "Не вдалося змінити налаштування функції.");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const togglePreview = async (flag: AppFeatureFlag) => {
+    setBusyKey(`preview:${flag.key}`);
+    setError("");
+    try {
+      await adminSetMyFeaturePreview({
+        key: flag.key,
+        isEnabled: !flag.isPreviewEnabled,
+      });
+      await onChanged();
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : "Не вдалося змінити приватний тестовий доступ.");
     } finally {
       setBusyKey("");
     }
@@ -632,15 +654,32 @@ export function AdminFeatureFlags({ flags, loadError, onChanged }: {
               {flag.description ? <p>{flag.description}</p> : null}
               <small>Ключ: {flag.key}</small>
             </div>
-            <button
-              type="button"
-              className={`feature-flag-toggle ${flag.isEnabled ? "enabled" : ""}`}
-              disabled={busyKey === flag.key}
-              onClick={() => void toggle(flag)}
-              aria-pressed={flag.isEnabled}
-            >
-              <span>{flag.isEnabled ? "Увімкнено" : "Вимкнено"}</span>
-            </button>
+            <div className="feature-flag-actions">
+              {flag.supportsPrivatePreview ? (
+                <button
+                  type="button"
+                  className={`feature-flag-toggle ${flag.isPreviewEnabled ? "enabled" : ""}`}
+                  disabled={Boolean(busyKey) || flag.isEnabled}
+                  onClick={() => void togglePreview(flag)}
+                  aria-pressed={flag.isPreviewEnabled}
+                >
+                  <span>{flag.isEnabled
+                    ? "Вже доступно всім"
+                    : flag.isPreviewEnabled
+                      ? "Лише мені: увімкнено"
+                      : "Увімкнути лише мені"}</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={`feature-flag-toggle ${flag.isEnabled ? "enabled" : ""}`}
+                disabled={Boolean(busyKey)}
+                onClick={() => void toggleGlobal(flag)}
+                aria-pressed={flag.isEnabled}
+              >
+                <span>{flag.isEnabled ? "Для всіх: увімкнено" : "Для всіх: вимкнено"}</span>
+              </button>
+            </div>
           </article>
         ))}
         {!flags.length && !loadError ? (

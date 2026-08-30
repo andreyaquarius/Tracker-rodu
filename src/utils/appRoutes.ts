@@ -56,6 +56,7 @@ const adminSegmentPages = new Map(
 export type AppRoute =
   | { kind: "root" }
   | { kind: "public"; page: "privacy" | "terms" | "features" | "pricing" | "faq" }
+  | { kind: "graph-share" }
   | {
       kind: "zagulyaky";
       tab: "people" | "documents" | "places" | "mine";
@@ -71,7 +72,8 @@ export type AppRoute =
       projectRef: string;
       page: PageKey;
       personId?: string;
-      personMode?: "profile" | "edit" | "new";
+      personMode?: "profile" | "edit" | "context" | "new";
+      contextView?: "social" | "ritual" | "documentary" | "research";
       placeId?: string;
       placeMode?: "profile" | "edit" | "new";
       familyTreeView?: "tree" | "statistics";
@@ -164,6 +166,9 @@ export function parseAppRoute(
   const pathOnly = pathname.split(/[?#]/, 1)[0] ?? pathname;
   const parts = pathOnly.split("/").filter(Boolean).map(decodeURIComponent);
   if (!parts.length) return { kind: "root" };
+  if (parts.length === 1 && parts[0] === "shared-graph") {
+    return { kind: "graph-share" };
+  }
   if (parts.length === 1 && parts[0] === "privacy") {
     return { kind: "public", page: "privacy" };
   }
@@ -324,6 +329,34 @@ export function parseAppRoute(
         personMode: "edit",
       };
     }
+    if (sectionPath.length === 3 && sectionPath[1] && sectionPath[2] === "context") {
+      return {
+        kind: "project",
+        projectRef,
+        page: "persons",
+        personId: sectionPath[1],
+        personMode: "context",
+      };
+    }
+    if (
+      sectionPath.length === 4
+      && sectionPath[1]
+      && sectionPath[2] === "context"
+      && (
+        sectionPath[3] === "documentary"
+        || sectionPath[3] === "ritual"
+        || sectionPath[3] === "research"
+      )
+    ) {
+      return {
+        kind: "project",
+        projectRef,
+        page: "persons",
+        personId: sectionPath[1],
+        personMode: "context",
+        contextView: sectionPath[3],
+      };
+    }
   }
   if (
     standardPage === "familyTree" &&
@@ -372,6 +405,43 @@ export function pagePath(
 
 export function projectDashboardPath(projectSlug: string): string {
   return pagePath(projectSlug, "dashboard");
+}
+
+/**
+ * Share tokens are opaque bearer credentials. Keep them in the URL only and
+ * reject malformed or suspiciously large path segments before any RPC call.
+ */
+export function isResearchGraphShareToken(value: string): boolean {
+  return /^[A-Za-z0-9_-]{43}$/u.test(value.trim());
+}
+
+/**
+ * Resolve a public-share bearer only from the one supported URL shape.
+ * Query parameters are deliberately fail-closed: a token-like query must
+ * never be combined with or override the fragment credential.
+ */
+export function researchGraphShareTokenFromLocation(
+  pathname: string,
+  search: string,
+  hash: string,
+): string {
+  if (pathname !== "/shared-graph" || search !== "") return "";
+  const encoded = hash.startsWith("#") ? hash.slice(1) : hash;
+  try {
+    const decoded = decodeURIComponent(encoded).trim();
+    return isResearchGraphShareToken(decoded) ? decoded : "";
+  } catch {
+    return "";
+  }
+}
+
+export function researchGraphSharePath(token: string): string {
+  const normalized = token.trim();
+  if (!isResearchGraphShareToken(normalized)) {
+    throw new Error("Некоректне посилання на дослідницький граф.");
+  }
+  // URL fragments are not sent to the hosting server or in HTTP Referer.
+  return `/shared-graph#${encodeURIComponent(normalized)}`;
 }
 
 export function adminPath(page: AdminPage): string {
@@ -447,15 +517,22 @@ export function parseFamilyTreeRouteFocus(search: string): FamilyTreeRouteFocus 
 export function personPath(
   projectSlug: string,
   personId?: string,
-  mode: "profile" | "edit" | "new" = "profile",
+  mode: "profile" | "edit" | "context" | "new" = "profile",
+  contextView: "social" | "ritual" | "documentary" | "research" = "social",
 ): string {
   const base = pagePath(projectSlug, "persons");
   if (mode === "new") return `${base}/new`;
   if (!personId) return base;
   const encodedPersonId = encodeURIComponent(personId);
-  return mode === "edit"
-    ? `${base}/${encodedPersonId}/edit`
-    : `${base}/${encodedPersonId}`;
+  if (mode === "edit") return `${base}/${encodedPersonId}/edit`;
+  if (mode === "context") {
+    const contextBase = `${base}/${encodedPersonId}/context`;
+    if (contextView === "documentary") return `${contextBase}/documentary`;
+    if (contextView === "ritual") return `${contextBase}/ritual`;
+    if (contextView === "research") return `${contextBase}/research`;
+    return contextBase;
+  }
+  return `${base}/${encodedPersonId}`;
 }
 
 export function historicalPlacePath(

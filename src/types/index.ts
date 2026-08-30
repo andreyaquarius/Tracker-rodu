@@ -328,6 +328,18 @@ export interface FindingParticipant {
    * have not been reconciled yet intentionally remain text-only.
    */
   personId?: EntityId;
+  /**
+   * Optional exact participant inside the same finding for whom this person
+   * performed a non-family role (for example, a godfather for a child or a
+   * witness for the bride). It points to FindingParticipant.id, not Person.id.
+   * Older findings omit it and are inferred only when one safe target exists.
+   */
+  contextTargetParticipantId?: EntityId;
+  /**
+   * Structured Ukrainian role label. Automatic social-circle projection uses
+   * the exact labels offered by the finding editor; arbitrary legacy labels
+   * remain supported as text but are not guessed into a precise relation.
+   */
   role: string;
   name: string;
   notes: string;

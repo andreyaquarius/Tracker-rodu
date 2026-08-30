@@ -4,6 +4,7 @@ dist/
 .pnpm-store/
 .tools/
 .claude/
+/.tmp/
 .vite-dev*.log
 .codex-*.log
 supabase/.branches/

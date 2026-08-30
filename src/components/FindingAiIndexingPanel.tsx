@@ -12,7 +12,10 @@ import {
   type AiFindingIndexingResponse,
   type AiFindingParticipantCandidate,
 } from "../services/findingAiIndexing";
-import { sortFindingParticipants } from "../utils/findingParticipants";
+import {
+  sortFindingParticipants,
+  suggestedContextTargetParticipantId,
+} from "../utils/findingParticipants";
 import {
   trackDeferredProductAnalyticsAction,
   trackDeferredProductAnalyticsOperation,
@@ -95,7 +98,7 @@ export function FindingAiIndexingPanel({
       ? finding.participants
       : [];
     const nextParticipants = sortFindingParticipants(
-      mergeParticipants(currentParticipants, candidates),
+      mergeParticipants(currentParticipants, candidates, finding.findingType ?? ""),
       finding.findingType ?? "",
     );
     const transcription = result.result.transcription.originalText
@@ -267,13 +270,14 @@ export function FindingAiIndexingPanel({
 function mergeParticipants(
   currentParticipants: FindingParticipant[],
   candidates: AiFindingParticipantCandidate[],
+  findingType: string,
 ): FindingParticipant[] {
   const existing = new Set(
     currentParticipants.map((participant) =>
       `${participant.role.trim().toLocaleLowerCase("uk")}:${participant.name.trim().toLocaleLowerCase("uk")}`,
     ),
   );
-  const additions = candidates
+  const additions: FindingParticipant[] = candidates
     .map((candidate) => ({
       id: createId(),
       role: candidate.roleLabel || "Інша особа",
@@ -287,7 +291,12 @@ function mergeParticipants(
       existing.add(key);
       return true;
     });
-  return [...currentParticipants, ...additions];
+  const merged = [...currentParticipants, ...additions];
+  return merged.map((participant) => ({
+    ...participant,
+    contextTargetParticipantId: participant.contextTargetParticipantId
+      ?? suggestedContextTargetParticipantId(participant, merged, findingType),
+  }));
 }
 
 function appendAudit(

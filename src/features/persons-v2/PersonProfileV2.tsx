@@ -113,6 +113,7 @@ export interface PersonProfileV2Props {
   onEdit?: (person: Person) => void;
   onDelete?: (person: Person) => void;
   onShowInTree?: (person: Person) => void;
+  onOpenContext?: (person: Person) => void;
   onOpenMap?: (person: Person) => void;
   onAddEvent?: (person: Person) => void;
   onLinkDocument?: (person: Person) => void;
@@ -188,6 +189,7 @@ export function PersonProfileV2({
   onEdit,
   onDelete,
   onShowInTree,
+  onOpenContext,
   onOpenMap,
   onAddEvent,
   onLinkDocument,
@@ -412,6 +414,11 @@ export function PersonProfileV2({
           {onDelete ? (
             <button type="button" className="button button-danger" onClick={() => onDelete(person)}>
               Видалити особу
+            </button>
+          ) : null}
+          {onOpenContext ? (
+            <button type="button" className="button button-secondary" onClick={() => onOpenContext(person)}>
+              Зв’язки та оточення
             </button>
           ) : null}
           {onShowInTree ? (

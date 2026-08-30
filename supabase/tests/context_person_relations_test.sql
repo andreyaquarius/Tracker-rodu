@@ -5,6 +5,10 @@ set search_path = public, extensions;
 
 select plan(42);
 
+update public.app_feature_flags
+set is_enabled = true
+where key = 'person_context_graphs_v1';
+
 select has_table('public', 'context_relation_types', 'context relation type catalogue exists');
 select has_table('public', 'person_context_relations', 'project context relation table exists');
 select hasnt_column('public', 'person_context_relations', 'tree_id', 'context relations have no family tree scope');
@@ -231,7 +235,7 @@ select set_config(
   public.save_person_context_relation_v1(
     'ca200000-0000-4000-8000-000000000001',
     jsonb_build_object(
-      'relationTypeCode', 'godparent',
+      'relationTypeCode', 'godfather',
       'sourcePersonId', 'ca300000-0000-4000-8000-000000000001',
       'targetPersonId', 'ca300000-0000-4000-8000-000000000002',
       'evidenceStatus', 'likely',
