@@ -52,6 +52,8 @@ interface FamilyTreeToolsWindowProps {
   onExportGedcom: () => void;
   onSelectDisplayMode: (mode: FamilyTreeDisplayMode) => void;
   onOpenCircularChart: () => void;
+  onOpenAncestorFanChart: () => void;
+  onOpenDescendantFanChart: () => void;
   onOpenStatistics: () => void;
   onAppearanceChange: (value: FamilyTreeAppearancePreferences) => void;
   onSetTreeRoot: (personId: string) => Promise<boolean>;
@@ -170,6 +172,8 @@ export function FamilyTreeToolsWindow({
   onExportGedcom,
   onSelectDisplayMode,
   onOpenCircularChart,
+  onOpenAncestorFanChart,
+  onOpenDescendantFanChart,
   onOpenStatistics,
   onAppearanceChange,
   onSetTreeRoot,
@@ -405,8 +409,8 @@ export function FamilyTreeToolsWindow({
             </button>
             <div>
               <span className="eyebrow">Відображення дерева</span>
-              <h3>Графіки прямих предків</h3>
-              <p>Тут з’являтимуться окремі способи огляду родоводу.</p>
+              <h3>Діаграми родоводу</h3>
+              <p>Оберіть класичне полотно, прямих предків або окреме віяло предків чи нащадків.</p>
             </div>
             <div className="family-tree-tools-grid">
               <button
@@ -456,6 +460,28 @@ export function FamilyTreeToolsWindow({
                 <span>
                   <strong>Кругова діаграма предків</strong>
                   <small>Від 1 до 16 поколінь прямих предків · інтерактивний огляд</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="family-tree-tools-action"
+                onClick={onOpenAncestorFanChart}
+              >
+                <span className="family-tree-tools-icon" aria-hidden="true">◔</span>
+                <span>
+                  <strong>Віялова діаграма предків</strong>
+                  <small>Батьківська гілка ліворуч, материнська — праворуч · до 16 поколінь</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="family-tree-tools-action"
+                onClick={onOpenDescendantFanChart}
+              >
+                <span className="family-tree-tools-icon" aria-hidden="true">◕</span>
+                <span>
+                  <strong>Віялова діаграма нащадків</strong>
+                  <small>Діти та їхні гілки за поколіннями · без сторонніх родин партнерів</small>
                 </span>
               </button>
             </div>

@@ -23,6 +23,8 @@ export interface UseProgressiveDescendantGraphInput {
   sessionKey?: string;
   maxGenerations?: number;
   pageSize?: number;
+  /** Optional hard cap for bounded consumers such as fan charts. */
+  maxPersons?: number;
   initialGraph?: FamilyGraphData;
   knownGraphVersion?: string | number;
   permissionFingerprint?: string;
@@ -42,20 +44,29 @@ export function useProgressiveDescendantGraph({
   sessionKey = "default",
   maxGenerations = 100,
   pageSize = 100,
-  initialGraph = EMPTY_GRAPH,
+  maxPersons,
+  initialGraph,
   knownGraphVersion,
   permissionFingerprint,
 }: UseProgressiveDescendantGraphInput): UseProgressiveDescendantGraphResult {
+  const providedInitialGraph = initialGraph;
+  const sourceInitialGraph = providedInitialGraph ?? EMPTY_GRAPH;
   const scopeKey = [
     treeId,
     rootPersonId,
     sessionKey,
     maxGenerations,
     pageSize,
+    maxPersons ?? "",
     knownGraphVersion ?? "",
     permissionFingerprint ?? "",
   ].join("\u001f");
-  const initialState = stateForGraph(initialGraph, false);
+  const initialState = stateForGraph(
+    providedInitialGraph === undefined
+      ? sourceInitialGraph
+      : freshDescendantSeed(sourceInitialGraph, rootPersonId, true),
+    false,
+  );
   const [state, setState] = useState<ProgressiveDescendantState>(initialState);
   const stateRef = useRef(state);
   const scopeRef = useRef(scopeKey);
@@ -82,9 +93,29 @@ export function useProgressiveDescendantGraph({
     scopeRef.current = scopeKey;
     const forceFreshReload = forceFreshReloadRef.current;
     forceFreshReloadRef.current = false;
+    const providedRootSeed = providedInitialGraph === undefined
+      ? undefined
+      : freshDescendantSeed(sourceInitialGraph, rootPersonId, true);
+
+    // A focus change can render once with the previous focus person's seed.
+    // Never expose that stale root or start a frontier request that may omit
+    // the root record; wait until the caller supplies the matching seed.
+    if (providedRootSeed && !providedRootSeed.persons.length) {
+      runRef.current += 1;
+      controllerRef.current?.abort();
+      controllerRef.current = undefined;
+      commit(stateForGraph(providedRootSeed, true));
+      return undefined;
+    }
+
+    const currentHasRoot = stateRef.current.graph.persons.some(
+      person => person.id === rootPersonId,
+    );
     const seedGraph = forceFreshReload
-      ? freshDescendantSeed(initialGraph, rootPersonId)
-      : (scopeChanged ? initialGraph : stateRef.current.graph);
+      ? freshDescendantSeed(sourceInitialGraph, rootPersonId, false)
+      : (scopeChanged || !currentHasRoot
+          ? providedRootSeed ?? sourceInitialGraph
+          : stateRef.current.graph);
     const startingState = stateForGraph(seedGraph, true);
     commit(startingState);
 
@@ -99,6 +130,7 @@ export function useProgressiveDescendantGraph({
       rootPersonId,
       maxGenerations,
       pageSize,
+      ...(maxPersons === undefined ? {} : { maxPersons }),
       initialGraph: seedGraph,
       ...(
         forceFreshReload || knownGraphVersion === undefined
@@ -147,7 +179,8 @@ export function useProgressiveDescendantGraph({
     client,
     commit,
     enabled,
-    initialGraph,
+    maxPersons,
+    providedInitialGraph,
     knownGraphVersion,
     maxGenerations,
     pageSize,
@@ -155,6 +188,7 @@ export function useProgressiveDescendantGraph({
     reloadKey,
     rootPersonId,
     scopeKey,
+    sourceInitialGraph,
     treeId,
   ]);
 
@@ -178,6 +212,7 @@ export function useProgressiveDescendantGraph({
       loading: true,
       canceled: false,
       error: undefined,
+      truncated: false,
       loadedGenerations: 0,
       pagesLoaded: 0,
     });
@@ -190,12 +225,20 @@ export function useProgressiveDescendantGraph({
 function freshDescendantSeed(
   graph: FamilyGraphData,
   rootPersonId: PersonId,
+  preserveScope: boolean,
 ): FamilyGraphData {
   return {
     persons: graph.persons.filter(person => person.id === rootPersonId),
     unions: [],
     parentChildRelations: [],
     continuations: [],
+    familyContinuations: [],
+    ...(preserveScope && graph.graphVersion !== undefined
+      ? { graphVersion: graph.graphVersion }
+      : {}),
+    ...(preserveScope && graph.permissionFingerprint !== undefined
+      ? { permissionFingerprint: graph.permissionFingerprint }
+      : {}),
   };
 }
 
@@ -207,6 +250,7 @@ function stateForGraph(
     graph,
     loading,
     canceled: false,
+    truncated: false,
     error: undefined,
     loadedPersons: graph.persons.length,
     loadedGenerations: 0,

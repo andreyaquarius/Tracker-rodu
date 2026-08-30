@@ -2260,9 +2260,10 @@ tbody tr:hover { background: #fbfaf5; }
 }
 
 .modal.circular-ancestor-modal {
-  width: min(1120px, calc(100vw - var(--app-sidebar-width, 340px) - 60px));
-  height: min(850px, calc(100dvh - 36px));
-  max-height: calc(100dvh - 36px);
+  width: calc(100vw - var(--app-sidebar-width, 340px) - 60px);
+  max-width: none;
+  height: calc(100dvh - 60px);
+  max-height: calc(100dvh - 60px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2318,10 +2319,12 @@ tbody tr:hover { background: #fbfaf5; }
   position: relative;
   z-index: 3;
   display: grid;
-  grid-template-columns: minmax(230px, 1fr) auto auto minmax(310px, auto) auto;
+  grid-template-columns: minmax(240px, 1fr) auto minmax(0, auto);
+  grid-template-areas: "intro build navigation";
   align-items: end;
   gap: 10px;
   padding: 13px 16px;
+  overflow: visible;
   border-bottom: 1px solid #dfe5dd;
   background: rgba(255, 253, 249, 0.96);
 }
@@ -2329,6 +2332,7 @@ tbody tr:hover { background: #fbfaf5; }
   overflow: visible;
 }
 .circular-ancestor-intro {
+  grid-area: intro;
   position: relative;
   min-width: 0;
   display: grid;
@@ -2456,17 +2460,52 @@ tbody tr:hover { background: #fbfaf5; }
   height: 36px;
   padding: 0 28px 0 10px;
 }
+.circular-ancestor-build-controls {
+  grid-area: build;
+  min-width: 0;
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+.circular-ancestor-build-button {
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+.circular-ancestor-navigation {
+  grid-area: navigation;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .circular-ancestor-camera-controls {
   min-width: 0;
   max-width: 100%;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #fff;
-  white-space: nowrap;
+  white-space: normal;
+}
+.circular-ancestor-zoom-controls,
+.circular-ancestor-view-controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.circular-ancestor-zoom-controls {
+  flex: 1 1 auto;
+}
+.circular-ancestor-view-controls {
+  flex: 0 1 auto;
 }
 .circular-ancestor-camera-controls button {
   flex: 0 0 auto;
@@ -2552,7 +2591,201 @@ tbody tr:hover { background: #fbfaf5; }
   color: var(--green-950);
   background: #e4f0ea;
 }
-.circular-ancestor-camera-controls span {
+.ancestor-chart-color-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+.ancestor-chart-color-menu > summary {
+  min-width: 78px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--green-900);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  list-style: none;
+  cursor: pointer;
+}
+.ancestor-chart-color-menu > summary::-webkit-details-marker { display: none; }
+.ancestor-chart-color-menu > summary:hover,
+.ancestor-chart-color-menu > summary:focus-visible,
+.ancestor-chart-color-menu[open] > summary { background: var(--green-100); }
+.ancestor-chart-color-summary-swatches {
+  flex: 0 0 auto;
+  display: flex;
+  min-width: 16px;
+}
+.ancestor-chart-color-summary-swatches i {
+  width: 8px;
+  height: 14px;
+  border: 1px solid rgba(23, 63, 54, .2);
+  border-radius: 3px;
+}
+.ancestor-chart-color-summary-swatches i + i { margin-left: -3px; }
+.ancestor-chart-color-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b57d22;
+}
+.ancestor-chart-color-popover {
+  position: absolute;
+  z-index: 24;
+  top: calc(100% + 8px);
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: min(390px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 150px));
+  display: grid;
+  gap: 11px;
+  padding: 13px;
+  overflow: auto;
+  border: 1px solid #c4d4ce;
+  border-radius: 12px;
+  color: var(--green-950);
+  background: #fffdfa;
+  box-shadow: 0 20px 50px rgba(20, 55, 46, .24);
+  white-space: normal;
+}
+.ancestor-chart-color-popover header { display: grid; gap: 3px; }
+.ancestor-chart-color-popover header strong { font-size: 13px; }
+.ancestor-chart-color-popover header small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.ancestor-chart-color-grouping { display: grid; gap: 4px; }
+.ancestor-chart-color-grouping > span,
+.ancestor-chart-color-popover legend {
+  color: #5c6f67;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.ancestor-chart-color-grouping select { width: 100%; height: 34px; }
+.ancestor-chart-color-popover fieldset {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ancestor-chart-base-colors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.circular-ancestor-camera-controls .ancestor-chart-base-colors > button {
+  width: 25px;
+  min-width: 25px;
+  height: 25px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #b9c9c3;
+}
+.circular-ancestor-camera-controls .ancestor-chart-base-colors > button.is-selected {
+  box-shadow: 0 0 0 2px #173f36;
+}
+.ancestor-chart-base-colors label { margin-left: 2px; }
+.ancestor-chart-base-colors input,
+.ancestor-chart-branch-colors input {
+  width: 28px;
+  height: 25px;
+  padding: 1px;
+  border: 1px solid #b9c9c3;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.ancestor-chart-palette-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+.circular-ancestor-camera-controls .ancestor-chart-palette-presets > button {
+  min-width: 0;
+  height: auto;
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #d4dfda;
+  border-radius: 8px;
+  font-size: 9px;
+  text-align: left;
+}
+.ancestor-chart-palette-presets > button > span {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+}
+.ancestor-chart-palette-presets i,
+.ancestor-chart-color-popover footer i {
+  flex: 1 1 auto;
+  height: 8px;
+  border-radius: 2px;
+}
+.ancestor-chart-branch-colors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+.ancestor-chart-branch-colors label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 5px;
+  border: 1px solid #dde5e1;
+  border-radius: 7px;
+  background: #faf9f5;
+}
+.ancestor-chart-branch-colors span {
+  min-width: 0;
+  overflow: hidden;
+  color: #425b53;
+  font-size: 9px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ancestor-chart-color-popover footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #e1e7e3;
+}
+.ancestor-chart-color-popover footer > span {
+  width: 74px;
+  display: flex;
+  overflow: hidden;
+  border-radius: 4px;
+}
+.circular-ancestor-camera-controls .ancestor-chart-color-popover footer > button {
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #cedbd6;
+  border-radius: 7px;
+  background: #fff;
+}
+.circular-ancestor-camera-controls .ancestor-chart-color-popover footer > button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+.circular-ancestor-zoom-controls > span {
   flex: 0 0 32px;
   min-width: 32px;
   color: var(--muted);
@@ -2567,6 +2800,7 @@ tbody tr:hover { background: #fbfaf5; }
   line-height: 1;
 }
 .circular-ancestor-list-toggle {
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 .circular-ancestor-status {
@@ -2615,7 +2849,7 @@ tbody tr:hover { background: #fbfaf5; }
   min-height: 420px;
   overflow: hidden;
   border-right: 1px solid #dfe5dd;
-  background-color: #f4f3ed;
+  background-color: var(--family-tree-chart-background, #f4f3ed);
   background-image:
     linear-gradient(rgba(44, 83, 73, 0.045) 1px, transparent 1px),
     linear-gradient(90deg, rgba(44, 83, 73, 0.045) 1px, transparent 1px),
@@ -2653,6 +2887,7 @@ tbody tr:hover { background: #fbfaf5; }
 }
 .circular-ancestor-legend .paternal { background: #cce6e4; }
 .circular-ancestor-legend .maternal { background: #efd7e2; }
+.circular-ancestor-legend .descendant { background: #d8e9df; }
 .circular-ancestor-legend .duplicate { background: #f2d89e; border-style: dashed; }
 .circular-ancestor-chart {
   width: 100%;
@@ -2666,12 +2901,12 @@ tbody tr:hover { background: #fbfaf5; }
 .circular-ancestor-chart.is-dragging { cursor: grabbing; }
 .circular-ancestor-ring-grid circle {
   fill: none;
-  stroke: rgba(48, 82, 73, 0.16);
+  stroke: var(--family-tree-chart-grid, rgba(48, 82, 73, 0.16));
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 .circular-ancestor-ring-grid line {
-  stroke: rgba(48, 82, 73, 0.22);
+  stroke: var(--family-tree-chart-grid, rgba(48, 82, 73, 0.22));
   stroke-dasharray: 5 6;
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
@@ -2680,14 +2915,15 @@ tbody tr:hover { background: #fbfaf5; }
   cursor: pointer;
 }
 .circular-ancestor-sector > path {
-  stroke: rgba(42, 78, 69, 0.52);
+  fill: var(--ancestor-sector-fill, #dce9df);
+  stroke: var(--ancestor-sector-stroke, rgba(42, 78, 69, 0.52));
   stroke-width: 0.75;
   vector-effect: non-scaling-stroke;
   transition: filter 140ms ease, opacity 140ms ease, stroke-width 140ms ease;
 }
-.circular-ancestor-sector.is-paternal > path { fill: #cde5e3; }
-.circular-ancestor-sector.is-maternal > path { fill: #efd9e3; }
-.circular-ancestor-sector.is-focus > path { fill: #dce9df; }
+.circular-ancestor-sector.is-paternal > path { fill: var(--ancestor-sector-fill, #cde5e3); }
+.circular-ancestor-sector.is-maternal > path { fill: var(--ancestor-sector-fill, #efd9e3); }
+.circular-ancestor-sector.is-focus > path { fill: var(--ancestor-sector-fill, #dce9df); }
 .circular-ancestor-sector:not(.is-highlighted) > path { opacity: 0.78; }
 .circular-ancestor-sector:hover > path,
 .circular-ancestor-sector.is-highlighted > path {
@@ -2695,7 +2931,7 @@ tbody tr:hover { background: #fbfaf5; }
   filter: saturate(1.08) brightness(1.025);
 }
 .circular-ancestor-sector.is-selected > path {
-  stroke: #ae7924;
+  stroke: var(--family-tree-chart-duplicate-fill, #ae7924);
   stroke-width: 2.4;
 }
 .circular-ancestor-sector.is-duplicate > path {
@@ -2703,22 +2939,22 @@ tbody tr:hover { background: #fbfaf5; }
 }
 .circular-ancestor-sector text,
 .circular-ancestor-focus text {
-  fill: #173f36;
+  fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
   font-family: Inter, system-ui, sans-serif;
   letter-spacing: -0.015em;
   pointer-events: none;
 }
 .circular-ancestor-label-name {
-  fill: #173f36;
+  fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
   font-weight: 800;
 }
 .circular-ancestor-label-life {
-  fill: #536760;
+  fill: var(--ancestor-sector-foreground, var(--family-tree-chart-muted-text, #536760));
   font-weight: 650;
   letter-spacing: 0;
 }
 .circular-ancestor-label-inline {
-  fill: #173f36;
+  fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
   font-weight: 760;
   letter-spacing: -0.01em;
 }
@@ -2727,25 +2963,25 @@ tbody tr:hover { background: #fbfaf5; }
   pointer-events: none;
 }
 .circular-ancestor-duplicate-mark {
-  fill: #b57d22;
-  stroke: #fff8e8;
+  fill: var(--family-tree-chart-duplicate-fill, #b57d22);
+  stroke: var(--family-tree-chart-duplicate-foreground, #fff8e8);
   pointer-events: none;
 }
 .circular-ancestor-focus {
   cursor: pointer;
 }
 .circular-ancestor-focus circle {
-  fill: #fffdfa;
-  stroke: #497d6f;
+  fill: var(--ancestor-sector-fill, var(--family-tree-chart-focus-fill, #fffdfa));
+  stroke: var(--ancestor-sector-stroke, var(--family-tree-chart-focus-stroke, #497d6f));
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
 .circular-ancestor-focus.is-selected circle {
-  stroke: #b47a21;
+  stroke: var(--family-tree-chart-duplicate-fill, #b47a21);
   stroke-width: 3;
 }
 .circular-ancestor-focus-initials {
-  fill: #1e6254;
+  fill: var(--ancestor-sector-foreground, var(--family-tree-chart-focus-foreground, #1e6254));
   font-family: Georgia, "Times New Roman", serif;
   font-weight: 800;
 }
@@ -2797,6 +3033,7 @@ tbody tr:hover { background: #fbfaf5; }
 }
 .circular-ancestor-avatar.paternal { border-color: #9dcac7; background: #dcecea; }
 .circular-ancestor-avatar.maternal { border-color: #d9acc0; background: #f3e2e9; }
+.circular-ancestor-avatar.descendant { border-color: #a9cbbd; background: #e0eee7; }
 .circular-ancestor-details dl {
   width: 100%;
   display: grid;
@@ -2877,48 +3114,199 @@ tbody tr:hover { background: #fbfaf5; }
   .circular-ancestor-sector > path { transition: none; }
 }
 
-@media (max-width: 1350px) and (min-width: 851px) {
-  .circular-ancestor-toolbar {
-    grid-template-columns: minmax(220px, 1fr) auto auto;
-    align-items: end;
-  }
-  .circular-ancestor-camera-controls {
-    grid-column: 1 / 3;
-    justify-self: stretch;
-    flex-wrap: wrap;
-  }
-  .circular-ancestor-list-toggle {
-    justify-self: end;
+/* Ancestor and descendant fan charts -------------------------------------- */
+.fan-genealogy-canvas-wrap:focus-visible {
+  outline: 3px solid rgba(37, 103, 86, .34);
+  outline-offset: -3px;
+}
+.fan-genealogy-chart {
+  min-height: 470px;
+}
+.fan-genealogy-grid path,
+.fan-genealogy-grid line {
+  fill: none;
+  stroke: var(--family-tree-chart-grid, rgba(48, 82, 73, .18));
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.fan-genealogy-grid line {
+  stroke: rgba(48, 82, 73, .28);
+  stroke-dasharray: 5 6;
+}
+.fan-genealogy-sector {
+  cursor: pointer;
+}
+.fan-genealogy-sector > path {
+  fill: var(--ancestor-sector-fill, #d8e9df);
+  opacity: .8;
+  stroke: var(--ancestor-sector-stroke, rgba(42, 78, 69, .52));
+  stroke-width: .8;
+  vector-effect: non-scaling-stroke;
+  transition: filter 140ms ease, opacity 140ms ease, stroke-width 140ms ease;
+}
+.fan-genealogy-sector:hover > path,
+.fan-genealogy-sector.is-highlighted > path {
+  opacity: 1;
+  filter: saturate(1.08) brightness(1.025);
+}
+.fan-genealogy-sector.is-selected > path {
+  stroke: var(--family-tree-chart-duplicate-fill, #ae7924);
+  stroke-width: 2.4;
+}
+.fan-genealogy-sector.is-duplicate > path {
+  stroke-dasharray: 4 2;
+}
+.fan-genealogy-sector text,
+.fan-genealogy-focus text {
+  fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
+  font-family: Inter, system-ui, sans-serif;
+  pointer-events: none;
+}
+.fan-genealogy-duplicate-mark {
+  fill: var(--family-tree-chart-duplicate-fill, #b57d22);
+  stroke: var(--family-tree-chart-duplicate-foreground, #fff8e8);
+  stroke-width: 1.2;
+  pointer-events: none;
+}
+.fan-genealogy-focus {
+  cursor: pointer;
+}
+.fan-genealogy-focus circle {
+  fill: var(--ancestor-sector-fill, var(--family-tree-chart-focus-fill, #fffdfa));
+  stroke: var(--ancestor-sector-stroke, var(--family-tree-chart-focus-stroke, #497d6f));
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.fan-genealogy-focus.is-selected circle {
+  stroke: var(--family-tree-chart-duplicate-fill, #b47a21);
+  stroke-width: 3;
+}
+.fan-genealogy-focus-name {
+  fill: var(--ancestor-sector-foreground, var(--family-tree-chart-focus-foreground, #173f36));
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 800;
+}
+.fan-genealogy-focus-life {
+  fill: var(--ancestor-sector-foreground, var(--family-tree-chart-muted-text, #536760));
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fan-genealogy-sector > path { transition: none; }
+}
+
+@media (max-width: 850px) {
+  .fan-genealogy-chart,
+  .fan-genealogy-canvas-wrap {
+    min-height: 430px;
   }
 }
 
 @media (max-width: 850px) {
   .modal.circular-ancestor-modal {
     width: calc(100vw - 16px);
+    max-width: none;
     height: calc(100dvh - 16px);
     max-height: calc(100dvh - 16px);
   }
+}
+
+@container app-modal (max-width: 1250px) {
   .circular-ancestor-toolbar {
-    grid-template-columns: minmax(180px, 1fr) auto auto;
-    align-items: end;
-    max-height: 168px;
-    overflow-y: auto;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    grid-template-areas:
+      "intro build"
+      "navigation navigation";
+  }
+  .circular-ancestor-navigation {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: stretch;
   }
   .circular-ancestor-camera-controls {
-    grid-column: 1 / 3;
-    justify-self: stretch;
+    flex-wrap: wrap;
+  }
+}
+
+@container app-modal (max-width: 840px) {
+  .circular-ancestor-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "intro"
+      "build"
+      "navigation";
+    align-items: stretch;
+    max-height: none;
+    overflow: visible;
+  }
+  .circular-ancestor-intro,
+  .circular-ancestor-build-controls,
+  .circular-ancestor-navigation {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .circular-ancestor-build-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+  .circular-ancestor-generation-control select {
+    width: 100%;
+    min-width: 0;
+  }
+  .circular-ancestor-navigation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .circular-ancestor-camera-controls {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .circular-ancestor-zoom-controls,
+  .circular-ancestor-view-controls {
+    flex: 1 1 auto;
+  }
+  .circular-ancestor-list-toggle {
+    width: 100%;
+    justify-content: center;
+  }
+  .circular-ancestor-focus-popover,
+  .ancestor-chart-color-popover {
+    right: 0;
+    left: auto;
+    width: min(390px, calc(100cqw - 24px));
+    transform: none;
   }
   .circular-ancestor-content {
     grid-template-columns: 1fr;
     overflow-y: auto;
   }
   .circular-ancestor-canvas-wrap {
-    min-height: 470px;
+    min-height: clamp(360px, 58dvh, 470px);
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
   .circular-ancestor-details {
     min-height: 230px;
+  }
+}
+
+@container app-modal (max-width: 520px) {
+  .circular-ancestor-toolbar {
+    padding: 10px;
+  }
+  .circular-ancestor-build-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .circular-ancestor-build-button {
+    width: 100%;
+  }
+  .circular-ancestor-zoom-controls,
+  .circular-ancestor-view-controls {
+    width: 100%;
+  }
+  .circular-ancestor-export-menu > div {
+    width: min(260px, calc(100cqw - 24px));
   }
 }
 
@@ -3148,33 +3536,6 @@ tbody tr:hover { background: #fbfaf5; }
   }
   .family-tree-root-editor .button {
     width: 100%;
-  }
-  .modal.circular-ancestor-modal {
-    width: calc(100vw - 16px);
-    height: calc(100dvh - 16px);
-    max-height: calc(100dvh - 16px);
-  }
-  .circular-ancestor-toolbar {
-    grid-template-columns: minmax(180px, 1fr) auto auto;
-    align-items: end;
-    max-height: 168px;
-    overflow-y: auto;
-  }
-  .circular-ancestor-camera-controls {
-    grid-column: 1 / 3;
-    justify-self: stretch;
-  }
-  .circular-ancestor-content {
-    grid-template-columns: 1fr;
-    overflow-y: auto;
-  }
-  .circular-ancestor-canvas-wrap {
-    min-height: 470px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .circular-ancestor-details {
-    min-height: 230px;
   }
 }
 

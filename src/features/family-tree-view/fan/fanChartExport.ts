@@ -1,125 +1,43 @@
 import {
+  CIRCULAR_ANCESTOR_EXPORT_OPTIONS,
+  DEFAULT_CIRCULAR_ANCESTOR_EXPORT_FORMAT,
+  type CircularAncestorExportFormat,
+} from "../circular/circularAncestorChartExport.ts";
+import {
   loadTrackerRoduChartLogoDataUrl,
   prepareFamilyTreeChartBrandForExport,
 } from "../export/familyTreeChartBrand.ts";
 
-export type CircularAncestorExportFormat =
-  | "pdf-a0"
-  | "pdf-a1"
-  | "pdf-a2"
-  | "pdf-a3"
-  | "svg"
-  | "png-4k"
-  | "png-8k";
+export type FanChartExportDirection = "ancestors" | "descendants";
+export type FanChartExportFormat = CircularAncestorExportFormat;
+export type FanChartPaperFormat = "A0" | "A1" | "A2" | "A3";
 
-type CircularAncestorPaperFormat = "A0" | "A1" | "A2" | "A3";
-
-interface CircularAncestorExportOption {
-  value: CircularAncestorExportFormat;
-  label: string;
-  kind: "pdf" | "svg" | "png";
-  paper?: CircularAncestorPaperFormat;
-  pixelSize?: number;
+export interface FanChartExportBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
-export const DEFAULT_CIRCULAR_ANCESTOR_EXPORT_FORMAT: CircularAncestorExportFormat =
-  "pdf-a0";
-
-export const CIRCULAR_ANCESTOR_EXPORT_OPTIONS: readonly CircularAncestorExportOption[] = [
-  { value: "pdf-a0", label: "PDF A0 · вектор", kind: "pdf", paper: "A0" },
-  { value: "pdf-a1", label: "PDF A1 · вектор", kind: "pdf", paper: "A1" },
-  { value: "pdf-a2", label: "PDF A2 · вектор", kind: "pdf", paper: "A2" },
-  { value: "pdf-a3", label: "PDF A3 · вектор", kind: "pdf", paper: "A3" },
-  { value: "svg", label: "SVG · вектор для типографії", kind: "svg" },
-  { value: "png-4k", label: "PNG 4K · для екрана", kind: "png", pixelSize: 4096 },
-  { value: "png-8k", label: "PNG 8K · високоякісний", kind: "png", pixelSize: 8192 },
-] as const;
-
-const PAPER_DIMENSIONS_MM: Record<
-  CircularAncestorPaperFormat,
-  { width: number; height: number }
-> = {
-  A0: { width: 841, height: 1189 },
-  A1: { width: 594, height: 841 },
-  A2: { width: 420, height: 594 },
-  A3: { width: 297, height: 420 },
-};
-
-const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-
-const EXPORT_SVG_STYLES = `
-  .circular-ancestor-ring-grid circle {
-    fill: none;
-    stroke: var(--family-tree-chart-grid, #b8c8c2);
-    stroke-width: 1;
-  }
-  .circular-ancestor-ring-grid line {
-    stroke: var(--family-tree-chart-grid, #9fb3ac);
-    stroke-dasharray: 5 6;
-    stroke-width: 1;
-  }
-  .circular-ancestor-sector > path {
-    fill: var(--ancestor-sector-fill, #dce9df);
-    stroke: var(--ancestor-sector-stroke, #476f64);
-    stroke-width: .75;
-  }
-  .circular-ancestor-sector.is-paternal > path { fill: var(--ancestor-sector-fill, #cde5e3); }
-  .circular-ancestor-sector.is-maternal > path { fill: var(--ancestor-sector-fill, #efd9e3); }
-  .circular-ancestor-sector.is-focus > path { fill: var(--ancestor-sector-fill, #dce9df); }
-  .circular-ancestor-sector.is-duplicate > path { stroke-dasharray: 4 2; }
-  .circular-ancestor-sector text,
-  .circular-ancestor-focus text {
-    fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
-    font-family: Arial, "Noto Sans", system-ui, sans-serif;
-    letter-spacing: -.015em;
-  }
-  .circular-ancestor-label-name {
-    fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
-    font-weight: 700;
-  }
-  .circular-ancestor-label-life {
-    fill: var(--ancestor-sector-foreground, var(--family-tree-chart-muted-text, #536760));
-    font-weight: 600;
-    letter-spacing: 0;
-  }
-  .circular-ancestor-label-inline {
-    fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
-    font-weight: 700;
-    letter-spacing: -.01em;
-  }
-  .circular-ancestor-duplicate-mark {
-    fill: var(--family-tree-chart-duplicate-fill, #b57d22);
-    stroke: var(--family-tree-chart-duplicate-foreground, #fff8e8);
-  }
-  .circular-ancestor-focus circle {
-    fill: var(--ancestor-sector-fill, var(--family-tree-chart-focus-fill, #fffdfa));
-    stroke: var(--ancestor-sector-stroke, var(--family-tree-chart-focus-stroke, #497d6f));
-    stroke-width: 2;
-  }
-  .circular-ancestor-focus-initials {
-    fill: var(--ancestor-sector-foreground, var(--family-tree-chart-focus-foreground, #1e6254));
-    font-family: Georgia, "Times New Roman", serif;
-    font-weight: 700;
-  }
-`;
-
-export interface CircularAncestorExportMetadata {
+export interface FanChartExportMetadata {
+  direction: FanChartExportDirection;
   focusLabel: string;
   generations: number;
-  ancestorCount: number;
+  personCount: number;
   generatedAtLabel?: string;
 }
 
-interface CircularAncestorExportRequest extends CircularAncestorExportMetadata {
+export interface FanChartExportRequest extends FanChartExportMetadata {
   sourceSvg: SVGSVGElement;
-  worldSize: number;
-  format: CircularAncestorExportFormat;
+  worldBounds: FanChartExportBounds;
+  format: FanChartExportFormat;
 }
 
-interface CircularAncestorPrintDocumentInput extends CircularAncestorExportMetadata {
+export interface FanChartPrintDocumentInput extends FanChartExportMetadata {
   svgMarkup: string;
-  paper: CircularAncestorPaperFormat;
+  paper: FanChartPaperFormat;
   documentTitle: string;
+  worldBounds: FanChartExportBounds;
   legendColors?: {
     paternal: string;
     maternal: string;
@@ -127,32 +45,109 @@ interface CircularAncestorPrintDocumentInput extends CircularAncestorExportMetad
   };
 }
 
-export async function exportCircularAncestorChart(
-  request: CircularAncestorExportRequest,
+/**
+ * Fan charts deliberately share the exact same format catalogue as the
+ * circular ancestor chart. Keeping the same object also prevents the two
+ * menus from drifting when a format is added or renamed later.
+ */
+export const FAN_CHART_EXPORT_OPTIONS = CIRCULAR_ANCESTOR_EXPORT_OPTIONS;
+
+export const DEFAULT_FAN_CHART_EXPORT_FORMAT: FanChartExportFormat =
+  DEFAULT_CIRCULAR_ANCESTOR_EXPORT_FORMAT;
+
+const PAPER_DIMENSIONS_MM: Record<
+  FanChartPaperFormat,
+  { shortSide: number; longSide: number }
+> = {
+  A0: { shortSide: 841, longSide: 1189 },
+  A1: { shortSide: 594, longSide: 841 },
+  A2: { shortSide: 420, longSide: 594 },
+  A3: { shortSide: 297, longSide: 420 },
+};
+
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
+const FAN_EXPORT_SVG_STYLES = `
+  .fan-genealogy-grid path,
+  .fan-genealogy-grid line {
+    fill: none;
+    stroke: var(--family-tree-chart-grid, #b8c8c2);
+    stroke-width: 1;
+  }
+  .fan-genealogy-grid line {
+    stroke: var(--family-tree-chart-grid, #9fb3ac);
+    stroke-dasharray: 5 6;
+  }
+  .fan-genealogy-sector > path {
+    fill: var(--ancestor-sector-fill, #d8e9df);
+    stroke: var(--ancestor-sector-stroke, #476f64);
+    stroke-width: .75;
+  }
+  .fan-genealogy-sector.is-duplicate > path {
+    stroke: var(--family-tree-chart-duplicate-stroke, #b57d22);
+    stroke-dasharray: 4 2;
+  }
+  .fan-genealogy-sector text,
+  .fan-genealogy-focus text {
+    fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
+    font-family: Arial, "Noto Sans", system-ui, sans-serif;
+    letter-spacing: -.015em;
+  }
+  .circular-ancestor-label-name,
+  .fan-genealogy-label-name,
+  .fan-genealogy-focus-name {
+    fill: var(--ancestor-sector-foreground, var(--family-tree-chart-text, #173f36));
+    font-weight: 700;
+  }
+  .circular-ancestor-label-life,
+  .fan-genealogy-label-life,
+  .fan-genealogy-focus-life {
+    fill: var(--ancestor-sector-foreground, var(--family-tree-chart-muted-text, #536760));
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .fan-genealogy-duplicate-mark {
+    fill: var(--family-tree-chart-duplicate-fill, #b57d22);
+    stroke: var(--family-tree-chart-duplicate-foreground, #fff8e8);
+  }
+  .fan-genealogy-focus circle {
+    fill: var(--ancestor-sector-fill, var(--family-tree-chart-focus-fill, #fffdfa));
+    stroke: var(--ancestor-sector-stroke, var(--family-tree-chart-focus-stroke, #497d6f));
+    stroke-width: 2;
+  }
+`;
+
+export async function exportFanChart(
+  request: FanChartExportRequest,
 ): Promise<string> {
-  const option = exportOption(request.format);
-  const documentTitle = `Кругова діаграма предків — ${request.focusLabel}`;
+  const option = fanExportOption(request.format);
+  const heading = fanChartHeading(request.direction);
+  const documentTitle = `${heading} — ${request.focusLabel}`;
   const brandLogoDataUrl = await loadTrackerRoduChartLogoDataUrl();
-  const svgMarkup = createCircularAncestorExportSvg(request.sourceSvg, {
-    worldSize: request.worldSize,
+  const svgMarkup = createFanChartExportSvg(request.sourceSvg, {
+    worldBounds: request.worldBounds,
+    direction: request.direction,
     title: documentTitle,
-    description: `${request.generations} поколінь, ${request.ancestorCount} позицій предків`,
+    description: `${request.generations} поколінь, ${request.personCount} позицій на діаграмі`,
     brandLogoDataUrl,
   });
-  const baseFileName = circularAncestorExportFileName(
+  const baseFileName = fanChartExportFileName(
+    request.direction,
     request.focusLabel,
     request.generations,
   );
 
   if (option.kind === "pdf" && option.paper) {
-    const html = buildCircularAncestorPrintDocument({
+    const html = buildFanChartPrintDocument({
       svgMarkup,
       paper: option.paper,
       documentTitle,
+      direction: request.direction,
       focusLabel: request.focusLabel,
       generations: request.generations,
-      ancestorCount: request.ancestorCount,
+      personCount: request.personCount,
       generatedAtLabel: request.generatedAtLabel,
+      worldBounds: request.worldBounds,
       legendColors: {
         paternal: svgChartColor(
           request.sourceSvg,
@@ -171,62 +166,63 @@ export async function exportCircularAncestorChart(
         ),
       },
     });
-    openCircularAncestorPrintWindow(html);
+    openFanChartPrintWindow(html);
     return `Відкрито векторний макет ${option.paper}. У вікні друку виберіть «Зберегти як PDF».`;
   }
 
   if (option.kind === "svg") {
-    downloadBlob(
+    downloadFanChartBlob(
       new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" }),
       `${baseFileName}.svg`,
     );
-    return "SVG завантажено. Він зберігає векторну чіткість у будь-якому масштабі.";
+    return "SVG завантажено. Він містить усю діаграму та зберігає векторну чіткість.";
   }
 
   if (option.kind === "png" && option.pixelSize) {
-    const png = await rasterizeCircularAncestorSvg(svgMarkup, option.pixelSize);
-    downloadBlob(png, `${baseFileName}-${option.pixelSize}px.png`);
-    return `PNG ${option.pixelSize} × ${option.pixelSize} пікселів завантажено.`;
+    const dimensions = fanChartRasterDimensions(request.worldBounds, option.pixelSize);
+    const png = await rasterizeFanChartSvg(svgMarkup, dimensions);
+    downloadFanChartBlob(
+      png,
+      `${baseFileName}-${dimensions.width}x${dimensions.height}px.png`,
+    );
+    return `PNG ${dimensions.width} × ${dimensions.height} пікселів завантажено.`;
   }
 
   throw new Error("Обраний формат експорту не підтримується.");
 }
 
-export function createCircularAncestorExportSvg(
+export function createFanChartExportSvg(
   sourceSvg: SVGSVGElement,
   options: {
-    worldSize: number;
+    worldBounds: FanChartExportBounds;
+    direction: FanChartExportDirection;
     title: string;
     description: string;
     brandLogoDataUrl: string;
   },
 ): string {
-  if (!Number.isFinite(options.worldSize) || options.worldSize <= 0) {
-    throw new Error("Не вдалося визначити повний розмір діаграми.");
-  }
-
+  const bounds = normalizeFanChartExportBounds(options.worldBounds);
   const clone = sourceSvg.cloneNode(true) as SVGSVGElement;
   const ownerDocument = sourceSvg.ownerDocument;
-  const origin = -options.worldSize / 2;
 
   clone.setAttribute("xmlns", SVG_NAMESPACE);
   clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
   clone.setAttribute("version", "1.1");
   clone.setAttribute("data-generator", "Трекер Роду");
-  clone.setAttribute("viewBox", `${origin} ${origin} ${options.worldSize} ${options.worldSize}`);
-  clone.setAttribute("width", String(options.worldSize));
-  clone.setAttribute("height", String(options.worldSize));
+  clone.setAttribute("viewBox", fanChartExportViewBox(bounds));
+  clone.setAttribute("width", String(bounds.width));
+  clone.setAttribute("height", String(bounds.height));
   clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
   clone.setAttribute("role", "img");
   clone.setAttribute("aria-label", options.title);
   clone.setAttribute("shape-rendering", "geometricPrecision");
   clone.setAttribute("text-rendering", "geometricPrecision");
-  clone.setAttribute("class", "circular-ancestor-export-chart");
+  clone.setAttribute("class", "fan-genealogy-export-chart");
 
   clone.querySelectorAll(".is-selected").forEach((element) => {
     element.classList.remove("is-selected");
   });
-  clone.querySelectorAll(".circular-ancestor-sector").forEach((element) => {
+  clone.querySelectorAll(".fan-genealogy-sector").forEach((element) => {
     element.classList.add("is-highlighted");
   });
 
@@ -236,7 +232,7 @@ export function createCircularAncestorExportSvg(
     clone.insertBefore(rootDefs, clone.firstChild);
   }
   const style = ownerDocument.createElementNS(SVG_NAMESPACE, "style");
-  style.textContent = EXPORT_SVG_STYLES;
+  style.textContent = FAN_EXPORT_SVG_STYLES;
   rootDefs.appendChild(style);
 
   const title = ownerDocument.createElementNS(SVG_NAMESPACE, "title");
@@ -246,10 +242,10 @@ export function createCircularAncestorExportSvg(
   const metadata = ownerDocument.createElementNS(SVG_NAMESPACE, "metadata");
   metadata.textContent = "Створено у вебзастосунку «Трекер Роду»";
   const background = ownerDocument.createElementNS(SVG_NAMESPACE, "rect");
-  background.setAttribute("x", String(origin));
-  background.setAttribute("y", String(origin));
-  background.setAttribute("width", String(options.worldSize));
-  background.setAttribute("height", String(options.worldSize));
+  background.setAttribute("x", String(bounds.x));
+  background.setAttribute("y", String(bounds.y));
+  background.setAttribute("width", String(bounds.width));
+  background.setAttribute("height", String(bounds.height));
   background.setAttribute(
     "fill",
     sourceSvg.style.getPropertyValue("--family-tree-chart-background").trim() ||
@@ -263,17 +259,18 @@ export function createCircularAncestorExportSvg(
 
   prepareFamilyTreeChartBrandForExport(
     clone,
-    { x: origin, y: origin, width: options.worldSize, height: options.worldSize },
+    bounds,
     options.brandLogoDataUrl,
+    options.direction === "descendants" ? "top-right" : "bottom-right",
   );
 
   return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
 }
 
-export function buildCircularAncestorPrintDocument(
-  input: CircularAncestorPrintDocumentInput,
+export function buildFanChartPrintDocument(
+  input: FanChartPrintDocumentInput,
 ): string {
-  const dimensions = PAPER_DIMENSIONS_MM[input.paper];
+  const dimensions = fanChartPaperDimensions(input.paper, input.worldBounds);
   const title = escapeHtml(input.documentTitle);
   const focusLabel = escapeHtml(input.focusLabel);
   const generatedAt = escapeHtml(input.generatedAtLabel ?? "");
@@ -281,6 +278,16 @@ export function buildCircularAncestorPrintDocument(
   const maternalLegendColor = safeExportColor(input.legendColors?.maternal, "#efd9e3");
   const duplicateLegendColor = safeExportColor(input.legendColors?.duplicate, "#f2d89e");
   const embeddedSvg = input.svgMarkup.replace(/^<\?xml[^>]*>\s*/i, "");
+  const heading = fanChartHeading(input.direction);
+  const chartAriaLabel = input.direction === "ancestors"
+    ? "Віялова діаграма предків"
+    : "Віялова діаграма нащадків";
+  const legend = input.direction === "ancestors"
+    ? `<span><i class="paternal"></i>Батьківська гілка</span>
+        <span><i class="maternal"></i>Материнська гілка</span>
+        <span><i class="duplicate"></i>Повторний предок</span>`
+    : `<span><i class="descendant"></i>Гілки дітей</span>
+        <span><i class="duplicate"></i>Повторна особа</span>`;
 
   return `<!doctype html>
 <html lang="uk">
@@ -321,6 +328,7 @@ export function buildCircularAncestorPrintDocument(
     .legend i { width: 4mm; height: 4mm; border: .35mm solid #78978e; border-radius: 50%; }
     .legend .paternal { background: ${paternalLegendColor}; }
     .legend .maternal { background: ${maternalLegendColor}; }
+    .legend .descendant { background: #d8e9df; }
     .legend .duplicate { background: ${duplicateLegendColor}; border-style: dashed; }
     .screen-help {
       position: fixed;
@@ -352,19 +360,17 @@ export function buildCircularAncestorPrintDocument(
   <main class="poster-page">
     <header class="poster-header">
       <div>
-        <h1>Кругова діаграма прямих предків</h1>
-        <p>${focusLabel} · поколінь: ${input.generations} · позицій предків: ${input.ancestorCount}</p>
+        <h1>${heading}</h1>
+        <p>${focusLabel} · поколінь: ${input.generations} · позицій: ${input.personCount}</p>
       </div>
       <span class="poster-format">${input.paper} · векторний макет</span>
     </header>
-    <section class="chart-frame" aria-label="Кругова діаграма предків">
+    <section class="chart-frame" aria-label="${chartAriaLabel}">
       ${embeddedSvg}
     </section>
     <footer class="poster-footer">
       <div class="legend">
-        <span><i class="paternal"></i>Батьківська гілка</span>
-        <span><i class="maternal"></i>Материнська гілка</span>
-        <span><i class="duplicate"></i>Повторний предок</span>
+        ${legend}
       </div>
       <span class="poster-brand"><strong>Трекер Роду</strong>${generatedAt ? ` · ${generatedAt}` : ""}</span>
     </footer>
@@ -373,7 +379,8 @@ export function buildCircularAncestorPrintDocument(
 </html>`;
 }
 
-export function circularAncestorExportFileName(
+export function fanChartExportFileName(
+  direction: FanChartExportDirection,
   focusLabel: string,
   generations: number,
 ): string {
@@ -383,11 +390,72 @@ export function circularAncestorExportFileName(
     .trim()
     .replace(/\s+/g, "-")
     .slice(0, 80) || "особа";
-  return `кругова-діаграма-${safeLabel}-${generations}-поколінь`;
+  const directionLabel = direction === "ancestors" ? "предків" : "нащадків";
+  return `віялова-діаграма-${directionLabel}-${safeLabel}-${generations}-поколінь`;
 }
 
-function exportOption(format: CircularAncestorExportFormat): CircularAncestorExportOption {
-  const option = CIRCULAR_ANCESTOR_EXPORT_OPTIONS.find((item) => item.value === format);
+export function fanChartExportViewBox(bounds: FanChartExportBounds): string {
+  const normalized = normalizeFanChartExportBounds(bounds);
+  return [normalized.x, normalized.y, normalized.width, normalized.height].join(" ");
+}
+
+/** The selected resolution is applied to the longest side without distortion. */
+export function fanChartRasterDimensions(
+  bounds: FanChartExportBounds,
+  longestSide: number,
+): { width: number; height: number } {
+  const normalized = normalizeFanChartExportBounds(bounds);
+  if (!Number.isFinite(longestSide) || longestSide <= 0) {
+    throw new Error("Некоректна роздільна здатність PNG.");
+  }
+  if (normalized.width >= normalized.height) {
+    return {
+      width: Math.round(longestSide),
+      height: Math.max(1, Math.round(longestSide * normalized.height / normalized.width)),
+    };
+  }
+  return {
+    width: Math.max(1, Math.round(longestSide * normalized.width / normalized.height)),
+    height: Math.round(longestSide),
+  };
+}
+
+export function fanChartPaperDimensions(
+  paper: FanChartPaperFormat,
+  bounds: FanChartExportBounds,
+): { width: number; height: number } {
+  const normalized = normalizeFanChartExportBounds(bounds);
+  const paperDimensions = PAPER_DIMENSIONS_MM[paper];
+  if (normalized.width >= normalized.height) {
+    return { width: paperDimensions.longSide, height: paperDimensions.shortSide };
+  }
+  return { width: paperDimensions.shortSide, height: paperDimensions.longSide };
+}
+
+function normalizeFanChartExportBounds(
+  bounds: FanChartExportBounds,
+): FanChartExportBounds {
+  if (
+    !Number.isFinite(bounds.x) ||
+    !Number.isFinite(bounds.y) ||
+    !Number.isFinite(bounds.width) ||
+    !Number.isFinite(bounds.height) ||
+    bounds.width <= 0 ||
+    bounds.height <= 0
+  ) {
+    throw new Error("Не вдалося визначити повні межі віялової діаграми.");
+  }
+  return bounds;
+}
+
+function fanChartHeading(direction: FanChartExportDirection): string {
+  return direction === "ancestors"
+    ? "Віялова діаграма предків"
+    : "Віялова діаграма нащадків";
+}
+
+function fanExportOption(format: FanChartExportFormat) {
+  const option = FAN_CHART_EXPORT_OPTIONS.find((item) => item.value === format);
   if (!option) throw new Error("Невідомий формат експорту.");
   return option;
 }
@@ -405,7 +473,7 @@ function safeExportColor(value: string | null | undefined, fallback: string): st
   return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : fallback;
 }
 
-function openCircularAncestorPrintWindow(html: string): void {
+function openFanChartPrintWindow(html: string): void {
   const printWindow = window.open("", "_blank", "popup,width=1280,height=900");
   if (!printWindow) {
     throw new Error("Браузер заблокував вікно друку. Дозвольте спливні вікна для Трекера Роду й повторіть спробу.");
@@ -420,9 +488,9 @@ function openCircularAncestorPrintWindow(html: string): void {
   }, 450);
 }
 
-async function rasterizeCircularAncestorSvg(
+async function rasterizeFanChartSvg(
   svgMarkup: string,
-  pixelSize: number,
+  dimensions: { width: number; height: number },
 ): Promise<Blob> {
   const source = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
   const sourceUrl = URL.createObjectURL(source);
@@ -436,16 +504,16 @@ async function rasterizeCircularAncestorSvg(
     });
 
     const canvas = document.createElement("canvas");
-    canvas.width = pixelSize;
-    canvas.height = pixelSize;
+    canvas.width = dimensions.width;
+    canvas.height = dimensions.height;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Браузер не підтримує створення PNG потрібного розміру.");
 
     context.fillStyle = "#f7f5ee";
-    context.fillRect(0, 0, pixelSize, pixelSize);
+    context.fillRect(0, 0, dimensions.width, dimensions.height);
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = "high";
-    context.drawImage(image, 0, 0, pixelSize, pixelSize);
+    context.drawImage(image, 0, 0, dimensions.width, dimensions.height);
 
     const result = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
@@ -463,7 +531,7 @@ async function rasterizeCircularAncestorSvg(
   }
 }
 
-function downloadBlob(blob: Blob, fileName: string): void {
+function downloadFanChartBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

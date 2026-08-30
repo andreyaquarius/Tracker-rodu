@@ -22,6 +22,8 @@ export interface ProgressiveDescendantState {
   graph: FamilyGraphData;
   loading: boolean;
   canceled: boolean;
+  /** True when maxPersons stopped the traversal before the requested depth. */
+  truncated: boolean;
   error: Error | undefined;
   loadedPersons: number;
   /** Number of completely loaded descendant generations. */
@@ -35,6 +37,8 @@ export interface LoadProgressiveDescendantGraphInput {
   rootPersonId: PersonId;
   maxGenerations?: number;
   pageSize?: number;
+  /** Optional hard cap for consumers that render a bounded visualization. */
+  maxPersons?: number;
   initialGraph?: FamilyGraphData;
   knownGraphVersion?: string | number;
   permissionFingerprint?: string;
@@ -65,15 +69,27 @@ export async function loadProgressiveDescendantGraph(
     MAX_PAGE_SIZE,
     Math.max(1, normalizedNonNegativeInteger(input.pageSize, 100)),
   );
-  const initialGraph = withExpectedScope(
+  const maxPersons = normalizedPositiveInteger(
+    input.maxPersons,
+    Number.POSITIVE_INFINITY,
+  );
+  const expectedInitialGraph = withExpectedScope(
     input.initialGraph ?? EMPTY_GRAPH,
     input.knownGraphVersion,
     input.permissionFingerprint,
   );
+  const boundedInitialGraph = boundProgressiveGraphPersons(
+    expectedInitialGraph,
+    EMPTY_GRAPH,
+    [input.rootPersonId],
+    maxPersons,
+  );
+  const initialGraph = boundedInitialGraph.graph;
   let state: ProgressiveDescendantState = {
     graph: initialGraph,
     loading: true,
     canceled: false,
+    truncated: boundedInitialGraph.truncated,
     error: undefined,
     loadedPersons: initialGraph.persons.length,
     loadedGenerations: 0,
@@ -86,6 +102,11 @@ export async function loadProgressiveDescendantGraph(
 
   try {
     throwIfAborted(input.signal);
+    if (state.truncated) {
+      state = { ...state, loading: false };
+      input.onProgress?.(state);
+      return state;
+    }
     while (frontier.length && currentGeneration < maxGenerations) {
       const chunks = chunkFrontier(frontier);
       const nextFrontier: PersonId[] = [];
@@ -119,14 +140,28 @@ export async function loadProgressiveDescendantGraph(
           assertFrontierResponse(response, request);
           assertCompatibleScope(state, response);
 
-          const graph = mergeNeighborhood(state.graph, response);
-          const graphPersonIds = new Set(graph.persons.map(person => person.id));
+          const mergedGraph = mergeNeighborhood(state.graph, response);
+          const mergedPersonIds = new Set(
+            mergedGraph.persons.map(person => person.id),
+          );
           for (const childId of response.nextFrontier.personIds) {
-            if (!graphPersonIds.has(childId)) {
+            if (!mergedPersonIds.has(childId)) {
               throw new Error(
                 `Пакет покоління ${response.nextFrontier.generation} не містить даних особи ${childId}.`,
               );
             }
+          }
+
+          const bounded = boundProgressiveGraphPersons(
+            mergedGraph,
+            state.graph,
+            response.nextFrontier.personIds,
+            maxPersons,
+          );
+          const graph = bounded.graph;
+          const graphPersonIds = new Set(graph.persons.map(person => person.id));
+          for (const childId of response.nextFrontier.personIds) {
+            if (!graphPersonIds.has(childId)) continue;
             if (traversalSeen.has(childId)) continue;
             traversalSeen.add(childId);
             nextFrontier.push(childId);
@@ -135,18 +170,29 @@ export async function loadProgressiveDescendantGraph(
           chunkComplete = !response.hasMore;
           const generationComplete =
             chunkComplete && chunkIndex === chunks.length - 1;
+          const hasMoreRequestedData = response.hasMore || (
+            response.nextFrontier.personIds.length > 0 &&
+            response.nextFrontier.generation < maxGenerations
+          );
+          const truncated = bounded.truncated || (
+            Number.isFinite(maxPersons) &&
+            graph.persons.length >= maxPersons &&
+            hasMoreRequestedData
+          );
           state = {
             graph,
-            loading: true,
+            loading: !truncated,
             canceled: false,
+            truncated,
             error: undefined,
             loadedPersons: graph.persons.length,
-            loadedGenerations: generationComplete
+            loadedGenerations: generationComplete && !bounded.truncated
               ? response.nextFrontier.generation
               : state.loadedGenerations,
             pagesLoaded: state.pagesLoaded + 1,
           };
           input.onProgress?.(state);
+          if (truncated) return state;
           await yieldControl(input.signal);
 
           if (!chunkComplete) {
@@ -208,6 +254,86 @@ function normalizedNonNegativeInteger(
 ): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(0, Math.floor(value!));
+}
+
+function normalizedPositiveInteger(
+  value: number | undefined,
+  fallback: number,
+): number {
+  if (value === undefined) return fallback;
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.floor(value));
+}
+
+interface BoundedProgressiveGraph {
+  graph: FamilyGraphData;
+  truncated: boolean;
+}
+
+/**
+ * Keeps previously committed people stable and gives newly returned frontier
+ * people priority over connector records. This makes maxPersons a real hard
+ * bound without leaving relations that reference discarded people.
+ */
+function boundProgressiveGraphPersons(
+  graph: FamilyGraphData,
+  previous: FamilyGraphData,
+  priorityPersonIds: readonly PersonId[],
+  maxPersons: number,
+): BoundedProgressiveGraph {
+  if (!Number.isFinite(maxPersons) || graph.persons.length <= maxPersons) {
+    return { graph, truncated: false };
+  }
+
+  const personsById = new Map(graph.persons.map(person => [person.id, person]));
+  const keptIds = new Set<PersonId>();
+  const add = (personId: PersonId): void => {
+    if (keptIds.size >= maxPersons || !personsById.has(personId)) return;
+    keptIds.add(personId);
+  };
+  for (const person of previous.persons) add(person.id);
+  for (const personId of priorityPersonIds) add(personId);
+  for (const person of graph.persons) add(person.id);
+
+  const persons = graph.persons.filter(person => keptIds.has(person.id));
+  const parentChildRelations = graph.parentChildRelations.filter(
+    relation => keptIds.has(relation.parentId) && keptIds.has(relation.childId),
+  );
+  const retainedUnionIds = new Set(
+    parentChildRelations
+      .map(relation => relation.unionId)
+      .filter((unionId): unionId is string => Boolean(unionId)),
+  );
+  const unions = graph.unions.filter(union =>
+    retainedUnionIds.has(union.id) ||
+    union.memberIds.some(personId => keptIds.has(personId))
+  );
+
+  return {
+    graph: {
+      ...graph,
+      persons,
+      unions,
+      parentChildRelations,
+      ...(graph.continuations === undefined
+        ? {}
+        : {
+            continuations: graph.continuations.filter(continuation =>
+              keptIds.has(continuation.personId)
+            ),
+          }),
+      ...(graph.familyContinuations === undefined
+        ? {}
+        : {
+            familyContinuations: graph.familyContinuations.filter(
+              continuation => continuation.scope.parentIds.some(personId =>
+                keptIds.has(personId)
+              ),
+            ),
+          }),
+    },
+    truncated: true,
+  };
 }
 
 function chunkFrontier(frontier: readonly PersonId[]): PersonId[][] {

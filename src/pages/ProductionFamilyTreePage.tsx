@@ -9,6 +9,7 @@ import { Modal } from "../components/Modal";
 import { GedcomImportButton, type GedcomImportArchivePayload } from "../components/GedcomImportButton";
 import { GedcomPhotoBackupModal } from "../components/GedcomPhotoBackupModal.tsx";
 import { CircularAncestorChartWindow } from "../components/familyTree/CircularAncestorChartWindow";
+import { FanGenealogyChartWindow } from "../components/familyTree/FanGenealogyChartWindow.tsx";
 import {
   FamilyTreeToolsWindow,
   type FamilyTreeDisplayMode,
@@ -38,6 +39,7 @@ import { attachTrackerPersonPhotos } from "../features/family-tree-view/adapters
 import { applyFamilyTreeNameDisplay } from "../features/family-tree-view/adapters/familyTreeNameDisplay.ts";
 import { MAX_RENDERED_FAMILY_TREE_NODES } from "../features/family-tree-view/react/renderLimits";
 import { MAX_CIRCULAR_ANCESTOR_OCCURRENCES } from "../features/family-tree-view/circular/circularAncestorChartLayout.ts";
+import type { FanChartDirection } from "../features/family-tree-view/fan/fanChartLayout.ts";
 import { trackProductAnalyticsAction } from "../services/productAnalytics.ts";
 import {
   useFamilyTreeNeighborhood,
@@ -233,6 +235,10 @@ export function ProductionFamilyTreePage({
     centralPersonId: string;
   } | null>(null);
   const [circularChartFocusPersonId, setCircularChartFocusPersonId] = useState("");
+  const [fanChart, setFanChart] = useState<{
+    direction: FanChartDirection;
+    focusPersonId: string;
+  } | null>(null);
   const [treeToolsNotice, setTreeToolsNotice] = useState("");
   const [exportingGedcom, setExportingGedcom] = useState(false);
   const [gedcomResearchId, setGedcomResearchId] = useState("");
@@ -363,6 +369,10 @@ export function ProductionFamilyTreePage({
     () => personLabel(persons.find((person) => person.id === circularChartFocusPersonId)),
     [circularChartFocusPersonId, persons],
   );
+  const fanChartFocusPersonLabel = useMemo(
+    () => personLabel(persons.find((person) => person.id === fanChart?.focusPersonId)),
+    [fanChart?.focusPersonId, persons],
+  );
 
   useEffect(() => {
     const initialVisualFocusPersonId = routedFocusPersonId?.trim() || selectedEntry?.rootPersonId || "";
@@ -372,6 +382,7 @@ export function ProductionFamilyTreePage({
         : null,
     );
     setCircularChartFocusPersonId("");
+    setFanChart(null);
   }, [routedFocusPersonId, selectedEntry?.id, selectedEntry?.rootPersonId]);
 
   async function createRoot(payload: FamilyTreePersonDialogSubmit) {
@@ -450,6 +461,13 @@ export function ProductionFamilyTreePage({
     trackProductAnalyticsAction("ancestor_chart_build");
     setTreeToolsOpen(false);
     setCircularChartFocusPersonId(focusPersonId);
+  }
+
+  function openFanChart(direction: FanChartDirection) {
+    const focusPersonId = activeTreeFocusPersonId || selectedEntry?.rootPersonId || "";
+    if (!focusPersonId) return;
+    setTreeToolsOpen(false);
+    setFanChart({ direction, focusPersonId });
   }
 
   async function createTreeFromGedcom(input: {
@@ -689,6 +707,8 @@ export function ProductionFamilyTreePage({
             setTreeToolsOpen(false);
           }}
           onOpenCircularChart={openCircularAncestorChart}
+          onOpenAncestorFanChart={() => openFanChart("ancestors")}
+          onOpenDescendantFanChart={() => openFanChart("descendants")}
           onOpenStatistics={() => {
             if (!selectedEntry?.id) return;
             setTreeToolsOpen(false);
@@ -717,11 +737,31 @@ export function ProductionFamilyTreePage({
           focusPersonId={circularChartFocusPersonId}
           focusPersonLabel={circularChartFocusPersonLabel}
           nameDisplayPreferences={treeAppearance}
+          appearancePreferences={treeAppearance}
           nameProfiles={persons}
           searchFocusPersons={searchCircularAncestorFocusPersons}
           onFocusPersonChange={setCircularChartFocusPersonId}
           onOpenPerson={onOpenPerson}
           onClose={() => setCircularChartFocusPersonId("")}
+        />
+      ) : null}
+
+      {selectedEntry?.id && fanChart ? (
+        <FanGenealogyChartWindow
+          key={`fan-${fanChart.direction}-chart:${selectedEntry.id}`}
+          treeId={selectedEntry.id}
+          direction={fanChart.direction}
+          focusPersonId={fanChart.focusPersonId}
+          focusPersonLabel={fanChartFocusPersonLabel}
+          nameDisplayPreferences={treeAppearance}
+          appearancePreferences={treeAppearance}
+          nameProfiles={persons}
+          searchFocusPersons={searchCircularAncestorFocusPersons}
+          onFocusPersonChange={(focusPersonId) => setFanChart((current) => (
+            current ? { ...current, focusPersonId } : current
+          ))}
+          onOpenPerson={onOpenPerson}
+          onClose={() => setFanChart(null)}
         />
       ) : null}
 

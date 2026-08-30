@@ -20,6 +20,13 @@ const circularChart = readFileSync(
   ),
   "utf8",
 );
+const fanChart = readFileSync(
+  new URL(
+    "../src/components/familyTree/FanGenealogyChartWindow.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const modal = readFileSync(
   new URL("../src/components/Modal.tsx", import.meta.url),
   "utf8",
@@ -90,11 +97,15 @@ test("tree tools window exposes GEDCOM and opens the statistics module", () => {
   assert.match(toolsWindow, /Звіти, діаграми, карта та якість даних/);
   assert.match(toolsWindow, /Відображення дерева/);
   assert.match(toolsWindow, /Кругова діаграма предків/);
+  assert.match(toolsWindow, /Віялова діаграма предків/);
+  assert.match(toolsWindow, /Віялова діаграма нащадків/);
   assert.match(toolsWindow, /Родовід прямих предків/);
   assert.match(toolsWindow, /onSelectDisplayMode\("direct-ancestors"\)/);
   assert.match(toolsWindow, /displayMode === "direct-ancestors"/);
   assert.match(toolsWindow, /Від 1 до 16 поколінь прямих предків · інтерактивний огляд/);
   assert.match(toolsWindow, /onClick=\{onOpenCircularChart\}/);
+  assert.match(toolsWindow, /onClick=\{onOpenAncestorFanChart\}/);
+  assert.match(toolsWindow, /onClick=\{onOpenDescendantFanChart\}/);
   assert.doesNotMatch(toolsWindow, /Кругова діаграма предків[\s\S]{0,160}заплановано/);
   assert.match(
     toolsWindow,
@@ -157,7 +168,36 @@ test("tree settings expose persistent married and maiden surname display rules",
   assert.match(productionPage, /applyFamilyTreeNameDisplay\(/);
   assert.match(productionPage, /nameDisplayPreferences=\{treeAppearance\}/);
   assert.match(circularChart, /applyFamilyTreeNameDisplay\(/);
+  assert.match(fanChart, /applyFamilyTreeNameDisplay\(/);
   assert.match(styles, /\.family-tree-name-display-options/);
+});
+
+test("fan charts load bounded ancestors and progressively stream only the selected person's descendants", () => {
+  assert.match(fanChart, /sessionKey: `fan-\$\{direction\}:\$\{focusPersonId\}`/);
+  assert.match(fanChart, /ancestorDepth: direction === "ancestors" \? generations : 0/);
+  assert.match(fanChart, /descendantDepth: 0/);
+  assert.match(fanChart, /collateralDepth: 0/);
+  assert.match(fanChart, /maxNodes: MAX_FAN_CHART_OCCURRENCES/);
+  assert.match(fanChart, /structuralOnly: true/);
+  assert.match(fanChart, /useProgressiveDescendantGraph\(\{/);
+  assert.match(fanChart, /enabled: descendantSeedReady/);
+  assert.match(fanChart, /maxGenerations: generations/);
+  assert.match(fanChart, /maxPersons: MAX_FAN_CHART_OCCURRENCES/);
+  assert.match(fanChart, /progressiveDescendants\.truncated/);
+  assert.match(fanChart, /planFanChartSectorLabel\(occurrence\)/);
+  assert.doesNotMatch(fanChart, /<textPath/);
+  assert.match(fanChart, /FAN_CHART_EXPORT_OPTIONS\.map/);
+  assert.match(fanChart, /exportFanChart\(\{/);
+  assert.match(fanChart, /worldBounds: \{/);
+  assert.match(fanChart, /addEventListener\("wheel", handleWheel, \{ passive: false \}\)/);
+  assert.match(fanChart, /tabIndex=\{0\}/);
+  assert.match(fanChart, /Доступний список/);
+  assert.match(fanChart, /Зробити центральною/);
+  assert.match(fanChart, /requestFullscreen\(\{ navigationUI: "hide" \}\)/);
+  assert.match(productionPage, /<FanGenealogyChartWindow/);
+  assert.match(productionPage, /key=\{`fan-\$\{fanChart\.direction\}-chart:\$\{selectedEntry\.id\}`\}/);
+  assert.match(productionPage, /onOpenAncestorFanChart=\{\(\) => openFanChart\("ancestors"\)\}/);
+  assert.match(productionPage, /onOpenDescendantFanChart=\{\(\) => openFanChart\("descendants"\)\}/);
 });
 
 test("circular ancestor chart uses an isolated bounded direct-ancestor session", () => {

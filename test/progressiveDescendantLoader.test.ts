@@ -498,6 +498,90 @@ test("breadth-first traversal chunks a large frontier and removes cycles", async
   );
   assert.equal(result.loadedGenerations, 2);
   assert.equal(result.loadedPersons, 201);
+  assert.equal(result.truncated, false);
+});
+
+test("enforces a hard person cap and stops before requesting another page", async () => {
+  const requests: DescendantFrontierPageRequest[] = [];
+  const client = clientWithFrontier(async request => {
+    requests.push(request);
+    const pageNumber = requests.length;
+    const childIds = Array.from(
+      { length: 200 },
+      (_, index) => `child-${(pageNumber - 1) * 200 + index}`,
+    );
+    return frontierPage(request, childIds, {
+      hasMore: true,
+      nextCursor: `cursor:${pageNumber + 1}`,
+      pageNumber,
+    });
+  });
+
+  const progress: ProgressiveDescendantState[] = [];
+  const result = await loadProgressiveDescendantGraph({
+    client,
+    treeId: "tree",
+    rootPersonId: "root",
+    maxGenerations: 5,
+    pageSize: 200,
+    maxPersons: 1_600,
+    initialGraph: {
+      persons: [{ id: "root", displayName: "root" }],
+      unions: [],
+      parentChildRelations: [],
+      continuations: [],
+    },
+    yieldControl: async () => undefined,
+    onProgress: state => progress.push(state),
+  });
+
+  assert.equal(requests.length, 8);
+  assert.equal(result.pagesLoaded, 8);
+  assert.equal(result.graph.persons.length, 1_600);
+  assert.equal(result.loadedPersons, 1_600);
+  assert.equal(result.loading, false);
+  assert.equal(result.truncated, true);
+  assert.equal(result.error, undefined);
+  assert.equal(result.graph.persons[0]?.id, "root");
+  const retainedPersonIds = new Set(result.graph.persons.map(person => person.id));
+  assert.equal(
+    result.graph.parentChildRelations.every(relation =>
+      retainedPersonIds.has(relation.parentId) &&
+      retainedPersonIds.has(relation.childId)
+    ),
+    true,
+  );
+  assert.equal(progress.at(-1)?.loading, false);
+  assert.equal(progress.at(-1)?.truncated, true);
+});
+
+test("does not mark an exactly bounded requested generation as truncated", async () => {
+  const childIds = Array.from(
+    { length: 1_599 },
+    (_, index) => `child-${index}`,
+  );
+  const client = clientWithFrontier(async request =>
+    frontierPage(request, childIds));
+
+  const result = await loadProgressiveDescendantGraph({
+    client,
+    treeId: "tree",
+    rootPersonId: "root",
+    maxGenerations: 1,
+    maxPersons: 1_600,
+    initialGraph: {
+      persons: [{ id: "root", displayName: "root" }],
+      unions: [],
+      parentChildRelations: [],
+      continuations: [],
+    },
+    yieldControl: async () => undefined,
+  });
+
+  assert.equal(result.loadedPersons, 1_600);
+  assert.equal(result.loadedGenerations, 1);
+  assert.equal(result.truncated, false);
+  assert.equal(result.loading, false);
 });
 
 test("rejects graph-version and permission changes without committing the page", async () => {

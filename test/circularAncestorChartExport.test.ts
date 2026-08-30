@@ -36,6 +36,11 @@ test("builds a single-page A0 vector print document with escaped metadata", () =
     generations: 7,
     ancestorCount: 126,
     generatedAtLabel: "11 серпня 2026 р.",
+    legendColors: {
+      paternal: "#123456",
+      maternal: "#abcdef",
+      duplicate: "#fedcba",
+    },
   });
 
   assert.match(html, /@page \{ size: 841mm 1189mm; margin: 0; \}/);
@@ -45,6 +50,28 @@ test("builds a single-page A0 vector print document with escaped metadata", () =
   assert.doesNotMatch(html, /<script>alert/);
   assert.match(html, /Зберегти як PDF/);
   assert.match(html, /A0 · векторний макет/);
+  assert.match(html, /<meta name="generator" content="Трекер Роду">/);
+  assert.match(html, /<strong>Трекер Роду<\/strong> · 11 серпня 2026 р\./);
+  assert.match(html, /\.legend \.paternal \{ background: #123456; \}/);
+  assert.match(html, /\.legend \.maternal \{ background: #abcdef; \}/);
+});
+
+test("rejects unsafe custom legend colors in print markup", () => {
+  const html = buildCircularAncestorPrintDocument({
+    svgMarkup: "<svg></svg>",
+    paper: "A3",
+    documentTitle: "Діаграма",
+    focusLabel: "Особа",
+    generations: 3,
+    ancestorCount: 6,
+    legendColors: {
+      paternal: "#fff; } body { display:none",
+      maternal: "#abcdef",
+      duplicate: "#fedcba",
+    },
+  });
+  assert.doesNotMatch(html, /display:none/);
+  assert.match(html, /\.legend \.paternal \{ background: #cde5e3; \}/);
 });
 
 test("creates filesystem-safe descriptive export names", () => {

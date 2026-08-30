@@ -4,10 +4,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Modal } from "../Modal";
+import { AncestorChartColorControls } from "./AncestorChartColorControls.tsx";
+import { FamilyTreeChartBrand } from "./FamilyTreeChartBrand.tsx";
 import type { FamilyTreeNeighborhoodClient } from "../../features/family-tree-view/data/neighborhoodClient";
 import { useFamilyTreeNeighborhood } from "../../features/family-tree-view/react/useFamilyTreeNeighborhood";
 import {
@@ -39,7 +42,18 @@ import {
   type FamilyTreeNameDisplayPreferences,
   type FamilyTreeNameProfile,
 } from "../../features/family-tree-view/adapters/familyTreeNameDisplay.ts";
-import { DEFAULT_FAMILY_TREE_APPEARANCE } from "../../utils/familyTreeAppearance.ts";
+import {
+  ancestorChartToneForOccurrence,
+  familyTreeChartColorCssVariables,
+  resolveFamilyTreeChartColorScheme,
+  type FamilyTreeChartTone,
+} from "../../features/family-tree-view/appearance/familyTreeChartColorScheme.ts";
+import {
+  DEFAULT_FAMILY_TREE_APPEARANCE,
+  normalizeFamilyTreeAppearance,
+  type FamilyTreeAppearancePreferences,
+} from "../../utils/familyTreeAppearance.ts";
+import { familyTreeChartBrandScreenPlacement } from "../../features/family-tree-view/export/familyTreeChartBrand.ts";
 
 const DEFAULT_GENERATIONS = 7;
 const MAX_GENERATIONS = 16;
@@ -51,6 +65,7 @@ interface CircularAncestorChartWindowProps {
   focusPersonId: string;
   focusPersonLabel?: string;
   nameDisplayPreferences?: FamilyTreeNameDisplayPreferences;
+  appearancePreferences?: FamilyTreeAppearancePreferences;
   nameProfiles?: readonly FamilyTreeNameProfile[];
   /** Optional dependency injection used by isolated previews and tests. */
   client?: FamilyTreeNeighborhoodClient;
@@ -79,6 +94,7 @@ export function CircularAncestorChartWindow({
   focusPersonId,
   focusPersonLabel,
   nameDisplayPreferences,
+  appearancePreferences,
   nameProfiles = [],
   client: providedClient,
   searchFocusPersons,
@@ -102,6 +118,14 @@ export function CircularAncestorChartWindow({
   const [exportPending, setExportPending] = useState(false);
   const [exportFeedback, setExportFeedback] = useState("");
   const [exportError, setExportError] = useState("");
+  const inheritedAppearance = useMemo(
+    () => normalizeFamilyTreeAppearance(
+      appearancePreferences ?? DEFAULT_FAMILY_TREE_APPEARANCE,
+    ),
+    [appearancePreferences],
+  );
+  const [chartAppearance, setChartAppearance] = useState(inheritedAppearance);
+  const [chartColorsDirty, setChartColorsDirty] = useState(false);
   const [camera, setCamera] = useState<ChartCamera>({ zoom: 1, x: 0, y: 0 });
   const [svgSize, setSvgSize] = useState({ width: 1, height: 1 });
   const chartId = useId().replace(/:/g, "");
@@ -121,6 +145,20 @@ export function CircularAncestorChartWindow({
     moved: boolean;
   } | undefined>(undefined);
 
+  useEffect(() => {
+    setChartAppearance(inheritedAppearance);
+    setChartColorsDirty(false);
+  }, [inheritedAppearance]);
+
+  const chartColorScheme = useMemo(
+    () => resolveFamilyTreeChartColorScheme(chartAppearance),
+    [chartAppearance],
+  );
+  const chartColorStyle = useMemo(
+    () => familyTreeChartColorCssVariables(chartColorScheme) as CSSProperties,
+    [chartColorScheme],
+  );
+
   const neighborhood = useFamilyTreeNeighborhood({
     client,
     treeId,
@@ -135,10 +173,10 @@ export function CircularAncestorChartWindow({
   const displayGraph = useMemo(
     () => applyFamilyTreeNameDisplay(
       neighborhood.graph,
-      nameDisplayPreferences ?? DEFAULT_FAMILY_TREE_APPEARANCE,
+      nameDisplayPreferences ?? inheritedAppearance,
       nameProfiles,
     ),
-    [nameDisplayPreferences, nameProfiles, neighborhood.graph],
+    [inheritedAppearance, nameDisplayPreferences, nameProfiles, neighborhood.graph],
   );
   const model = useMemo(
     () => buildCircularAncestorChartModel(
@@ -151,6 +189,9 @@ export function CircularAncestorChartWindow({
   const selectedOccurrence = model.occurrences.find(
     (occurrence) => occurrence.occurrenceId === selectedOccurrenceId,
   ) ?? model.occurrences[0];
+  const selectedOccurrenceTone = selectedOccurrence
+    ? ancestorChartToneForOccurrence(chartColorScheme, selectedOccurrence)
+    : chartColorScheme.focus;
   const currentFocusLabel = model.occurrences[0]?.person.displayName ||
     focusPersonLabel ||
     "Особа";
@@ -176,6 +217,15 @@ export function CircularAncestorChartWindow({
     generations * CIRCULAR_ANCESTOR_RING_WIDTH;
   const worldSize = (chartRadius + 38) * 2;
   const viewSize = worldSize / camera.zoom;
+  const chartBrandPlacement = familyTreeChartBrandScreenPlacement(
+    {
+      x: camera.x - viewSize / 2,
+      y: camera.y - viewSize / 2,
+      width: viewSize,
+      height: viewSize,
+    },
+    svgSize,
+  );
   const fitPixelsPerWorld = Math.max(1, Math.min(svgSize.width, svgSize.height)) /
     worldSize;
   const labelZoomRecommendation = useMemo(
@@ -549,95 +599,116 @@ export function CircularAncestorChartWindow({
               </div>
             ) : null}
           </div>
-          <label className="circular-ancestor-generation-control">
-            <span>Поколінь предків</span>
-            <select
-              value={draftGenerations}
-              onChange={(event) => setDraftGenerations(Number(event.target.value))}
-            >
-              {Array.from({ length: MAX_GENERATIONS }, (_, index) => index + 1).map((value) => (
-                <option key={value} value={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="button"
-            disabled={draftGenerations === generations || neighborhood.loading}
-            onClick={() => {
-              setGenerations(draftGenerations);
-              setSelectedOccurrenceId("circular-ancestor:1");
-              setCamera({ zoom: 1, x: 0, y: 0 });
-            }}
-          >
-            Побудувати
-          </button>
-          <div className="circular-ancestor-camera-controls" aria-label="Масштаб діаграми">
-            <button type="button" onClick={() => setZoom(camera.zoom / 1.25)} aria-label="Зменшити масштаб">−</button>
-            <span>{Math.round(camera.zoom * 100)}%</span>
-            <button type="button" onClick={() => setZoom(camera.zoom * 1.25)} aria-label="Збільшити масштаб">+</button>
-            <button type="button" onClick={() => setCamera({ zoom: 1, x: 0, y: 0 })}>Вмістити</button>
-            <button
-              type="button"
-              className="circular-ancestor-readable-zoom"
-              onClick={() => setCamera((current) => ({
-                ...current,
-                zoom: readableLabelZoom,
-              }))}
-              title={`Мінімальний масштаб для всіх повних підписів: ${Math.round(readableLabelZoom * 100)}%`}
-            >
-              Читати · {Math.round(readableLabelZoom * 100)}%
-            </button>
-            <button type="button" onClick={() => setCamera((current) => ({ ...current, x: 0, y: 0 }))}>До центру</button>
-            <button
-              type="button"
-              disabled={fullscreenPending}
-              aria-pressed={fullscreen}
-              aria-label={fullscreen ? "Вийти з повноекранного режиму" : "Розгорнути на весь екран"}
-              title={fullscreen ? "Згорнути (Esc)" : "На весь екран"}
-              onClick={() => void toggleFullscreen()}
-            >
-              {fullscreen ? "Згорнути" : "На весь екран"}
-            </button>
-            <details className="circular-ancestor-export-menu">
-              <summary
-                aria-label="Зберегти або надрукувати кругову діаграму"
-                aria-disabled={exportPending || neighborhood.loading || !model.occurrences.length}
-                title="Зберегти / PDF"
-                onClick={(event) => {
-                  if (exportPending || neighborhood.loading || !model.occurrences.length) {
-                    event.preventDefault();
-                  }
-                }}
+          <div className="circular-ancestor-build-controls">
+            <label className="circular-ancestor-generation-control">
+              <span>Поколінь предків</span>
+              <select
+                value={draftGenerations}
+                onChange={(event) => setDraftGenerations(Number(event.target.value))}
               >
-                <span aria-hidden="true">{exportPending ? "…" : "⇩"}</span>
-              </summary>
-              <div role="menu" aria-label="Формат збереження кругової діаграми">
-                {CIRCULAR_ANCESTOR_EXPORT_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="menuitem"
-                    disabled={exportPending || neighborhood.loading || !model.occurrences.length}
+                {Array.from({ length: MAX_GENERATIONS }, (_, index) => index + 1).map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="button circular-ancestor-build-button"
+              disabled={draftGenerations === generations || neighborhood.loading}
+              onClick={() => {
+                setGenerations(draftGenerations);
+                setSelectedOccurrenceId("circular-ancestor:1");
+                setCamera({ zoom: 1, x: 0, y: 0 });
+              }}
+            >
+              Побудувати
+            </button>
+          </div>
+          <div className="circular-ancestor-navigation">
+            <div className="circular-ancestor-camera-controls" role="group" aria-label="Керування діаграмою">
+              <div className="circular-ancestor-zoom-controls" role="group" aria-label="Масштаб діаграми">
+                <button type="button" onClick={() => setZoom(camera.zoom / 1.25)} aria-label="Зменшити масштаб">−</button>
+                <span>{Math.round(camera.zoom * 100)}%</span>
+                <button type="button" onClick={() => setZoom(camera.zoom * 1.25)} aria-label="Збільшити масштаб">+</button>
+                <button type="button" onClick={() => setCamera({ zoom: 1, x: 0, y: 0 })}>Вмістити</button>
+                <button
+                  type="button"
+                  className="circular-ancestor-readable-zoom"
+                  onClick={() => setCamera((current) => ({
+                    ...current,
+                    zoom: readableLabelZoom,
+                  }))}
+                  title={`Мінімальний масштаб для всіх повних підписів: ${Math.round(readableLabelZoom * 100)}%`}
+                >
+                  Читати · {Math.round(readableLabelZoom * 100)}%
+                </button>
+                <button type="button" onClick={() => setCamera((current) => ({ ...current, x: 0, y: 0 }))}>До центру</button>
+              </div>
+              <div className="circular-ancestor-view-controls" role="group" aria-label="Вигляд і збереження діаграми">
+                <AncestorChartColorControls
+                  appearance={chartAppearance}
+                  inheritedAppearance={inheritedAppearance}
+                  dirty={chartColorsDirty}
+                  onChange={(nextAppearance) => {
+                    setChartAppearance(nextAppearance);
+                    setChartColorsDirty(true);
+                  }}
+                  onReset={() => {
+                    setChartAppearance(inheritedAppearance);
+                    setChartColorsDirty(false);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={fullscreenPending}
+                  aria-pressed={fullscreen}
+                  aria-label={fullscreen ? "Вийти з повноекранного режиму" : "Розгорнути на весь екран"}
+                  title={fullscreen ? "Згорнути (Esc)" : "На весь екран"}
+                  onClick={() => void toggleFullscreen()}
+                >
+                  {fullscreen ? "Згорнути" : "На весь екран"}
+                </button>
+                <details className="circular-ancestor-export-menu">
+                  <summary
+                    aria-label="Зберегти або надрукувати кругову діаграму"
+                    aria-disabled={exportPending || neighborhood.loading || !model.occurrences.length}
+                    title="Зберегти / PDF"
                     onClick={(event) => {
-                      event.currentTarget.closest("details")?.removeAttribute("open");
-                      void saveChart(option.value);
+                      if (exportPending || neighborhood.loading || !model.occurrences.length) {
+                        event.preventDefault();
+                      }
                     }}
                   >
-                    {option.label}
-                  </button>
-                ))}
+                    <span aria-hidden="true">{exportPending ? "…" : "⇩"}</span>
+                  </summary>
+                  <div role="menu" aria-label="Формат збереження кругової діаграми">
+                    {CIRCULAR_ANCESTOR_EXPORT_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="menuitem"
+                        disabled={exportPending || neighborhood.loading || !model.occurrences.length}
+                        onClick={(event) => {
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                          void saveChart(option.value);
+                        }}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </details>
               </div>
-            </details>
+            </div>
+            <button
+              type="button"
+              className="button button-secondary circular-ancestor-list-toggle"
+              aria-expanded={showAccessibleList}
+              onClick={() => setShowAccessibleList((current) => !current)}
+            >
+              {showAccessibleList ? "Сховати список" : "Доступний список"}
+            </button>
           </div>
-          <button
-            type="button"
-            className="button button-secondary circular-ancestor-list-toggle"
-            aria-expanded={showAccessibleList}
-            onClick={() => setShowAccessibleList((current) => !current)}
-          >
-            {showAccessibleList ? "Сховати список" : "Доступний список"}
-          </button>
         </header>
 
         <div className="circular-ancestor-status" aria-live="polite">
@@ -674,14 +745,15 @@ export function CircularAncestorChartWindow({
         ) : null}
 
         <div className="circular-ancestor-content">
-          <div className="circular-ancestor-canvas-wrap">
+          <div className="circular-ancestor-canvas-wrap" style={chartColorStyle}>
             <div className="circular-ancestor-legend" aria-label="Позначення гілок">
-              <span><i className="paternal" /> Батьківська гілка</span>
-              <span><i className="maternal" /> Материнська гілка</span>
-              <span><i className="duplicate" /> Повторний предок</span>
+              <span><i className="paternal" style={{ backgroundColor: chartColorScheme.paternal.fill }} /> Батьківська гілка</span>
+              <span><i className="maternal" style={{ backgroundColor: chartColorScheme.maternal.fill }} /> Материнська гілка</span>
+              <span><i className="duplicate" style={{ backgroundColor: chartColorScheme.duplicate.fill }} /> Повторний предок</span>
             </div>
             <svg
               ref={svgRef}
+              style={chartColorStyle}
               className={`circular-ancestor-chart ${dragRef.current ? "is-dragging" : ""}`}
               viewBox={`${camera.x - viewSize / 2} ${camera.y - viewSize / 2} ${viewSize} ${viewSize}`}
               aria-hidden="true"
@@ -713,6 +785,7 @@ export function CircularAncestorChartWindow({
                     chartId={chartId}
                     selected={occurrence.occurrenceId === selectedOccurrence?.occurrenceId}
                     highlighted={selectedPathSlots.has(occurrence.slot)}
+                    tone={ancestorChartToneForOccurrence(chartColorScheme, occurrence)}
                     onSelect={() => selectOccurrenceFromClick(occurrence.occurrenceId)}
                   />
                 ))}
@@ -722,9 +795,11 @@ export function CircularAncestorChartWindow({
                   occurrence={model.occurrences[0]}
                   chartId={chartId}
                   selected={selectedOccurrence?.slot === 1}
+                  tone={chartColorScheme.focus}
                   onSelect={() => selectOccurrenceFromClick(model.occurrences[0]!.occurrenceId)}
                 />
               ) : null}
+              <FamilyTreeChartBrand placement={chartBrandPlacement} />
             </svg>
             {neighborhood.loading && !model.occurrences.length ? (
               <div className="circular-ancestor-loading">Будуємо діаграму…</div>
@@ -735,7 +810,14 @@ export function CircularAncestorChartWindow({
             {selectedOccurrence ? (
               <>
                 <span className="eyebrow">{generationLabel(selectedOccurrence.generation)}</span>
-                <div className={`circular-ancestor-avatar ${selectedOccurrence.branch}`}>
+                <div
+                  className={`circular-ancestor-avatar ${selectedOccurrence.branch}`}
+                  style={{
+                    color: selectedOccurrenceTone.foreground,
+                    backgroundColor: selectedOccurrenceTone.fill,
+                    borderColor: selectedOccurrenceTone.stroke,
+                  }}
+                >
                   {personInitials(selectedOccurrence.person.displayName)}
                 </div>
                 <h3>{selectedOccurrence.person.displayName}</h3>
@@ -810,12 +892,14 @@ function AncestorSector({
   chartId,
   selected,
   highlighted,
+  tone,
   onSelect,
 }: {
   occurrence: CircularAncestorOccurrence;
   chartId: string;
   selected: boolean;
   highlighted: boolean;
+  tone: FamilyTreeChartTone;
   onSelect: () => void;
 }) {
   const midAngle = (occurrence.startAngle + occurrence.endAngle) / 2;
@@ -854,6 +938,11 @@ function AncestorSector({
         selected ? "is-selected" : "",
         highlighted ? "is-highlighted" : "",
       ].filter(Boolean).join(" ")}
+      style={{
+        "--ancestor-sector-fill": tone.fill,
+        "--ancestor-sector-foreground": tone.foreground,
+        "--ancestor-sector-stroke": tone.stroke,
+      } as CSSProperties}
       onClick={(event) => {
         event.stopPropagation();
         onSelect();
@@ -972,11 +1061,13 @@ function FocusAncestorCard({
   occurrence,
   chartId,
   selected,
+  tone,
   onSelect,
 }: {
   occurrence: CircularAncestorOccurrence;
   chartId: string;
   selected: boolean;
+  tone: FamilyTreeChartTone;
   onSelect: () => void;
 }) {
   const label = planCircularAncestorLabel(occurrence);
@@ -994,6 +1085,11 @@ function FocusAncestorCard({
     <g
       data-occurrence-id={occurrence.occurrenceId}
       className={`circular-ancestor-focus ${selected ? "is-selected" : ""}`}
+      style={{
+        "--ancestor-sector-fill": tone.fill,
+        "--ancestor-sector-foreground": tone.foreground,
+        "--ancestor-sector-stroke": tone.stroke,
+      } as CSSProperties}
       onClick={(event) => {
         event.stopPropagation();
         onSelect();
