@@ -1062,7 +1062,7 @@ export function EntityDetailsModal({
                 persons,
               }))}
             >
-              Попросити допомоги в GeneHelp
+              Допомога з дослідженням у GeneHelp
             </button>
           ) : null}
           <button type="button" className="button button-ghost" onClick={onClose}>
@@ -1882,7 +1882,7 @@ export function EntityModal({
                 persons: availablePersons,
               }))}
             >
-              Попросити допомоги в GeneHelp
+              Допомога з дослідженням у GeneHelp
             </button>
           ) : null}
           <button type="button" className="button button-ghost" onClick={onClose} disabled={savePending}>Скасувати</button>

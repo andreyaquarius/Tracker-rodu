@@ -133,7 +133,7 @@ export const PRODUCT_ANALYTICS_PAGE_LABELS: Record<ProductAnalyticsPageCode, str
   backup: "Резервні копії",
   settings: "Налаштування",
   subscription: "Тариф і підписка",
-  feedback: "Зворотний зв’язок",
+  feedback: "Підтримка Трекера Роду",
   notes: "Нотатки",
   custom_section: "Власний розділ",
   unknown: "Інша сторінка",

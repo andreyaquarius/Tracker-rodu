@@ -24,8 +24,7 @@ interface LayoutProps {
   onOpenNotes: () => void;
   isNotesActive: boolean;
   onOpenProjects: () => void;
-  onOpenGeneHelp: () => void;
-  showGeneHelp: boolean;
+  onOpenHelp: () => void;
   showFamilyTree: boolean;
   customSections: CustomSectionDefinition[];
   account: SupabaseAccount | null;
@@ -91,8 +90,7 @@ export function Layout(props: LayoutProps) {
           onOpenNotes={props.onOpenNotes}
           isNotesActive={props.isNotesActive}
           onOpenProjects={props.onOpenProjects}
-          onOpenGeneHelp={props.onOpenGeneHelp}
-          showGeneHelp={props.showGeneHelp}
+          onOpenHelp={props.onOpenHelp}
           showFamilyTree={props.showFamilyTree}
           customSections={props.customSections}
           open={menuOpen}

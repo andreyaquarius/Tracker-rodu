@@ -24,6 +24,7 @@ import {
 interface FeedbackPageProps {
   account: SupabaseAccount;
   isAdmin: boolean;
+  startComposer?: boolean;
 }
 
 const categoryLabels: Record<FeedbackCategory, string> = {
@@ -41,7 +42,7 @@ const statusLabels: Record<FeedbackStatus, string> = {
 
 type AdminFilter = "all" | "unread" | FeedbackStatus;
 
-export function FeedbackPage({ account, isAdmin }: FeedbackPageProps) {
+export function FeedbackPage({ account, isAdmin, startComposer = false }: FeedbackPageProps) {
   const [threads, setThreads] = useState<FeedbackThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [messages, setMessages] = useState<FeedbackMessage[]>([]);
@@ -51,7 +52,7 @@ export function FeedbackPage({ account, isAdmin }: FeedbackPageProps) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reply, setReply] = useState("");
-  const [showComposer, setShowComposer] = useState(false);
+  const [showComposer, setShowComposer] = useState(() => !isAdmin && startComposer);
   const [subject, setSubject] = useState("");
   const [category, setCategory] = useState<FeedbackCategory>("question");
   const [body, setBody] = useState("");
@@ -96,6 +97,10 @@ export function FeedbackPage({ account, isAdmin }: FeedbackPageProps) {
   useEffect(() => {
     void refreshThreads();
   }, [account.id, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin && startComposer) setShowComposer(true);
+  }, [isAdmin, startComposer]);
 
   useEffect(() => {
     const generation = ++selectionGeneration.current;
@@ -201,11 +206,11 @@ export function FeedbackPage({ account, isAdmin }: FeedbackPageProps) {
       <header className="page-heading feedback-page-heading">
         <div>
           <span className="eyebrow">Приватні повідомлення</span>
-          <h1 id="feedback-page-title">{isAdmin ? "Звернення користувачів" : "Зворотний зв’язок"}</h1>
+          <h1 id="feedback-page-title">{isAdmin ? "Звернення користувачів" : "Підтримка Трекера Роду"}</h1>
           <p>
             {isAdmin
               ? "Відповідайте на питання й побажання користувачів у зручний час. Це не онлайн-чат."
-              : "Поставте питання або залиште побажання. Відповідь можна прочитати тут пізніше — чекати онлайн не потрібно."}
+              : "Повідомте про помилку платформи або поставте питання щодо функцій, акаунта, тарифу, оплати, резервних копій чи збереження даних. Відповідь можна прочитати тут пізніше."}
           </p>
         </div>
         <div className="page-heading-actions">

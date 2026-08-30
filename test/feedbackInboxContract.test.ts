@@ -16,8 +16,11 @@ test("feedback inbox has one account-level route and navigation entry", () => {
   });
   assert.equal(pagePath("ignored-project", "feedback"), "/feedback");
   assert.match(app, /case "feedback"/);
-  assert.match(app, /<FeedbackPage account=\{account\} isAdmin=\{subscriptionAccess\.isAdmin\}/);
-  assert.match(sidebar, /sidebar-feedback-label">Зворотний зв’язок/);
+  assert.match(
+    app,
+    /<FeedbackPage[\s\S]*?account=\{account\}[\s\S]*?isAdmin=\{subscriptionAccess\.isAdmin\}[\s\S]*?startComposer=/,
+  );
+  assert.match(sidebar, /sidebar-feedback-label">Допомога/);
   assert.match(sidebar, /<FeedbackNavBadge accountId=\{accountId\}/);
   assert.match(sidebar, /className={`sidebar-feedback-action/);
   assert.match(sidebar, /sidebar-feedback-action[\s\S]*sidebar-privacy-copy/);
@@ -27,6 +30,7 @@ test("feedback UI is asynchronous, private and usable by users and administrator
   assert.match(page, /Це не онлайн-чат/);
   assert.match(page, /лише ви та адміністратор Трекера Роду/);
   assert.match(page, /Звернення користувачів/);
+  assert.match(page, /Підтримка Трекера Роду/);
   assert.match(page, /Відповідь користувачу/);
   assert.match(page, /Нове звернення/);
   assert.match(page, /statusLabels/);

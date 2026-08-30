@@ -63,7 +63,6 @@ type NavigationIconName =
   | "bookmark-check"
   | "lightbulb"
   | "users"
-  | "send"
   | "message-square"
   | "refresh"
   | "credit-card"
@@ -164,12 +163,6 @@ function NavigationIcon({ icon }: { icon: NavigationIconName }) {
         <path d="M16 3.13a4 4 0 0 1 0 7.75" />
       </>
     ),
-    send: (
-      <>
-        <path d="M22 2 11 13" />
-        <path d="M22 2 15 22l-4-9-9-4z" />
-      </>
-    ),
     refresh: (
       <>
         <path d="M20 12a8 8 0 0 1-14.4 4.8" />
@@ -215,8 +208,7 @@ interface SidebarProps {
   onOpenNotes: () => void;
   isNotesActive: boolean;
   onOpenProjects: () => void;
-  onOpenGeneHelp: () => void;
-  showGeneHelp: boolean;
+  onOpenHelp: () => void;
   showFamilyTree: boolean;
   customSections: CustomSectionDefinition[];
   open: boolean;
@@ -233,8 +225,7 @@ export function Sidebar({
   onOpenNotes,
   isNotesActive,
   onOpenProjects,
-  onOpenGeneHelp,
-  showGeneHelp,
+  onOpenHelp,
   showFamilyTree,
   customSections,
   open,
@@ -281,8 +272,8 @@ export function Sidebar({
     onOpenNotes();
     onClose();
   };
-  const openGeneHelp = () => {
-    onOpenGeneHelp();
+  const openHelp = () => {
+    onOpenHelp();
     onClose();
   };
   const toggle = (key: string) => {
@@ -467,16 +458,6 @@ export function Sidebar({
           ) : null}
 
           <div className="system-nav-group">
-            {showGeneHelp ? (
-              <button
-                type="button"
-                className="genehelp-nav-action"
-                onClick={openGeneHelp}
-              >
-                <span className="nav-icon"><NavigationIcon icon="send" /></span>
-                Попросити допомоги в GeneHelp
-              </button>
-            ) : null}
             {systemItems.map((item) => (
               <button
                 type="button"
@@ -493,11 +474,13 @@ export function Sidebar({
         <div className="sidebar-foot">
           <button
             type="button"
-            className={`sidebar-feedback-action ${page === "feedback" ? "active" : ""}`}
-            onClick={() => navigate("feedback")}
+            className={`sidebar-feedback-action sidebar-help-action ${page === "feedback" ? "active" : ""}`}
+            onClick={openHelp}
+            aria-label="Відкрити допомогу"
+            title="Допомога"
           >
             <span className="nav-icon"><NavigationIcon icon="message-square" /></span>
-            <span className="sidebar-feedback-label">Зворотний зв’язок</span>
+            <span className="sidebar-feedback-label">Допомога</span>
             {accountId ? <FeedbackNavBadge accountId={accountId} /> : null}
           </button>
           <div className="sidebar-privacy-copy">

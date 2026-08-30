@@ -47,6 +47,7 @@ import { FamilyTreeErrorBoundary } from "./components/familyTree/FamilyTreeError
 import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
 import { GeneHelpRequestModal } from "./components/GeneHelpRequestModal";
+import { HelpChoiceModal } from "./components/HelpChoiceModal";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
 import {
@@ -796,6 +797,7 @@ export default function App() {
   const workspaceDeletionAbortRef = useRef<AbortController | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
   const [scanViewer, setScanViewer] = useState<AppDocumentScanViewer | null>(null);
+  const [helpChoiceOpen, setHelpChoiceOpen] = useState(false);
   const [geneHelpOpen, setGeneHelpOpen] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [featureFlagsOwnerId, setFeatureFlagsOwnerId] = useState("");
@@ -6308,7 +6310,11 @@ export default function App() {
         );
       case "feedback":
         return account ? (
-          <FeedbackPage account={account} isAdmin={subscriptionAccess.isAdmin} />
+          <FeedbackPage
+            account={account}
+            isAdmin={subscriptionAccess.isAdmin}
+            startComposer={new URLSearchParams(location.search).get("new") === "1"}
+          />
         ) : (
           <section className="panel empty-state">
             <strong>Увійдіть до облікового запису, щоб відкрити приватні звернення.</strong>
@@ -6394,10 +6400,7 @@ export default function App() {
         onOpenNotes={() => routerNavigate("/notes")}
         isNotesActive={route.kind === "notes"}
         onOpenProjects={openProjects}
-        onOpenGeneHelp={() => {
-          if (canOpenGeneHelp) setGeneHelpOpen(true);
-        }}
-        showGeneHelp={canOpenGeneHelp}
+        onOpenHelp={() => setHelpChoiceOpen(true)}
         showFamilyTree={canUseFamilyTreeFeature}
         customSections={activeDb.customSections}
         account={account}
@@ -6467,6 +6470,20 @@ export default function App() {
           onActivity={(relatedId, text, actionType) =>
             recordProjectActivity("settings", relatedId, text, actionType)
           }
+        />
+      ) : null}
+      {helpChoiceOpen ? (
+        <HelpChoiceModal
+          showGeneHelp={canOpenGeneHelp}
+          onClose={() => setHelpChoiceOpen(false)}
+          onOpenTrackerSupport={() => {
+            setHelpChoiceOpen(false);
+            routerNavigate("/feedback?new=1");
+          }}
+          onOpenGeneHelp={() => {
+            setHelpChoiceOpen(false);
+            if (canOpenGeneHelp) setGeneHelpOpen(true);
+          }}
         />
       ) : null}
       {geneHelpOpen && canOpenGeneHelp ? (

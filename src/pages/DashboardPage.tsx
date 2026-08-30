@@ -344,7 +344,7 @@ function moduleLabel(module: PageKey): string {
     archiveRequests: "Запити",
     persons: "Особи",
     backup: "Резервні копії",
-    feedback: "Зворотний зв’язок",
+    feedback: "Підтримка Трекера Роду",
     subscription: "Тариф і підписка",
     settings: "Налаштування",
   };

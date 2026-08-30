@@ -225,11 +225,14 @@ export function GeneHelpRequestModal({ onClose, initialRequest = null }: GeneHel
       ) : (
         <form className="genehelp-request-modal" onSubmit={create}>
         <div className="genehelp-intro">
-          <span className="eyebrow">Партнерський сервіс</span>
+          <span className="eyebrow">Партнерський сервіс для досліджень</span>
           <p>
-            Опишіть задачу або пошук, з яким потрібна допомога. Якщо у вас ще
+            Опишіть генеалогічний пошук, архівний документ або запис, з яким потрібна допомога. Якщо у вас ще
             немає профілю GeneHelp, Трекер Роду створить його автоматично за
             email вашого акаунта.
+          </p>
+          <p className="field-hint">
+            GeneHelp не вирішує технічні питання та помилки платформи Трекера Роду — для них скористайтеся підтримкою Трекера Роду.
           </p>
           {accountLoading ? (
             <small className="field-hint">Перевіряємо підключення до GeneHelp...</small>
