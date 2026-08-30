@@ -170,6 +170,34 @@ test("build-time public requester retries PGRST002 schema-cache failures with bo
   assert.equal(new Set(requestBodies).size, 1, "Every safe retry must replay the same read-only RPC parameters.");
 });
 
+test("build-time public requester does not replay a deterministic database statement timeout", async () => {
+  let calls = 0;
+  await assert.rejects(
+    requestPublicZagulyakyRpc({
+      supabaseUrl: "https://example.supabase.co",
+      publishableKey: "sb_publishable_fixture",
+      rpcName: "list_public_zagulyaky_indexing_v1",
+      parameters: { p_kind: "person", p_limit: 100, p_cursor_slug: null },
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({
+          code: "57014",
+          message: "canceling statement due to statement timeout",
+        }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+      retryOptions: {
+        maxAttempts: 6,
+        sleep: async () => { throw new Error("A deterministic SQL timeout must not be replayed."); },
+      },
+    }),
+    /HTTP 500.*57014.*statement timeout/i,
+  );
+  assert.equal(calls, 1);
+});
+
 test("build-time public requester does not retry permanent responses and preserves diagnostics", async () => {
   let calls = 0;
   await assert.rejects(

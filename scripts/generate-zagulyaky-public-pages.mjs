@@ -128,7 +128,7 @@ function indexingPayload(rawPayload) {
 
 function fallbackEligibleIndexingError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return /\bPGRST202\b|\b42883\b|could not find the function|function .* does not exist|HTTP 404|\bPGRST002\b|could not query the database for the schema cache/i.test(message);
+  return /\bPGRST202\b|\b42883\b|could not find the function|function .* does not exist|HTTP 404|\bPGRST002\b|could not query the database for the schema cache|\b57014\b|statement timeout/i.test(message);
 }
 
 /**

@@ -363,8 +363,14 @@ export async function requestPublicZagulyakyRpc({
 
     if (!response.ok) {
       const failure = await rpcHttpFailure(response, rpcName, attempt);
-      const retryable = TRANSIENT_HTTP_STATUSES.has(response.status)
-        || TRANSIENT_POSTGREST_CODES.has(failure.code);
+      // A database statement timeout is deterministic for this page shape.
+      // Replaying it six times only keeps PostgreSQL busy and delays the safe
+      // catalogue fallback used by the static renderer.
+      const databaseStatementTimeout = failure.code === "57014";
+      const retryable = !databaseStatementTimeout && (
+        TRANSIENT_HTTP_STATUSES.has(response.status)
+        || TRANSIENT_POSTGREST_CODES.has(failure.code)
+      );
       if (!retryable || attempt === maxAttempts) throw new Error(failure.message);
       const delayMs = retryAfterDelay(response, attempt, baseDelayMs, maxDelayMs, random);
       onRetry({ rpcName, attempt, maxAttempts, delayMs, reason: failure.message });

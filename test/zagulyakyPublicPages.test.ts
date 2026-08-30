@@ -269,6 +269,29 @@ test("static SEO generation may use the public catalogue after exhausted PGRST00
   ]);
 });
 
+test("static SEO generation falls back immediately after an indexing statement timeout", async () => {
+  const calls: string[] = [];
+  const result = await collectStaticZagulyakyEntries({
+    requestRpc: async (rpcName: string) => {
+      calls.push(rpcName);
+      if (rpcName === "list_public_zagulyaky_indexing_v1") {
+        throw new Error(
+          "The public list_public_zagulyaky_indexing_v1 RPC returned HTTP 500: 57014 — canceling statement due to statement timeout.",
+        );
+      }
+      return { items: [], nextCursor: null };
+    },
+  });
+
+  assert.equal(result.indexingMode, "catalogue-fallback");
+  assert.deepEqual(result.entries, []);
+  assert.deepEqual(calls, [
+    "list_public_zagulyaky_indexing_v1",
+    "search_zagulyaky_people_v1",
+    "search_zagulyaky_documents_v1",
+  ]);
+});
+
 test("static SEO generation still fails when the public catalogue fallback is unavailable", async () => {
   const calls: string[] = [];
   await assert.rejects(
