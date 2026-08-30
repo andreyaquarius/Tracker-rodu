@@ -75,25 +75,28 @@ export function Modal({
 
   useEffect(() => {
     const modal = modalRef.current;
-    if (!modal || viewportBounded || !isDraggableModalViewport()) {
+    if (!modal || viewportBounded) {
       setPosition(null);
       return undefined;
     }
 
-    const rect = modal.getBoundingClientRect();
-    const initialPosition = centerModalInWorkspace(
-      rect.width,
-      rect.height,
-      initialStackIndexRef.current,
-    );
-    setPosition(initialPosition);
-
-    const clampToViewport = () => {
-      if (fullscreenRef.current || !isDraggableModalViewport()) return;
+    const fitToWorkspace = (center = false) => {
+      if (fullscreenRef.current) return;
+      if (!isDraggableModalViewport()) {
+        setPosition(null);
+        return;
+      }
       const nextRect = modal.getBoundingClientRect();
       setPosition((current) => {
+        const base = center || !current
+          ? centerModalInWorkspace(
+              nextRect.width,
+              nextRect.height,
+              initialStackIndexRef.current,
+            )
+          : current;
         const next = clampModalPosition(
-          current ?? initialPosition,
+          base,
           nextRect.width,
           nextRect.height,
         );
@@ -103,23 +106,14 @@ export function Modal({
       });
     };
 
+    fitToWorkspace(true);
+
     const handleResize = () => {
-      if (fullscreenRef.current) return;
-      if (!isDraggableModalViewport()) {
-        setPosition(null);
-        return;
-      }
-      clampToViewport();
+      fitToWorkspace();
     };
 
     const handleSidebarLayoutChange = () => {
-      if (fullscreenRef.current || !isDraggableModalViewport()) return;
-      const nextRect = modal.getBoundingClientRect();
-      setPosition(centerModalInWorkspace(
-        nextRect.width,
-        nextRect.height,
-        initialStackIndexRef.current,
-      ));
+      fitToWorkspace(true);
     };
 
     // Window content can grow after navigation inside the modal (for example,
@@ -127,7 +121,7 @@ export function Modal({
     // view). Re-clamp on every size change so its bottom remains reachable.
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? null
-      : new ResizeObserver(clampToViewport);
+      : new ResizeObserver(() => fitToWorkspace());
     resizeObserver?.observe(modal);
 
     window.addEventListener("resize", handleResize);
@@ -137,16 +131,22 @@ export function Modal({
       window.removeEventListener("resize", handleResize);
       window.removeEventListener(SIDEBAR_LAYOUT_CHANGE_EVENT, handleSidebarLayoutChange);
     };
-  }, [viewportBounded]);
+  }, [minimized, viewportBounded]);
 
   useEffect(() => {
     if (fullscreen || viewportBounded || !isDraggableModalViewport()) return;
     const modal = modalRef.current;
     if (!modal) return;
     const rect = modal.getBoundingClientRect();
-    setPosition((current) => current
-      ? clampModalPosition(current, rect.width, rect.height)
-      : current);
+    setPosition((current) => clampModalPosition(
+      current ?? centerModalInWorkspace(
+        rect.width,
+        rect.height,
+        initialStackIndexRef.current,
+      ),
+      rect.width,
+      rect.height,
+    ));
   }, [fullscreen, viewportBounded]);
 
   const focusWindow = () => {
@@ -308,7 +308,9 @@ function minimizedDockPosition(dockIndex: number): CSSProperties {
 }
 
 function isDraggableModalViewport(): boolean {
-  return window.innerWidth > DESKTOP_MODAL_BREAKPOINT;
+  const workspaceWidth = window.innerWidth - desktopWorkspaceLeft();
+  return window.innerWidth > DESKTOP_MODAL_BREAKPOINT
+    && workspaceWidth > DESKTOP_MODAL_BREAKPOINT;
 }
 
 function centerModalInWorkspace(width: number, height: number, stackIndex = 0): ModalPosition {

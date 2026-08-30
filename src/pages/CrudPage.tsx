@@ -1732,12 +1732,17 @@ export function EntityModal({
     <Modal
       title={`${entity ? "Редагувати" : "Додати"} ${config.singular}`}
       onClose={onClose}
+      className={config.collection === "findings" ? "finding-editor-modal" : ""}
       mode="window"
       stackIndex={stackIndex}
       dockIndex={dockIndex}
       onFocus={onFocus}
     >
-      <form onSubmit={submit} aria-busy={savePending}>
+      <form
+        className={config.collection === "findings" ? "finding-editor-form" : undefined}
+        onSubmit={submit}
+        aria-busy={savePending}
+      >
         <div className="form-grid">
           {config.fields.map((field) => (
             <FormField
@@ -3734,7 +3739,7 @@ function ParticipantsEditor({
             return (
               <div className="participant-row" key={participant.id}>
                 <span className="participant-number">{index + 1}</span>
-                <label>
+                <label className="participant-role">
                   <span>Роль</span>
                   <select
                     value={participant.role}
@@ -3765,7 +3770,7 @@ function ParticipantsEditor({
                     </small>
                   ) : null}
                 </label>
-                <label>
+                <label className="participant-name">
                   <span>ПІБ або ім’я</span>
                   <input
                     value={participant.name}

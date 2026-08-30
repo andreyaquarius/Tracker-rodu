@@ -995,14 +995,22 @@ tbody tr:hover { background: #fbfaf5; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 100; min-width: 0; padding: 30px; display: grid; place-items: center; overflow: hidden; background: rgba(10,28,24,.58); backdrop-filter: blur(4px); }
 .modal-backdrop-windowed { pointer-events: none; background: transparent; backdrop-filter: none; }
-.modal { min-width: 0; width: min(820px, 100%); max-width: 100%; max-height: calc(100dvh - 60px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; background: var(--paper); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.26); pointer-events: auto; }
+.modal { min-width: 0; width: min(820px, 100%); max-width: 100%; max-height: calc(100dvh - 60px); overflow-x: hidden; overflow-x: clip; overflow-y: auto; overscroll-behavior: contain; container-name: app-modal; container-type: inline-size; background: var(--paper); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.26); pointer-events: auto; }
 .modal-draggable { position: fixed; margin: 0; }
-.modal-header { position: sticky; top: 0; z-index: 2; min-width: 0; padding: 20px 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; background: var(--paper); border-bottom: 1px solid var(--line); cursor: move; touch-action: none; user-select: none; }
+.modal-header { position: sticky; top: 0; z-index: 2; min-width: 0; padding: 20px 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; background: var(--paper); border-bottom: 1px solid var(--line); cursor: default; touch-action: auto; user-select: none; }
+.modal-draggable > .modal-header { cursor: move; touch-action: none; }
 .modal-header .icon-button { cursor: pointer; }
 .modal-header h2 { min-width: 0; margin: 0; font-size: 23px; line-height: 1.22; overflow-wrap: anywhere; }
 .modal-window-controls { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-.modal form { padding: 24px; }
+.modal form { min-width: 0; max-width: 100%; padding: 24px; }
 .modal > :not(.modal-header) { min-width: 0; max-width: 100%; }
+.modal .form-grid,
+.modal .form-grid > *,
+.modal fieldset,
+.modal label { min-width: 0; max-width: 100%; }
+.modal input,
+.modal select,
+.modal textarea { min-width: 0; max-width: 100%; }
 .modal-minimized-card {
   position: fixed;
   min-height: 48px;
@@ -5030,9 +5038,17 @@ tbody tr:hover { background: #fbfaf5; }
 .participants-heading p { margin: 4px 0 0; color: #445650; font-size: 11px; }
 .participant-list { display: grid; gap: 10px; }
 .participant-row {
-  display: grid; grid-template-columns: 30px minmax(130px, .7fr) minmax(180px, 1fr) minmax(210px, 1.2fr) minmax(210px, 1.2fr) minmax(210px, 1.2fr) 36px;
-  align-items: end; gap: 9px; padding: 12px; background: white; border: 1px solid #e2e3dd; border-radius: 10px;
+  min-width: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) 36px;
+  align-items: start; gap: 9px; padding: 12px; background: white; border: 1px solid #e2e3dd; border-radius: 10px;
 }
+.participant-row > label { min-width: 0; }
+.participant-number { grid-column: 1; grid-row: 1; }
+.participant-role { grid-column: 2; grid-row: 1; }
+.participant-name { grid-column: 3; grid-row: 1; }
+.participant-person-link,
+.participant-context-target,
+.participant-notes { grid-column: 2 / 4; }
+.participant-remove { grid-column: 4; grid-row: 1; }
 .participant-person-link small,
 .participant-context-target small,
 .participant-role-warning { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.35; }
@@ -5828,7 +5844,7 @@ tbody tr:hover { background: #fbfaf5; }
 .genehelp-result dt { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
 .genehelp-result dd { margin: 0; font-size: 12px; }
 .genehelp-links { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.ai-review-modal { min-width: min(720px, 78vw); }
+.ai-review-modal { min-width: 0; width: 100%; }
 .ai-data-list, .ai-review-block ul { margin: 10px 0 0; padding-left: 22px; }
 .ai-data-list li, .ai-review-block li { margin: 5px 0; line-height: 1.5; }
 .ai-review-summary {
@@ -9063,7 +9079,82 @@ tbody tr:hover { background: #fbfaf5; }
   .modal-backdrop.modal-backdrop-viewport { padding: 30px; }
   .modal {
     width: min(820px, 100%);
+    max-width: min(100%, calc(100vw - var(--app-sidebar-width, 340px) - 36px));
   }
+  .modal-backdrop-viewport .modal { max-width: min(100%, calc(100vw - 60px)); }
+}
+
+.finding-editor-modal {
+  width: min(1120px, 100%);
+  container-name: finding-editor;
+  container-type: inline-size;
+}
+.finding-editor-form,
+.finding-editor-form .form-grid,
+.finding-editor-form .form-grid > * { min-width: 0; max-width: 100%; }
+
+@container app-modal (max-width: 700px) {
+  .form-grid,
+  .details-grid,
+  .range-grid { grid-template-columns: minmax(0, 1fr); }
+  .field-wide { grid-column: auto; }
+  .modal-actions,
+  .details-actions { flex-wrap: wrap; }
+  .relation-chooser-tools,
+  .scan-picker-heading,
+  .participants-heading { align-items: stretch; flex-direction: column; }
+  .relation-chooser-tools .text-button,
+  .scan-picker-actions,
+  .scan-picker-actions .button,
+  .participants-heading .button { width: 100%; max-width: 100%; }
+  .team-invite-form,
+  .ai-review-summary,
+  .inline-custom-field-panel { grid-template-columns: minmax(0, 1fr); }
+  .team-row,
+  .ai-suggested-task { align-items: stretch; flex-direction: column; }
+  .team-row-actions { width: 100%; flex-wrap: wrap; }
+  .team-row-actions select { min-width: 0; flex: 1 1 180px; }
+  .ai-review-history-list > button { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}
+
+@container finding-editor (max-width: 800px) {
+  .finding-editor-form .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .finding-editor-form .field-wide { grid-column: auto; }
+  .finding-editor-form .relation-chooser-tools,
+  .finding-editor-form .scan-picker-heading,
+  .finding-editor-form .participants-heading { align-items: stretch; flex-direction: column; }
+  .finding-editor-form .relation-chooser-tools .text-button,
+  .finding-editor-form .scan-picker-actions,
+  .finding-editor-form .scan-picker-actions .button,
+  .finding-editor-form .participants-heading .button { width: 100%; max-width: 100%; }
+  .finding-editor-form .participant-row { grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) 36px; }
+  .finding-editor-form .participant-row > label,
+  .finding-editor-form .participant-person-link,
+  .finding-editor-form .participant-context-target,
+  .finding-editor-form .participant-notes { min-width: 0; grid-column: 2 / 4; grid-row: auto; }
+  .finding-editor-form .participant-role { grid-column: 2; grid-row: 1; }
+  .finding-editor-form .participant-name { grid-column: 3; grid-row: 1; }
+  .finding-editor-form .participant-number { grid-column: 1; grid-row: 1; }
+  .finding-editor-form .participant-remove { grid-column: 4; grid-row: 1; }
+  .finding-editor-form .scan-row,
+  .finding-editor-form .scan-document-bundle { grid-template-columns: 38px minmax(0, 1fr); }
+  .finding-editor-form .scan-actions { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; }
+  .finding-editor-form .finding-historical-place-heading,
+  .finding-editor-form .finding-place-actions,
+  .finding-editor-form .finding-place-load-error,
+  .finding-editor-form .finding-ai-panel-header,
+  .finding-editor-form .finding-ai-actions { align-items: stretch; flex-direction: column; }
+  .finding-editor-form .finding-place-load-error .button,
+  .finding-editor-form .finding-ai-panel-header .button,
+  .finding-editor-form .finding-ai-actions .button { width: 100%; max-width: 100%; }
+  .finding-editor-form .finding-place-search-row,
+  .finding-editor-form .finding-place-candidates > button,
+  .finding-editor-form .finding-ai-summary,
+  .finding-editor-form .inline-custom-field-panel,
+  .finding-editor-form .geo-search-row { grid-template-columns: minmax(0, 1fr); }
+  .finding-editor-form .finding-place-candidates > button small { grid-column: auto; }
+  .finding-editor-form .finding-place-actions span { text-align: left; }
+  .finding-editor-form .modal-actions { flex-wrap: wrap; }
 }
 
 .modal-backdrop-viewport .modal-header { cursor: default; touch-action: auto; }
@@ -9134,6 +9225,20 @@ tbody tr:hover { background: #fbfaf5; }
   .login-copy h1 { font-size: clamp(2.5rem, 12vw, 4rem); }
   .login-header { align-items: flex-start; margin-bottom: 50px; }
   .login-card { margin: 30px auto; }
+  .modal-backdrop { padding: 0; place-items: end center; }
+  .modal { width: 100%; max-height: 94dvh; border-radius: 16px 16px 0 0; }
+  .modal-draggable { position: relative; left: auto !important; top: auto !important; }
+  .modal-header { padding: 18px 20px; cursor: default; touch-action: auto; }
+  .modal-header h2 { font-size: 21px; }
+  .modal form { padding: 20px; }
+  .modal-actions {
+    bottom: -20px;
+    margin: 20px -20px -20px;
+    padding: 14px 20px;
+    flex-wrap: wrap;
+  }
+  .finding-editor-form .button { max-width: 100%; }
+  .finding-editor-form .modal-actions .button { flex: 1 1 140px; }
   .participant-row { grid-template-columns: 30px 1fr 1fr 36px; }
   .participant-person-link { grid-column: 2 / 4; }
   .participant-context-target { grid-column: 2 / 4; }
@@ -9241,7 +9346,7 @@ tbody tr:hover { background: #fbfaf5; }
   .map-marker-list { max-height: 420px; }
   .participants-heading { align-items: stretch; flex-direction: column; }
   .participant-row { grid-template-columns: 28px 1fr 36px; }
-  .participant-row > label { grid-column: 2; }
+  .participant-row > label { grid-column: 2; grid-row: auto; }
   .participant-person-link { grid-column: 2; }
   .participant-context-target { grid-column: 2; }
   .participant-notes { grid-column: 2; }
