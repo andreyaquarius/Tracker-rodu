@@ -13,6 +13,15 @@ on:
       # source tree. Changes there must redeploy the function as well.
       - "src/types/**"
       - "src/utils/**"
+      # These source-contract suites gate the context rollout below. Changes
+      # to the tests themselves must rerun this workflow on Linux as well.
+      - "test/churchRole*.test.ts"
+      - "test/context*.test.ts"
+      - "test/findingAiSocialRoles.test.ts"
+      - "test/findingLegacyRelationIsolation.test.ts"
+      - "test/personContext*.test.ts"
+      - "test/personSocialCircleGraphPresentation.test.ts"
+      - "test/researchGraph*.test.ts"
       - ".github/workflows/deploy-supabase-functions.yml"
       - ".github/workflows/telegram-inbox.yml"
   workflow_dispatch:

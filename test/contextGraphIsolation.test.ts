@@ -5,6 +5,7 @@ import {
   readdirSync,
   statSync,
 } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -24,8 +25,8 @@ test("context graph owns a dedicated feature namespace", () => {
 test("context graph and relation service do not depend on the family tree renderer or repository", () => {
   const contextFiles = [
     ...sourceFiles(contextFeatureRoot),
-    `${srcRoot}services\\contextRelationsService.ts`,
-    `${srcRoot}types\\contextGraph.ts`,
+    join(srcRoot, "services", "contextRelationsService.ts"),
+    join(srcRoot, "types", "contextGraph.ts"),
   ].filter(existsSync);
 
   const forbiddenFamilyImport = /(?:from\s+|import\s*\()["'][^"']*(?:features\/family-tree-view|components\/familyTree|familyTree(?:GraphService|Repository|MutationService))[^"']*["']/u;
@@ -58,7 +59,7 @@ function sourceFiles(root: string): string[] {
   if (!existsSync(root)) return [];
   const result: string[] = [];
   for (const entry of readdirSync(root)) {
-    const absolute = `${root}${root.endsWith("\\") ? "" : "\\"}${entry}`;
+    const absolute = join(root, entry);
     if (statSync(absolute).isDirectory()) {
       result.push(...sourceFiles(absolute));
     } else if (/\.(?:ts|tsx)$/u.test(entry)) {
