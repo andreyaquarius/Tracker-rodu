@@ -344,9 +344,10 @@ function normalizePlaceType(value: unknown): string {
   if (INTERNAL_PLACE_TYPES.has(text)) return text;
   const aliases: Record<string, string> = {
     m: "city", "м": "city", "місто": "city",
-    t: "town", "т": "town", "смт": "town", "містечко": "town",
+    t: "urban_settlement", "т": "urban_settlement", "смт": "urban_settlement",
+    "селище": "urban_settlement", "містечко": "town",
     c: "village", "с": "village", "село": "village",
-    x: "settlement", "х": "settlement", "селище": "settlement",
+    x: "settlement", "х": "settlement",
     locality: "settlement", place: "settlement",
     хутір: "hamlet", присілок: "small_settlement",
     municipality: "community", administrative: "region",

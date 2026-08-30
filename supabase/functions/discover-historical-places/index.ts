@@ -322,7 +322,7 @@ async function cachedProviderRequest(
 }
 
 function mapKatottgType(category: string): string {
-  return ({ M: "city", T: "town", C: "village", X: "small_settlement" } as Record<string, string>)[category] ?? "settlement";
+  return ({ M: "city", T: "urban_settlement", C: "village", X: "small_settlement" } as Record<string, string>)[category] ?? "settlement";
 }
 
 function katottgCandidates(data: unknown): DiscoveryCandidate[] {

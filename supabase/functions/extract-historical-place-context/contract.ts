@@ -44,6 +44,7 @@ const relationTypes = [
 
 const placeTypes = [
   "settlement",
+  "urban_settlement",
   "hamlet",
   "small_settlement",
   "village",

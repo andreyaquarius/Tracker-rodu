@@ -19,6 +19,7 @@ test("server discovery uses hardened editor authorization and keeps KATOTTG auth
   assert.match(discoveryEdgeSource, /const preferAdditionKatottg = !baseHasKatottg && additionHasKatottg/u);
   assert.match(discoveryEdgeSource, /id: preferAdditionKatottg \? addition\.id : base\.id/u);
   assert.match(discoveryEdgeSource, /placeType: preferAdditionKatottg[\s\S]*?addition\.placeType/u);
+  assert.match(discoveryEdgeSource, /T: "urban_settlement"/u);
 });
 
 test("runs discovery only through the authenticated server contract", async () => {
@@ -111,6 +112,20 @@ test("normalizes a merged catalogue candidate and preserves safe source metadata
   assert.ok(candidate.sources.some((source) => source.provider === "openstreetmap"));
   assert.ok(candidate.sources.some((source) => source.provider === "wikidata"));
   assert.equal(candidate.sources[0]?.datasetVersion, "2026-08");
+});
+
+test("normalizes KATOTTG urban settlements to the seeded controlled type", () => {
+  const candidates = normalizeHistoricalPlaceDiscoveryResponse([
+    { canonicalName: "Приклад Т", category: "T" },
+    { canonicalName: "Приклад смт", placeType: "смт" },
+    { canonicalName: "Приклад селища", placeType: "селище" },
+    { canonicalName: "Приклад містечка", placeType: "містечко" },
+  ]);
+
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.placeType),
+    ["urban_settlement", "urban_settlement", "urban_settlement", "town"],
+  );
 });
 
 test("confirmed draft cannot overwrite source wording or a researcher description", () => {
