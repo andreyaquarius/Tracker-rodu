@@ -1,38 +1,45 @@
 import { useEffect, useState } from "react";
 import {
   authorizeGoogleDrive,
-  hasGoogleDriveConnectionHint,
-  isGoogleDriveAuthorized,
+  getGoogleDriveConnectionState,
   prepareGoogleDriveAuthorization,
+  subscribeGoogleDriveConnectionState,
 } from "../services/googleDriveStorage";
 
 export function GoogleDriveConnectionButton() {
   const [ready, setReady] = useState(false);
-  const [connected, setConnected] = useState(isGoogleDriveAuthorized());
-  const [knownConnection, setKnownConnection] = useState(hasGoogleDriveConnectionHint());
+  const [connectionState, setConnectionState] = useState(() => getGoogleDriveConnectionState());
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
+    const unsubscribe = subscribeGoogleDriveConnectionState((state) => {
+      if (cancelled) return;
+      setConnectionState(state);
+      if (state.authorized) {
+        setReady(true);
+        setError("");
+      }
+    });
+
     prepareGoogleDriveAuthorization()
       .then(() => {
         if (!cancelled) setReady(true);
       })
-      .catch(() => {
-        if (!cancelled) setReady(false);
+      .catch((loadError) => {
+        if (cancelled) return;
+        setReady(false);
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Не вдалося підготувати підключення Google Drive.",
+        );
       });
 
-    const refreshState = () => {
-      setConnected(isGoogleDriveAuthorized());
-      setKnownConnection(hasGoogleDriveConnectionHint());
-    };
-    const intervalId = window.setInterval(refreshState, 30_000);
-    window.addEventListener("focus", refreshState);
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
-      window.removeEventListener("focus", refreshState);
+      unsubscribe();
     };
   }, []);
 
@@ -41,27 +48,29 @@ export function GoogleDriveConnectionButton() {
     setError("");
     try {
       await authorizeGoogleDrive();
-      setConnected(true);
-      setKnownConnection(true);
     } catch (connectError) {
-      setConnected(false);
-      setError(connectError instanceof Error ? connectError.message : "Не вдалося підключити Google Drive.");
+      const actualState = getGoogleDriveConnectionState();
+      setConnectionState(actualState);
+      if (!actualState.authorized) {
+        setError(connectError instanceof Error ? connectError.message : "Не вдалося підключити Google Drive.");
+      }
     } finally {
+      setConnectionState(getGoogleDriveConnectionState());
       setConnecting(false);
     }
   };
 
-  const label = connected
+  const label = connectionState.authorized
     ? "Google Drive підключено"
-    : knownConnection
-      ? "Оновити Google Drive"
+    : connectionState.knownConnection
+      ? "Відновити Google Drive"
       : "Підключити Google Drive";
 
   return (
     <div className="drive-connection-action">
       <button
         type="button"
-        className={`drive-connection-button ${connected ? "connected" : ""}`}
+        className={`drive-connection-button ${connectionState.authorized ? "connected" : ""}`}
         disabled={!ready || connecting}
         onClick={() => void connect()}
         title={error || label}

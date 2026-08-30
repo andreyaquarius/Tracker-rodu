@@ -19,6 +19,7 @@ on:
       - "test/context*.test.ts"
       - "test/findingAiSocialRoles.test.ts"
       - "test/findingLegacyRelationIsolation.test.ts"
+      - "test/googleDrive*.test.ts"
       - "test/personContext*.test.ts"
       - "test/personSocialCircleGraphPresentation.test.ts"
       - "test/researchGraph*.test.ts"
@@ -74,8 +75,7 @@ jobs:
             "test/documentSource*.test.ts" \
             "test/externalPdf*.test.ts" \
             "test/findingDocument*.test.ts" \
-            "test/googleDriveDocumentSourceAdapter.test.ts" \
-            "test/googleDrivePdfGatewayMigration.test.ts" \
+            "test/googleDrive*.test.ts" \
             "test/pdf*.test.ts" \
             "test/scanStorageExternalPreviewStrategy.test.ts" \
             "test/integration/externalPdfViewerCoreIntegration.test.ts"

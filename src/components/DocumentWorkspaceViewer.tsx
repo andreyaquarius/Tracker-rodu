@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import type { DocumentFragmentSelection, ScanAttachment } from "../types";
 import type { StoredDocumentSource } from "../services/document-sources/contracts.ts";
+import type { PublicDocumentSourceError } from "../services/document-sources/errors.ts";
 import {
   downloadScan,
   getExternalScanPreviewStrategy,
@@ -31,6 +32,10 @@ import {
   createDocumentSourceViewerSession,
   exportDocumentSourcePdfPages,
 } from "../services/documentSourceViewerAccess.ts";
+import {
+  classifyDocumentSourceViewerError,
+  shouldOfferGoogleDriveReconnect,
+} from "../services/documentSourceViewerError.ts";
 import {
   trackProductAnalyticsAction,
   trackProductAnalyticsOperation,
@@ -402,6 +407,7 @@ export function DocumentWorkspaceViewer({
   const [pan, setPan] = useState<ImagePan>({ x: 0, y: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [documentSourceError, setDocumentSourceError] = useState<PublicDocumentSourceError | null>(null);
   const [externalSourceReason, setExternalSourceReason] = useState<ExternalSourceReason | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
@@ -724,6 +730,7 @@ export function DocumentWorkspaceViewer({
     setPdfRenderZoom(1);
     setPan({ x: 0, y: 0 });
     setError("");
+    setDocumentSourceError(null);
     setExternalSourceReason(null);
     setThumbnailUrls({});
     setMarkedExportPages(new Set());
@@ -815,6 +822,7 @@ export function DocumentWorkspaceViewer({
     const abortController = new AbortController();
 
     setError("");
+    setDocumentSourceError(null);
     setSelectionMode(false);
     setCropRect(null);
     const restoredPage = viewerV2Enabled && currentScan?.id === viewer?.scan.id
@@ -873,21 +881,23 @@ export function DocumentWorkspaceViewer({
       })
       .catch((loadError) => {
         if (!active) return;
+        const sourceError = classifyDocumentSourceViewerError(loadError, currentScan);
+        setDocumentSourceError(sourceError);
         if (currentScan.storage === "external-url") {
           setKind(null);
           setBlobUrl("");
           setExternalSourceReason(null);
           setError(
-            loadError instanceof Error
+            sourceError?.message ?? (loadError instanceof Error
               ? loadError.message
-              : "Не вдалося відкрити зовнішній документ у Переглядачі.",
+              : "Не вдалося відкрити зовнішній документ у Переглядачі."),
           );
           return;
         }
         setError(
-          loadError instanceof Error
+          sourceError?.message ?? (loadError instanceof Error
             ? loadError.message
-            : "Не вдалося відкрити попередній перегляд.",
+            : "Не вдалося відкрити попередній перегляд."),
         );
       })
       .finally(() => {
@@ -1461,6 +1471,7 @@ export function DocumentWorkspaceViewer({
 
   const run = async (action: () => Promise<void>) => {
     setError("");
+    setDocumentSourceError(null);
     try {
       await action();
     } catch (actionError) {
@@ -1510,17 +1521,25 @@ export function DocumentWorkspaceViewer({
   };
 
   const reconnectDriveAndRetry = async () => {
+    const recoveryError = documentSourceError;
     setError("");
+    setDocumentSourceError(null);
     setExternalSourceReason(null);
     disposePreviewForScan(activeScan.id);
-    await reconnectGoogleDrive();
-    setBlobUrl("");
-    setKind(null);
-    setPreviewReloadKey((value) => value + 1);
+    try {
+      await reconnectGoogleDrive();
+      setBlobUrl("");
+      setKind(null);
+      setPreviewReloadKey((value) => value + 1);
+    } catch (reconnectError) {
+      setDocumentSourceError(recoveryError);
+      throw reconnectError;
+    }
   };
 
   const retryCurrentPreview = () => {
     setError("");
+    setDocumentSourceError(null);
     setExternalSourceReason(null);
     setPdfPageReady(false);
     mainPdfRenderRef.current?.cancel();
@@ -1596,6 +1615,7 @@ export function DocumentWorkspaceViewer({
       return;
     }
     setError("");
+    setDocumentSourceError(null);
     setSelectionMode(false);
     setCropRect(null);
     if (isInteractivePdf) {
@@ -2734,7 +2754,7 @@ export function DocumentWorkspaceViewer({
           <div className="workspace-viewer-state error">
             <strong>{error}</strong>
             <div className="workspace-viewer-state-actions">
-              {activeScan.storage === "google-drive" ? (
+              {shouldOfferGoogleDriveReconnect(documentSourceError, activeScan) ? (
                 <button
                   type="button"
                   className="button button-primary"

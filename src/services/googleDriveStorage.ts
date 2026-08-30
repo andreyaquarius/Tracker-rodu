@@ -128,10 +128,22 @@ let googleScriptPromise: Promise<void> | null = null;
 let googlePickerScriptPromise: Promise<void> | null = null;
 let googlePickerApiPromise: Promise<void> | null = null;
 let tokenRequestPromise: Promise<string> | null = null;
+let tokenRequestGeneration = 0;
 let activeToken: StoredToken | null = null;
+let tokenExpiryTimer: number | null = null;
 const folderPromises = new Map<string, Promise<string>>();
 const deduplicatedUploadPromises = new Map<string, Promise<GoogleDriveUploadedFile>>();
 const GOOGLE_DRIVE_CONNECTION_KEY = "tracker-rodu-google-drive-connected";
+const GOOGLE_DRIVE_AUTHORIZATION_REQUIRED_MESSAGE =
+  "Потрібно підключити Google Drive або оновити дозвіл доступу.";
+const googleDriveConnectionListeners = new Set<
+  (state: GoogleDriveConnectionState) => void
+>();
+
+export interface GoogleDriveConnectionState {
+  authorized: boolean;
+  knownConnection: boolean;
+}
 
 export interface GoogleDriveProjectTarget {
   projectId: string;
@@ -249,7 +261,7 @@ export async function pickGoogleDriveFiles(
   }
 
   const [accessToken] = await Promise.all([
-    getGoogleDriveAccessToken(false, "consent"),
+    getGoogleDriveAccessToken(false, googleDriveInteractivePrompt()),
     loadGooglePickerApi(),
   ]);
   const pickerApi = (window as GoogleWindow).google?.picker;
@@ -354,7 +366,7 @@ export async function pickGoogleDriveFolder(
   }
 
   const [accessToken] = await Promise.all([
-    getGoogleDriveAccessToken(false, "consent"),
+    getGoogleDriveAccessToken(false, googleDriveInteractivePrompt()),
     loadGooglePickerApi(),
   ]);
   const pickerApi = (window as GoogleWindow).google?.picker;
@@ -441,23 +453,91 @@ export async function pickGoogleDriveFolder(
 }
 
 export function isGoogleDriveAuthorized(): boolean {
-  return Boolean(activeToken && activeToken.expiresAt > Date.now() + 60_000);
+  return getGoogleDriveConnectionState().authorized;
 }
 
 export function hasGoogleDriveConnectionHint(): boolean {
   return safeStorageGet(GOOGLE_DRIVE_CONNECTION_KEY) === "1";
 }
 
+export function getGoogleDriveConnectionState(): GoogleDriveConnectionState {
+  invalidateExpiredGoogleDriveToken();
+  return currentGoogleDriveConnectionState();
+}
+
+export function subscribeGoogleDriveConnectionState(
+  listener: (state: GoogleDriveConnectionState) => void,
+): () => void {
+  googleDriveConnectionListeners.add(listener);
+  return () => {
+    googleDriveConnectionListeners.delete(listener);
+  };
+}
+
 export async function authorizeGoogleDrive(): Promise<void> {
-  await getGoogleDriveAccessToken(false, "consent");
+  await getGoogleDriveAccessToken(false, googleDriveInteractivePrompt());
 }
 
 export async function reconnectGoogleDrive(): Promise<void> {
-  activeToken = null;
-  tokenRequestPromise = null;
+  invalidateGoogleDriveTokenRequest();
+  setActiveGoogleDriveToken(null);
   folderPromises.clear();
   deduplicatedUploadPromises.clear();
   await getGoogleDriveAccessToken(true, "select_account");
+}
+
+function googleDriveInteractivePrompt(): GoogleDrivePrompt {
+  return hasGoogleDriveConnectionHint() ? "" : "consent";
+}
+
+function currentGoogleDriveConnectionState(): GoogleDriveConnectionState {
+  return {
+    authorized: Boolean(activeToken),
+    knownConnection: hasGoogleDriveConnectionHint(),
+  };
+}
+
+function publishGoogleDriveConnectionState(): void {
+  const state = currentGoogleDriveConnectionState();
+  for (const listener of googleDriveConnectionListeners) {
+    try {
+      listener(state);
+    } catch {
+      // One mounted consumer must not break OAuth completion for the others.
+    }
+  }
+}
+
+function setActiveGoogleDriveToken(token: StoredToken | null): void {
+  activeToken = token;
+  if (tokenExpiryTimer !== null && typeof window !== "undefined") {
+    window.clearTimeout(tokenExpiryTimer);
+  }
+  tokenExpiryTimer = null;
+  if (token && typeof window !== "undefined") {
+    const refreshBoundary = token.expiresAt - Date.now() - 60_000;
+    tokenExpiryTimer = window.setTimeout(() => {
+      tokenExpiryTimer = null;
+      invalidateExpiredGoogleDriveToken();
+    }, Math.max(0, refreshBoundary));
+  }
+  publishGoogleDriveConnectionState();
+}
+
+function invalidateExpiredGoogleDriveToken(): void {
+  if (!activeToken || activeToken.expiresAt > Date.now() + 60_000) return;
+  setActiveGoogleDriveToken(null);
+}
+
+function invalidateGoogleDriveTokenRequest(): void {
+  tokenRequestGeneration += 1;
+  tokenRequestPromise = null;
+}
+
+function googleDriveAuthorizationRequiredError(): Error {
+  const error = new Error(GOOGLE_DRIVE_AUTHORIZATION_REQUIRED_MESSAGE);
+  error.name = "GoogleDriveAuthorizationRequiredError";
+  return error;
 }
 
 export async function uploadFileToGoogleDrive(
@@ -757,11 +837,11 @@ export function clearGoogleDriveSession(): void {
   if (activeToken) {
     (window as GoogleWindow).google?.accounts?.oauth2.revoke?.(activeToken.accessToken);
   }
-  activeToken = null;
-  tokenRequestPromise = null;
+  invalidateGoogleDriveTokenRequest();
+  safeStorageRemove(GOOGLE_DRIVE_CONNECTION_KEY);
+  setActiveGoogleDriveToken(null);
   folderPromises.clear();
   deduplicatedUploadPromises.clear();
-  safeStorageRemove(GOOGLE_DRIVE_CONNECTION_KEY);
 }
 
 async function ensureProjectFolder(target: GoogleDriveProjectTarget): Promise<string> {
@@ -974,22 +1054,16 @@ function pickerNumberField(
 
 async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
   throwIfGoogleDriveAborted(init.signal);
-  let token = await getGoogleDriveAccessToken();
+  const token = await getGoogleDriveAccessToken();
   throwIfGoogleDriveAborted(init.signal);
-  let response = await retryGoogleDriveRequest(
+  const response = await retryGoogleDriveRequest(
     () => fetchWithToken(url, init, token),
     4,
     init.signal,
   );
   if (response.status === 401) {
-    activeToken = null;
-    token = await getGoogleDriveAccessToken(true);
-    throwIfGoogleDriveAborted(init.signal);
-    response = await retryGoogleDriveRequest(
-      () => fetchWithToken(url, init, token),
-      4,
-      init.signal,
-    );
+    setActiveGoogleDriveToken(null);
+    throw googleDriveAuthorizationRequiredError();
   }
   if (!response.ok) {
     const message = await googleApiError(response);
@@ -1010,27 +1084,21 @@ async function driveUploadFetch(
   maxAttempts = 4,
 ): Promise<Response> {
   throwIfGoogleDriveAborted(init.signal);
-  let token = await getGoogleDriveAccessToken();
+  const token = await getGoogleDriveAccessToken();
   throwIfGoogleDriveAborted(init.signal);
   const request = () => (
     onProgress && typeof XMLHttpRequest !== "undefined" && init.body instanceof Blob
       ? xhrFetchWithToken(url, init, token, onProgress)
       : fetchWithToken(url, init, token)
   );
-  let response = await retryGoogleDriveRequest(
+  const response = await retryGoogleDriveRequest(
     request,
     maxAttempts,
     init.signal,
   );
   if (response.status === 401) {
-    activeToken = null;
-    token = await getGoogleDriveAccessToken(true);
-    throwIfGoogleDriveAborted(init.signal);
-    response = await retryGoogleDriveRequest(
-      request,
-      maxAttempts,
-      init.signal,
-    );
+    setActiveGoogleDriveToken(null);
+    throw googleDriveAuthorizationRequiredError();
   }
   if (!response.ok) {
     const message = await googleApiError(response);
@@ -1228,21 +1296,28 @@ function parseXhrHeaders(rawHeaders: string): Headers {
   return headers;
 }
 
-async function getGoogleDriveAccessToken(forceRefresh = false, prompt: GoogleDrivePrompt = "consent"): Promise<string> {
-  if (!forceRefresh) {
-    if (activeToken && activeToken.expiresAt > Date.now() + 60_000) {
-      return activeToken.accessToken;
-    }
-  }
+async function getGoogleDriveAccessToken(
+  forceRefresh = false,
+  prompt?: GoogleDrivePrompt,
+): Promise<string> {
+  invalidateExpiredGoogleDriveToken();
+  if (!forceRefresh && activeToken) return activeToken.accessToken;
+  if (prompt === undefined) throw googleDriveAuthorizationRequiredError();
   if (tokenRequestPromise) return tokenRequestPromise;
-  tokenRequestPromise = requestGoogleDriveAccessToken(prompt)
-    .finally(() => {
-      tokenRequestPromise = null;
-    });
-  return tokenRequestPromise;
+
+  const generation = tokenRequestGeneration;
+  const request = requestGoogleDriveAccessToken(prompt, generation);
+  tokenRequestPromise = request;
+  void request.finally(() => {
+    if (tokenRequestPromise === request) tokenRequestPromise = null;
+  }).catch(() => undefined);
+  return request;
 }
 
-async function requestGoogleDriveAccessToken(prompt: GoogleDrivePrompt): Promise<string> {
+async function requestGoogleDriveAccessToken(
+  prompt: GoogleDrivePrompt,
+  generation: number,
+): Promise<string> {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
   if (!clientId) {
     throw new Error("У налаштуваннях застосунку не вказано VITE_GOOGLE_CLIENT_ID.");
@@ -1254,45 +1329,77 @@ async function requestGoogleDriveAccessToken(prompt: GoogleDrivePrompt): Promise
   if (!google?.accounts?.oauth2) {
     throw new Error("Не вдалося завантажити сервіс авторизації Google.");
   }
+  if (generation !== tokenRequestGeneration) {
+    throw googleDriveAuthorizationRequiredError();
+  }
   const oauth2 = google.accounts.oauth2;
 
   return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    let popupClosedTimer: number | null = null;
+    const clearTimers = () => {
+      window.clearTimeout(timeoutId);
+      if (popupClosedTimer !== null) window.clearTimeout(popupClosedTimer);
+    };
+    const finishError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      reject(error);
+    };
     const timeoutId = window.setTimeout(() => {
-      reject(new Error("Підключення хмарного сховища не було завершено."));
+      finishError(new Error("Підключення хмарного сховища не було завершено."));
     }, 90_000);
     const client = oauth2.initTokenClient({
       client_id: clientId,
       scope: GOOGLE_DRIVE_SCOPE,
       include_granted_scopes: false,
       callback: (response) => {
-        window.clearTimeout(timeoutId);
+        if (settled) return;
+        if (generation !== tokenRequestGeneration) {
+          finishError(googleDriveAuthorizationRequiredError());
+          return;
+        }
         if (response.error || !response.access_token) {
-          reject(new Error(
+          finishError(new Error(
             response.error_description
               || "Хмарне сховище не надало доступ до файлів застосунку.",
           ));
           return;
         }
-        activeToken = {
+        settled = true;
+        clearTimers();
+        const token = {
           accessToken: response.access_token,
           expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000,
         };
         safeStorageSet(GOOGLE_DRIVE_CONNECTION_KEY, "1");
-        resolve(activeToken.accessToken);
+        setActiveGoogleDriveToken(token);
+        resolve(token.accessToken);
       },
       error_callback: (error) => {
-        window.clearTimeout(timeoutId);
+        if (settled) return;
+        if (generation !== tokenRequestGeneration) {
+          finishError(googleDriveAuthorizationRequiredError());
+          return;
+        }
         const message = error.type === "popup_failed_to_open"
           ? "Браузер заблокував вікно підключення сховища. Дозвольте спливні вікна для цього сайту й спробуйте ще раз."
           : error.type === "popup_closed"
             ? "Вікно підключення сховища було закрито до завершення."
             : "Не вдалося відкрити вікно підключення сховища.";
-        reject(new Error(message));
+        if (error.type === "popup_closed") {
+          // GIS can report popup_closed just before delivering the successful
+          // token callback. Give that callback a brief opportunity to win.
+          popupClosedTimer ??= window.setTimeout(() => {
+            finishError(new Error(message));
+          }, 300);
+          return;
+        }
+        finishError(new Error(message));
       },
     });
-    client.requestAccessToken({
-      prompt: prompt || (!hasGoogleDriveConnectionHint() ? "consent" : ""),
-    });
+    client.requestAccessToken({ prompt });
   });
 }
 

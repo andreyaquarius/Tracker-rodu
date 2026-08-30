@@ -27,10 +27,11 @@ import {
 } from "../services/scanStorage";
 import {
   authorizeGoogleDrive,
-  isGoogleDriveAuthorized,
+  getGoogleDriveConnectionState,
   prepareGoogleDriveAuthorization,
   prepareGoogleDrivePicker,
   pickGoogleDriveFiles,
+  subscribeGoogleDriveConnectionState,
 } from "../services/googleDriveStorage";
 
 type UploadProgressState = {
@@ -76,7 +77,10 @@ export function ScanAttachmentsEditor({
   const [uploading, setUploading] = useState(false);
   const [driveReady, setDriveReady] = useState(false);
   const [pickerReady, setPickerReady] = useState(false);
-  const [driveConnected, setDriveConnected] = useState(isGoogleDriveAuthorized());
+  const [driveConnectionState, setDriveConnectionState] = useState(
+    () => getGoogleDriveConnectionState(),
+  );
+  const driveConnected = driveConnectionState.authorized;
   const [error, setError] = useState("");
   const [driveAttachOpen, setDriveAttachOpen] = useState(false);
   const [attachingDriveFile, setAttachingDriveFile] = useState(false);
@@ -88,6 +92,11 @@ export function ScanAttachmentsEditor({
 
   useEffect(() => {
     let active = true;
+    const unsubscribe = subscribeGoogleDriveConnectionState((state) => {
+      if (!active) return;
+      setDriveConnectionState(state);
+      if (state.authorized) setDriveReady(true);
+    });
     void prepareGoogleDriveAuthorization()
       .then(() => {
         if (active) setDriveReady(true);
@@ -102,6 +111,7 @@ export function ScanAttachmentsEditor({
       });
     return () => {
       active = false;
+      unsubscribe();
     };
   }, []);
 
@@ -123,14 +133,18 @@ export function ScanAttachmentsEditor({
     setError("");
     try {
       await authorizeGoogleDrive();
-      setDriveConnected(true);
     } catch (authorizationError) {
-      setDriveConnected(false);
-      setError(
-        authorizationError instanceof Error
-          ? authorizationError.message
-          : "Не вдалося підключити хмарне сховище.",
-      );
+      const actualState = getGoogleDriveConnectionState();
+      setDriveConnectionState(actualState);
+      if (!actualState.authorized) {
+        setError(
+          authorizationError instanceof Error
+            ? authorizationError.message
+            : "Не вдалося підключити хмарне сховище.",
+        );
+      }
+    } finally {
+      setDriveConnectionState(getGoogleDriveConnectionState());
     }
   };
 
@@ -139,8 +153,9 @@ export function ScanAttachmentsEditor({
       setError(uploadBlockedMessage);
       return;
     }
-    if (!isGoogleDriveAuthorized()) {
-      setDriveConnected(false);
+    const actualState = getGoogleDriveConnectionState();
+    setDriveConnectionState(actualState);
+    if (!actualState.authorized) {
       setError("Термін доступу до хмарного сховища завершився. Підключіть сховище повторно.");
       return;
     }
@@ -255,7 +270,6 @@ export function ScanAttachmentsEditor({
           : "Оберіть документи з Google Drive",
       });
       setPickerReady(true);
-      setDriveConnected(true);
       if (!selected.length) return;
 
       const existingDriveIds = new Set(
@@ -277,10 +291,12 @@ export function ScanAttachmentsEditor({
       const attached = await attachPickedGoogleDriveFiles(unique, policy);
       onChange([...scans, ...attached]);
     } catch (pickError) {
+      setDriveConnectionState(getGoogleDriveConnectionState());
       setError(pickError instanceof Error
         ? pickError.message
         : "Не вдалося вибрати файли з Google Drive.");
     } finally {
+      setDriveConnectionState(getGoogleDriveConnectionState());
       setAttachingDriveFile(false);
     }
   };
@@ -333,8 +349,9 @@ export function ScanAttachmentsEditor({
       setError("Дочекайтеся підготовки Google Drive і спробуйте ще раз.");
       return;
     }
-    if (!isGoogleDriveAuthorized()) {
-      setDriveConnected(false);
+    const actualState = getGoogleDriveConnectionState();
+    setDriveConnectionState(actualState);
+    if (!actualState.authorized) {
       setError("Спочатку підключіть Google Drive кнопкою над списком фотографій.");
       return;
     }
@@ -381,7 +398,9 @@ export function ScanAttachmentsEditor({
             {!driveReady
               ? "Підготовка сховища…"
               : !driveConnected
-                ? "Підключити сховище"
+                ? driveConnectionState.knownConnection
+                  ? "Відновити доступ до сховища"
+                  : "Підключити сховище"
                 : uploading
                   ? "Завантаження…"
                   : limitReached
