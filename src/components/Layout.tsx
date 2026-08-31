@@ -133,7 +133,10 @@ export function Layout(props: LayoutProps) {
             isCreatingWorkspace={props.isCreatingWorkspace}
             helpAction={(
               <>
-                <AnnouncementBell account={props.account} />
+                <AnnouncementBell
+                  key={props.account?.id ?? "anonymous"}
+                  account={props.account}
+                />
                 <GoogleDriveConnectionButton />
                 <HelpCenter
                   key={props.account?.id ?? "anonymous"}

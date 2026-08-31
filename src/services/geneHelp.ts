@@ -45,6 +45,18 @@ export interface GeneHelpAccountStatus {
   name: string;
 }
 
+export interface GeneHelpNotificationSyncSummary {
+  connected: boolean;
+  skipped: boolean;
+  throttled: boolean;
+  notificationPages: number;
+  notificationsScanned: number;
+  messageEvents: number;
+  statusPages: number;
+  statusesScanned: number;
+  statusEvents: number;
+}
+
 export async function getGeneHelpAccountStatus(): Promise<GeneHelpAccountStatus> {
   return invokeGeneHelp<GeneHelpAccountStatus>("account-status", {});
 }
@@ -63,6 +75,10 @@ export async function getGeneHelpRequestStatus(id: string): Promise<GeneHelpSimp
 
 export async function listGeneHelpRequests(): Promise<GeneHelpRequestListResponse> {
   return invokeGeneHelp<GeneHelpRequestListResponse>("list-requests", {});
+}
+
+export async function syncGeneHelpNotifications(): Promise<GeneHelpNotificationSyncSummary> {
+  return invokeGeneHelp<GeneHelpNotificationSyncSummary>("sync-notifications", {});
 }
 
 async function invokeGeneHelp<T = unknown>(

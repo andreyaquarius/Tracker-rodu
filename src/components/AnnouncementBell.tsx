@@ -7,12 +7,21 @@ import {
 } from "../services/announcementService";
 import type { AppAnnouncement } from "../types/announcements";
 import {
+  loadMyGeneHelpNotifications,
+  markAllGeneHelpNotificationsRead,
+  markGeneHelpNotificationRead,
+} from "../services/geneHelpNotificationService";
+import {
   loadMyTaskNotifications,
   markAllTaskNotificationsRead,
   markTaskNotificationRead,
 } from "../services/taskNotificationService";
-import type { TaskReminderNotification } from "../types/notifications";
+import type {
+  GeneHelpNotification,
+  TaskReminderNotification,
+} from "../types/notifications";
 import { formatDateForDisplay, formatDateTimeForDisplay } from "../utils/dateHelpers";
+import { authenticatedGeneHelpViewUrl } from "../utils/geneHelpLinks";
 
 interface AnnouncementBellProps {
   account: SupabaseAccount | null;
@@ -28,6 +37,7 @@ const categoryLabels: Record<AppAnnouncement["category"], string> = {
 export function AnnouncementBell({ account }: AnnouncementBellProps) {
   const detailsRef = useDismissibleDetails();
   const [announcements, setAnnouncements] = useState<AppAnnouncement[]>([]);
+  const [geneHelpNotifications, setGeneHelpNotifications] = useState<GeneHelpNotification[]>([]);
   const [taskNotifications, setTaskNotifications] = useState<TaskReminderNotification[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -36,8 +46,9 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
   const unreadCount = useMemo(
     () =>
       announcements.filter((item) => !item.isRead).length +
+      geneHelpNotifications.filter((item) => !item.isRead).length +
       taskNotifications.filter((item) => !item.isRead).length,
-    [announcements, taskNotifications],
+    [announcements, geneHelpNotifications, taskNotifications],
   );
 
   const refresh = async () => {
@@ -48,21 +59,33 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
     setLoading(true);
     setError("");
     try {
-      const [announcementResult, taskResult] = await Promise.allSettled([
+      const [announcementResult, geneHelpResult, taskResult] = await Promise.allSettled([
         loadMyAnnouncements(expectedUserId),
+        loadMyGeneHelpNotifications(50, expectedUserId),
         loadMyTaskNotifications(50, expectedUserId),
       ]);
       if (!isCurrent()) return;
       if (announcementResult.status === "fulfilled") {
         setAnnouncements(announcementResult.value);
       }
+      if (geneHelpResult.status === "fulfilled") {
+        setGeneHelpNotifications(geneHelpResult.value.notifications);
+      }
       if (taskResult.status === "fulfilled") {
         setTaskNotifications(taskResult.value);
       }
-      if (announcementResult.status === "rejected" && taskResult.status === "rejected") {
-        throw announcementResult.reason;
+      const results = [announcementResult, geneHelpResult, taskResult];
+      if (results.every((result) => result.status === "rejected")) {
+        const firstFailure = results.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
+        throw firstFailure?.reason;
       }
-      if (announcementResult.status === "rejected" || taskResult.status === "rejected") {
+      const geneHelpSyncWarning = geneHelpResult.status === "fulfilled" &&
+        geneHelpResult.value.syncWarning;
+      if (geneHelpSyncWarning) {
+        setError("Не вдалося оновити сповіщення GeneHelp. Показуємо раніше отримані дані.");
+      } else if (results.some((result) => result.status === "rejected")) {
         setError("Частину сповіщень тимчасово не вдалося завантажити.");
       }
     } catch (loadError) {
@@ -77,6 +100,7 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
     refreshGenerationRef.current += 1;
     if (!account) {
       setAnnouncements([]);
+      setGeneHelpNotifications([]);
       setTaskNotifications([]);
       setError("");
       setLoading(false);
@@ -125,10 +149,33 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
     }
   };
 
+  const markGeneHelpRead = async (notification: GeneHelpNotification) => {
+    if (notification.isRead) return;
+    setGeneHelpNotifications((current) =>
+      current.map((item) =>
+        item.id === notification.id
+          ? { ...item, isRead: true, readAt: new Date().toISOString() }
+          : item,
+      ),
+    );
+    try {
+      await markGeneHelpNotificationRead(notification.id, account?.id);
+    } catch {
+      void refresh();
+    }
+  };
+
+  const openGeneHelpNotification = (notification: GeneHelpNotification) => {
+    const targetUrl = geneHelpNotificationUrl(notification);
+    if (targetUrl) window.open(targetUrl, "_blank", "noopener,noreferrer");
+    void markGeneHelpRead(notification);
+  };
+
   const markAllRead = async () => {
     const unread = announcements.filter((item) => !item.isRead);
+    const unreadGeneHelp = geneHelpNotifications.filter((item) => !item.isRead);
     const unreadTasks = taskNotifications.filter((item) => !item.isRead);
-    if (!unread.length && !unreadTasks.length) return;
+    if (!unread.length && !unreadGeneHelp.length && !unreadTasks.length) return;
     setAnnouncements((current) =>
       current.map((item) => ({ ...item, isRead: true, readAt: item.readAt ?? new Date().toISOString() })),
     );
@@ -139,9 +186,17 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
         readAt: item.readAt ?? new Date().toISOString(),
       })),
     );
+    setGeneHelpNotifications((current) =>
+      current.map((item) => ({
+        ...item,
+        isRead: true,
+        readAt: item.readAt ?? new Date().toISOString(),
+      })),
+    );
     try {
       await Promise.all([
         ...unread.map((announcement) => markAnnouncementRead(announcement.id, account?.id)),
+        ...(unreadGeneHelp.length ? [markAllGeneHelpNotificationsRead(account?.id)] : []),
         ...(unreadTasks.length ? [markAllTaskNotificationsRead(account?.id)] : []),
       ]);
     } catch {
@@ -174,8 +229,25 @@ export function AnnouncementBell({ account }: AnnouncementBellProps) {
           </button>
         </div>
         {error ? <div className="alert alert-error compact-alert">{error}</div> : null}
-        {taskNotifications.length || announcements.length ? (
+        {geneHelpNotifications.length || taskNotifications.length || announcements.length ? (
           <>
+            {geneHelpNotifications.length ? (
+              <div className="announcement-list genehelp-notification-list">
+                {geneHelpNotifications.map((notification) => (
+                  <article
+                    className={`announcement-item genehelp-notification-item ${notification.isRead ? "" : "unread"}`}
+                    key={notification.id}
+                  >
+                    <button type="button" onClick={() => openGeneHelpNotification(notification)}>
+                      <span>{geneHelpNotificationLabel(notification)}</span>
+                      <strong>{notification.title || "Запит GeneHelp"}</strong>
+                      {notification.body ? <p>{notification.body}</p> : null}
+                      <small>{formatDateTimeForDisplay(notification.occurredAt || notification.createdAt)}</small>
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : null}
             {taskNotifications.length ? (
               <div className="announcement-list task-notification-list">
                 {taskNotifications.map((notification) => (
@@ -271,4 +343,17 @@ function BellIcon() {
 
 function taskNotificationUrl(notification: TaskReminderNotification): string {
   return `/projects/${encodeURIComponent(notification.projectId)}/tasks`;
+}
+
+function geneHelpNotificationLabel(notification: GeneHelpNotification): string {
+  return notification.eventType === "reply_created"
+    ? "GeneHelp · Нова відповідь"
+    : "GeneHelp · Статус змінено";
+}
+
+function geneHelpNotificationUrl(notification: GeneHelpNotification): string | null {
+  const requestId = notification.requestId.trim();
+  if (!/^[a-z0-9_-]{4,64}$/i.test(requestId)) return null;
+  const canonicalRequestUrl = `https://genehelp.online/requests/${encodeURIComponent(requestId)}`;
+  return authenticatedGeneHelpViewUrl(canonicalRequestUrl, undefined, requestId);
 }

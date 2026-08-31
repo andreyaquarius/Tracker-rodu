@@ -20,6 +20,7 @@ on:
       - "test/findingAiSocialRoles.test.ts"
       - "test/findingLegacyRelationIsolation.test.ts"
       - "test/googleDrive*.test.ts"
+      - "test/geneHelp*.test.ts"
       - "test/personContext*.test.ts"
       - "test/personSocialCircleGraphPresentation.test.ts"
       - "test/researchGraph*.test.ts"
@@ -91,6 +92,9 @@ jobs:
             "test/personContext*.test.ts" \
             "test/personSocialCircleGraphPresentation.test.ts" \
             "test/researchGraph*.test.ts"
+
+      - name: Verify GeneHelp notification sync contracts
+        run: node --test --test-concurrency=1 "test/geneHelp*.test.ts"
 
       - name: Verify PDF worker container
         run: docker build --tag tracker-rodu-pdf-worker:test services/pdf-export-worker
