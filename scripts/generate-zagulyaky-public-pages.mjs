@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -526,11 +527,50 @@ function renderJsonLd(value) {
   return JSON.stringify(value).replaceAll("<", "\\u003c");
 }
 
+function inlineScriptHash(source) {
+  return `'sha256-${createHash("sha256").update(source).digest("base64")}'`;
+}
+
+/**
+ * Vite's built template authorizes the homepage JSON-LD with a CSP hash. Every
+ * generated Zagulyaky document replaces that script, so its script-src must
+ * replace the stale homepage hash with the hash of the page-specific payload.
+ */
+function replaceJsonLdCspHash(html, jsonLd, previousJsonLdHashes) {
+  const cspMetaPattern = /<meta\b(?=[^>]*\bhttp-equiv=["']Content-Security-Policy["'])[^>]*>/i;
+  const cspMeta = html.match(cspMetaPattern)?.[0];
+  if (!cspMeta) throw new Error("The public page template is missing the Content-Security-Policy meta tag.");
+
+  const contentMatch = cspMeta.match(/\bcontent=(["'])([\s\S]*?)\1/i);
+  if (!contentMatch) throw new Error("The public page template CSP meta tag is missing its content attribute.");
+
+  const content = contentMatch[2];
+  const scriptSrcPattern = /\bscript-src(?=\s|$)[^;]*/i;
+  const scriptSrc = content.match(scriptSrcPattern)?.[0];
+  if (!scriptSrc) throw new Error("The public page template CSP is missing the script-src directive.");
+
+  const tokens = scriptSrc.trim().split(/\s+/);
+  const firstHashIndex = tokens.findIndex((token) => previousJsonLdHashes.has(token));
+  const sources = tokens.filter((token) => !previousJsonLdHashes.has(token));
+  const insertionIndex = firstHashIndex >= 0
+    ? Math.min(firstHashIndex, sources.length)
+    : Math.min(2, sources.length);
+  sources.splice(insertionIndex, 0, inlineScriptHash(jsonLd));
+
+  const nextContent = content.replace(scriptSrcPattern, sources.join(" "));
+  const nextMeta = cspMeta.replace(contentMatch[0], `content=${contentMatch[1]}${nextContent}${contentMatch[1]}`);
+  return html.replace(cspMetaPattern, nextMeta);
+}
+
 /** Builds a real HTTP-200 document from Vite's built HTML template. */
 export function renderZagulyakySeoPage(template, page) {
   // `index.html` has a homepage-oriented <noscript> fallback and JSON-LD.
   // A generated catalogue/card must have one meaningful H1 and one matching
   // structured-data payload instead of carrying those homepage fragments.
+  const previousJsonLdHashes = new Set(
+    [...template.matchAll(/<script\b(?=[^>]*\btype=["']application\/ld\+json["'])[^>]*>([\s\S]*?)<\/script>/gi)]
+      .map((match) => inlineScriptHash(match[1] ?? "")),
+  );
   let html = template
     .replace(/<noscript>[\s\S]*?<\/noscript>\s*/i, "")
     .replace(/<script\b(?=[^>]*\btype=["']application\/ld\+json["'])[^>]*>[\s\S]*?<\/script>\s*/gi, "")
@@ -544,12 +584,14 @@ export function renderZagulyakySeoPage(template, page) {
   html = replaceMeta(html, "property", "og:url", page.url);
   html = replaceMeta(html, "name", "twitter:title", page.title);
   html = replaceMeta(html, "name", "twitter:description", page.description);
+  const jsonLd = renderJsonLd(page.structuredData);
   html = replaceRequired(
     html,
     /<\/head>/i,
-    `<meta name="${STATIC_SEO_MARKER_NAME}" content="${escapeHtml(page.url)}" />\n    <script type="application/ld+json">${renderJsonLd(page.structuredData)}</script>\n  </head>`,
+    `<meta name="${STATIC_SEO_MARKER_NAME}" content="${escapeHtml(page.url)}" />\n    <script type="application/ld+json">${jsonLd}</script>\n  </head>`,
     "head closing tag",
   );
+  html = replaceJsonLdCspHash(html, jsonLd, previousJsonLdHashes);
   return replaceRequired(
     html,
     /<div\b(?=[^>]*\bid=["']root["'])[^>]*>\s*<\/div>/i,

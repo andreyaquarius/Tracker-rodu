@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,6 +12,9 @@ import {
 } from "../scripts/generate-zagulyaky-public-pages.mjs";
 
 const PUBLIC_ORIGIN = "https://trekerrodu.com.ua";
+const HOMEPAGE_JSON_LD = JSON.stringify({ "@type": "WebSite", name: "Трекер Роду" });
+const HOMEPAGE_JSON_LD_HASH = `'sha256-${createHash("sha256").update(HOMEPAGE_JSON_LD).digest("base64")}'`;
+const UNRELATED_INLINE_HASH = "'sha256-dW5yZWxhdGVk'";
 
 const viteTemplate = `<!doctype html>
 <html lang="uk">
@@ -24,6 +28,8 @@ const viteTemplate = `<!doctype html>
     <meta property="og:url" content="${PUBLIC_ORIGIN}/" />
     <meta name="twitter:title" content="Base title" />
     <meta name="twitter:description" content="Base description" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' ${HOMEPAGE_JSON_LD_HASH} ${UNRELATED_INLINE_HASH} https://accounts.google.com; style-src 'self' 'unsafe-inline'" />
+    <script type="application/ld+json">${HOMEPAGE_JSON_LD}</script>
     <title>Base title</title>
   </head>
   <body><div id="root"></div><script type="module" src="/assets/app.js"></script></body>
@@ -122,6 +128,25 @@ test("public Zagulyaky static pages contain only escaped public SEO fields", () 
   assert.doesNotMatch(html, /<script>alert\('not executable'\)<\/script>/);
   assert.doesNotMatch(html, /private-record-id-do-not-render|private-user-id|private raw payload/);
   assert.doesNotMatch(html, /https:\/\/private\.example\.test|private\/zagulyaky\/file\.png/);
+});
+
+test("public Zagulyaky pages authorize only their actual JSON-LD in script-src", () => {
+  const page = publicEntrySeoData(publicPersonIndexingEntry());
+  const html = renderZagulyakySeoPage(viteTemplate, page);
+  const jsonLdScripts = [...html.matchAll(/<script\b(?=[^>]*\btype=["']application\/ld\+json["'])[^>]*>([\s\S]*?)<\/script>/gi)];
+  const csp = html.match(/<meta\b(?=[^>]*\bhttp-equiv=["']Content-Security-Policy["'])[^>]*\bcontent="([^"]*)"[^>]*>/i)?.[1];
+  const scriptSrc = csp?.split(";").map((directive) => directive.trim()).find((directive) => directive.startsWith("script-src "));
+
+  assert.equal(jsonLdScripts.length, 1, "Expected exactly one page-specific JSON-LD script");
+  const jsonLd = jsonLdScripts[0]?.[1];
+  assert.ok(jsonLd, "Expected non-empty page-specific JSON-LD");
+  assert.ok(scriptSrc, "Expected the CSP script-src directive");
+
+  const pageHash = `'sha256-${createHash("sha256").update(jsonLd).digest("base64")}'`;
+  const hashes = scriptSrc.match(/'sha(?:256|384|512)-[^']+'/gi) ?? [];
+  assert.deepEqual(hashes, [pageHash, UNRELATED_INLINE_HASH]);
+  assert.doesNotMatch(scriptSrc, new RegExp(HOMEPAGE_JSON_LD_HASH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(scriptSrc, /'unsafe-inline'/i);
 });
 
 test("static SEO generation uses the enriched public indexing RPC and writes private-safe canonical pages", async () => {

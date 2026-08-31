@@ -3,10 +3,14 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "vite --configLoader runner",
     "dev:historical-places": "vite --mode historical-places --configLoader runner",
     "build": "tsc --noEmit && vite build --configLoader runner",
+    "build:vercel": "npm run verify:vercel-config && npm run build && node scripts/generate-zagulyaky-public-pages.mjs && npm run verify:hosting",
     "preview": "vite preview --configLoader runner",
     "lint": "tsc --noEmit --pretty false",
     "typecheck": "tsc --noEmit --pretty false",
@@ -17,7 +21,9 @@
     "benchmark:family-tree": "node --test test/familyTreePerformance.test.ts",
     "benchmark:gedcom": "node scripts/benchmark-gedcom-export.ts",
     "functions:serve:index-finding": "supabase functions serve index-finding-fragment --env-file .env.functions.local --no-verify-jwt",
+    "verify:hosting": "node scripts/verify-hosting-build.mjs",
     "verify:pages": "node scripts/verify-pages-build.mjs",
+    "verify:vercel-config": "node --test test/vercelDeploymentConfig.test.ts",
     "verify:pdf-rollout": "node scripts/verify-external-pdf-rollout.mjs",
     "qa:family-tree": "node scripts/family-tree-visual-qa.ts"
   },

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import {
   isResearchGraphShareToken,
   parseAppRoute,
@@ -191,7 +192,11 @@ test("GitHub Pages transfers a share bearer through fragments without web storag
     }
   }
 
-  const legacyRestore = sourceBlock(main, "function restoreSpaRedirect", "if (!restoreSharedGraphFragmentHandoff())");
+  const legacyRestore = sourceBlock(
+    main,
+    "function restoreSpaRedirect",
+    "!sanitizeDirectSharedGraphLocation()",
+  );
   assert.ok(
     legacyRestore.indexOf('sessionStorage.removeItem("tracker-rodu-redirect")')
       < legacyRestore.indexOf("parseSharedGraphBearerFragment(target.hash)"),
@@ -209,6 +214,85 @@ test("GitHub Pages transfers a share bearer through fragments without web storag
   const ordinary = executeSpaRedirect("/projects/example", "#section");
   assert.equal(ordinary.stored.length, 1, "ordinary deep links keep the established fallback");
   assert.deepEqual(ordinary.replaced, ["/"]);
+});
+
+test("direct Vercel entries sanitize shared-graph bearers before app startup", () => {
+  const token = `${"d".repeat(42)}_`;
+  const encodedToken = `${"d".repeat(42)}%5F`;
+
+  const canonical = executeMainEntryGuard("/shared-graph", `#${token}`);
+  assert.deepEqual(canonical.replaced, [], "the exact canonical share URL must be preserved");
+  assert.deepEqual(canonical.storageReads, [], "a direct bearer must never reach storage");
+
+  const encoded = executeMainEntryGuard("/shared-graph", `#${encodedToken}`);
+  assert.deepEqual(encoded.replaced, [`/shared-graph#${token}`]);
+  assert.deepEqual(encoded.storageReads, []);
+
+  const handoff = executeMainEntryGuard("/", `#shared-graph=${token}`);
+  assert.deepEqual(handoff.replaced, [`/shared-graph#${token}`]);
+  assert.deepEqual(handoff.storageReads, []);
+
+  for (const pathname of ["/shared-graph/", "/shared-graph/extra"]) {
+    for (const hash of [`#${token}`, `#${encodedToken}`, `#shared-graph=${token}`]) {
+      const nestedBearer = executeMainEntryGuard(pathname, hash);
+      assert.deepEqual(nestedBearer.replaced, ["/"]);
+      assert.deepEqual(nestedBearer.storageReads, []);
+    }
+  }
+  for (const search of [`?token=${token}`, `?p_token=${token}`, "?view=public"]) {
+    const queryBearer = executeMainEntryGuard("/shared-graph", `#${token}`, search);
+    assert.deepEqual(queryBearer.replaced, ["/"]);
+    assert.deepEqual(queryBearer.storageReads, []);
+  }
+  const markerOnShare = executeMainEntryGuard(
+    "/shared-graph",
+    `#shared-graph=${token}`,
+  );
+  assert.deepEqual(markerOnShare.replaced, ["/"]);
+  assert.deepEqual(markerOnShare.storageReads, []);
+
+  for (const pathname of ["/shared-graph", "/shared-graph/", "/shared-graph/extra"]) {
+    for (const search of ["", `?token=${token}`, "?view=public"]) {
+      for (const hash of ["", "#short", "#abc%ZZ", `#shared-graph=short`]) {
+        const malformed = executeMainEntryGuard(pathname, hash, search);
+        assert.deepEqual(
+          malformed.replaced,
+          ["/"],
+          `${pathname}${search}${hash} must fail closed before app startup`,
+        );
+        assert.deepEqual(malformed.storageReads, []);
+      }
+    }
+  }
+
+  for (const [pathname, hash, search = ""] of [
+    ["/", `#${token}`],
+    ["/unrelated", `#${token}`],
+    ["/unrelated", `#shared-graph=${token}`],
+    ["/unrelated", `#shared-graph=${encodedToken}`],
+    ["/", `#shared-graph=${token}`, "?unexpected=1"],
+  ] as const) {
+    const misplaced = executeMainEntryGuard(pathname, hash, search);
+    assert.deepEqual(
+      misplaced.replaced,
+      ["/"],
+      `${pathname}${search}${hash} must discard a misplaced bearer or marker`,
+    );
+    assert.deepEqual(misplaced.storageReads, []);
+  }
+
+  const ordinary = executeMainEntryGuard("/projects/example", "#section");
+  assert.deepEqual(ordinary.replaced, []);
+  assert.deepEqual(
+    ordinary.storageReads,
+    ["tracker-rodu-redirect"],
+    "ordinary direct routes keep the existing GitHub storage restoration check",
+  );
+
+  const sanitizerCall = main.lastIndexOf("sanitizeDirectSharedGraphLocation()");
+  assert.ok(sanitizerCall >= 0);
+  assert.ok(sanitizerCall < main.indexOf("installChunkLoadRecovery();"));
+  assert.ok(sanitizerCall < main.indexOf("const router = createBrowserRouter"));
 });
 
 test("leaving the sensitive route cannot reuse an inactive workspace bootstrap", () => {
@@ -255,4 +339,40 @@ function executeSpaRedirect(pathname: string, hash: string, search = ""): {
     },
   });
   return { stored, replaced };
+}
+
+function executeMainEntryGuard(pathname: string, hash: string, search = ""): {
+  storageReads: string[];
+  replaced: string[];
+} {
+  const storageReads: string[] = [];
+  const replaced: string[] = [];
+  const prebootSource = sourceBlock(
+    main,
+    "function parseSharedGraphBearerFragment",
+    "installChunkLoadRecovery();",
+  );
+  const executable = transpileModule(prebootSource, {
+    compilerOptions: {
+      module: ModuleKind.None,
+      target: ScriptTarget.ES2022,
+    },
+  }).outputText;
+  runInNewContext(executable, {
+    URL,
+    window: {
+      location: { pathname, search, hash },
+      history: {
+        replaceState: (_state: unknown, _title: string, target: string) => replaced.push(target),
+      },
+    },
+    sessionStorage: {
+      getItem: (key: string) => {
+        storageReads.push(key);
+        return null;
+      },
+      removeItem: () => undefined,
+    },
+  });
+  return { storageReads, replaced };
 }

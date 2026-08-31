@@ -26,13 +26,55 @@ function parseSharedGraphBearerFragment(hash: string): {
 
 function restoreSharedGraphFragmentHandoff(): boolean {
   const bearer = parseSharedGraphBearerFragment(window.location.hash);
-  if (window.location.pathname !== "/" || bearer?.kind !== "handoff") return false;
+  if (
+    window.location.pathname !== "/"
+    || window.location.search !== ""
+    || bearer?.kind !== "handoff"
+  ) return false;
   window.history.replaceState(
     null,
     "",
     `/shared-graph#${bearer.token}`,
   );
   return true;
+}
+
+function hasSharedGraphMarkerPrefix(hash: string): boolean {
+  const encoded = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (encoded.startsWith("shared-graph=")) return true;
+  try {
+    return decodeURIComponent(encoded).startsWith("shared-graph=");
+  } catch {
+    return false;
+  }
+}
+
+// Vercel serves direct SPA routes without the GitHub Pages 404 handoff. Guard
+// the bearer before the router, analytics, or chunk recovery can observe the
+// location. Only the exact fragment-only public-share URL is allowed through.
+function sanitizeDirectSharedGraphLocation(): boolean {
+  const { pathname, search, hash } = window.location;
+  const bearer = parseSharedGraphBearerFragment(hash);
+  const normalizedPathname = pathname.replace(/\/+$/, "");
+  const isSharedGraphPath = normalizedPathname === "/shared-graph"
+    || normalizedPathname.startsWith("/shared-graph/");
+  const isExactDirectShare = pathname === "/shared-graph"
+    && search === ""
+    && bearer?.kind === "raw";
+
+  if (isExactDirectShare) {
+    const canonicalShareUrl = `/shared-graph#${bearer.token}`;
+    if (`${pathname}${search}${hash}` !== canonicalShareUrl) {
+      window.history.replaceState(null, "", canonicalShareUrl);
+    }
+    return true;
+  }
+
+  if (bearer || hasSharedGraphMarkerPrefix(hash) || isSharedGraphPath) {
+    window.history.replaceState(null, "", "/");
+    return true;
+  }
+  return false;
 }
 
 // Restore the deep link captured by the GitHub Pages 404.html SPA fallback
@@ -48,7 +90,7 @@ function restoreSpaRedirect(): void {
     const normalizedPathname = target.pathname.replace(/\/+$/, "");
     const isSharedGraphPath = normalizedPathname === "/shared-graph"
       || normalizedPathname.startsWith("/shared-graph/");
-    const hasShareMarkerPrefix = target.hash.startsWith("#shared-graph=");
+    const hasShareMarkerPrefix = hasSharedGraphMarkerPrefix(target.hash);
     if (
       bearer
       || hasShareMarkerPrefix
@@ -75,7 +117,10 @@ function restoreSpaRedirect(): void {
   }
 }
 
-if (!restoreSharedGraphFragmentHandoff()) {
+if (
+  !restoreSharedGraphFragmentHandoff()
+  && !sanitizeDirectSharedGraphLocation()
+) {
   restoreSpaRedirect();
 }
 installChunkLoadRecovery();
