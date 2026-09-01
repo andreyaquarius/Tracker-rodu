@@ -144,6 +144,9 @@ test("stale import rollback is service-only and scheduled", () => {
   );
   assert.match(workerSource, /TASK_REMINDER_CRON_SECRET/);
   assert.match(workerSource, /process_next_stale_gedcom_import_rollback/);
+  assert.match(workerSource, /process_next_gedcom_deletion_job/);
+  assert.match(workerSource, /nextKind: WorkKind = "deletion"/);
+  assert.match(workerSource, /processedDeletionBatches/);
   assert.match(workflow, /cron: "\*\/5 \* \* \* \*"/);
   assert.match(workflow, /process-gedcom-import-rollbacks/);
 });

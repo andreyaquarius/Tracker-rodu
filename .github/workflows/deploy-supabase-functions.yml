@@ -98,6 +98,12 @@ jobs:
       - name: Verify GeneHelp notification sync contracts
         run: node --test --test-concurrency=1 "test/geneHelp*.test.ts"
 
+      - name: Verify GEDCOM deletion and rollback contracts
+        run: |
+          node --test --test-concurrency=1 \
+            "test/gedcomImportRollback.test.ts" \
+            "test/projectGedcomDeletionContinuation.test.ts"
+
       - name: Verify private-schema public facade ACL contracts
         run: |
           node --test --test-concurrency=1 \

@@ -1,5 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
+import {
+  subscribeProjectGedcomDeletionProgress,
+  type ProjectGedcomDeletionPhase,
+  type ProjectGedcomDeletionProgress,
+} from "../../services/projectPeople.ts";
 import {
   gedcomImportDisplayName,
   type GedcomImportGroup,
@@ -18,12 +23,19 @@ export function GedcomImportManagerV2({
 }: GedcomImportManagerV2Props) {
   const [open, setOpen] = useState(false);
   const [deletingSourceKey, setDeletingSourceKey] = useState("");
+  const [deletionProgress, setDeletionProgress] = useState<ProjectGedcomDeletionProgress | null>(null);
   const [error, setError] = useState("");
+  const deletionInFlightRef = useRef(false);
+  const deletingSourceKeyRef = useRef("");
+
+  useEffect(() => subscribeProjectGedcomDeletionProgress((progress) => {
+    if (progress.sourceKey === deletingSourceKeyRef.current) setDeletionProgress(progress);
+  }), []);
 
   if (!groups.length) return null;
 
   const removeGroup = async (group: GedcomImportGroup, index: number) => {
-    if (!canDelete || deletingSourceKey) return;
+    if (!canDelete || deletionInFlightRef.current) return;
     const name = gedcomImportDisplayName(group, index);
     const confirmed = window.confirm(
       [
@@ -34,13 +46,18 @@ export function GedcomImportManagerV2({
       ].join("\n\n"),
     );
     if (!confirmed) return;
+    deletionInFlightRef.current = true;
+    deletingSourceKeyRef.current = group.sourceKey;
     setError("");
+    setDeletionProgress(null);
     setDeletingSourceKey(group.sourceKey);
     try {
       await onDelete(group);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не вдалося видалити GEDCOM-імпорт.");
     } finally {
+      deletionInFlightRef.current = false;
+      deletingSourceKeyRef.current = "";
       setDeletingSourceKey("");
     }
   };
@@ -62,7 +79,7 @@ export function GedcomImportManagerV2({
           title="Імпортовані GEDCOM"
           className="persons-v2-gedcom-manager-modal"
           onClose={() => {
-            if (!deletingSourceKey) setOpen(false);
+            if (!deletionInFlightRef.current) setOpen(false);
           }}
         >
           <div className="persons-v2-gedcom-manager">
@@ -99,6 +116,31 @@ export function GedcomImportManagerV2({
                     >
                       {deleting ? "Видаляємо…" : "Видалити набір"}
                     </button>
+                    {deleting && deletionProgress ? (
+                      <div className="gedcom-import-progress" role="status" aria-live="polite">
+                        <progress
+                          max={Math.max(1, deletionProgress.totalPersons)}
+                          value={Math.min(
+                            Math.max(0, deletionProgress.processedPersons),
+                            Math.max(1, deletionProgress.totalPersons),
+                          )}
+                        />
+                        <span>
+                          {gedcomDeletionPhaseLabel(deletionProgress.phase)} · {deletionProgress.processedPersons}
+                          {deletionProgress.totalPersons > 0 ? ` із ${deletionProgress.totalPersons}` : ""} осіб
+                          {deletionProgress.remainingPersons > 0
+                            ? ` · залишилося ${deletionProgress.remainingPersons}`
+                            : ""}
+                        </span>
+                        <small>
+                          Видалено: {deletionProgress.deletedRelations} звʼязків, {deletionProgress.deletedFindings}
+                          {" "}знахідок, {deletionProgress.deletedPersons} осіб.
+                          {deletionProgress.status === "failed" && deletionProgress.retryable
+                            ? " Сервер автоматично повторює безпечний крок."
+                            : ""}
+                        </small>
+                      </div>
+                    ) : null}
                   </article>
                 );
               })}
@@ -111,4 +153,16 @@ export function GedcomImportManagerV2({
       ) : null}
     </>
   );
+}
+
+function gedcomDeletionPhaseLabel(phase: ProjectGedcomDeletionPhase): string {
+  switch (phase) {
+    case "relations": return "Видаляємо звʼязки";
+    case "findings": return "Видаляємо знахідки";
+    case "trees": return "Перевіряємо дерева";
+    case "archives": return "Очищаємо архівні привʼязки";
+    case "persons": return "Видаляємо осіб";
+    case "finalize": return "Завершуємо";
+    case "completed": return "Готово";
+  }
 }

@@ -1,4 +1,4 @@
-name: Recover abandoned GEDCOM imports
+name: Process GEDCOM background jobs
 
 on:
   schedule:
@@ -27,7 +27,7 @@ jobs:
             exit 1
           fi
 
-      - name: Resume abandoned GEDCOM rollbacks
+      - name: Resume GEDCOM deletions and abandoned import rollbacks
         env:
           PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
           CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
@@ -38,13 +38,13 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{}' \
             "https://${PROJECT_REF}.supabase.co/functions/v1/process-gedcom-import-rollbacks")"; then
-            echo "::error::GEDCOM import rollback worker request failed."
+            echo "::error::GEDCOM background worker request failed."
             exit 1
           fi
 
           echo "$response"
           {
-            echo "### GEDCOM import rollback worker"
+            echo "### GEDCOM background worker"
             echo '```json'
             echo "$response"
             echo '```'

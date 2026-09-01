@@ -54,6 +54,7 @@ import {
   GEDCOM_IMPORT_SOURCE_KEY_CUSTOM_FIELD,
   GEDCOM_XREF_CUSTOM_FIELD,
 } from "../utils/gedcomMetadata.ts";
+import { isDatabaseStatementTimeout } from "../utils/databaseErrors.ts";
 
 type PersonRow = {
   id: string;
@@ -943,6 +944,67 @@ export interface ProjectPersonDeletionResult {
   deletedFindings: number;
 }
 
+export type ProjectGedcomDeletionStatus = "pending" | "running" | "failed" | "completed";
+export type ProjectGedcomDeletionPhase =
+  | "relations"
+  | "findings"
+  | "trees"
+  | "archives"
+  | "persons"
+  | "finalize"
+  | "completed";
+
+export interface ProjectGedcomDeletionProgress extends ProjectPersonDeletionResult {
+  jobId: string;
+  projectId: string;
+  sourceKey: string;
+  status: ProjectGedcomDeletionStatus;
+  phase: ProjectGedcomDeletionPhase;
+  totalPersons: number;
+  processedPersons: number;
+  remainingPersons: number;
+  lastError: string;
+  lastErrorCode: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string;
+  done: boolean;
+  retryable: boolean;
+}
+
+export interface ProjectGedcomDeletionOptions {
+  batchSize?: number;
+  maxContinuationCalls?: number;
+  maxRunTimeMs?: number;
+  maxTransientRetries?: number;
+  retryDelayMs?: number;
+  onProgress?: (progress: ProjectGedcomDeletionProgress) => void;
+}
+
+type ProjectGedcomDeletionRpc = (
+  functionName: string,
+  args: Record<string, unknown>,
+) => PromiseLike<{ data: unknown; error: unknown }>;
+
+type ProjectGedcomDeletionProgressListener = (
+  progress: ProjectGedcomDeletionProgress,
+) => void;
+
+const PROJECT_GEDCOM_DELETION_BATCH_SIZE = 50;
+const PROJECT_GEDCOM_DELETION_MAX_CONTINUATIONS = 500;
+const PROJECT_GEDCOM_DELETION_MAX_RUN_TIME_MS = 4 * 60_000;
+const PROJECT_GEDCOM_DELETION_MAX_TRANSIENT_RETRIES = 3;
+const PROJECT_GEDCOM_DELETION_RETRY_DELAY_MS = 250;
+const projectGedcomDeletionInFlight = new Map<string, Promise<ProjectPersonDeletionResult>>();
+const projectGedcomDeletionProgressListeners = new Set<ProjectGedcomDeletionProgressListener>();
+
+export function subscribeProjectGedcomDeletionProgress(
+  listener: ProjectGedcomDeletionProgressListener,
+): () => void {
+  projectGedcomDeletionProgressListeners.add(listener);
+  return () => projectGedcomDeletionProgressListeners.delete(listener);
+}
+
 export interface ProjectPersonRootRequirement {
   treeId: string;
   treeTitle: string;
@@ -1041,15 +1103,396 @@ export async function replaceTreeRootsAndDeleteProjectPersons(
 export async function deleteProjectGedcomPersons(
   projectId: string,
   sourceKey: string,
+  options: ProjectGedcomDeletionOptions = {},
 ): Promise<ProjectPersonDeletionResult> {
   const normalizedSourceKey = sourceKey.trim();
   if (!normalizedSourceKey) throw new Error("Не вказано GEDCOM-імпорт для видалення.");
-  const { data, error } = await getSupabaseClient().rpc("delete_project_gedcom_persons", {
-    target_project_id: projectId,
-    target_source_key: normalizedSourceKey,
+  const client = getSupabaseClient();
+  return runProjectGedcomDeletionRpc(
+    (functionName, args) => client.rpc(functionName, args),
+    projectId,
+    normalizedSourceKey,
+    options,
+  );
+}
+
+/**
+ * Drives the resumable server-side GEDCOM deletion one bounded batch at a
+ * time. The module-level promise fence is synchronous, so two components in
+ * the same browser cannot start duplicate continuation loops for one dataset.
+ * Server-side idempotency and advisory locks provide the cross-tab fence.
+ */
+export function runProjectGedcomDeletionRpc(
+  rpc: ProjectGedcomDeletionRpc,
+  projectId: string,
+  sourceKey: string,
+  options: ProjectGedcomDeletionOptions = {},
+): Promise<ProjectPersonDeletionResult> {
+  const normalizedProjectId = projectId.trim();
+  const normalizedSourceKey = sourceKey.trim();
+  if (!normalizedProjectId) return Promise.reject(new Error("Не вказано проєкт для видалення GEDCOM."));
+  if (!normalizedSourceKey) return Promise.reject(new Error("Не вказано GEDCOM-імпорт для видалення."));
+  const operationKey = `${normalizedProjectId}\u001f${normalizedSourceKey}`;
+  const active = projectGedcomDeletionInFlight.get(operationKey);
+  if (active) return active;
+
+  let operation: Promise<ProjectPersonDeletionResult>;
+  operation = executeProjectGedcomDeletion(
+    rpc,
+    normalizedProjectId,
+    normalizedSourceKey,
+    options,
+  ).finally(() => {
+    if (projectGedcomDeletionInFlight.get(operationKey) === operation) {
+      projectGedcomDeletionInFlight.delete(operationKey);
+    }
   });
-  if (error) throw projectPersonDeletionError(error);
-  return parseProjectPersonDeletionResult(data);
+  projectGedcomDeletionInFlight.set(operationKey, operation);
+  return operation;
+}
+
+async function executeProjectGedcomDeletion(
+  rpc: ProjectGedcomDeletionRpc,
+  projectId: string,
+  sourceKey: string,
+  options: ProjectGedcomDeletionOptions,
+): Promise<ProjectPersonDeletionResult> {
+  const requestedBatchSize = boundedInteger(options.batchSize, 1, 100, PROJECT_GEDCOM_DELETION_BATCH_SIZE);
+  const maxContinuationCalls = boundedInteger(
+    options.maxContinuationCalls,
+    1,
+    PROJECT_GEDCOM_DELETION_MAX_CONTINUATIONS,
+    PROJECT_GEDCOM_DELETION_MAX_CONTINUATIONS,
+  );
+  const maxTransientRetries = boundedInteger(
+    options.maxTransientRetries,
+    0,
+    10,
+    PROJECT_GEDCOM_DELETION_MAX_TRANSIENT_RETRIES,
+  );
+  const retryDelayMs = boundedInteger(
+    options.retryDelayMs,
+    0,
+    5_000,
+    PROJECT_GEDCOM_DELETION_RETRY_DELAY_MS,
+  );
+  const maxRunTimeMs = boundedInteger(
+    options.maxRunTimeMs,
+    1_000,
+    30 * 60_000,
+    PROJECT_GEDCOM_DELETION_MAX_RUN_TIME_MS,
+  );
+  const startedAt = Date.now();
+  let currentBatchSize = requestedBatchSize;
+  let successfulBatchesAtCurrentSize = 0;
+
+  let progress = await startProjectGedcomDeletion(
+    rpc,
+    projectId,
+    sourceKey,
+    maxTransientRetries,
+    retryDelayMs,
+  );
+  assertProjectGedcomDeletionScope(progress, projectId, sourceKey);
+  reportProjectGedcomDeletionProgress(progress, options.onProgress);
+
+  let transientFailures = 0;
+  let retryableFailures = 0;
+  for (let continuation = 0; continuation < maxContinuationCalls; continuation += 1) {
+    if (progress.done || progress.status === "completed") {
+      return projectGedcomDeletionResult(progress);
+    }
+    if (progress.status === "failed") {
+      if (!progress.retryable) throw projectGedcomDeletionFailure(progress);
+      if (isTransientProjectGedcomDeletionProgress(progress)) {
+        currentBatchSize = Math.max(1, Math.floor(currentBatchSize / 2));
+        successfulBatchesAtCurrentSize = 0;
+      }
+      retryableFailures += 1;
+      if (retryableFailures > maxTransientRetries) {
+        throw projectGedcomDeletionFailure(progress, true);
+      }
+    } else {
+      retryableFailures = 0;
+    }
+
+    if (Date.now() - startedAt >= maxRunTimeMs) {
+      throw new Error(
+        "Видалення GEDCOM ще триває. Прогрес збережено — натисніть видалення набору ще раз, щоб безпечно продовжити.",
+      );
+    }
+
+    try {
+      progress = await callProjectGedcomDeletionRpc(
+        rpc,
+        "continue_project_gedcom_deletion",
+        {
+          target_job_id: progress.jobId,
+          batch_size: currentBatchSize,
+        },
+      );
+      assertProjectGedcomDeletionScope(progress, projectId, sourceKey);
+      transientFailures = 0;
+      successfulBatchesAtCurrentSize += 1;
+      if (successfulBatchesAtCurrentSize >= 3 && currentBatchSize < requestedBatchSize) {
+        currentBatchSize = Math.min(requestedBatchSize, currentBatchSize + 5);
+        successfulBatchesAtCurrentSize = 0;
+      }
+      reportProjectGedcomDeletionProgress(progress, options.onProgress);
+    } catch (error) {
+      if (!isTransientProjectGedcomDeletionError(error)) {
+        throw projectPersonDeletionError(error);
+      }
+      transientFailures += 1;
+      currentBatchSize = Math.max(1, Math.floor(currentBatchSize / 2));
+      successfulBatchesAtCurrentSize = 0;
+      const reconciled = await readProjectGedcomDeletionAfterFailure(
+        rpc,
+        progress.jobId,
+        projectId,
+        sourceKey,
+      );
+      if (reconciled) {
+        progress = reconciled;
+        reportProjectGedcomDeletionProgress(progress, options.onProgress);
+        if (progress.done || progress.status === "completed") {
+          return projectGedcomDeletionResult(progress);
+        }
+      }
+      if (transientFailures > maxTransientRetries) {
+        throw new Error(
+          "Сервер не встиг продовжити видалення GEDCOM. Прогрес збережено — повторіть дію, і видалення продовжиться з безпечного місця.",
+          { cause: error },
+        );
+      }
+      await waitForProjectGedcomDeletionRetry(retryDelayMs * (2 ** (transientFailures - 1)));
+    }
+    await waitForProjectGedcomDeletionRetry(0);
+  }
+
+  throw new Error(
+    "Видалення GEDCOM потребує надто багато кроків. Прогрес збережено — повторіть дію, щоб продовжити.",
+  );
+}
+
+async function startProjectGedcomDeletion(
+  rpc: ProjectGedcomDeletionRpc,
+  projectId: string,
+  sourceKey: string,
+  maxTransientRetries: number,
+  retryDelayMs: number,
+): Promise<ProjectGedcomDeletionProgress> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxTransientRetries; attempt += 1) {
+    try {
+      return await callProjectGedcomDeletionRpc(
+        rpc,
+        "start_project_gedcom_deletion",
+        {
+          target_project_id: projectId,
+          target_source_key: sourceKey,
+        },
+      );
+    } catch (error) {
+      lastError = error;
+      if (!isTransientProjectGedcomDeletionError(error) || attempt >= maxTransientRetries) {
+        throw projectPersonDeletionError(error);
+      }
+      await waitForProjectGedcomDeletionRetry(retryDelayMs * (2 ** attempt));
+    }
+  }
+  throw projectPersonDeletionError(lastError);
+}
+
+async function readProjectGedcomDeletionAfterFailure(
+  rpc: ProjectGedcomDeletionRpc,
+  jobId: string,
+  projectId: string,
+  sourceKey: string,
+): Promise<ProjectGedcomDeletionProgress | null> {
+  try {
+    const progress = await callProjectGedcomDeletionRpc(
+      rpc,
+      "get_project_gedcom_deletion",
+      { target_job_id: jobId },
+    );
+    assertProjectGedcomDeletionScope(progress, projectId, sourceKey);
+    return progress;
+  } catch {
+    return null;
+  }
+}
+
+async function callProjectGedcomDeletionRpc(
+  rpc: ProjectGedcomDeletionRpc,
+  functionName: string,
+  args: Record<string, unknown>,
+): Promise<ProjectGedcomDeletionProgress> {
+  const { data, error } = await rpc(functionName, args);
+  if (error) throw error;
+  return parseProjectGedcomDeletionProgress(data);
+}
+
+export function parseProjectGedcomDeletionProgress(
+  value: unknown,
+): ProjectGedcomDeletionProgress {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const status = deletionText(record, "status") as ProjectGedcomDeletionStatus;
+  const phase = deletionText(record, "phase") as ProjectGedcomDeletionPhase;
+  const progress: ProjectGedcomDeletionProgress = {
+    jobId: deletionText(record, "jobId", "job_id"),
+    projectId: deletionText(record, "projectId", "project_id"),
+    sourceKey: deletionText(record, "sourceKey", "source_key"),
+    status,
+    phase,
+    totalPersons: deletionCount(record, "totalPersons", "total_persons"),
+    processedPersons: deletionCount(record, "processedPersons", "processed_persons"),
+    remainingPersons: deletionCount(record, "remainingPersons", "remaining_persons"),
+    deletedPersons: deletionCount(record, "deletedPersons", "deleted_persons"),
+    deletedRelations: deletionCount(record, "deletedRelations", "deleted_relations"),
+    deletedFindings: deletionCount(record, "deletedFindings", "deleted_findings"),
+    lastError: deletionText(record, "lastError", "last_error"),
+    lastErrorCode: deletionText(record, "lastErrorCode", "last_error_code"),
+    createdAt: deletionText(record, "createdAt", "created_at"),
+    updatedAt: deletionText(record, "updatedAt", "updated_at"),
+    completedAt: deletionText(record, "completedAt", "completed_at"),
+    done: deletionBoolean(record, "done"),
+    retryable: deletionBoolean(record, "retryable"),
+  };
+  if (
+    !progress.jobId
+    || !progress.projectId
+    || !progress.sourceKey
+    || !["pending", "running", "failed", "completed"].includes(status)
+    || !["relations", "findings", "trees", "archives", "persons", "finalize", "completed"].includes(phase)
+  ) {
+    throw new Error("Сервер повернув некоректний стан видалення GEDCOM.");
+  }
+  return progress;
+}
+
+function assertProjectGedcomDeletionScope(
+  progress: ProjectGedcomDeletionProgress,
+  projectId: string,
+  sourceKey: string,
+): void {
+  if (progress.projectId !== projectId || progress.sourceKey !== sourceKey) {
+    throw new Error("Сервер повернув стан іншого GEDCOM-набору. Оновіть сторінку та повторіть дію.");
+  }
+}
+
+function projectGedcomDeletionResult(
+  progress: ProjectGedcomDeletionProgress,
+): ProjectPersonDeletionResult {
+  return {
+    deletedPersons: progress.deletedPersons,
+    deletedRelations: progress.deletedRelations,
+    deletedFindings: progress.deletedFindings,
+  };
+}
+
+function projectGedcomDeletionFailure(
+  progress: ProjectGedcomDeletionProgress,
+  retriesExhausted = false,
+): Error {
+  const detail = progress.lastError.trim();
+  if (retriesExhausted) {
+    return new Error(
+      detail
+        ? `Не вдалося продовжити видалення GEDCOM: ${detail}. Прогрес збережено; повторіть дію пізніше.`
+        : "Не вдалося продовжити видалення GEDCOM. Прогрес збережено; повторіть дію пізніше.",
+    );
+  }
+  return new Error(detail || "Не вдалося завершити видалення GEDCOM.");
+}
+
+function isTransientProjectGedcomDeletionProgress(
+  progress: ProjectGedcomDeletionProgress,
+): boolean {
+  const code = progress.lastErrorCode.trim().toLocaleUpperCase();
+  if (code === "57014") return true;
+  return /timeout|timed out|statement timeout/i.test(progress.lastError);
+}
+
+function reportProjectGedcomDeletionProgress(
+  progress: ProjectGedcomDeletionProgress,
+  listener?: ProjectGedcomDeletionProgressListener,
+): void {
+  try {
+    listener?.(progress);
+  } catch {
+    // Progress rendering must never interrupt a durable deletion operation.
+  }
+  for (const subscribed of projectGedcomDeletionProgressListeners) {
+    try {
+      subscribed(progress);
+    } catch {
+      // Keep other UI subscribers and the server loop alive.
+    }
+  }
+}
+
+function isTransientProjectGedcomDeletionError(error: unknown): boolean {
+  if (isDatabaseStatementTimeout(error)) return true;
+  const record = error && typeof error === "object" && !Array.isArray(error)
+    ? error as Record<string, unknown>
+    : {};
+  const code = String(record.code ?? "").trim().toLocaleUpperCase();
+  if (["57014", "40001", "40P01", "55P03"].includes(code)) return true;
+  const status = Number(record.status ?? record.statusCode);
+  if (Number.isFinite(status) && status >= 500 && status <= 599) return true;
+  const text = [
+    error instanceof Error ? error.message : error,
+    record.code,
+    record.message,
+    record.details,
+    record.hint,
+  ].filter((part) => typeof part === "string").join(" ").toLocaleLowerCase();
+  return text.includes("failed to fetch")
+    || text.includes("fetch failed")
+    || text.includes("network request failed")
+    || text.includes("connection reset")
+    || text.includes("bad gateway")
+    || text.includes("gateway timeout")
+    || text.includes("service unavailable");
+}
+
+function deletionText(
+  record: Record<string, unknown>,
+  camelKey: string,
+  snakeKey = camelKey,
+): string {
+  const value = record[camelKey] ?? record[snakeKey];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function deletionCount(
+  record: Record<string, unknown>,
+  camelKey: string,
+  snakeKey: string,
+): number {
+  const value = Number(record[camelKey] ?? record[snakeKey] ?? 0);
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+function deletionBoolean(record: Record<string, unknown>, key: string): boolean {
+  return record[key] === true;
+}
+
+function boundedInteger(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(minimum, Math.min(maximum, Math.floor(value!)));
+}
+
+function waitForProjectGedcomDeletionRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, delayMs)));
 }
 
 export async function listProjectGedcomImportDatasets(
@@ -1095,6 +1538,26 @@ function projectPersonDeletionError(error: unknown): Error {
   }
   if (message.includes("PROJECT_GEDCOM_OPERATION_ACTIVE")) {
     return new Error("Зачекайте завершення поточного GEDCOM-імпорту або відкату та повторіть дію.");
+  }
+  if (message.includes("PROJECT_GEDCOM_DELETION_ACTIVE")) {
+    return new Error("У цьому проєкті вже видаляється інший GEDCOM-набір. Дочекайтеся завершення та повторіть дію.");
+  }
+  if (message.includes("PROJECT_GEDCOM_DELETION_BUSY")) {
+    return new Error("Видалення GEDCOM уже обробляється в іншій вкладці. Зачекайте кілька секунд і повторіть дію.");
+  }
+  if (message.includes("GEDCOM_DATASET_NOT_FOUND")) {
+    return new Error("GEDCOM-набір уже видалено або список застарів. Оновіть сторінку.");
+  }
+  if (message.includes("GEDCOM_DELETION_JOB_NOT_FOUND")) {
+    return new Error("Стан видалення GEDCOM більше недоступний. Оновіть сторінку та повторіть дію.");
+  }
+  if (message.includes("GEDCOM_DELETION_SOURCE_CHANGED")) {
+    return new Error("Склад GEDCOM-набору змінився під час видалення. Оновіть сторінку та повторіть дію.");
+  }
+  if (isDatabaseStatementTimeout(error)) {
+    return new Error(
+      "Сервер не встиг завершити крок видалення. Прогрес збережено — повторіть дію, щоб безпечно продовжити.",
+    );
   }
   if (message.includes("PERSON_DELETE_TARGET_MISMATCH")) {
     return new Error("Список осіб змінився. Оновіть сторінку, перевірте вибір і повторіть видалення.");

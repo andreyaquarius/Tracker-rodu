@@ -12273,6 +12273,7 @@ button.persons-v2-timeline__event:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 14px;
 }
@@ -12292,6 +12293,31 @@ button.persons-v2-timeline__event:focus-visible {
   color: #53665f;
   font-size: 11px;
   font-weight: 650;
+}
+
+.persons-v2-gedcom-manager__item > .gedcom-import-progress {
+  flex: 1 0 100%;
+  width: 100%;
+}
+
+.persons-v2-gedcom-manager__item > .gedcom-import-progress progress {
+  width: 100%;
+  accent-color: var(--green);
+}
+
+.persons-v2-gedcom-manager__item > .gedcom-import-progress small {
+  color: #53665f;
+  line-height: 1.45;
+}
+
+@media (max-width: 560px) {
+  .persons-v2-gedcom-manager__item {
+    align-items: stretch;
+  }
+
+  .persons-v2-gedcom-manager__item > button {
+    width: 100%;
+  }
 }
 
 @container person-profile-section (max-width: 620px) {

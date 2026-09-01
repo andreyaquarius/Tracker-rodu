@@ -1,8 +1,19 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const WORKER_BUDGET_MS = 80_000;
-const INITIAL_BATCH_SIZE = 500;
-const MIN_BATCH_SIZE = 25;
+const INITIAL_ROLLBACK_BATCH_SIZE = 500;
+const MIN_ROLLBACK_BATCH_SIZE = 25;
+const INITIAL_DELETION_BATCH_SIZE = 100;
+const MIN_DELETION_BATCH_SIZE = 1;
+
+type WorkKind = "deletion" | "rollback";
+
+type WorkerPayload = {
+  operationId?: unknown;
+  jobId?: unknown;
+  status?: unknown;
+  retryable?: unknown;
+};
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -68,39 +79,90 @@ Deno.serve(async (request) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const deadline = Date.now() + WORKER_BUDGET_MS;
-  let batchSize = INITIAL_BATCH_SIZE;
-  let processedBatches = 0;
+  let rollbackBatchSize = INITIAL_ROLLBACK_BATCH_SIZE;
+  let deletionBatchSize = INITIAL_DELETION_BATCH_SIZE;
+  let processedRollbackBatches = 0;
+  let processedDeletionBatches = 0;
   let lastOperationId: string | null = null;
+  let lastDeletionJobId: string | null = null;
+  let nextKind: WorkKind = "deletion";
+  let consecutiveEmptyQueues = 0;
+  let deletionBlocked = false;
+  let rollbackBlocked = false;
+  const queueErrors: Array<{ kind: WorkKind; message: string }> = [];
 
   while (Date.now() < deadline) {
-    const { data, error } = await client.rpc("process_next_stale_gedcom_import_rollback", {
-      batch_size: batchSize,
-    });
+    if (deletionBlocked && rollbackBlocked) break;
+    if (nextKind === "deletion" && deletionBlocked) nextKind = "rollback";
+    if (nextKind === "rollback" && rollbackBlocked) nextKind = "deletion";
+    const workKind = nextKind;
+    const isDeletion = workKind === "deletion";
+    const functionName = isDeletion
+      ? "process_next_gedcom_deletion_job"
+      : "process_next_stale_gedcom_import_rollback";
+    const batchSize = isDeletion ? deletionBatchSize : rollbackBatchSize;
+    const { data, error } = await client.rpc(functionName, { batch_size: batchSize });
     if (error) {
-      if (isTransientError(error) && batchSize > MIN_BATCH_SIZE) {
-        batchSize = Math.max(MIN_BATCH_SIZE, Math.floor(batchSize / 2));
+      const minimumBatchSize = isDeletion
+        ? MIN_DELETION_BATCH_SIZE
+        : MIN_ROLLBACK_BATCH_SIZE;
+      if (isTransientError(error) && batchSize > minimumBatchSize) {
+        const smallerBatchSize = Math.max(minimumBatchSize, Math.floor(batchSize / 2));
+        if (isDeletion) deletionBatchSize = smallerBatchSize;
+        else rollbackBatchSize = smallerBatchSize;
         continue;
       }
-      console.error("GEDCOM import rollback worker stopped", error);
-      return json({
-        error: "GEDCOM rollback batch failed; the next scheduled run will retry.",
-        processedBatches,
-        lastOperationId,
-      }, 500);
+      console.error(`GEDCOM ${workKind} worker stopped`, error);
+      queueErrors.push({
+        kind: workKind,
+        message: String((error as { message?: unknown })?.message ?? error),
+      });
+      if (isDeletion) deletionBlocked = true;
+      else rollbackBlocked = true;
+      nextKind = isDeletion ? "rollback" : "deletion";
+      continue;
     }
-    if (!data) break;
+    nextKind = isDeletion ? "rollback" : "deletion";
+    if (!data) {
+      if ((isDeletion && rollbackBlocked) || (!isDeletion && deletionBlocked)) break;
+      consecutiveEmptyQueues += 1;
+      if (consecutiveEmptyQueues >= 2) break;
+      continue;
+    }
 
-    const operation = data as { operationId?: unknown };
-    lastOperationId = typeof operation.operationId === "string"
-      ? operation.operationId
-      : lastOperationId;
-    processedBatches += 1;
+    consecutiveEmptyQueues = 0;
+    const payload = data as WorkerPayload;
+    if (isDeletion) {
+      lastDeletionJobId = typeof payload.jobId === "string"
+        ? payload.jobId
+        : lastDeletionJobId;
+      processedDeletionBatches += 1;
+      if (payload.status === "failed" && payload.retryable === true) {
+        deletionBatchSize = Math.max(
+          MIN_DELETION_BATCH_SIZE,
+          Math.floor(deletionBatchSize / 2),
+        );
+      }
+    } else {
+      lastOperationId = typeof payload.operationId === "string"
+        ? payload.operationId
+        : lastOperationId;
+      processedRollbackBatches += 1;
+    }
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 
-  return json({
-    processedBatches,
+  const result = {
+    ...(queueErrors.length > 0
+      ? { error: "One GEDCOM work queue failed; completed work is durable and the next run will retry." }
+      : {}),
+    processedBatches: processedRollbackBatches + processedDeletionBatches,
+    processedRollbackBatches,
+    processedDeletionBatches,
     lastOperationId,
-    hasMore: Date.now() >= deadline,
-  });
+    lastDeletionJobId,
+    hasMore: Date.now() >= deadline || queueErrors.length > 0,
+    queueErrors,
+  };
+  return json(result, queueErrors.length > 0 ? 500 : 200);
 });
