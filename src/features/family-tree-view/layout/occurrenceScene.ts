@@ -491,10 +491,11 @@ function addParentGroups(state: SceneBuilderState, current: QueueItem): void {
   const selectedMatch = selectedParentSet
     ? allGroups.filter(group => group.union.id === selectedParentSet).slice(0, 1)
     : [];
-  const selectedGroups = selectedParentSet
-    ? selectedMatch.length > 0
-      ? selectedMatch
-      : allGroups.slice(0, 1)
+  // A persisted selection can become stale after a parent set is removed or
+  // merged. Treat it exactly like no explicit selection so "show all" keeps
+  // working and the canvas agrees with the select's visible fallback.
+  const selectedGroups = selectedMatch.length > 0
+    ? selectedMatch
     : state.options.showAllParentSets
       ? allGroups
       : allGroups.slice(0, 1);

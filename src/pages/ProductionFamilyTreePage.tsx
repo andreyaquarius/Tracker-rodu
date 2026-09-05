@@ -86,6 +86,10 @@ import type {
 } from "../features/family-tree-view/types";
 import { useFamilyTreeMutations } from "../hooks/useFamilyTreeMutations";
 import { useFamilyTreeAppearancePreferences } from "../hooks/useFamilyTreeAppearancePreferences.ts";
+import {
+  useFamilyTreeViewPreferences,
+  type FamilyTreeViewPreferenceSyncState,
+} from "../hooks/useFamilyTreeViewPreferences.ts";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
 import {
   createFamilyTreeFromLegacyImport,
@@ -120,6 +124,7 @@ import {
   directLineagePalette,
   type FamilyTreeAppearancePreferences,
 } from "../utils/familyTreeAppearance.ts";
+import { MAX_FAMILY_TREE_VIEW_GENERATIONS } from "../utils/familyTreeViewPreferences.ts";
 import { formatDateForDisplay } from "../utils/dateHelpers.ts";
 import type {
   GedcomImportExecutionOptions,
@@ -832,15 +837,25 @@ function LoadedFamilyTree({
   const appliedRouteFocusRef = useRef(requestedFocusPersonId);
   const focusPersonId = focusHistory[focusIndex] ?? homePersonId;
   const directAncestorMode = displayMode === "direct-ancestors";
+  const {
+    preferences: viewPreferences,
+    syncState: viewPreferencesSyncState,
+    ready: viewPreferencesReady,
+    updatePreferences: updateViewPreferences,
+  } = useFamilyTreeViewPreferences(projectId, entryPoint.id);
+  const {
+    ancestorDepth,
+    descendantDepth,
+    collateralDepth,
+    showAllParentSets,
+    activeParentSetByChild,
+  } = viewPreferences;
   useEffect(() => {
     onFocusPersonChange(focusPersonId);
   }, [focusPersonId, onFocusPersonChange]);
-  const [ancestorDepth, setAncestorDepth] = useState(7);
-  const [descendantDepth, setDescendantDepth] = useState(0);
-  const [collateralDepth, setCollateralDepth] = useState(0);
   const maxNodes = directAncestorMode ? STRUCTURAL_ANCESTOR_MAX_NODES : 400;
-  const [showAllParentSets, setShowAllParentSets] = useState(false);
-  const [activeParentSetByChild, setActiveParentSetByChild] = useState<Record<string, string>>({});
+  const viewPreferencesUsable =
+    viewPreferencesReady || viewPreferencesSyncState === "error";
   const [selectedPersonId, setSelectedPersonId] = useState(focusPersonId);
   const [searchQuery, setSearchQuery] = useState("");
   const [quickEditPersonId, setQuickEditPersonId] = useState("");
@@ -887,6 +902,7 @@ function LoadedFamilyTree({
     client,
     treeId: entryPoint.id,
     focusPersonId,
+    enabled: viewPreferencesUsable,
     ancestorDepth,
     descendantDepth: directAncestorMode ? 0 : descendantDepth,
     collateralDepth: directAncestorMode ? 0 : collateralDepth,
@@ -1327,13 +1343,6 @@ function LoadedFamilyTree({
       : "stale-scope";
     setFocusHistory([...snapshot.focusHistory]);
     setFocusIndex(snapshot.focusIndex);
-    setAncestorDepth(snapshot.generationSettings.ancestorDepth);
-    setDescendantDepth(snapshot.generationSettings.descendantDepth);
-    setCollateralDepth(snapshot.generationSettings.collateralDepth);
-    setShowAllParentSets(snapshot.generationSettings.showAllParentSets);
-    setActiveParentSetByChild({
-      ...snapshot.generationSettings.activeParentSetByChild,
-    });
     setSelectedPersonId(
       snapshot.pedigreeGraph.persons.some(
         person => person.id === snapshot.selectedPersonId,
@@ -1783,6 +1792,12 @@ function LoadedFamilyTree({
   }, [normalizedSearch, persons]);
 
   const parentSetOptions = useMemo(() => parentSetsForChild(graph, focusPersonId), [focusPersonId, graph]);
+  const requestedActiveParentSetId = activeParentSetByChild[focusPersonId] ?? "";
+  const effectiveActiveParentSetId = parentSetOptions.some(
+    (parentSet) => parentSet.id === requestedActiveParentSetId,
+  )
+    ? requestedActiveParentSetId
+    : parentSetOptions[0]?.id ?? "";
   const targetPersonId = builderTarget?.personId ?? attachTarget?.personId ?? relativeMenuPersonId;
   const targetName = graph.persons.find((person) => person.id === targetPersonId)?.displayName ??
     personLabel(persons.find((person) => person.id === targetPersonId));
@@ -1978,7 +1993,10 @@ function LoadedFamilyTree({
         return;
       }
       if (token.endsWith(":other-parent-sets")) {
-        setShowAllParentSets(true);
+        updateViewPreferences((current) => ({
+          ...current,
+          showAllParentSets: true,
+        }));
         setNotice("Показано всі вже завантажені набори батьків цієї особи.");
         return;
       }
@@ -2019,6 +2037,10 @@ function LoadedFamilyTree({
   const specialPerspectiveLoadedPersons = perspective.kind === "all-descendants"
     ? progressiveDescendants.loadedPersons
     : specialNeighborhood.graph.persons.length;
+
+  if (!viewPreferencesUsable) {
+    return <FamilyTreeLoadingState />;
+  }
 
   if (
     perspective.kind === "pedigree" &&
@@ -2253,36 +2275,86 @@ function LoadedFamilyTree({
         <details ref={viewSettingsRef} className="family-tree-v2-view-settings">
           <summary className="button button-secondary" aria-controls="family-tree-v2-view-settings-panel">Параметри</summary>
           <div id="family-tree-v2-view-settings-panel" className="family-tree-v2-view-settings-panel">
-        <label>
-          <span>{directAncestorMode ? "Поколінь предків" : "Предків"}</span>
-          <input type="number" min={0} value={ancestorDepth} disabled={specialPerspectiveActive} onChange={(event) => setAncestorDepth(nonNegativeInteger(event.target.value, 7))} />
-        </label>
-        {!directAncestorMode ? <label>
-          <span>Нащадків</span>
-          <input type="number" min={0} value={descendantDepth} disabled={specialPerspectiveActive} onChange={(event) => setDescendantDepth(nonNegativeInteger(event.target.value, 0))} />
-        </label> : null}
-        {!directAncestorMode ? <label className="checkbox-line">
-          <input type="checkbox" checked={collateralDepth > 0} disabled={specialPerspectiveActive} onChange={(event) => setCollateralDepth(event.target.checked ? 1 : 0)} />
-          <span>Показати бічні гілки зараз</span>
-        </label> : null}
-        <label className="checkbox-line">
-          <input type="checkbox" checked={showAllParentSets} disabled={specialPerspectiveActive} onChange={(event) => setShowAllParentSets(event.target.checked)} />
-          <span>Усі набори батьків</span>
-        </label>
-        {parentSetOptions.length > 1 ? (
-          <label>
-            <span>Активний набір батьків</span>
-            <select
-              disabled={specialPerspectiveActive}
-              value={activeParentSetByChild[focusPersonId] ?? parentSetOptions[0]?.id ?? ""}
-              onChange={(event) => setActiveParentSetByChild((current) => ({ ...current, [focusPersonId]: event.target.value }))}
+            <label>
+              <span>{directAncestorMode ? "Поколінь предків" : "Предків"}</span>
+              <input
+                type="number"
+                min={0}
+                max={MAX_FAMILY_TREE_VIEW_GENERATIONS}
+                value={ancestorDepth}
+                disabled={specialPerspectiveActive || !viewPreferencesReady}
+                onChange={(event) => updateViewPreferences((current) => ({
+                  ...current,
+                  ancestorDepth: nonNegativeInteger(event.target.value, 7),
+                }))}
+              />
+            </label>
+            {!directAncestorMode ? <label>
+              <span>Нащадків</span>
+              <input
+                type="number"
+                min={0}
+                max={MAX_FAMILY_TREE_VIEW_GENERATIONS}
+                value={descendantDepth}
+                disabled={specialPerspectiveActive || !viewPreferencesReady}
+                onChange={(event) => updateViewPreferences((current) => ({
+                  ...current,
+                  descendantDepth: nonNegativeInteger(event.target.value, 0),
+                }))}
+              />
+            </label> : null}
+            {!directAncestorMode ? <label className="checkbox-line">
+              <input
+                type="checkbox"
+                checked={collateralDepth > 0}
+                disabled={specialPerspectiveActive || !viewPreferencesReady}
+                onChange={(event) => updateViewPreferences((current) => ({
+                  ...current,
+                  collateralDepth: event.target.checked ? 1 : 0,
+                }))}
+              />
+              <span>Показати бічні гілки зараз</span>
+            </label> : null}
+            <label className="checkbox-line">
+              <input
+                type="checkbox"
+                checked={showAllParentSets}
+                disabled={specialPerspectiveActive || !viewPreferencesReady}
+                onChange={(event) => updateViewPreferences((current) => ({
+                  ...current,
+                  showAllParentSets: event.target.checked,
+                }))}
+              />
+              <span>Усі набори батьків</span>
+            </label>
+            {parentSetOptions.length > 1 ? (
+              <label>
+                <span>Активний набір батьків</span>
+                <select
+                  disabled={specialPerspectiveActive || !viewPreferencesReady}
+                  value={effectiveActiveParentSetId}
+                  onChange={(event) => updateViewPreferences((current) => ({
+                    ...current,
+                    activeParentSetByChild: {
+                      ...current.activeParentSetByChild,
+                      [focusPersonId]: event.target.value,
+                    },
+                  }))}
+                >
+                  {parentSetOptions.map((parentSet, index) => (
+                    <option key={parentSet.id} value={parentSet.id}>{parentSetLabel(parentSet, index)}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <small
+              className="family-tree-v2-view-settings-sync"
+              data-state={viewPreferencesSyncState}
+              role="status"
+              aria-live="polite"
             >
-              {parentSetOptions.map((parentSet, index) => (
-                <option key={parentSet.id} value={parentSet.id}>{parentSetLabel(parentSet, index)}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+              {viewPreferencesStatus(viewPreferencesReady, viewPreferencesSyncState)}
+            </small>
           </div>
         </details>
         <button type="button" className="button button-secondary family-tree-v2-fullscreen" onClick={() => void toggleFullscreen()}>
@@ -2685,5 +2757,21 @@ function personLabel(person: Person | undefined): string {
 
 function nonNegativeInteger(value: string, fallback: number): number {
   const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
+  return Number.isFinite(parsed)
+    ? Math.min(MAX_FAMILY_TREE_VIEW_GENERATIONS, Math.max(0, parsed))
+    : fallback;
+}
+
+function viewPreferencesStatus(
+  ready: boolean,
+  syncState: FamilyTreeViewPreferenceSyncState,
+): string {
+  if (syncState === "error") {
+    return ready
+      ? "Збережено на цьому пристрої. Синхронізацію буде повторено при наступному відкритті."
+      : "Не вдалося завантажити параметри облікового запису. Оновіть сторінку й повторіть.";
+  }
+  if (!ready || syncState === "loading") return "Завантажуємо ваші параметри…";
+  if (syncState === "saving") return "Зберігаємо для вашого облікового запису…";
+  return "Збережено для вашого облікового запису й цього дерева.";
 }

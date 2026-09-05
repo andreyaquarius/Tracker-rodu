@@ -39,6 +39,7 @@ test("account privacy cleanup removes private mirrors but never the auth session
     "family-tree-viewport:tree-a:root-a:ancestors": "private viewport",
     "family-tree-manual-positions-v3:tree-a:root-a:ancestors": "private positions",
     "tracker-rodu.family-tree-appearance.v1:project-a:tree-a": "private appearance",
+    "tracker-rodu.family-tree-view-preferences.v1:user-a:project-a:tree-a": "private view settings",
     "tracker-rodu-active-workspace": "project-a",
     "tracker-rodu-account-onboarded": "1",
     "tracker-rodu-ai-finding-indexing-consent": "yes",
@@ -50,7 +51,7 @@ test("account privacy cleanup removes private mirrors but never the auth session
 
   const removed = clearSensitiveLocalStorage(storage);
 
-  assert.equal(removed, 10);
+  assert.equal(removed, 11);
   assert.equal(storage.has("tracker-rodu-project-people:project-a"), false);
   assert.equal(storage.has("family-tree-viewport:tree-a:root-a:ancestors"), false);
   assert.equal(storage.has("tracker-rodu-active-workspace"), false);
@@ -65,18 +66,24 @@ test("project access cleanup removes only that project's data caches", () => {
     "tracker-rodu-project-people:project-a": "a",
     "tracker-rodu-project-documents:project-a": "a",
     "tracker-rodu.family-tree-appearance.v1:project-a:tree-a": "a",
+    "tracker-rodu.family-tree-view-preferences.v1:user-a:project-a:tree-a": "a",
+    "tracker-rodu.family-tree-view-preferences.v1:user-b:project-a:tree-b": "a",
     "tracker-rodu-project-people:project-b": "b",
     "tracker-rodu.family-tree-appearance.v1:project-b:tree-b": "b",
+    "tracker-rodu.family-tree-view-preferences.v1:user-a:project-b:tree-b": "b",
     "family-tree-viewport:tree-a:root-a:ancestors": "visual state without project id",
     "unrelated": "keep",
   });
 
-  assert.equal(clearSensitiveProjectLocalStorage("project-a", storage), 4);
+  assert.equal(clearSensitiveProjectLocalStorage("project-a", storage), 6);
   assert.equal(storage.has("tracker-rodu-project-people:project-a"), false);
   assert.equal(storage.has("tracker-rodu.family-tree-appearance.v1:project-a:tree-a"), false);
+  assert.equal(storage.has("tracker-rodu.family-tree-view-preferences.v1:user-a:project-a:tree-a"), false);
+  assert.equal(storage.has("tracker-rodu.family-tree-view-preferences.v1:user-b:project-a:tree-b"), false);
   assert.equal(storage.has("family-tree-viewport:tree-a:root-a:ancestors"), false);
   assert.equal(storage.has("tracker-rodu-project-people:project-b"), true);
   assert.equal(storage.has("tracker-rodu.family-tree-appearance.v1:project-b:tree-b"), true);
+  assert.equal(storage.has("tracker-rodu.family-tree-view-preferences.v1:user-a:project-b:tree-b"), true);
   assert.equal(storage.has("unrelated"), true);
 });
 

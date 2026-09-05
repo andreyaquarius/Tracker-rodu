@@ -1929,6 +1929,67 @@ test("multiple parent-set records for one child reuse the same parent card", () 
   );
 });
 
+test("a removed persisted parent-set selection still honors show all parent sets", () => {
+  const graph: FamilyGraphData = {
+    persons: [
+      person("child"),
+      person("biological-parent"),
+      person("legal-parent"),
+    ],
+    unions: [
+      {
+        id: "parent-set:biological",
+        kind: "parent-set",
+        memberIds: ["biological-parent"],
+        displayOrder: "01",
+      },
+      {
+        id: "parent-set:legal",
+        kind: "parent-set",
+        memberIds: ["legal-parent"],
+        displayOrder: "02",
+      },
+    ],
+    parentChildRelations: [
+      {
+        id: "biological-parent",
+        parentId: "biological-parent",
+        childId: "child",
+        unionId: "parent-set:biological",
+        kind: "biological",
+      },
+      {
+        id: "legal-parent",
+        parentId: "legal-parent",
+        childId: "child",
+        unionId: "parent-set:legal",
+        kind: "legal_parent",
+      },
+    ],
+  };
+
+  const result = run(graph, {
+    focusPersonId: "child",
+    ancestorDepth: 1,
+    descendantDepth: 0,
+    collateralDepth: 0,
+    showAllParentSets: true,
+    activeParentSetByChild: { child: "parent-set:removed" },
+  });
+
+  assert.deepEqual(
+    result.nodes
+      .filter(node => node.personId?.endsWith("parent"))
+      .map(node => node.personId)
+      .sort(),
+    ["biological-parent", "legal-parent"],
+  );
+  assert.deepEqual(
+    result.unions.map(union => union.unionId).sort(),
+    ["parent-set:biological", "parent-set:legal"],
+  );
+});
+
 test("pedigree collapse creates one canonical and one reference occurrence", () => {
   const graph: FamilyGraphData = {
     persons: [

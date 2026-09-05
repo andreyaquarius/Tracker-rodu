@@ -220,9 +220,10 @@ test("leaving a special perspective restores the complete pedigree snapshot", ()
   );
   assert.match(restore, /setFocusHistory\(\[\.\.\.snapshot\.focusHistory\]\)/);
   assert.match(restore, /setFocusIndex\(snapshot\.focusIndex\)/);
-  assert.match(restore, /setAncestorDepth\(snapshot\.generationSettings\.ancestorDepth\)/);
-  assert.match(restore, /setDescendantDepth\(snapshot\.generationSettings\.descendantDepth\)/);
-  assert.match(restore, /setCollateralDepth\(snapshot\.generationSettings\.collateralDepth\)/);
+  assert.doesNotMatch(
+    restore,
+    /updateViewPreferences|setAncestorDepth|setDescendantDepth|setCollateralDepth/,
+  );
   assert.match(restore, /setSelectedPersonId\(/);
   assert.match(restore, /cameraSnapshotsRef\.current\.set\(/);
   assert.match(restore, /setPerspective\(\{ kind: "pedigree" \}\)/);

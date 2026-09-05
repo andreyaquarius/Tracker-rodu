@@ -8,6 +8,9 @@ import {
   PROJECT_CACHE_PREFIX,
   type ProjectCacheStorage,
 } from "../utils/projectCache.ts";
+import {
+  FAMILY_TREE_VIEW_PREFERENCES_STORAGE_PREFIX,
+} from "../utils/familyTreeViewPreferences.ts";
 
 export const SENSITIVE_LOCAL_STORAGE_PREFIXES = Object.freeze([
   PROJECT_CACHE_PREFIX,
@@ -15,6 +18,7 @@ export const SENSITIVE_LOCAL_STORAGE_PREFIXES = Object.freeze([
   "family-tree-viewport:",
   "family-tree-manual-positions-v3:",
   "tracker-rodu.family-tree-appearance.v1:",
+  FAMILY_TREE_VIEW_PREFERENCES_STORAGE_PREFIX,
 ]);
 
 export const SENSITIVE_LOCAL_STORAGE_KEYS = Object.freeze([
@@ -79,6 +83,7 @@ export function clearSensitiveProjectLocalStorage(
   if (!projectId || !storage) return 0;
   const projectSuffix = `:${projectId}`;
   const appearancePrefix = `tracker-rodu.family-tree-appearance.v1:${projectId}:`;
+  const viewPreferencesPrefix = FAMILY_TREE_VIEW_PREFERENCES_STORAGE_PREFIX;
   const keys: string[] = [];
   try {
     for (let index = 0; index < storage.length; index += 1) {
@@ -87,6 +92,10 @@ export function clearSensitiveProjectLocalStorage(
       if (
         (key.startsWith(PROJECT_CACHE_PREFIX) && key.endsWith(projectSuffix)) ||
         key.startsWith(appearancePrefix) ||
+        (
+          key.startsWith(viewPreferencesPrefix) &&
+          key.slice(viewPreferencesPrefix.length).split(":")[1] === projectId
+        ) ||
         key.startsWith("family-tree-layout:") ||
         key.startsWith("family-tree-viewport:") ||
         key.startsWith("family-tree-manual-positions-v3:")

@@ -153,7 +153,7 @@ test("production tree viewport fills its host without reserving empty optional r
   assert.match(camera, /observer\.observe\(element\)/);
 });
 
-test("production keeps the base request compact while priming the focus family and optional cousins", () => {
+test("production keeps the base request compact and restores each user's saved view parameters", () => {
   const page = readFileSync(
     new URL("../../src/pages/ProductionFamilyTreePage.tsx", import.meta.url),
     "utf8",
@@ -166,17 +166,19 @@ test("production keeps the base request compact while priming the focus family a
     "utf8",
   );
 
-  assert.match(page, /const \[ancestorDepth, setAncestorDepth\] = useState\(7\);/);
-  assert.match(page, /const \[descendantDepth, setDescendantDepth\] = useState\(0\);/);
-  assert.match(page, /const \[collateralDepth, setCollateralDepth\] = useState\(0\);/);
+  assert.match(page, /useFamilyTreeViewPreferences\(projectId, entryPoint\.id\)/);
+  assert.doesNotMatch(page, /const \[ancestorDepth, setAncestorDepth\] = useState/);
+  assert.doesNotMatch(page, /const \[descendantDepth, setDescendantDepth\] = useState/);
+  assert.doesNotMatch(page, /const \[collateralDepth, setCollateralDepth\] = useState/);
   assert.match(
     page,
-    /value=\{descendantDepth\}[\s\S]*?setDescendantDepth\(nonNegativeInteger\(event\.target\.value, 0\)\)/,
+    /value=\{descendantDepth\}[\s\S]*?updateViewPreferences\([\s\S]*?descendantDepth:\s*nonNegativeInteger\(event\.target\.value, 0\)/,
   );
   assert.match(
     page,
-    /checked=\{collateralDepth > 0\}[\s\S]*?setCollateralDepth\(event\.target\.checked \? 1 : 0\)/,
+    /checked=\{collateralDepth > 0\}[\s\S]*?updateViewPreferences\([\s\S]*?collateralDepth:\s*event\.target\.checked \? 1 : 0/,
   );
+  assert.match(page, /Збережено для вашого облікового запису й цього дерева/);
   assert.match(page, /defaultVisibleFamilyPersonId:\s*focusPersonId/);
   assert.match(
     page,
