@@ -94,6 +94,7 @@ import {
   type FindingDocumentPlaceState,
   type FindingHistoricalPlaceDecision,
 } from "../services/findingHistoricalPlaceWorkflow.ts";
+import { prefillFindingFromDocument } from "../utils/findingDocumentPrefill.ts";
 
 interface CrudPageProps {
   config: EntityConfig;
@@ -1417,6 +1418,10 @@ export function EntityModal({
           "findingId"
         >;
       }
+      const linkedDocument = documents.find(
+        (document) => document.id === String(defaults.documentId ?? "").trim(),
+      );
+      return prefillFindingFromDocument(defaults, linkedDocument);
     }
     return defaults;
   });
@@ -1490,6 +1495,19 @@ export function EntityModal({
     normalizeCustomFieldValues((entity as unknown as { customFields?: unknown } | null)?.customFields),
   );
   const archiveReferenceMissingLabels = missingArchiveReferenceLabels(config.collection, config.fields, form);
+
+  const changeFindingDocument = (value: string) => {
+    setForm((current) => {
+      const previousDocument = documents.find(
+        (document) => document.id === String(current.documentId ?? "").trim(),
+      );
+      const linkedDocument = documents.find(
+        (document) => document.id === value.trim(),
+      );
+      const next = { ...current, documentId: value };
+      return prefillFindingFromDocument(next, linkedDocument, previousDocument);
+    });
+  };
 
   const buildEntityForSave = (sourceForm: FormRecord, timestamp = nowIso()): AppEntity => {
     const persistedEntity = persistedEntityRef.current;
@@ -1783,6 +1801,7 @@ export function EntityModal({
                   ? (current.personIds as string[]).filter((id) => id !== personId)
                   : [],
               }))}
+              onDocumentChange={config.collection === "findings" ? changeFindingDocument : undefined}
               onCreatePerson={() => {
                 if (config.collection === "findings") {
                   if (!entity?.id) {
@@ -3296,6 +3315,7 @@ function FormField({
   scanUploadBlockedMessage,
   onCreatePerson,
   onParticipantPersonUnlink,
+  onDocumentChange,
   onOpenScanViewer,
   onChange,
 }: {
@@ -3317,6 +3337,7 @@ function FormField({
   scanUploadBlockedMessage?: string;
   onCreatePerson: () => void;
   onParticipantPersonUnlink: (personId: string) => void;
+  onDocumentChange?: (value: string) => void;
   onOpenScanViewer?: (
     scan: ScanAttachment,
     context?: DocumentScanViewerContext,
@@ -3417,8 +3438,14 @@ function FormField({
   const common = {
     value: Array.isArray(value) ? "" : String(value ?? ""),
     required,
-    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      onChange(event.target.value),
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+      const nextValue = event.target.value;
+      if (field.type === "document" && onDocumentChange) {
+        onDocumentChange(nextValue);
+        return;
+      }
+      onChange(nextValue);
+    },
   };
   const suggestions = field.suggestions ?? [];
   return (
