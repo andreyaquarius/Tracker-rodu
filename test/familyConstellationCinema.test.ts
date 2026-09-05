@@ -12,10 +12,32 @@ import type { FamilyGraphData } from "../src/features/family-tree-view/types.ts"
 const fixture = (size = 5) => {
   const graph: FamilyGraphData = { persons: Array.from({ length: size }, (_, i) => ({ id: String(i), displayName: `Особа ${i}`, birth: { display: String(1800 + i) } })),
     unions: [], parentChildRelations: Array.from({ length: size - 1 }, (_, i) => ({ id: `r${i}`, parentId: "0", childId: String(i + 1), kind: "biological" })) };
-  const scene = buildConstellationScene(graph, "0");
+  return cinemaFixture(graph, "0");
+};
+const cinemaFixture = (graph: FamilyGraphData, focusId: string) => {
+  const scene = buildConstellationScene(graph, focusId);
   const time = buildConstellationTimeModel(scene, graph, graph.persons.map(person => ({ id: person.id, birthPlace: `Місце ${person.id}` })), 2026);
   const places = buildConstellationPlacesScene(buildConstellationPlacesModel(time));
   return { graph, scene, time, places };
+};
+const ancestorFixture = (size = 15) => {
+  // IDs sort in the opposite direction to pedigree order; array order is not a tour order.
+  const id = (slot: number) => `person-${10_000 - slot}`;
+  const expected = Array.from({ length: size }, (_, index) => id(index + 1));
+  const graph: FamilyGraphData = {
+    persons: expected.map((id, index) => ({ id, displayName: `Особа ${index + 1}`, birth: { display: String(1978 - index) } })),
+    unions: [{ id: "root-couple", kind: "partnership", memberIds: [id(1), "partner"] }],
+    parentChildRelations: Array.from({ length: size - 1 }, (_, index) => {
+      const slot = index + 2;
+      return { id: `relation-${id(slot)}`, parentId: id(slot), childId: id(Math.floor(slot / 2)), kind: "biological", role: slot % 2 ? "mother" : "father" };
+    }),
+  };
+  graph.persons.push(...["partner", "child", "sibling", "disconnected"].map(id => ({ id, displayName: id })));
+  graph.parentChildRelations.push(
+    { id: "child", parentId: id(1), childId: "child", kind: "biological" },
+    { id: "sibling", parentId: id(2), childId: "sibling", kind: "biological" },
+  );
+  return { ...cinemaFixture(graph, id(1)), expected };
 };
 test("night palette stays readable and preserves the user's saved scheme without mutations", () => {
   for (const color of ["#183b29", "#aa2288", "#0707bf", "#faff00", "#000000", "#ffffff"]) {
@@ -38,14 +60,79 @@ test("night colors respond to palette edits and keep different branch colors dis
   assert.ok(new Set(a.lineage.slice(0, 4).map(tone => tone.stroke)).size >= 3);
 });
 test("family presentation only uses loaded unmasked people and real scene coordinates", () => {
-  const { scene, time, places } = fixture(); const snapshot = structuredClone(scene);
+  const { scene, time, places, expected } = ancestorFixture(7); const snapshot = structuredClone(scene);
   const tour = buildConstellationTour("family", scene, time, places);
-  assert.equal(tour.steps.length, 5); assert.equal(tour.steps[0]?.personId, "0");
+  assert.deepEqual(tour.steps.map(step => step.personId), expected);
+  assert.equal(tour.total, expected.length);
   assert.ok(tour.steps.every(step => scene.nodes.some(node => node.id === step.personId && node.x === step.x && node.y === step.y)));
   assert.deepEqual(structuredClone(scene), snapshot);
-  scene.nodes[1]!.person.badges = { privacy: "masked" };
-  assert.equal(buildConstellationTour("family", scene, time, places).steps.some(step => step.personId === scene.nodes[1]!.id), false);
+  scene.nodes.find(node => node.id === expected[1])!.person.badges = { privacy: "masked" };
+  assert.deepEqual(buildConstellationTour("family", scene, time, places).steps.map(step => step.personId), expected.filter((_, index) => index !== 1));
   assert.deepEqual(buildConstellationTour("family", undefined, time, places), { steps: [], total: 0 });
+});
+
+test("ancestor presentation goes focus, father, mother, grandparents and each older row, regardless of IDs or graph distance", () => {
+  const { graph, expected } = ancestorFixture();
+  // An extra social connection shortens the graph path to a grandparent, but not their generation.
+  graph.unions.push({ id: "shortcut", kind: "partnership", memberIds: [expected[0]!, expected[6]!] });
+  const before = structuredClone(graph);
+  const { scene, time, places } = cinemaFixture(graph, expected[0]!);
+  assert.equal(scene.nodes.find(node => node.id === expected[6])?.distance, 1);
+  const tour = buildConstellationTour("family", scene, time, places);
+  assert.deepEqual(tour.steps.map(step => step.personId), expected);
+  assert.match(tour.steps[0]!.detail, /^Центральна особа/u);
+  assert.match(tour.steps[1]!.detail, /^Батьки · покоління 1/u);
+  assert.match(tour.steps[3]!.detail, /^Дідусі та бабусі · покоління 2/u);
+  assert.match(tour.steps[7]!.detail, /^Предки · покоління 3/u);
+  assert.deepEqual(graph, before);
+  const reordered = cinemaFixture({ persons: [...graph.persons].reverse(), unions: [...graph.unions].reverse(), parentChildRelations: [...graph.parentChildRelations].reverse() }, expected[0]!);
+  reordered.scene.nodes.reverse();
+  assert.deepEqual(buildConstellationTour("family", reordered.scene, reordered.time, reordered.places), tour);
+});
+
+test("incomplete pedigree and unspecified parent roles preserve branch order without inventing people", () => {
+  const { graph, expected } = ancestorFixture();
+  // Unknown role on the paternal grandmother removes her Ahnentafel slot and those above her.
+  graph.parentChildRelations.find(relation => relation.parentId === expected[4])!.role = undefined;
+  graph.persons = graph.persons.filter(person => person.id !== expected[3]);
+  const { scene, time, places } = cinemaFixture(graph, expected[0]!);
+  assert.equal(scene.nodes.find(node => node.id === expected[4])?.ancestorSlot, undefined);
+  const missingBranch = new Set([expected[3], expected[7], expected[8]]);
+  assert.deepEqual(buildConstellationTour("family", scene, time, places).steps.map(step => step.personId), expected.filter(id => !missingBranch.has(id)));
+});
+
+test("shared ancestors and malformed parent cycles are shown once and do not disturb generation order", () => {
+  const { graph, expected } = ancestorFixture(7);
+  graph.parentChildRelations.push(
+    { id: "shared", parentId: expected[3]!, childId: expected[2]!, kind: "biological", role: "father" },
+    { id: "cycle", parentId: expected[0]!, childId: expected[3]!, kind: "biological" },
+  );
+  const { scene, time, places } = cinemaFixture(graph, expected[0]!);
+  const tour = buildConstellationTour("family", scene, time, places);
+  assert.deepEqual(tour.steps.map(step => step.personId), expected);
+  assert.equal(new Set(tour.steps.map(step => step.personId)).size, expected.length);
+});
+
+test("large ancestor presentations keep every loaded person instead of sampling or cutting a generation at 60", () => {
+  const { scene, time, places, expected } = ancestorFixture(255);
+  const tour = buildConstellationTour("family", scene, time, places);
+  assert.ok(tour.steps.length > MAX_CONSTELLATION_TOUR_STEPS);
+  assert.equal(tour.total, expected.length);
+  assert.deepEqual(tour.steps.map(step => step.personId), expected);
+});
+
+test("changing the central person rebuilds the tour from their own ancestor rows", () => {
+  const { graph, expected } = ancestorFixture();
+  const { scene, time, places } = cinemaFixture(graph, expected[1]!);
+  assert.deepEqual(buildConstellationTour("family", scene, time, places).steps.map(step => step.personId), [1, 3, 4, 7, 8, 9, 10].map(index => expected[index]));
+});
+
+test("a focus person without loaded ancestors has a one-frame family presentation, not a descendant tour", () => {
+  const { scene, time, places } = fixture();
+  const tour = buildConstellationTour("family", scene, time, places);
+  assert.deepEqual(tour.steps.map(step => step.personId), ["0"]);
+  scene.nodes[0]!.person.badges = { privacy: "masked" };
+  assert.deepEqual(buildConstellationTour("family", scene, time, places), { steps: [], total: 0 });
 });
 test("time presentation preserves uncertain date wording without inventing unknown dates", () => {
   const { graph, scene, places } = fixture();

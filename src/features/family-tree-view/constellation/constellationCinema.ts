@@ -22,7 +22,7 @@ export interface ConstellationTourStep {
 }
 export interface ConstellationTour { steps: ConstellationTourStep[]; total: number }
 
-/** Deterministic highlights of the loaded scope, not an invented family narrative. */
+/** Family: every loaded direct ancestor in generation order. Time/places: bounded highlights. */
 export function buildConstellationTour(mode: ConstellationMode, scene: ConstellationScene | undefined, time: ConstellationTimeModel, places: ConstellationPlacesScene): ConstellationTour {
   if (!scene) return { steps: [], total: 0 };
   const nodes = new Map(scene.nodes.filter(node => node.person.badges?.privacy !== "masked").map(node => [node.id, node]));
@@ -35,12 +35,25 @@ export function buildConstellationTour(mode: ConstellationMode, scene: Constella
       return { id: event.id, personId: node.id, year: event.date.reference, x: node.x, y: node.y,
         title: `${event.date.text} · ${event.title}`, detail: `${node.person.displayName}${event.place ? ` · ${event.place}` : ""}` };
     });
-  else steps = [...nodes.values()].sort((a, b) => a.distance - b.distance || a.generation - b.generation || a.id.localeCompare(b.id))
-    .map(node => ({ id: node.id, personId: node.id, x: node.x, y: node.y, title: node.person.displayName,
-      detail: [CONSTELLATION_ROLE_LABELS[node.role], constellationLife(node.person)].filter(Boolean).join(" · ") }));
-  // Sample across the entire sequence rather than silently dropping the most recent years.
+  else steps = [...nodes.values()]
+    .filter(node => node.id === scene.focusId || node.role === "ancestor")
+    .sort((a, b) => Number(b.id === scene.focusId) - Number(a.id === scene.focusId)
+      || Math.abs(a.generation) - Math.abs(b.generation)
+      || (a.ancestorOrder ?? Number.MAX_SAFE_INTEGER) - (b.ancestorOrder ?? Number.MAX_SAFE_INTEGER)
+      || (a.ancestorSlot ?? Number.MAX_SAFE_INTEGER) - (b.ancestorSlot ?? Number.MAX_SAFE_INTEGER)
+      || a.person.displayName.localeCompare(b.person.displayName, "uk") || a.id.localeCompare(b.id))
+    .map(node => {
+      const generation = Math.abs(node.generation);
+      const label = node.id === scene.focusId ? CONSTELLATION_ROLE_LABELS.focus
+        : `${generation === 1 ? "Батьки" : generation === 2 ? "Дідусі та бабусі" : "Предки"} · покоління ${generation}`;
+      return { id: node.id, personId: node.id, x: node.x, y: node.y, title: node.person.displayName,
+        detail: [label, constellationLife(node.person)].filter(Boolean).join(" · ") };
+    });
+  // The family scene is already bounded to 1,000 people. Do not sample it:
+  // that would skip parents or leave gaps inside a generation. Time/place
+  // highlights still sample the entire sequence, retaining both endpoints.
   const total = steps.length;
-  if (total > MAX_CONSTELLATION_TOUR_STEPS) steps = Array.from({ length: MAX_CONSTELLATION_TOUR_STEPS }, (_, index) => steps[Math.round(index * (total - 1) / (MAX_CONSTELLATION_TOUR_STEPS - 1))]!);
+  if (mode !== "family" && total > MAX_CONSTELLATION_TOUR_STEPS) steps = Array.from({ length: MAX_CONSTELLATION_TOUR_STEPS }, (_, index) => steps[Math.round(index * (total - 1) / (MAX_CONSTELLATION_TOUR_STEPS - 1))]!);
   return { steps, total };
 }
 

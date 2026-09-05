@@ -11,6 +11,8 @@ export interface ConstellationNode {
   distance: number;
   /** Only assigned from explicit father/mother roles, never inferred from sex. */
   ancestorSlot?: number;
+  /** Breadth-first parent order, including branches without an explicit parent role. */
+  ancestorOrder?: number;
   x: number;
   y: number;
 }
@@ -114,7 +116,7 @@ export function buildConstellationScene(graph: FamilyGraphData, focusId: string)
       queue.push(next.id);
     }
   }
-  const ancestors = new Map<string, { depth: number; slot?: number }>([[focusId, { depth: 0, slot: 1 }]]);
+  const ancestors = new Map<string, { depth: number; slot?: number; order: number }>([[focusId, { depth: 0, slot: 1, order: 0 }]]);
   const ancestorQueue = [focusId];
   for (let index = 0; index < ancestorQueue.length; index++) {
     const childId = ancestorQueue[index]!;
@@ -127,7 +129,7 @@ export function buildConstellationScene(graph: FamilyGraphData, focusId: string)
       if (!visited.has(relation.parentId) || ancestors.has(relation.parentId)) continue;
       const bit = parentBit(relation);
       const slot = current.slot !== undefined && bit !== undefined && current.depth < 50 ? current.slot * 2 + bit : undefined;
-      ancestors.set(relation.parentId, { depth: current.depth + 1, slot });
+      ancestors.set(relation.parentId, { depth: current.depth + 1, slot, order: ancestors.size });
       ancestorQueue.push(relation.parentId);
     }
   }
@@ -148,7 +150,7 @@ export function buildConstellationScene(graph: FamilyGraphData, focusId: string)
     const node = visited.get(id)!;
     const role: ConstellationRole = id === focusId ? "focus" : ancestor ? "ancestor" : descendant !== undefined ? "descendant" : directPartners.has(id) ? "partner" : "relative";
     return { id, person: people.get(id)!, role, generation: ancestor ? -ancestor.depth : descendant ?? node.generation,
-      distance: node.distance, ancestorSlot: ancestor?.slot, x: 0, y: 0 };
+      distance: node.distance, ancestorSlot: ancestor?.slot, ancestorOrder: ancestor?.order, x: 0, y: 0 };
   });
   const rings: number[] = [];
   // Disjoint angular sectors preserve reading direction; growing radii prevent
