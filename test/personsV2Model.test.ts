@@ -13,6 +13,7 @@ import {
   personLifeYears,
   personMainPlaces,
   personRelationLabel,
+  personTimelineAttachments,
 } from "../src/features/persons-v2/model.ts";
 
 function person(overrides: Partial<Person> = {}): Person {
@@ -258,6 +259,25 @@ test("timeline folds synthetic core duplicates and orders exact, partial, approx
   assert.deepEqual(timeline[5].deduplicatedEventIds, ["residence"]);
   assert.equal(timeline[6].sortTimestamp, null);
   assert.equal(timeline[7].sortTimestamp, null);
+});
+
+test("timeline resolves saved scans beside their corresponding life events", () => {
+  const birthScan = photo("birth-record");
+  const marriageScan = photo("marriage-record");
+  const deathScan = photo("death-record");
+  const mentionScan = photo("mention-record");
+  const value = person({
+    birthScans: [birthScan],
+    marriageScans: [marriageScan],
+    deathScans: [deathScan],
+    mentionScans: [mentionScan],
+  });
+
+  assert.deepEqual(personTimelineAttachments(value, { type: "birth" }), [birthScan]);
+  assert.deepEqual(personTimelineAttachments(value, { type: "marriage" }), [marriageScan]);
+  assert.deepEqual(personTimelineAttachments(value, { type: "death" }), [deathScan]);
+  assert.deepEqual(personTimelineAttachments(value, { type: "mention" }), [mentionScan]);
+  assert.deepEqual(personTimelineAttachments(value, { type: "census" }), []);
 });
 
 test("timeline keeps genuinely conflicting core facts instead of hiding them as duplicates", () => {

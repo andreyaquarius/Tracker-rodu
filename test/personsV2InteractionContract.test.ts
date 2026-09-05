@@ -56,6 +56,14 @@ test("persons V2 timeline has explicit layout areas and presentation-only locali
   assert.match(timeline, /personTimelineDateTimeValue\(event\.date\)/u);
 });
 
+test("persons V2 timeline opens scans saved for the corresponding event", () => {
+  assert.match(timeline, /personTimelineAttachments\(person, event\)/u);
+  assert.match(timeline, /Документи події/u);
+  assert.match(timeline, /onOpenAttachment\(attachments\[0\], attachments\)/u);
+  assert.match(profile, /onOpenAttachment=\{onOpenPhoto\}/u);
+  assert.match(styles, /\.persons-v2-timeline__attachments/u);
+});
+
 test("persons V2 linked records can browse, create, and open real application records", () => {
   assert.match(profile, /onOpenRelated\?:/u);
   assert.match(profile, /onBrowseRelated\?:/u);

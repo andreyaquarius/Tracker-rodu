@@ -406,6 +406,24 @@ export function buildPersonTimeline(
 }
 
 /**
+ * Resolves the durable scan group saved for a timeline event.
+ * Person attachments live beside the event fields, so timeline views must
+ * explicitly join both pieces instead of expecting files inside PersonEvent.
+ */
+export function personTimelineAttachments(
+  person: Person,
+  event: Pick<PersonTimelineItem, "type">,
+): readonly ScanAttachment[] {
+  switch (event.type) {
+    case "birth": return person.birthScans ?? [];
+    case "marriage": return person.marriageScans ?? [];
+    case "death": return person.deathScans ?? [];
+    case "mention": return person.mentionScans ?? [];
+    default: return [];
+  }
+}
+
+/**
  * Builds a cycle-safe pedigree order from the central person towards older
  * generations. Every person receives at most one rank, at their nearest
  * generation; within a generation fathers precede mothers and other parents.

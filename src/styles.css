@@ -11963,9 +11963,19 @@ button.persons-v2-timeline__event:focus-visible {
   font-style: italic;
 }
 
-.persons-v2-timeline__meta {
+.persons-v2-timeline__footer {
   grid-area: meta;
-  justify-self: start;
+  display: flex;
+  align-items: center;
+  justify-self: stretch;
+  gap: 7px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.persons-v2-timeline__meta {
+  display: inline-flex;
+  align-items: center;
   padding: 3px 7px;
   color: #31584f;
   background: #e6efea;
@@ -11973,6 +11983,79 @@ button.persons-v2-timeline__event:focus-visible {
   font-size: 9px;
   font-weight: 800;
   white-space: normal;
+}
+
+.persons-v2-timeline__attachments,
+.persons-v2-timeline__open-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 25px;
+  padding: 3px 8px;
+  color: #174f43;
+  background: #fffaf0;
+  border: 1px solid #d8c18a;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+button.persons-v2-timeline__attachments,
+.persons-v2-timeline__open-event {
+  cursor: pointer;
+}
+
+button.persons-v2-timeline__attachments:hover,
+button.persons-v2-timeline__attachments:focus-visible,
+.persons-v2-timeline__open-event:hover,
+.persons-v2-timeline__open-event:focus-visible {
+  color: #0c3d33;
+  background: #fff3d7;
+  border-color: #a87b22;
+}
+
+button.persons-v2-timeline__attachments:focus-visible,
+.persons-v2-timeline__open-event:focus-visible {
+  outline: 2px solid rgba(168, 123, 34, .3);
+  outline-offset: 2px;
+}
+
+.persons-v2-timeline__attachments svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.persons-v2-timeline__attachments span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.persons-v2-timeline__attachments strong {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  color: #fff;
+  background: #9a6b13;
+  border-radius: 999px;
+  font-size: 9px;
+}
+
+.persons-v2-timeline__attachments.is-static {
+  color: #53665f;
+  background: #f5f4ef;
+  border-color: #d8ddd8;
 }
 
 .persons-v2-profile__timeline-layout {

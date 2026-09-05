@@ -623,6 +623,7 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
     onOpenFinding,
     onOpenRelated,
     onBrowseRelated,
+    onOpenPhoto,
     photoUrlForPerson,
   } = props;
   return (
@@ -720,7 +721,11 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
           title="Життєві події"
           action={<button type="button" className="button button-ghost" onClick={() => onSelectTab("timeline")}>Уся хронологія</button>}
         >
-          <PersonTimelineV2 person={person} items={timeline.slice(0, 5)} />
+          <PersonTimelineV2
+            person={person}
+            items={timeline.slice(0, 5)}
+            onOpenAttachment={onOpenPhoto}
+          />
         </ProfileSectionV2>
 
         <ProfileSectionV2
@@ -851,6 +856,7 @@ function TimelinePanelV2({
   onAddEvent,
   onOpenMap,
   onSelectEvent,
+  onOpenPhoto,
 }: PersonProfilePanelV2Props) {
   return (
     <div className="persons-v2-profile__timeline-layout">
@@ -858,7 +864,12 @@ function TimelinePanelV2({
         title="Хронологія життя"
         action={onAddEvent ? <button type="button" className="button button-primary" onClick={() => onAddEvent(person)}>+ Додати подію</button> : null}
       >
-        <PersonTimelineV2 person={person} items={timeline} onSelectEvent={onSelectEvent} />
+        <PersonTimelineV2
+          person={person}
+          items={timeline}
+          onSelectEvent={onSelectEvent}
+          onOpenAttachment={onOpenPhoto}
+        />
       </ProfileSectionV2>
       <PersonLifeMapV2
         timeline={timeline}
