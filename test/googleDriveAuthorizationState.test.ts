@@ -66,11 +66,49 @@ test("background Drive API calls fail closed instead of opening OAuth", () => {
   );
   assert.match(
     driveSource,
-    /if \(response\.status === 401\) \{\s*setActiveGoogleDriveToken\(null\);\s*throw googleDriveAuthorizationRequiredError\(\);\s*\}/u,
+    /if \(response\.status === 401\) \{\s*keepAliveSessionAuthorized = false;\s*setActiveGoogleDriveToken\(null\);\s*throw googleDriveAuthorizationRequiredError\(\);\s*\}/u,
   );
   assert.doesNotMatch(
     driveSource,
     /if \(response\.status === 401\)[\s\S]{0,180}getGoogleDriveAccessToken\(true\)/u,
+  );
+});
+
+test("an active tab renews Drive access from a real user gesture before expiry", () => {
+  assert.match(
+    driveSource,
+    /GOOGLE_DRIVE_TOKEN_RENEWAL_WINDOW_MS = 5 \* 60 \* 1000/u,
+  );
+  assert.match(
+    driveSource,
+    /window\.addEventListener\("pointerdown", refreshGoogleDriveTokenFromUserGesture, true\)/u,
+  );
+  assert.match(
+    driveSource,
+    /window\.addEventListener\("keydown", refreshGoogleDriveTokenFromUserGesture, true\)/u,
+  );
+  assert.match(
+    driveSource,
+    /!event\.isTrusted[\s\S]*?document\.visibilityState !== "visible"/u,
+  );
+  assert.match(
+    driveSource,
+    /void getGoogleDriveAccessToken\(true, ""\)\.catch/u,
+  );
+  assert.match(
+    driveSource,
+    /if \(tokenRequestPromise\) return tokenRequestPromise;\s*if \(!forceRefresh && activeToken\) return activeToken\.accessToken;\s*if \(prompt === undefined\) throw googleDriveAuthorizationRequiredError\(\)/u,
+    "a Drive action fired by the same gesture must wait for the renewal already in progress",
+  );
+  assert.match(
+    driveSource,
+    /activeToken\.expiresAt > Date\.now\(\)[\s\S]*?activeToken\.expiresAt <= Date\.now\(\) \+ GOOGLE_DRIVE_TOKEN_RENEWAL_WINDOW_MS/u,
+    "keep-alive must not open OAuth from an unrelated click after an idle token already expired",
+  );
+  assert.doesNotMatch(
+    driveSource,
+    /activeToken\.expiresAt > Date\.now\(\) \+ 60_000/u,
+    "the UI must not disconnect a still-valid token one minute early",
   );
 });
 

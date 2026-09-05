@@ -137,9 +137,14 @@ let tokenRequestPromise: Promise<string> | null = null;
 let tokenRequestGeneration = 0;
 let activeToken: StoredToken | null = null;
 let tokenExpiryTimer: number | null = null;
+let keepAliveListenersInstalled = false;
+let keepAliveSessionAuthorized = false;
+let nextKeepAliveAttemptAt = 0;
 const folderPromises = new Map<string, Promise<string>>();
 const deduplicatedUploadPromises = new Map<string, Promise<GoogleDriveUploadedFile>>();
 const GOOGLE_DRIVE_CONNECTION_KEY = "tracker-rodu-google-drive-connected";
+const GOOGLE_DRIVE_TOKEN_RENEWAL_WINDOW_MS = 5 * 60 * 1000;
+const GOOGLE_DRIVE_KEEP_ALIVE_RETRY_MS = 60 * 1000;
 const GOOGLE_DRIVE_AUTHORIZATION_REQUIRED_MESSAGE =
   "Потрібно підключити Google Drive або оновити дозвіл доступу.";
 const googleDriveConnectionListeners = new Set<
@@ -244,6 +249,7 @@ export interface GoogleDrivePickerOptions {
 }
 
 export function prepareGoogleDriveAuthorization(): Promise<void> {
+  installGoogleDriveKeepAliveListeners();
   return loadGoogleIdentityServices();
 }
 
@@ -619,18 +625,55 @@ function setActiveGoogleDriveToken(token: StoredToken | null): void {
   }
   tokenExpiryTimer = null;
   if (token && typeof window !== "undefined") {
-    const refreshBoundary = token.expiresAt - Date.now() - 60_000;
+    keepAliveSessionAuthorized = true;
+    nextKeepAliveAttemptAt = 0;
+    installGoogleDriveKeepAliveListeners();
+    const expiryBoundary = token.expiresAt - Date.now() + 50;
     tokenExpiryTimer = window.setTimeout(() => {
       tokenExpiryTimer = null;
       invalidateExpiredGoogleDriveToken();
-    }, Math.max(0, refreshBoundary));
+    }, Math.max(0, expiryBoundary));
   }
   publishGoogleDriveConnectionState();
 }
 
 function invalidateExpiredGoogleDriveToken(): void {
-  if (!activeToken || activeToken.expiresAt > Date.now() + 60_000) return;
+  if (!activeToken || activeToken.expiresAt > Date.now()) return;
   setActiveGoogleDriveToken(null);
+}
+
+function installGoogleDriveKeepAliveListeners(): void {
+  if (keepAliveListenersInstalled || typeof window === "undefined") return;
+  keepAliveListenersInstalled = true;
+  window.addEventListener("pointerdown", refreshGoogleDriveTokenFromUserGesture, true);
+  window.addEventListener("keydown", refreshGoogleDriveTokenFromUserGesture, true);
+}
+
+function refreshGoogleDriveTokenFromUserGesture(event: Event): void {
+  if (
+    !event.isTrusted
+    || !keepAliveSessionAuthorized
+    || tokenRequestPromise
+    || Date.now() < nextKeepAliveAttemptAt
+    || (typeof document !== "undefined" && document.visibilityState !== "visible")
+  ) {
+    return;
+  }
+  // Renew only while the current grant is still valid. If a tab was idle long
+  // enough for expiry, avoid surprising the user with OAuth on an unrelated
+  // click and leave reconnection to an explicit Drive action.
+  const needsRenewal = Boolean(
+    activeToken
+    && activeToken.expiresAt > Date.now()
+    && activeToken.expiresAt <= Date.now() + GOOGLE_DRIVE_TOKEN_RENEWAL_WINDOW_MS,
+  );
+  if (!needsRenewal) return;
+
+  void getGoogleDriveAccessToken(true, "").catch(() => {
+    // A silent renewal can fail after sign-out, consent revocation, or browser
+    // blocking. Back off and leave the explicit reconnect control available.
+    nextKeepAliveAttemptAt = Date.now() + GOOGLE_DRIVE_KEEP_ALIVE_RETRY_MS;
+  });
 }
 
 function invalidateGoogleDriveTokenRequest(): void {
@@ -942,6 +985,8 @@ export function clearGoogleDriveSession(): void {
     (window as GoogleWindow).google?.accounts?.oauth2.revoke?.(activeToken.accessToken);
   }
   invalidateGoogleDriveTokenRequest();
+  keepAliveSessionAuthorized = false;
+  nextKeepAliveAttemptAt = 0;
   safeStorageRemove(GOOGLE_DRIVE_CONNECTION_KEY);
   setActiveGoogleDriveToken(null);
   folderPromises.clear();
@@ -1166,6 +1211,7 @@ async function driveFetch(url: string, init: RequestInit = {}): Promise<Response
     init.signal,
   );
   if (response.status === 401) {
+    keepAliveSessionAuthorized = false;
     setActiveGoogleDriveToken(null);
     throw googleDriveAuthorizationRequiredError();
   }
@@ -1201,6 +1247,7 @@ async function driveUploadFetch(
     init.signal,
   );
   if (response.status === 401) {
+    keepAliveSessionAuthorized = false;
     setActiveGoogleDriveToken(null);
     throw googleDriveAuthorizationRequiredError();
   }
@@ -1405,9 +1452,9 @@ async function getGoogleDriveAccessToken(
   prompt?: GoogleDrivePrompt,
 ): Promise<string> {
   invalidateExpiredGoogleDriveToken();
+  if (tokenRequestPromise) return tokenRequestPromise;
   if (!forceRefresh && activeToken) return activeToken.accessToken;
   if (prompt === undefined) throw googleDriveAuthorizationRequiredError();
-  if (tokenRequestPromise) return tokenRequestPromise;
 
   const generation = tokenRequestGeneration;
   const request = requestGoogleDriveAccessToken(prompt, generation);
