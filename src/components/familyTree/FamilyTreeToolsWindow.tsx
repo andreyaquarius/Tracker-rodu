@@ -25,8 +25,6 @@ export interface FamilyTreeRootCandidate {
   detail?: string;
 }
 
-export type FamilyTreeDisplayMode = "classic" | "direct-ancestors";
-
 interface FamilyTreeToolsWindowProps {
   trees: readonly FamilyTreeToolEntry[];
   selectedTreeId: string;
@@ -38,7 +36,6 @@ interface FamilyTreeToolsWindowProps {
   gedcomPhotoBackupCount: number;
   canExportGedcom: boolean;
   exportingGedcom: boolean;
-  displayMode: FamilyTreeDisplayMode;
   appearance: FamilyTreeAppearancePreferences;
   appearanceSyncState?: FamilyTreeAppearanceSyncState;
   notice?: string;
@@ -50,17 +47,13 @@ interface FamilyTreeToolsWindowProps {
   onImportGedcom: () => void;
   onOpenGedcomPhotoBackup: () => void;
   onExportGedcom: () => void;
-  onSelectDisplayMode: (mode: FamilyTreeDisplayMode) => void;
-  onOpenCircularChart: () => void;
-  onOpenAncestorFanChart: () => void;
-  onOpenDescendantFanChart: () => void;
   onOpenStatistics: () => void;
   onAppearanceChange: (value: FamilyTreeAppearancePreferences) => void;
   onSetTreeRoot: (personId: string) => Promise<boolean>;
   onClose: () => void;
 }
 
-type ToolsView = "main" | "visualizations" | "settings";
+type ToolsView = "main" | "settings";
 
 const MARRIED_SURNAME_OPTIONS: readonly {
   value: MarriedSurnameDisplay;
@@ -158,7 +151,6 @@ export function FamilyTreeToolsWindow({
   gedcomPhotoBackupCount,
   canExportGedcom,
   exportingGedcom,
-  displayMode,
   appearance,
   appearanceSyncState = "idle",
   notice,
@@ -170,10 +162,6 @@ export function FamilyTreeToolsWindow({
   onImportGedcom,
   onOpenGedcomPhotoBackup,
   onExportGedcom,
-  onSelectDisplayMode,
-  onOpenCircularChart,
-  onOpenAncestorFanChart,
-  onOpenDescendantFanChart,
   onOpenStatistics,
   onAppearanceChange,
   onSetTreeRoot,
@@ -264,7 +252,7 @@ export function FamilyTreeToolsWindow({
 
   return (
     <Modal
-      title="Родове дерево"
+      title="Адміністрування"
       mode="window"
       minimizable={false}
       onClose={onClose}
@@ -273,7 +261,7 @@ export function FamilyTreeToolsWindow({
         <div className="family-tree-tools-summary">
           <span className="eyebrow">Активне дерево</span>
           <strong>{selectedTree?.title || "Родове дерево"}</strong>
-          <small>Інструменти файлів, огляду та майбутніх візуалізацій.</small>
+          <small>Імпорт, експорт, статистика та налаштування дерева.</small>
         </div>
 
         {trees.length > 1 ? (
@@ -362,19 +350,6 @@ export function FamilyTreeToolsWindow({
             <button
               type="button"
               className="family-tree-tools-action"
-              aria-haspopup="true"
-              onClick={() => setView("visualizations")}
-            >
-              <span className="family-tree-tools-icon" aria-hidden="true">◉</span>
-              <span>
-                <strong>Відображення дерева</strong>
-                <small>Класичні та майбутні графіки прямих предків</small>
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="family-tree-tools-action"
               disabled={!selectedTree?.id}
               onClick={onOpenStatistics}
             >
@@ -397,94 +372,6 @@ export function FamilyTreeToolsWindow({
                 <small>ПІБ у картках, кольори гілок та родові сектори</small>
               </span>
             </button>
-          </div>
-        ) : view === "visualizations" ? (
-          <div className="family-tree-tools-visualizations">
-            <button
-              type="button"
-              className="button button-secondary family-tree-tools-back"
-              onClick={() => setView("main")}
-            >
-              ← До інструментів
-            </button>
-            <div>
-              <span className="eyebrow">Відображення дерева</span>
-              <h3>Діаграми родоводу</h3>
-              <p>Оберіть класичне полотно, прямих предків або окреме віяло предків чи нащадків.</p>
-            </div>
-            <div className="family-tree-tools-grid">
-              <button
-                type="button"
-                className={`family-tree-tools-action${
-                  displayMode === "classic"
-                    ? " family-tree-tools-action-active"
-                    : ""
-                }`}
-                aria-pressed={displayMode === "classic"}
-                onClick={() => onSelectDisplayMode("classic")}
-              >
-                <span className="family-tree-tools-icon" aria-hidden="true">⌘</span>
-                <span>
-                  <strong>Класичне родове дерево</strong>
-                  <small>Поточне відображення на полотні</small>
-                </span>
-                {displayMode === "classic" ? (
-                  <span className="family-tree-tools-badge">Активне</span>
-                ) : null}
-              </button>
-              <button
-                type="button"
-                className={`family-tree-tools-action${
-                  displayMode === "direct-ancestors"
-                    ? " family-tree-tools-action-active"
-                    : ""
-                }`}
-                aria-pressed={displayMode === "direct-ancestors"}
-                onClick={() => onSelectDisplayMode("direct-ancestors")}
-              >
-                <span className="family-tree-tools-icon" aria-hidden="true">⑂</span>
-                <span>
-                  <strong>Родовід прямих предків</strong>
-                  <small>Окремий режим полотна · лише прямі предки зліва направо</small>
-                </span>
-                {displayMode === "direct-ancestors" ? (
-                  <span className="family-tree-tools-badge">Активне</span>
-                ) : null}
-              </button>
-              <button
-                type="button"
-                className="family-tree-tools-action"
-                onClick={onOpenCircularChart}
-              >
-                <span className="family-tree-tools-icon" aria-hidden="true">◌</span>
-                <span>
-                  <strong>Кругова діаграма предків</strong>
-                  <small>Від 1 до 16 поколінь прямих предків · інтерактивний огляд</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className="family-tree-tools-action"
-                onClick={onOpenAncestorFanChart}
-              >
-                <span className="family-tree-tools-icon" aria-hidden="true">◔</span>
-                <span>
-                  <strong>Віялова діаграма предків</strong>
-                  <small>Батьківська гілка ліворуч, материнська — праворуч · до 16 поколінь</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className="family-tree-tools-action"
-                onClick={onOpenDescendantFanChart}
-              >
-                <span className="family-tree-tools-icon" aria-hidden="true">◕</span>
-                <span>
-                  <strong>Віялова діаграма нащадків</strong>
-                  <small>Діти та їхні гілки за поколіннями · без сторонніх родин партнерів</small>
-                </span>
-              </button>
-            </div>
           </div>
         ) : (
           <div className="family-tree-tools-settings">

@@ -1,10 +1,10 @@
 .shared-research-graph {
-  --shared-ink: #123b34;
-  --shared-muted: #5d6d68;
+  --shared-ink: var(--app-ink, #123b34);
+  --shared-muted: var(--app-ink-muted, #5d6d68);
   --shared-border: #d7ddd7;
   min-height: 100vh;
   padding: clamp(1rem, 3vw, 2.5rem);
-  background: #f4f1e9;
+  background: var(--app-surface-soft, #f4f1e9);
   color: var(--shared-ink);
 }
 
@@ -20,7 +20,7 @@
 }
 
 .shared-research-graph__header span {
-  color: #8d5e16;
+  color: var(--app-warning, #8d5e16);
   font-size: 0.76rem;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -41,9 +41,9 @@
   gap: 0.25rem;
   margin-top: 1rem;
   padding: 0.9rem 1rem;
-  border: 1px solid #bfd8cf;
+  border: 1px solid var(--app-border, #bfd8cf);
   border-radius: 0.9rem;
-  background: #e7f2ee;
+  background: var(--app-surface-soft, #e7f2ee);
 }
 
 .shared-research-graph__summary {
@@ -57,15 +57,15 @@
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--shared-border);
   border-radius: 999px;
-  background: #fffdf9;
+  background: var(--app-surface, #fffdf9);
 }
 
 .shared-research-graph__warning {
   margin-top: 0.8rem;
   padding: 0.8rem 1rem;
   border-radius: 0.75rem;
-  background: #fff4d8;
-  color: #694a12;
+  background: var(--app-warning-surface, #fff4d8);
+  color: var(--app-ink, #694a12);
 }
 
 .shared-research-graph__state {
@@ -77,16 +77,16 @@
   padding: 2rem;
   border: 1px solid var(--shared-border);
   border-radius: 1rem;
-  background: #fffdf9;
+  background: var(--app-surface, #fffdf9);
   text-align: center;
 }
 
-.shared-research-graph__state.is-error { color: #823b34; }
+.shared-research-graph__state.is-error { color: var(--app-danger, #823b34); }
 
 .shared-research-graph__spinner {
   width: 2rem;
   height: 2rem;
-  border: 3px solid #d5e1dc;
+  border: 3px solid var(--app-border, #d5e1dc);
   border-top-color: #176357;
   border-radius: 50%;
   animation: shared-graph-spin 0.8s linear infinite;
@@ -105,7 +105,7 @@
   width: auto;
   border: 1px solid var(--shared-border);
   border-radius: 1rem;
-  background: #fffdf9;
+  background: var(--app-surface, #fffdf9);
 }
 
 .shared-research-graph__graph-column { padding: 0.8rem; }
@@ -122,10 +122,10 @@
 .shared-research-graph__tools > div { display: flex; align-items: center; gap: 0.35rem; }
 .shared-research-graph button {
   min-height: 2.35rem;
-  border: 1px solid #b9c9c3;
+  border: 1px solid var(--app-border, #b9c9c3);
   border-radius: 0.55rem;
   padding: 0.4rem 0.65rem;
-  background: #fff;
+  background: var(--app-surface, #fff);
   color: var(--shared-ink);
   font: inherit;
   font-weight: 750;
@@ -138,33 +138,33 @@
   min-height: 34rem;
   overflow: auto;
   overscroll-behavior: contain;
-  border: 1px solid #e2e5df;
+  border: 1px solid var(--app-border, #e2e5df);
   border-radius: 0.8rem;
-  background: #f8f7f2;
+  background: var(--app-surface-soft, #f8f7f2);
 }
 
 .shared-research-graph__canvas svg { display: block; min-height: 34rem; }
-.shared-research-graph__edges path { fill: none; stroke: #769088; stroke-width: 2.5; }
+.shared-research-graph__edges path { fill: none; stroke: var(--app-ink-muted, #769088); stroke-width: 2.5; }
 .shared-research-graph__edges path.is-hypothesis { stroke-dasharray: 8 6; }
 .shared-research-graph__edges path.is-disputed,
-.shared-research-graph__edges path.is-disproven { stroke: #a7554e; }
-.shared-research-graph__edges path.is-proven { stroke: #2f7763; }
-.shared-research-graph__arrow { fill: #617c74; }
+.shared-research-graph__edges path.is-disproven { stroke: var(--app-danger, #a7554e); }
+.shared-research-graph__edges path.is-proven { stroke: var(--app-link, #2f7763); }
+.shared-research-graph__arrow { fill: var(--app-ink-muted, #617c74); }
 
 .shared-research-graph__node { cursor: pointer; }
 .shared-research-graph__node circle,
 .shared-research-graph__node rect {
-  fill: #fffefb;
-  stroke: #4c6b63;
+  fill: var(--app-surface, #fffefb);
+  stroke: var(--app-ink-muted, #4c6b63);
   stroke-width: 2;
 }
-.shared-research-graph__node.is-place rect { fill: #fff4d8; stroke: #a47b29; }
-.shared-research-graph__node.is-center circle { fill: #176357; stroke: #0e473e; }
+.shared-research-graph__node.is-place rect { fill: var(--app-warning-surface, #fff4d8); stroke: var(--app-warning, #a47b29); }
+.shared-research-graph__node.is-center circle { fill: #176357; stroke: var(--app-ink, #0e473e); }
 .shared-research-graph__node.is-selected circle,
-.shared-research-graph__node.is-selected rect { stroke: #e09d20; stroke-width: 4; }
-.shared-research-graph__node text { fill: #173e36; font-size: 13px; font-weight: 800; pointer-events: none; }
+.shared-research-graph__node.is-selected rect { stroke: var(--app-warning, #e09d20); stroke-width: 4; }
+.shared-research-graph__node text { fill: var(--app-ink, #173e36); font-size: 13px; font-weight: 800; pointer-events: none; }
 .shared-research-graph__node.is-center text { fill: #fff; }
-.shared-research-graph__node text.is-secondary { fill: #65766f; font-size: 10px; font-weight: 600; }
+.shared-research-graph__node text.is-secondary { fill: var(--app-ink-muted, #65766f); font-size: 10px; font-weight: 600; }
 .shared-research-graph__node.is-center text.is-secondary { fill: #dcece7; }
 
 .shared-research-graph__detail {

@@ -5,6 +5,7 @@ import { ApplicationRouteError } from "./components/ApplicationRouteError.tsx";
 import { installChunkLoadRecovery } from "./utils/chunkLoadRecovery.ts";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
+import { AppAppearanceProvider } from "./components/appearance/AppAppearanceProvider.tsx";
 
 // GitHub Pages first serves 404.html for a direct public-share deep link. Its
 // external redirect script transfers the bearer only in the root fragment;
@@ -137,5 +138,5 @@ const router = createBrowserRouter([
 ]);
 
 createRoot(document.getElementById("root")!).render(
-  <RouterProvider router={router} />,
+  <AppAppearanceProvider><RouterProvider router={router} /></AppAppearanceProvider>,
 );

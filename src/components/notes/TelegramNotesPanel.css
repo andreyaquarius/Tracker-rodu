@@ -186,7 +186,7 @@
 }
 
 .telegram-note-list__button:hover {
-  background: color-mix(in srgb, var(--paper) 76%, #e5f0eb);
+  background: color-mix(in srgb, var(--paper) 76%, var(--app-surface-soft, #e5f0eb));
 }
 
 .telegram-note-list__button:focus-visible {
@@ -245,7 +245,7 @@
 }
 
 .telegram-note-list__open {
-  color: #285c4d;
+  color: var(--app-ink, #285c4d);
   font-size: .82rem;
   font-weight: 800;
   white-space: nowrap;
@@ -297,7 +297,7 @@
 }
 
 .telegram-note-detail__invalid-link {
-  color: #8c3e39;
+  color: var(--app-danger, #8c3e39);
 }
 
 .telegram-note-badge {
@@ -311,16 +311,16 @@
   line-height: 1.25;
 }
 
-.telegram-note-badge--status { color: #285c4d; background: #e4f2eb; }
-.telegram-note-badge--status-reviewing { color: #765214; background: #fff2ce; }
-.telegram-note-badge--status-archived { color: #5d6670; background: #edf0f2; }
-.telegram-note-badge--status-converted { color: #4e4374; background: #ece8f7; }
-.telegram-note-badge--source { color: #3d5a78; background: #e5f0fa; }
-.telegram-note-badge--source-unavailable { color: #8c3e39; background: #f6dfdd; }
-.telegram-note-badge--source-changed { color: #765214; background: #fff2ce; }
-.telegram-note-badge--priority { color: #5d6670; background: #edf0f2; }
-.telegram-note-badge--priority-high { color: #8f5319; background: #fff0d8; }
-.telegram-note-badge--priority-urgent { color: #8c3e39; background: #f6dfdd; }
+.telegram-note-badge--status { color: var(--app-ink, #285c4d); background: var(--app-success-surface, #e4f2eb); }
+.telegram-note-badge--status-reviewing { color: var(--app-warning, #765214); background: var(--app-warning-surface, #fff2ce); }
+.telegram-note-badge--status-archived { color: var(--app-ink-muted, #5d6670); background: var(--app-surface-soft, #edf0f2); }
+.telegram-note-badge--status-converted { color: var(--app-info, #4e4374); background: var(--app-violet-surface, #ece8f7); }
+.telegram-note-badge--source { color: var(--app-info, #3d5a78); background: var(--app-info-surface, #e5f0fa); }
+.telegram-note-badge--source-unavailable { color: var(--app-danger, #8c3e39); background: var(--app-danger-surface, #f6dfdd); }
+.telegram-note-badge--source-changed { color: var(--app-warning, #765214); background: var(--app-warning-surface, #fff2ce); }
+.telegram-note-badge--priority { color: var(--app-ink-muted, #5d6670); background: var(--app-surface-soft, #edf0f2); }
+.telegram-note-badge--priority-high { color: var(--app-warning, #8f5319); background: var(--app-warning-surface, #fff0d8); }
+.telegram-note-badge--priority-urgent { color: var(--app-danger, #8c3e39); background: var(--app-danger-surface, #f6dfdd); }
 
 .telegram-note-editor__heading {
   align-items: center;

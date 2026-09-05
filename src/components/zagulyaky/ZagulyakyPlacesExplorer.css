@@ -1,7 +1,7 @@
 .zagulyaky-places-explorer {
   min-width: 0;
   padding: clamp(16px, 2.3vw, 28px);
-  color: var(--green-950);
+  color: var(--app-ink, var(--green-950));
   background: var(--paper, #fffdfa);
   border: 1px solid var(--line, #d8dfda);
   border-radius: 18px;
@@ -25,14 +25,14 @@
   flex: 0 0 auto;
   gap: 3px;
   padding: 3px;
-  background: #edf3ef;
-  border: 1px solid #cadbd2;
+  background: var(--app-surface-soft, #edf3ef);
+  border: 1px solid var(--app-border, #cadbd2);
   border-radius: 10px;
 }
 .zagulyaky-places-explorer__view-switch button {
   min-height: 34px;
   padding: 7px 12px;
-  color: #456057;
+  color: var(--app-ink-muted, #456057);
   background: transparent;
   border: 0;
   border-radius: 7px;
@@ -53,7 +53,7 @@
   gap: 14px;
   margin-top: 20px;
   padding: 14px;
-  background: #f6f5ef;
+  background: var(--app-surface-soft, #f6f5ef);
   border: 1px solid var(--line, #d8dfda);
   border-radius: 13px;
 }
@@ -72,9 +72,9 @@
   min-width: 0;
   min-height: 40px;
   padding: 8px 10px;
-  color: var(--green-950, #103a33);
-  background: #fff;
-  border: 1px solid #cbd4cf;
+  color: var(--app-ink, var(--green-950, #103a33));
+  background: var(--app-surface, #fff);
+  border: 1px solid var(--app-border, #cbd4cf);
   border-radius: 8px;
   font: inherit;
   font-size: 13px;
@@ -121,8 +121,8 @@
 .zagulyaky-places-explorer__connection-group {
   min-width: 0;
   padding: 15px;
-  background: #fbfcf9;
-  border: 1px solid #d8dfda;
+  background: var(--app-surface, #fbfcf9);
+  border: 1px solid var(--app-border, #d8dfda);
   border-radius: 13px;
 }
 .zagulyaky-places-explorer__connection-group > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
@@ -133,13 +133,13 @@
   padding: 5px 8px;
   display: grid;
   place-items: center;
-  color: #174f44;
-  background: #e5f0eb;
+  color: var(--app-ink, #174f44);
+  background: var(--app-surface-soft, #e5f0eb);
   border-radius: 999px;
   font-size: 11px;
 }
-.zagulyaky-places-explorer__connection-group--incoming > header > strong { color: #76540a; background: #fbefc9; }
-.zagulyaky-places-explorer__connection-group--local > header > strong { color: #565247; background: #eceae4; }
+.zagulyaky-places-explorer__connection-group--incoming > header > strong { color: var(--app-ink, #76540a); background: var(--app-warning-surface, #fbefc9); }
+.zagulyaky-places-explorer__connection-group--local > header > strong { color: var(--app-ink, #565247); background: var(--app-surface-soft, #eceae4); }
 .zagulyaky-places-explorer__connection-group ul { margin: 13px 0 0; padding: 0; display: grid; gap: 8px; list-style: none; }
 .zagulyaky-places-explorer__connection-group li {
   display: flex;
@@ -147,8 +147,8 @@
   align-items: stretch;
   gap: 8px;
   padding: 5px;
-  background: #fff;
-  border: 1px solid #dce3de;
+  background: var(--app-surface, #fff);
+  border: 1px solid var(--app-border, #dce3de);
   border-radius: 10px;
 }
 .zagulyaky-places-explorer__connection-group li.is-active { border-color: var(--green-700, #28695e); box-shadow: 0 0 0 2px rgba(40, 105, 94, .12); }
@@ -159,14 +159,14 @@
   align-items: flex-start;
   gap: 9px;
   padding: 7px;
-  color: var(--green-950, #103a33);
+  color: var(--app-ink, var(--green-950, #103a33));
   background: transparent;
   border: 0;
   border-radius: 7px;
   text-align: left;
   cursor: pointer;
 }
-.zagulyaky-places-explorer__connection-button:hover { background: #f0f6f2; }
+.zagulyaky-places-explorer__connection-button:hover { background: var(--app-surface-soft, #f0f6f2); }
 .zagulyaky-places-explorer__connection-dot { width: 10px; height: 10px; flex: 0 0 auto; margin-top: 4px; background: #28695e; border-radius: 50%; }
 .zagulyaky-places-explorer__connection-group--incoming .zagulyaky-places-explorer__connection-dot { background: #c49a32; }
 .zagulyaky-places-explorer__connection-group--local .zagulyaky-places-explorer__connection-dot { background: #6a675d; }
@@ -174,13 +174,13 @@
 .zagulyaky-places-explorer__connection-main strong { overflow-wrap: anywhere; font-size: 13px; }
 .zagulyaky-places-explorer__connection-main small,
 .zagulyaky-places-explorer__connection-main em { color: var(--muted, #53665f); font-size: 11px; line-height: 1.42; overflow-wrap: anywhere; }
-.zagulyaky-places-explorer__connection-main em { color: #456057; font-style: normal; }
-.zagulyaky-places-explorer__connection-sample { margin-top: 3px; color: #315248; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.zagulyaky-places-explorer__connection-main em { color: var(--app-ink-muted, #456057); font-style: normal; }
+.zagulyaky-places-explorer__connection-sample { margin-top: 3px; color: var(--app-ink, #315248); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .zagulyaky-places-explorer__records-button { flex: 0 0 auto; align-self: center; min-height: 34px; padding: 6px 9px; font-size: 11px; white-space: nowrap; }
-.zagulyaky-places-explorer__empty { margin: 13px 0 0; padding: 11px; color: var(--muted, #53665f); background: #f5f6f2; border: 1px dashed #cbd6d0; border-radius: 9px; font-size: 12px; line-height: 1.5; }
+.zagulyaky-places-explorer__empty { margin: 13px 0 0; padding: 11px; color: var(--muted, #53665f); background: var(--app-surface-soft, #f5f6f2); border: 1px dashed var(--app-border, #cbd6d0); border-radius: 9px; font-size: 12px; line-height: 1.5; }
 
 .zagulyaky-places-explorer__map-panel { display: grid; gap: 11px; }
-.zagulyaky-places-explorer__map-legend { display: flex; flex-wrap: wrap; gap: 7px 14px; color: #456057; font-size: 11px; }
+.zagulyaky-places-explorer__map-legend { display: flex; flex-wrap: wrap; gap: 7px 14px; color: var(--app-ink-muted, #456057); font-size: 11px; }
 .zagulyaky-places-explorer__map-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .zagulyaky-places-explorer__map-legend i { width: 9px; height: 9px; border-radius: 50%; background: #0f4a42; }
 .zagulyaky-places-explorer__map-legend .incoming i { background: #c49a32; }
@@ -194,9 +194,9 @@
   isolation: isolate;
   height: clamp(280px, 48vw, 500px);
   overflow: hidden;
-  border: 1px solid #c8d5ce;
+  border: 1px solid var(--app-border, #c8d5ce);
   border-radius: 11px;
-  background: #e6ede8;
+  background: var(--app-surface-soft, #e6ede8);
 }
 .zagulyaky-places-explorer__map-fullscreen-button {
   position: absolute;
@@ -208,16 +208,16 @@
   align-items: center;
   gap: 7px;
   padding: 8px 12px;
-  color: var(--green-950, #103a33);
-  background: rgba(255, 253, 250, .96);
-  border: 1px solid #c8d5ce;
+  color: var(--app-ink, var(--green-950, #103a33));
+  background: var(--app-glass, rgba(255, 253, 250, .96));
+  border: 1px solid var(--app-border, #c8d5ce);
   border-radius: 9px;
   box-shadow: 0 5px 18px rgba(20, 57, 48, .18);
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
 }
-.zagulyaky-places-explorer__map-fullscreen-button:hover { background: #fff; }
+.zagulyaky-places-explorer__map-fullscreen-button:hover { background: var(--app-surface, #fff); }
 .zagulyaky-places-explorer__map-fullscreen-button > span { font-size: 18px; line-height: 1; }
 .zagulyaky-places-explorer__map-figure--fullscreen {
   position: fixed;
@@ -236,7 +236,7 @@
   padding-left: max(8px, env(safe-area-inset-left));
   overflow: hidden;
   overscroll-behavior: contain;
-  color: var(--green-950, #103a33);
+  color: var(--app-ink, var(--green-950, #103a33));
   background: var(--paper, #fffdfa);
 }
 .zagulyaky-places-explorer__map-figure--fullscreen .zagulyaky-places-explorer__map-canvas,
@@ -255,8 +255,8 @@
   line-height: 1.5;
 }
 .zagulyaky-places-explorer__map-figure figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; }
-.zagulyaky-places-explorer__map-controls-hint { color: #315248; font-weight: 700; }
-.zagulyaky-places-explorer__map-empty { padding: 20px; color: var(--muted, #53665f); background: #f5f6f2; border: 1px dashed #cbd6d0; border-radius: 11px; font-size: 13px; line-height: 1.5; }
+.zagulyaky-places-explorer__map-controls-hint { color: var(--app-ink, #315248); font-weight: 700; }
+.zagulyaky-places-explorer__map-empty { padding: 20px; color: var(--muted, #53665f); background: var(--app-surface-soft, #f5f6f2); border: 1px dashed var(--app-border, #cbd6d0); border-radius: 11px; font-size: 13px; line-height: 1.5; }
 
 @media (max-width: 860px) {
   .zagulyaky-places-explorer__controls { grid-template-columns: 1fr; }

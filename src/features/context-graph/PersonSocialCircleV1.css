@@ -1,7 +1,7 @@
 .context-social-v1 {
   --context-border: var(--line, #deddd5);
   --context-paper: var(--paper, #fffdf8);
-  --context-ink: var(--green-950, #102f2a);
+  --context-ink: var(--app-ink, var(--green-950, #102f2a));
   --context-muted: var(--muted, #4f5f5a);
   display: grid;
   gap: 0.65rem;
@@ -62,8 +62,8 @@
 }
 
 .context-social-v1__source-note {
-  background: #edf5f2;
-  border: 1px solid #cfe0da;
+  background: var(--app-surface-soft, #edf5f2);
+  border: 1px solid var(--app-border, #cfe0da);
   border-radius: 0.7rem;
   color: var(--context-muted);
   overflow: hidden;
@@ -79,7 +79,7 @@
 }
 
 .context-social-v1__source-note > div {
-  border-top: 1px solid #cfe0da;
+  border-top: 1px solid var(--app-border, #cfe0da);
   display: grid;
   font-size: 0.76rem;
   gap: 0.2rem;
@@ -92,7 +92,7 @@
 }
 
 .context-social-v1__eyebrow {
-  color: #96651f;
+  color: var(--app-warning, #96651f);
   display: block;
   font-size: 0.7rem;
   font-weight: 800;
@@ -175,7 +175,7 @@
 }
 
 .context-social-v1__disclosure > summary:hover {
-  background: #f5f7f4;
+  background: var(--app-surface-soft, #f5f7f4);
 }
 
 .context-social-v1__disclosure > summary:focus-visible {
@@ -235,8 +235,8 @@
 .context-social-v1 select,
 .context-social-v1 input:not([type="range"]),
 .context-social-v1 textarea {
-  background: #fff;
-  border: 1px solid #cbd4d0;
+  background: var(--app-surface, #fff);
+  border: 1px solid var(--app-border, #cbd4d0);
   border-radius: 0.65rem;
   color: var(--context-ink);
   min-height: 2.65rem;
@@ -289,15 +289,15 @@
 
 .context-social-v1__message.is-error,
 .context-social-v1__form-error {
-  background: #fff1ef;
-  border-color: #e6aaa4;
-  color: #92362f;
+  background: var(--app-danger-surface, #fff1ef);
+  border-color: var(--app-border, #e6aaa4);
+  color: var(--app-danger, #92362f);
 }
 
 .context-social-v1__message.is-success {
-  background: #edf7f0;
-  border-color: #b7d8c0;
-  color: #245c37;
+  background: var(--app-surface-soft, #edf7f0);
+  border-color: var(--app-border, #b7d8c0);
+  color: var(--app-ink, #245c37);
 }
 
 .context-social-v1__message button {
@@ -328,7 +328,7 @@
   background: transparent;
   border: 0;
   border-radius: 50%;
-  color: var(--green-800, #22574d);
+  color: var(--app-link, var(--green-800, #22574d));
   display: inline-flex;
   font-size: 1.6rem;
   height: 2.25rem;
@@ -352,10 +352,10 @@
 }
 
 .context-social-v1__editor label .context-social-v1__role-warning {
-  background: #fff4d8;
-  border: 1px solid #e7c875;
+  background: var(--app-warning-surface, #fff4d8);
+  border: 1px solid var(--app-border, #e7c875);
   border-radius: 0.55rem;
-  color: #765313;
+  color: var(--app-ink, #765313);
   line-height: 1.45;
   padding: 0.55rem 0.65rem;
 }
@@ -424,30 +424,30 @@
 }
 
 .context-social-v1__truncated {
-  background: #fbf1da;
-  border: 1px solid #e8ce98;
+  background: var(--app-warning-surface, #fbf1da);
+  border: 1px solid var(--app-border, #e8ce98);
   border-radius: 0.65rem;
-  color: #6f541f;
+  color: var(--app-warning, #6f541f);
   font-size: 0.75rem;
   margin: 0.2rem 0.5rem 0.5rem;
   padding: 0.6rem 0.75rem;
 }
 
 .context-social-v1__edge {
-  stroke: #8caaa2;
+  stroke: var(--app-ink-muted, #8caaa2);
   stroke-linecap: round;
   stroke-width: 2.5;
 }
 
-.context-social-v1__edge.is-church { stroke: #9d70ad; }
-.context-social-v1__edge.is-household { stroke: #c18a2d; }
-.context-social-v1__edge.is-social { stroke: #33806b; }
-.context-social-v1__edge.is-military { stroke: #747d4b; }
-.context-social-v1__edge.is-documentary { stroke: #527ca8; }
-.context-social-v1__edge.is-research { stroke: #a65b56; stroke-dasharray: 8 6; }
-.context-social-v1__edge.is-occupation { stroke: #8a7049; }
-.context-social-v1__edge.is-education { stroke: #537c91; }
-.context-social-v1__edge.is-other { stroke: #87938f; }
+.context-social-v1__edge.is-church { stroke: var(--app-violet, #9d70ad); }
+.context-social-v1__edge.is-household { stroke: var(--app-warning, #c18a2d); }
+.context-social-v1__edge.is-social { stroke: var(--app-link, #33806b); }
+.context-social-v1__edge.is-military { stroke: var(--app-warning, #747d4b); }
+.context-social-v1__edge.is-documentary { stroke: var(--app-info, #527ca8); }
+.context-social-v1__edge.is-research { stroke: var(--app-danger, #a65b56); stroke-dasharray: 8 6; }
+.context-social-v1__edge.is-occupation { stroke: var(--app-warning, #8a7049); }
+.context-social-v1__edge.is-education { stroke: var(--app-info, #537c91); }
+.context-social-v1__edge.is-other { stroke: var(--app-ink-muted, #87938f); }
 .context-social-v1__edge.is-hypothesis { stroke-dasharray: 8 6; }
 .context-social-v1__edge.is-generated { opacity: 0.68; stroke-width: 2; }
 
@@ -471,8 +471,8 @@
 }
 
 .context-social-v1__person-node circle {
-  fill: #fffdf8;
-  stroke: var(--green-800, #22574d);
+  fill: var(--app-surface, #fffdf8);
+  stroke: var(--app-link, var(--green-800, #22574d));
   stroke-width: 3;
   transition: fill 140ms ease, stroke-width 140ms ease, transform 140ms ease;
 }
@@ -496,12 +496,12 @@
 
 .context-social-v1__person-node.is-interactive:hover > circle,
 .context-social-v1__person-node.is-interactive:focus-visible > circle {
-  fill: #edf5f1;
+  fill: var(--app-surface-soft, #edf5f1);
   stroke-width: 4;
 }
 
 .context-social-v1__node-count circle {
-  fill: #c98b34;
+  fill: var(--app-warning-surface, #c98b34);
   stroke: #fff;
   stroke-width: 2;
 }
@@ -522,7 +522,7 @@
 }
 
 .context-social-v1__empty > span {
-  color: #c98b34;
+  color: var(--app-warning, #c98b34);
   font-family: Georgia, serif;
   font-size: 4.2rem;
   line-height: 1;
@@ -577,9 +577,9 @@
 
 .context-social-v1__relations-heading b {
   align-items: center;
-  background: #edf4f1;
+  background: var(--app-surface-soft, #edf4f1);
   border-radius: 999px;
-  color: var(--green-800, #22574d);
+  color: var(--app-link, var(--green-800, #22574d));
   display: inline-flex;
   font-size: 0.75rem;
   font-weight: 800;
@@ -650,7 +650,7 @@
 }
 
 .context-social-v1__person-link:not(:disabled):hover {
-  color: var(--green-800, #22574d);
+  color: var(--app-link, var(--green-800, #22574d));
   text-decoration: underline;
 }
 
@@ -663,15 +663,15 @@
   padding: 0.3rem 0.5rem;
 }
 
-.context-social-v1__status.is-proven { background: #dcefe3; color: #21613a; }
-.context-social-v1__status.is-likely { background: #f6eaca; color: #775719; }
-.context-social-v1__status.is-disputed { background: #f9dfd5; color: #8f4335; }
-.context-social-v1__status.is-disproven { background: #f3d4d2; color: #8e2f2b; }
-.context-social-v1__status.is-unknown { background: #e7ecea; color: #52615d; }
-.context-social-v1__assertion { background: #edf2f0; color: #38554d; }
-.context-social-v1__assertion.is-research_hypothesis { background: #f6e0de; color: #843d38; }
+.context-social-v1__status.is-proven { background: var(--app-success-surface, #dcefe3); color: var(--app-ink, #21613a); }
+.context-social-v1__status.is-likely { background: var(--app-warning-surface, #f6eaca); color: var(--app-warning, #775719); }
+.context-social-v1__status.is-disputed { background: var(--app-danger-surface, #f9dfd5); color: var(--app-danger, #8f4335); }
+.context-social-v1__status.is-disproven { background: var(--app-danger-surface, #f3d4d2); color: var(--app-danger, #8e2f2b); }
+.context-social-v1__status.is-unknown { background: var(--app-surface-soft, #e7ecea); color: var(--app-ink-muted, #52615d); }
+.context-social-v1__assertion { background: var(--app-surface-soft, #edf2f0); color: var(--app-ink, #38554d); }
+.context-social-v1__assertion.is-research_hypothesis { background: var(--app-danger-surface, #f6e0de); color: var(--app-danger, #843d38); }
 .context-social-v1__assertion.is-generated,
-.context-social-v1__assertion.is-legacy_import { background: #e2ebf4; color: #315f83; }
+.context-social-v1__assertion.is-legacy_import { background: var(--app-info-surface, #e2ebf4); color: var(--app-info, #315f83); }
 
 .context-social-v1__relation-card dl {
   display: grid;
@@ -700,7 +700,7 @@
 }
 
 .context-social-v1__relation-notes {
-  background: #f7f5ef;
+  background: var(--app-surface-soft, #f7f5ef);
   border-radius: 0.55rem;
   font-size: 0.76rem;
   margin: 0;
@@ -710,21 +710,21 @@
 }
 
 .context-social-v1__relation-actions {
-  border-top: 1px solid #ebe9e1;
+  border-top: 1px solid var(--app-border, #ebe9e1);
   padding-top: 0.65rem;
 }
 
 .context-social-v1__relation-actions button {
   background: transparent;
   border: 0;
-  color: var(--green-800, #22574d);
+  color: var(--app-link, var(--green-800, #22574d));
   font-size: 0.72rem;
   font-weight: 800;
   padding: 0.25rem 0;
 }
 
 .context-social-v1__relation-actions button.is-danger {
-  color: #a23d36;
+  color: var(--app-danger, #a23d36);
 }
 
 .context-social-v1__provenance-note {
@@ -746,9 +746,9 @@
 
 .context-social-v1__cooccurrence-summary > b {
   align-items: center;
-  background: #edf4f1;
+  background: var(--app-surface-soft, #edf4f1);
   border-radius: 999px;
-  color: var(--green-800, #22574d);
+  color: var(--app-link, var(--green-800, #22574d));
   display: inline-flex;
   flex: 0 0 auto;
   font-size: 0.75rem;
@@ -786,8 +786,8 @@
 
 .context-social-v1__cooccurrence-total {
   align-items: center;
-  background: #edf4f1;
-  border: 1px solid #d4e1dc;
+  background: var(--app-surface-soft, #edf4f1);
+  border: 1px solid var(--app-border, #d4e1dc);
   border-radius: 0.75rem;
   color: var(--context-muted);
   display: grid;
@@ -810,7 +810,7 @@
 
 .context-social-v1__cooccurrence-filters {
   align-items: end;
-  background: #f7f6f1;
+  background: var(--app-surface-soft, #f7f6f1);
   border-bottom: 1px solid var(--context-border);
   display: grid;
   gap: 0.75rem;
@@ -913,10 +913,10 @@
 }
 
 .context-social-v1__cooccurrence-strength {
-  background: #fbefd8;
-  border: 1px solid #ead19e;
+  background: var(--app-warning-surface, #fbefd8);
+  border: 1px solid var(--app-border, #ead19e);
   border-radius: 999px;
-  color: #765313;
+  color: var(--app-ink, #765313);
   font-size: 0.72rem;
   font-weight: 800;
   padding: 0.35rem 0.55rem;
@@ -931,7 +931,7 @@
 }
 
 .context-social-v1__cooccurrence-counts > div {
-  background: #f7f6f1;
+  background: var(--app-surface-soft, #f7f6f1);
   border-radius: 0.55rem;
   min-width: 0;
   padding: 0.45rem 0.55rem;
@@ -963,9 +963,9 @@
 
 .context-social-v1__cooccurrence-source-details summary {
   align-items: center;
-  background: #edf4f1;
+  background: var(--app-surface-soft, #edf4f1);
   border-radius: 0.4rem;
-  color: var(--green-800, #22574d);
+  color: var(--app-link, var(--green-800, #22574d));
   cursor: pointer;
   display: flex;
   font-weight: 800;
@@ -997,7 +997,7 @@
 }
 
 .context-social-v1__cooccurrence-sources li > button {
-  background: #fff;
+  background: var(--app-surface, #fff);
   border: 1px solid var(--context-border);
   border-radius: 0.45rem;
   color: inherit;
@@ -1007,12 +1007,12 @@
 
 .context-social-v1__cooccurrence-sources li > button:hover,
 .context-social-v1__cooccurrence-sources li > button:focus-visible {
-  background: #f1f6f4;
+  background: var(--app-surface-soft, #f1f6f4);
   border-color: var(--green-800, #22574d);
 }
 
 .context-social-v1__cooccurrence-sources span {
-  color: #96651f;
+  color: var(--app-warning, #96651f);
   font-size: 0.62rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -1029,14 +1029,14 @@
 }
 
 .context-social-v1__cooccurrence-actions {
-  border-top: 1px solid #ebe9e1;
+  border-top: 1px solid var(--app-border, #ebe9e1);
   padding-top: 0.6rem;
 }
 
 .context-social-v1__cooccurrence-actions button {
   background: transparent;
   border: 0;
-  color: var(--green-800, #22574d);
+  color: var(--app-link, var(--green-800, #22574d));
   font-size: 0.72rem;
   font-weight: 800;
   padding: 0.2rem 0;
@@ -1093,7 +1093,7 @@
 
 .context-social-v1__cooccurrence-skeleton span {
   animation: context-social-v1-pulse 1.3s ease-in-out infinite alternate;
-  background: #ecece5;
+  background: var(--app-surface-soft, #ecece5);
   height: 10rem;
 }
 
@@ -1110,7 +1110,7 @@
 .context-social-v1__graph-skeleton span,
 .context-social-v1__card-skeletons span {
   animation: context-social-v1-pulse 1.3s ease-in-out infinite alternate;
-  background: #ecece5;
+  background: var(--app-surface-soft, #ecece5);
 }
 
 .context-social-v1__graph-skeleton span {

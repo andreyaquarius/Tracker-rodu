@@ -33,6 +33,9 @@ import {
   positionFamilyContinuations,
 } from "./familyContinuationLayout.ts";
 import "./familyTree.css";
+import { StarrySkyCanvas } from "../../../components/appearance/StarrySkyCanvas.tsx";
+import { luminousTreeColor } from "../appearance/starrySkyTheme.ts";
+import { useAppAppearance } from "../../../components/appearance/AppAppearanceProvider.tsx";
 
 export interface FamilyTreeViewportProps {
   graph: FamilyGraphData;
@@ -40,6 +43,8 @@ export interface FamilyTreeViewportProps {
   className?: string;
   lineageColor?: string;
   lineagePalette?: readonly string[];
+  starryBackground?: boolean;
+  starryAnimation?: boolean;
   selectedPersonId?: string;
   preserveAnchorOccurrenceId?: OccurrenceId;
   /** May lower, but never raise, the hard ceiling of 600 mounted cards. */
@@ -84,6 +89,8 @@ export function FamilyTreeViewport({
   className,
   lineageColor,
   lineagePalette,
+  starryBackground: savedStarryBackground = false,
+  starryAnimation: savedStarryAnimation = true,
   selectedPersonId,
   preserveAnchorOccurrenceId,
   maxRenderedNodes,
@@ -103,6 +110,9 @@ export function FamilyTreeViewport({
   onLayoutWarnings,
   resolvePhotoSource,
 }: FamilyTreeViewportProps): ReactElement {
+  const { appearance } = useAppAppearance();
+  const starryBackground = savedStarryBackground || appearance.theme === "starry-dark";
+  const starryAnimation = savedStarryAnimation && (appearance.theme !== "starry-dark" || appearance.skyMotion);
   const layoutGraph = useMemo(
     () => graphWithoutLegacyFamilyChildControls(graph),
     [graph],
@@ -233,13 +243,14 @@ export function FamilyTreeViewport({
   const visibleFamilyControls = mountedInteractive.secondary;
 
   const compact = camera.camera.zoom < 0.48;
+  const displayColor = (color: string) => starryBackground ? luminousTreeColor(color) : color;
   const rootStyle = {
     "--ft-zoom": String(camera.camera.zoom),
-    "--ft-direct-lineage-color": lineageColor ?? "#2f7465",
+    "--ft-direct-lineage-color": displayColor(lineageColor ?? "#2f7465"),
     ...Object.fromEntries(
       Array.from({ length: 8 }, (_, index) => [
         `--ft-lineage-group-${index}`,
-        lineagePalette?.[index] ?? lineageColor ?? "#2f7465",
+        displayColor(lineagePalette?.[index] ?? lineageColor ?? "#2f7465"),
       ]),
     ),
   } as CSSProperties;
@@ -248,6 +259,7 @@ export function FamilyTreeViewport({
     <section
       className={`ft-root${className ? ` ${className}` : ""}`}
       style={rootStyle}
+      data-starry={starryBackground}
       aria-label="Робочий простір родового дерева"
     >
       <div className="ft-toolbar" role="toolbar" aria-label="Керування полотном дерева">
@@ -315,8 +327,11 @@ export function FamilyTreeViewport({
           onPointerCancelCapture={camera.onPointerUp}
           onLostPointerCapture={camera.onPointerUp}
         >
+          {starryBackground ? <StarrySkyCanvas className="ft-starry-background" moving={starryAnimation}
+            width={camera.viewportSize.width} height={camera.viewportSize.height} /> : null}
           {layoutState.layout ? (
             <TreeEdgeCanvas
+              starryBackground={starryBackground}
               width={camera.viewportSize.width}
               height={camera.viewportSize.height}
               camera={camera.camera}

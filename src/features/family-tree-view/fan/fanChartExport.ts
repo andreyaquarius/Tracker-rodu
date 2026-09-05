@@ -7,6 +7,7 @@ import {
   loadTrackerRoduChartLogoDataUrl,
   prepareFamilyTreeChartBrandForExport,
 } from "../export/familyTreeChartBrand.ts";
+import { prepareStarrySkyForExport } from "../appearance/starrySkyTheme.ts";
 
 export type FanChartExportDirection = "ancestors" | "descendants";
 export type FanChartExportFormat = CircularAncestorExportFormat;
@@ -218,6 +219,7 @@ export function createFanChartExportSvg(
   clone.setAttribute("shape-rendering", "geometricPrecision");
   clone.setAttribute("text-rendering", "geometricPrecision");
   clone.setAttribute("class", "fan-genealogy-export-chart");
+  prepareStarrySkyForExport(clone, bounds);
 
   clone.querySelectorAll(".is-selected").forEach((element) => {
     element.classList.remove("is-selected");

@@ -10,6 +10,7 @@ import type {
 } from "../types.ts";
 
 export interface TreeEdgeCanvasProps {
+  starryBackground?: boolean;
   width: number;
   height: number;
   camera: CameraState;
@@ -111,6 +112,7 @@ export function TreeEdgeCanvas({
   edges,
   unions,
   generationBands,
+  starryBackground = false,
 }: TreeEdgeCanvasProps): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -224,7 +226,7 @@ export function TreeEdgeCanvas({
       context.fill();
     }
     context.restore();
-  }, [camera, edges, generationBands, height, unions, width, worldViewport]);
+  }, [camera, edges, generationBands, height, unions, width, worldViewport, starryBackground]);
 
   return <canvas ref={canvasRef} className="ft-edge-canvas" aria-hidden="true" />;
 }

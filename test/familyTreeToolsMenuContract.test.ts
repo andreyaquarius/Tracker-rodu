@@ -13,6 +13,14 @@ const toolsWindow = readFileSync(
   ),
   "utf8",
 );
+const navigation = readFileSync(
+  new URL("../src/components/familyTree/FamilyTreeNavigation.tsx", import.meta.url),
+  "utf8",
+);
+const displayWindow = readFileSync(
+  new URL("../src/components/familyTree/FamilyTreeDisplayWindow.tsx", import.meta.url),
+  "utf8",
+);
 const circularChart = readFileSync(
   new URL(
     "../src/components/familyTree/CircularAncestorChartWindow.tsx",
@@ -66,56 +74,77 @@ const css = readFileSync(
   "utf8",
 );
 
-test("production tree replaces the large hero with one compact toolbar action", () => {
+test("production tree exposes administration and display directly in the toolbar", () => {
   assert.doesNotMatch(productionPage, /family-tree-v2-page-header/);
   assert.doesNotMatch(productionPage, /Гілки завантажуються поступово/);
   assert.match(
-    productionPage,
+    navigation,
     /className="button button-secondary family-tree-v2-tools-trigger"/,
   );
-  assert.match(productionPage, /aria-haspopup="dialog"/);
-  assert.match(productionPage, /aria-expanded=\{treeToolsOpen\}/);
+  assert.match(navigation, /Адміністрування/);
+  assert.match(navigation, /Відображення дерева/);
+  assert.match(navigation, /aria-haspopup="dialog"/);
+  assert.match(navigation, /aria-expanded=\{treeToolsOpen\}/);
+  assert.match(navigation, /aria-expanded=\{treeDisplayOpen\}/);
+  assert.match(navigation, /openWindow\(event.currentTarget, onOpenTreeDisplay\)/);
+  assert.match(navigation, /openWindow\(event.currentTarget, onOpenTreeTools\)/);
+  assert.match(navigation, /document.fullscreenElement\?\.contains\(trigger\)/);
+  assert.match(navigation, /await document.exitFullscreen\(\)/);
+  assert.match(navigation, /disabled=\{!canDisplayTree\}/);
   assert.match(
     productionPage,
-    /family-tree-v2-host-toolbar[\s\S]*?Родове дерево[\s\S]*?family-tree-v2-history/,
+    /family-tree-v2-host-toolbar[\s\S]*?<FamilyTreeNavigation[\s\S]*?family-tree-v2-history/,
   );
+  assert.match(productionPage, /family-tree-v2-empty-tools[\s\S]*?<FamilyTreeNavigation[\s\S]*?canDisplayTree=\{false\}/);
+  assert.match(productionPage, /function openTreeDisplay\(\)[\s\S]*?if \(!selectedEntry\?\.rootPersonId\) return;[\s\S]*?setTreeToolsOpen\(false\);[\s\S]*?setTreeDisplayOpen\(true\)/);
+  assert.match(productionPage, /function openTreeTools\(\)[\s\S]*?setTreeDisplayOpen\(false\);[\s\S]*?setTreeToolsOpen\(true\)/);
   assert.doesNotMatch(css, /\.family-tree-v2-page-header/);
   assert.match(
     css,
     /\.family-tree-v2-shell\s*\{[^}]*flex:\s*1 1 0;[^}]*min-height:\s*0;/s,
   );
+  assert.match(css, /\.family-tree-v2-host-toolbar\s*\{[^}]*flex-wrap:\s*wrap;/s);
+  assert.match(css, /@media \(max-width: 700px\)\s*\{\s*\.family-tree-v2-navigation\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s);
 });
 
 test("tree tools window exposes GEDCOM and opens the statistics module", () => {
   assert.match(
     toolsWindow,
-    /<Modal[\s\S]*?title="Родове дерево"[\s\S]*?mode="window"[\s\S]*?minimizable=\{false\}/,
+    /<Modal[\s\S]*?title="Адміністрування"[\s\S]*?mode="window"[\s\S]*?minimizable=\{false\}/,
   );
   assert.match(toolsWindow, /Імпорт GEDCOM/);
   assert.match(toolsWindow, /Експорт GEDCOM/);
   assert.match(toolsWindow, /Статистика/);
   assert.match(toolsWindow, /Звіти, діаграми, карта та якість даних/);
-  assert.match(toolsWindow, /Відображення дерева/);
-  assert.match(toolsWindow, /Кругова діаграма предків/);
-  assert.match(toolsWindow, /Віялова діаграма предків/);
-  assert.match(toolsWindow, /Віялова діаграма нащадків/);
-  assert.match(toolsWindow, /Родовід прямих предків/);
-  assert.match(toolsWindow, /onSelectDisplayMode\("direct-ancestors"\)/);
-  assert.match(toolsWindow, /displayMode === "direct-ancestors"/);
-  assert.match(toolsWindow, /Від 1 до 16 поколінь прямих предків · інтерактивний огляд/);
-  assert.match(toolsWindow, /onClick=\{onOpenCircularChart\}/);
-  assert.match(toolsWindow, /onClick=\{onOpenAncestorFanChart\}/);
-  assert.match(toolsWindow, /onClick=\{onOpenDescendantFanChart\}/);
-  assert.doesNotMatch(toolsWindow, /Кругова діаграма предків[\s\S]{0,160}заплановано/);
+  assert.doesNotMatch(toolsWindow, /Відображення дерева|visualizations|onSelectDisplayMode|onOpenConstellationChart|onOpenCircularChart|onOpenAncestorFanChart|onOpenDescendantFanChart/);
   assert.match(
     toolsWindow,
     /onClick=\{onOpenStatistics\}[\s\S]*?<strong>Статистика<\/strong>/,
   );
-  assert.match(
-    toolsWindow,
-    /<strong>Кругова діаграма предків<\/strong>[\s\S]*?<small>Від 1 до 16 поколінь прямих предків · інтерактивний огляд<\/small>/,
-  );
   assert.match(toolsWindow, /onSelectTree\(event\.target\.value\)/);
+});
+
+test("standalone display window retains all six modes and closes on selection", () => {
+  assert.match(displayWindow, /<Modal title="Відображення дерева"/);
+  for (const label of ["Класичне родове дерево", "Родовід прямих предків", "Сузір’я роду", "Кругова діаграма предків", "Віялова діаграма предків", "Віялова діаграма нащадків"]) {
+    assert.ok(displayWindow.includes(`<strong>${label}</strong>`), label);
+  }
+  assert.equal((displayWindow.match(/<button\b/g) ?? []).length, 6);
+  for (const mode of ["classic", "direct-ancestors"]) {
+    assert.ok(displayWindow.includes(`onSelectDisplayMode("${mode}")`));
+    assert.ok(displayWindow.includes(`aria-pressed={displayMode === "${mode}"}`));
+  }
+  for (const callback of ["onOpenConstellationChart", "onOpenCircularChart", "onOpenAncestorFanChart", "onOpenDescendantFanChart"]) {
+    assert.ok(displayWindow.includes(`onClick={${callback}}`));
+  }
+  assert.match(displayWindow, /Від 1 до 16 поколінь прямих предків · інтерактивний огляд/);
+  assert.match(displayWindow, /event.key === "Escape"/);
+  assert.match(displayWindow, /trigger\.focus\(\)/);
+  assert.match(productionPage, /treeDisplayOpen && selectedEntry\?\.rootPersonId/);
+  assert.match(productionPage, /<FamilyTreeDisplayWindow[\s\S]*?trackProductAnalyticsAction\("tree_mode_change"\)[\s\S]*?setTreeDisplayMode\(mode\);\s*setTreeDisplayOpen\(false\)/);
+  for (const handler of ["openConstellationChart", "openCircularAncestorChart", "openFanChart"]) {
+    assert.match(productionPage, new RegExp(`function ${handler}\\([^)]*\\) \\{[\\s\\S]*?setTreeDisplayOpen\\(false\\)`));
+  }
 });
 
 test("tree tools expose persistent direct-lineage palettes and per-branch colors", () => {

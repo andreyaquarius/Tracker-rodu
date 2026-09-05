@@ -2,6 +2,8 @@ import type { CameraState } from "../types.ts";
 
 export const MIN_TREE_ZOOM = 0.045;
 export const MAX_TREE_ZOOM = 4;
+export interface TreeZoomLimits { min: number; max: number }
+export const DEFAULT_TREE_ZOOM_LIMITS: TreeZoomLimits = { min: MIN_TREE_ZOOM, max: MAX_TREE_ZOOM };
 
 export interface CameraViewportRect {
   left: number;
@@ -21,8 +23,8 @@ export interface PinchGestureSnapshot {
   distance: number;
 }
 
-export function clampTreeZoom(value: number): number {
-  return Math.min(MAX_TREE_ZOOM, Math.max(MIN_TREE_ZOOM, value));
+export function clampTreeZoom(value: number, limits: TreeZoomLimits = DEFAULT_TREE_ZOOM_LIMITS): number {
+  return Math.min(limits.max, Math.max(limits.min, value));
 }
 
 function screenPoint(
@@ -40,11 +42,12 @@ export function zoomCameraAtClientPoint(
   viewport: CameraViewportRect,
   point: CameraClientPoint,
   factor: number,
+  limits: TreeZoomLimits = DEFAULT_TREE_ZOOM_LIMITS,
 ): CameraState {
   const screen = screenPoint(viewport, point);
   const worldX = camera.x + screen.x / camera.zoom;
   const worldY = camera.y + screen.y / camera.zoom;
-  const zoom = clampTreeZoom(camera.zoom * factor);
+  const zoom = clampTreeZoom(camera.zoom * factor, limits);
   return {
     x: worldX - screen.x / zoom,
     y: worldY - screen.y / zoom,
@@ -57,6 +60,7 @@ export function applyPinchToCamera(
   viewport: CameraViewportRect,
   previous: PinchGestureSnapshot,
   current: PinchGestureSnapshot,
+  limits: TreeZoomLimits = DEFAULT_TREE_ZOOM_LIMITS,
 ): CameraState {
   if (
     !Number.isFinite(previous.distance) ||
@@ -78,6 +82,7 @@ export function applyPinchToCamera(
   const anchorWorldY = camera.y + previousScreen.y / camera.zoom;
   const zoom = clampTreeZoom(
     camera.zoom * (current.distance / previous.distance),
+    limits,
   );
   return {
     x: anchorWorldX - currentScreen.x / zoom,

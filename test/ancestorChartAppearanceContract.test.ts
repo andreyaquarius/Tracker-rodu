@@ -18,10 +18,9 @@ const fanExport = source(
 );
 
 test("both ancestor diagrams inherit the saved tree appearance and expose a local reset", () => {
-  assert.equal(
-    page.match(/appearancePreferences=\{treeAppearance\}/g)?.length,
-    2,
-  );
+  for (const component of ["CircularAncestorChartWindow", "FanGenealogyChartWindow"]) {
+    assert.match(page, new RegExp(`<${component}\\b[^]*?appearancePreferences=\\{treeAppearance\\}`));
+  }
   assert.match(circular, /resolveFamilyTreeChartColorScheme\(chartAppearance\)/);
   assert.match(fan, /resolveFamilyTreeChartColorScheme\(chartAppearance\)/);
   assert.match(circular, /ancestorChartToneForOccurrence\(chartColorScheme, occurrence\)/);

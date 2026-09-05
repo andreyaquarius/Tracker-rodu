@@ -18,11 +18,13 @@ import type {
 import {
   applyPinchToCamera,
   clampTreeZoom,
+  DEFAULT_TREE_ZOOM_LIMITS,
   pinchSnapshot,
   wheelZoomFactor,
   zoomCameraAtClientPoint,
   type CameraViewportRect,
   type PinchGestureSnapshot,
+  type TreeZoomLimits,
 } from "./treeCameraMath.ts";
 
 export interface TreeCameraController {
@@ -52,6 +54,7 @@ function isInteractiveMouseTarget(target: EventTarget | null): boolean {
 
 export function useTreeCamera(
   initial: CameraState = { x: 0, y: 0, zoom: 1 },
+  zoomLimits: TreeZoomLimits = DEFAULT_TREE_ZOOM_LIMITS,
 ): TreeCameraController {
   const containerRef = useRef<HTMLDivElement>(null);
   const [camera, setCamera] = useState(initial);
@@ -99,6 +102,7 @@ export function useTreeCamera(
           viewportRect(element),
           { x: event.clientX, y: event.clientY },
           factor,
+          zoomLimits,
         ),
       );
     };
@@ -115,7 +119,7 @@ export function useTreeCamera(
       element.removeEventListener("gesturechange", preventBrowserGesture);
       element.removeEventListener("gestureend", preventBrowserGesture);
     };
-  }, [updateCamera]);
+  }, [updateCamera, zoomLimits]);
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>): void => {
@@ -165,11 +169,12 @@ export function useTreeCamera(
             viewportRect(event.currentTarget),
             previousPinch,
             currentPinch,
+            zoomLimits,
           ),
         );
       }
     },
-    [updateCamera],
+    [updateCamera, zoomLimits],
   );
 
   const onPointerUp = useCallback(
@@ -186,9 +191,9 @@ export function useTreeCamera(
   const zoomBy = useCallback(
     (factor: number): void => {
       const active = cameraRef.current;
-      updateCamera({ ...active, zoom: clampTreeZoom(active.zoom * factor) });
+      updateCamera({ ...active, zoom: clampTreeZoom(active.zoom * factor, zoomLimits) });
     },
-    [updateCamera],
+    [updateCamera, zoomLimits],
   );
 
   const fitBounds = useCallback(
@@ -200,6 +205,7 @@ export function useTreeCamera(
           Math.max(1, viewportSize.width - padding * 2) / width,
           Math.max(1, viewportSize.height - padding * 2) / height,
         ),
+        zoomLimits,
       );
       updateCamera({
         x: (bounds.left + bounds.right) / 2,
@@ -207,7 +213,7 @@ export function useTreeCamera(
         zoom,
       });
     },
-    [updateCamera, viewportSize],
+    [updateCamera, viewportSize, zoomLimits],
   );
 
   const centerNode = useCallback(

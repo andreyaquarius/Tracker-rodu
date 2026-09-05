@@ -1,9 +1,9 @@
 .church-role-network-v1 {
   --church-border: var(--line, #deddd5);
   --church-paper: var(--paper, #fffdf8);
-  --church-ink: var(--green-950, #102f2a);
+  --church-ink: var(--app-ink, var(--green-950, #102f2a));
   --church-muted: var(--muted, #53645f);
-  --church-accent: var(--green-900, #173f38);
+  --church-accent: var(--app-link, var(--green-900, #173f38));
   color: var(--church-ink);
   display: grid;
   gap: 0.65rem;
@@ -56,7 +56,7 @@
 .church-role-network-v1__eyebrow,
 .church-role-network-v1__filters label > span,
 .church-role-network-v1__card header > div > span {
-  color: var(--gold-800, #8d5a13);
+  color: var(--app-warning, var(--gold-800, #8d5a13));
   font-size: 0.72rem;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -86,7 +86,7 @@
 
 .church-role-network-v1__research-note {
   align-items: flex-start;
-  background: color-mix(in srgb, var(--gold-200, #f3dfac) 42%, var(--church-paper));
+  background: var(--app-warning-surface, color-mix(in srgb, var(--gold-200, #f3dfac) 42%, var(--church-paper)));
   border-color: color-mix(in srgb, var(--gold-700, #9e6819) 28%, var(--church-border));
   display: grid;
   gap: 0.3rem;
@@ -143,7 +143,7 @@
 
 .church-role-network-v1__filters input,
 .church-role-network-v1__filters select {
-  background: #fff;
+  background: var(--app-surface, #fff);
   border: 1px solid color-mix(in srgb, var(--church-accent) 20%, var(--church-border));
   border-radius: 0.65rem;
   color: var(--church-ink);
@@ -263,13 +263,13 @@
 }
 
 .church-role-network-v1__message.is-error {
-  background: #fff0ed;
-  border-color: #e8a99d;
-  color: #8a2517;
+  background: var(--app-danger-surface, #fff0ed);
+  border-color: var(--app-border, #e8a99d);
+  color: var(--app-danger, #8a2517);
 }
 
 .church-role-network-v1__surname-warning {
-  color: #684914;
+  color: var(--app-ink, #684914);
   font-size: 0.62rem;
   font-weight: 750;
   line-height: 1.15;
@@ -279,9 +279,9 @@
 
 .church-role-network-v1__graph-limit-note {
   background: color-mix(in srgb, #d99a20 12%, var(--church-paper));
-  border: 1px solid color-mix(in srgb, #d99a20 35%, var(--church-border));
+  border: 1px solid color-mix(in srgb, var(--app-border-strong, #d99a20) 35%, var(--church-border));
   border-radius: 0.65rem;
-  color: #684914;
+  color: var(--app-ink, #684914);
   font-size: 0.78rem;
   font-weight: 750;
   margin: 0;
@@ -452,10 +452,10 @@
 }
 
 .church-role-network-v1__ambiguous {
-  background: #fff5dc;
-  border: 1px solid #e7c983;
+  background: var(--app-warning-surface, #fff5dc);
+  border: 1px solid var(--app-border, #e7c983);
   border-radius: 0.65rem;
-  color: #74510c;
+  color: var(--app-ink, #74510c);
   padding: 0.65rem;
 }
 
@@ -496,7 +496,7 @@
 
 .church-role-network-v1__sample p button {
   border: 0;
-  color: var(--church-accent);
+  color: var(--app-link, var(--church-accent));
   min-height: 0;
   padding: 0.15rem;
   text-decoration: underline;
@@ -536,7 +536,7 @@
 .church-role-network-v1__sources span,
 .church-role-network-v1__sample > button span,
 .church-role-network-v1__sample > div > span {
-  color: var(--gold-800, #8d5a13);
+  color: var(--app-warning, var(--gold-800, #8d5a13));
   font-size: 0.68rem;
   font-weight: 900;
   text-transform: uppercase;
@@ -558,7 +558,7 @@
 }
 
 .church-role-network-v1__empty > span {
-  color: color-mix(in srgb, var(--church-accent) 40%, transparent);
+  color: color-mix(in srgb, var(--app-link, var(--church-accent)) 40%, transparent);
   font-size: 3rem;
 }
 
@@ -589,8 +589,8 @@
 }
 
 .church-role-network-v1__limit {
-  background: #fff5dc;
-  border-color: #e7c983;
+  background: var(--app-warning-surface, #fff5dc);
+  border-color: var(--app-border, #e7c983);
   display: grid;
   gap: 0.4rem;
   padding: 0.9rem 1rem;

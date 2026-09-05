@@ -10,6 +10,10 @@ import {
 } from "react";
 import { Modal } from "../Modal";
 import { AncestorChartColorControls } from "./AncestorChartColorControls.tsx";
+import { StarryAnimationToggle, StarryBackgroundToggle } from "./StarryBackgroundToggle.tsx";
+import { useTreeSkyAppearance } from "../appearance/useTreeSkyAppearance.ts";
+import { StarrySkyBackground } from "../../features/family-tree-view/appearance/StarrySkyBackground.tsx";
+import { starrySkyViewportBounds, starryTreeColorScheme } from "../../features/family-tree-view/appearance/starrySkyTheme.ts";
 import { FamilyTreeChartBrand } from "./FamilyTreeChartBrand.tsx";
 import type { FamilyTreeNeighborhoodClient } from "../../features/family-tree-view/data/neighborhoodClient";
 import { useFamilyTreeNeighborhood } from "../../features/family-tree-view/react/useFamilyTreeNeighborhood";
@@ -124,7 +128,8 @@ export function CircularAncestorChartWindow({
     ),
     [appearancePreferences],
   );
-  const [chartAppearance, setChartAppearance] = useState(inheritedAppearance);
+  const [localChartAppearance, setChartAppearance] = useState(inheritedAppearance);
+  const chartAppearance = useTreeSkyAppearance(localChartAppearance);
   const [chartColorsDirty, setChartColorsDirty] = useState(false);
   const [camera, setCamera] = useState<ChartCamera>({ zoom: 1, x: 0, y: 0 });
   const [svgSize, setSvgSize] = useState({ width: 1, height: 1 });
@@ -151,7 +156,10 @@ export function CircularAncestorChartWindow({
   }, [inheritedAppearance]);
 
   const chartColorScheme = useMemo(
-    () => resolveFamilyTreeChartColorScheme(chartAppearance),
+    () => {
+      const scheme = resolveFamilyTreeChartColorScheme(chartAppearance);
+      return chartAppearance.starryBackground ? starryTreeColorScheme(scheme) : scheme;
+    },
     [chartAppearance],
   );
   const chartColorStyle = useMemo(
@@ -645,8 +653,18 @@ export function CircularAncestorChartWindow({
                 <button type="button" onClick={() => setCamera((current) => ({ ...current, x: 0, y: 0 }))}>До центру</button>
               </div>
               <div className="circular-ancestor-view-controls" role="group" aria-label="Вигляд і збереження діаграми">
+                <StarryAnimationToggle enabled={chartAppearance.starryAnimation} skyEnabled={chartAppearance.starryBackground}
+                  onChange={starryAnimation => {
+                    setChartAppearance(current => ({ ...current, starryAnimation }));
+                    setChartColorsDirty(true);
+                  }} />
+                <StarryBackgroundToggle enabled={chartAppearance.starryBackground}
+                  onChange={starryBackground => {
+                    setChartAppearance(current => ({ ...current, starryBackground }));
+                    setChartColorsDirty(true);
+                  }} />
                 <AncestorChartColorControls
-                  appearance={chartAppearance}
+                  appearance={localChartAppearance}
                   inheritedAppearance={inheritedAppearance}
                   dirty={chartColorsDirty}
                   onChange={(nextAppearance) => {
@@ -745,7 +763,7 @@ export function CircularAncestorChartWindow({
         ) : null}
 
         <div className="circular-ancestor-content">
-          <div className="circular-ancestor-canvas-wrap" style={chartColorStyle}>
+          <div className="circular-ancestor-canvas-wrap" style={chartColorStyle} data-starry={chartAppearance.starryBackground}>
             <div className="circular-ancestor-legend" aria-label="Позначення гілок">
               <span><i className="paternal" style={{ backgroundColor: chartColorScheme.paternal.fill }} /> Батьківська гілка</span>
               <span><i className="maternal" style={{ backgroundColor: chartColorScheme.maternal.fill }} /> Материнська гілка</span>
@@ -753,6 +771,7 @@ export function CircularAncestorChartWindow({
             </div>
             <svg
               ref={svgRef}
+              data-starry={chartAppearance.starryBackground}
               style={chartColorStyle}
               className={`circular-ancestor-chart ${dragRef.current ? "is-dragging" : ""}`}
               viewBox={`${camera.x - viewSize / 2} ${camera.y - viewSize / 2} ${viewSize} ${viewSize}`}
@@ -768,6 +787,9 @@ export function CircularAncestorChartWindow({
                   <feDropShadow dx="0" dy="3" stdDeviation="4" floodColor="#173f36" floodOpacity=".18" />
                 </filter>
               </defs>
+              {chartAppearance.starryBackground ? <StarrySkyBackground
+                moving={chartAppearance.starryAnimation}
+                {...starrySkyViewportBounds({ x: camera.x - viewSize / 2, y: camera.y - viewSize / 2, width: viewSize, height: viewSize }, svgSize)} /> : null}
               <g className="circular-ancestor-ring-grid">
                 {Array.from({ length: generations }, (_, index) => index + 1).map((generation) => (
                   <circle

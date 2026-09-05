@@ -2,6 +2,7 @@ import {
   loadTrackerRoduChartLogoDataUrl,
   prepareFamilyTreeChartBrandForExport,
 } from "../export/familyTreeChartBrand.ts";
+import { prepareStarrySkyForExport } from "../appearance/starrySkyTheme.ts";
 
 export type CircularAncestorExportFormat =
   | "pdf-a0"
@@ -222,6 +223,7 @@ export function createCircularAncestorExportSvg(
   clone.setAttribute("shape-rendering", "geometricPrecision");
   clone.setAttribute("text-rendering", "geometricPrecision");
   clone.setAttribute("class", "circular-ancestor-export-chart");
+  prepareStarrySkyForExport(clone, { x: origin, y: origin, width: options.worldSize, height: options.worldSize });
 
   clone.querySelectorAll(".is-selected").forEach((element) => {
     element.classList.remove("is-selected");

@@ -144,6 +144,49 @@
   cursor: grabbing;
 }
 
+/* Presentation-only sky: no changes to layout, card dimensions or hit targets. */
+.ft-root[data-starry="true"] {
+  --ft-bg: #050814;
+  --ft-panel: #111c30;
+  --ft-card: #101b30;
+  --ft-ink: #f0f5ff;
+  --ft-muted: #bccce3;
+  --ft-border: #344a69;
+  --ft-accent: #7ee4cf;
+  --ft-accent-soft: #223d4c;
+  --ft-warm-accent: #ffc979;
+  --ft-danger: #ff9a9e;
+  --ft-edge-structure: #839ec9;
+  --ft-edge-partnership: #83c9c4;
+  --ft-edge-continuation: #ae915e;
+  --ft-edge-continuation-node: #ae915e;
+  --ft-edge-generation: #22334e;
+  --ft-edge-generation-label: #a4b8d9;
+  --ft-edge-junction: #d7e5ff;
+}
+.ft-root[data-starry="true"] .ft-viewport { background: var(--ft-bg); }
+.ft-starry-background { position: absolute; inset: 0; pointer-events: none; }
+.ft-root[data-starry="true"] .ft-person-card {
+  --ft-card-glow: #b8c9e7;
+  color: var(--ft-ink);
+  border-color: var(--ft-card-glow);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--ft-card-glow) 23%, transparent), 0 12px 30px #0007;
+}
+.ft-root[data-starry="true"] .ft-person-card[data-sex="male"] { --ft-card-glow: #7dbfff; }
+.ft-root[data-starry="true"] .ft-person-card[data-sex="female"] { --ft-card-glow: #f39fcd; }
+.ft-root[data-starry="true"] .ft-person-card[data-sex="other"] { --ft-card-glow: #ffcb80; }
+.ft-root[data-starry="true"] .ft-person-card:is([data-lineage="focus"], [data-lineage="direct-ancestor"]) {
+  --ft-card-glow: var(--ft-card-lineage-color);
+}
+.ft-root[data-starry="true"] .ft-person-card:is(:hover, :focus-within, [data-selected="true"]) {
+  border-color: #f4f8ff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ft-card-glow) 35%, transparent), 0 0 28px color-mix(in srgb, var(--ft-card-glow) 42%, transparent);
+}
+.ft-root[data-starry="true"] .ft-card-action[data-action="focus"] { --ft-card-action-accent: #91cfff; }
+.ft-root[data-starry="true"] .ft-card-action[data-action="descendants"] { --ft-card-action-accent: #7be0b2; }
+.ft-root[data-starry="true"] .ft-card-action[data-action="toggle-branches"] { --ft-card-action-accent: #ffd08d; }
+.ft-root[data-starry="true"] .ft-card-quick-edit:is(:hover, :focus-visible) { color: #081021; }
+
 .ft-edge-canvas,
 .ft-card-layer {
   position: absolute;

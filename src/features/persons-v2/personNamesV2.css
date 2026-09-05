@@ -34,9 +34,9 @@
 }
 
 .person-names-v2__notice.is-error {
-  background: #fff1ef;
-  border-color: #e6aaa4;
-  color: #9b3028;
+  background: var(--app-danger-surface, #fff1ef);
+  border-color: var(--app-border, #e6aaa4);
+  color: var(--app-danger, #9b3028);
 }
 
 .person-names-v2__list {
@@ -143,7 +143,7 @@
 }
 
 .person-names-v2__suggestions-error {
-  color: #9b3028;
+  color: var(--app-danger, #9b3028);
 }
 
 .person-names-v2__suggestion-list {

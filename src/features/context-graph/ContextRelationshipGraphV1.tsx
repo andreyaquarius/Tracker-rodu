@@ -24,6 +24,8 @@ import {
   type ContextRelationshipGraphProjectionNode,
 } from "./contextRelationshipGraphModel.ts";
 import "./ContextRelationshipGraphV1.css";
+import { useAppAppearance } from "../../components/appearance/AppAppearanceProvider.tsx";
+import { luminousTreeColor } from "../family-tree-view/appearance/starrySkyTheme.ts";
 
 export type ContextRelationshipGraphMode = "2d" | "3d";
 export type ContextRelationshipGraphCenterConnectionLabels = "edge" | "node";
@@ -131,6 +133,7 @@ export function ContextRelationshipGraphV1({
   onNodeActivate,
   onEdgeSelect,
 }: ContextRelationshipGraphV1Props) {
+  const { appearance } = useAppAppearance();
   const headingId = useId();
   const instanceId = useId().replace(/[^a-z0-9_-]/giu, "");
   const rootRef = useRef<HTMLElement | null>(null);
@@ -589,7 +592,7 @@ export function ContextRelationshipGraphV1({
                 const isCenter = node.id === graph.centerNodeId;
                 const selected = selection.kind === "node" && selection.id === node.id;
                 const nodeStyle = {
-                  "--context-relationship-node-color": node.color,
+                  "--context-relationship-node-color": appearance.theme === "starry-dark" ? luminousTreeColor(node.color ?? "#22574d") : node.color,
                 } as CSSProperties;
                 return (
                   <g

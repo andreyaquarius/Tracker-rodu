@@ -92,11 +92,12 @@ test("existing refresh on open, focus and every minute remains intact", () => {
   assert.match(bell, /event\.currentTarget\.open\) void refresh\(\)/);
 });
 
-test("notification state is remounted when the signed-in account changes", () => {
+test("notification state is remounted by account with a key distinct from the sibling help center", () => {
   assert.match(
     layout,
-    /<AnnouncementBell\s+key=\{props\.account\?\.id \?\? "anonymous"\}\s+account=\{props\.account\}/s,
+    /<AnnouncementBell\s+key=\{`announcements:\$\{props\.account\?\.id \?\? "anonymous"\}`\}\s+account=\{props\.account\}/s,
   );
+  assert.match(layout, /<HelpCenter\s+key=\{`help:\$\{props\.account\?\.id \?\? "anonymous"\}`\}/s);
 });
 
 function source(relativePath: string): string {

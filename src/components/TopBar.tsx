@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
 import { useDismissibleDetails } from "../hooks/useDismissibleDetails";
+import { AppAppearanceSettings } from "./appearance/AppAppearanceSettings.tsx";
 
 interface TopBarProps {
   account: SupabaseAccount | null;
@@ -135,6 +136,7 @@ export function TopBar({
           <div className="account-popover">
             <strong>{account.name}</strong>
             <small>{account.email}</small>
+            <AppAppearanceSettings compact />
             {workspace ? (
               <p className="account-project">
                 <span>{workspace.projectName}</span>

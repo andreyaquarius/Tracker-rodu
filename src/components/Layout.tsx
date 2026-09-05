@@ -134,12 +134,12 @@ export function Layout(props: LayoutProps) {
             helpAction={(
               <>
                 <AnnouncementBell
-                  key={props.account?.id ?? "anonymous"}
+                  key={`announcements:${props.account?.id ?? "anonymous"}`}
                   account={props.account}
                 />
                 <GoogleDriveConnectionButton />
                 <HelpCenter
-                  key={props.account?.id ?? "anonymous"}
+                  key={`help:${props.account?.id ?? "anonymous"}`}
                   page={props.page}
                   accountId={props.account?.id ?? "anonymous"}
                 />

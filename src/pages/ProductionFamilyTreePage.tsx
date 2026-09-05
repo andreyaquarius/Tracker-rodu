@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -10,10 +12,12 @@ import { GedcomImportButton, type GedcomImportArchivePayload } from "../componen
 import { GedcomPhotoBackupModal } from "../components/GedcomPhotoBackupModal.tsx";
 import { CircularAncestorChartWindow } from "../components/familyTree/CircularAncestorChartWindow";
 import { FanGenealogyChartWindow } from "../components/familyTree/FanGenealogyChartWindow.tsx";
+import { FamilyTreeToolsWindow } from "../components/familyTree/FamilyTreeToolsWindow";
+import { FamilyTreeNavigation } from "../components/familyTree/FamilyTreeNavigation";
 import {
-  FamilyTreeToolsWindow,
+  FamilyTreeDisplayWindow,
   type FamilyTreeDisplayMode,
-} from "../components/familyTree/FamilyTreeToolsWindow";
+} from "../components/familyTree/FamilyTreeDisplayWindow";
 import {
   FamilyTreeAttachPersonDialog,
   type FamilyTreeAttachAction,
@@ -138,6 +142,9 @@ import {
   type GedcomPhotoBackupResult,
 } from "../services/gedcomPhotoBackup.ts";
 
+const FamilyConstellationWindow = lazy(() => import("../components/familyTree/FamilyConstellationWindow.tsx")
+  .then(module => ({ default: module.FamilyConstellationWindow })));
+
 type GedcomPhotoRecoverySnapshot = {
   plan: GedcomPhotoBackupPlan;
   importSummary: string;
@@ -233,6 +240,7 @@ export function ProductionFamilyTreePage({
   const [reloadRevision, setReloadRevision] = useState(0);
   const [rootDialogOpen, setRootDialogOpen] = useState(false);
   const [treeToolsOpen, setTreeToolsOpen] = useState(false);
+  const [treeDisplayOpen, setTreeDisplayOpen] = useState(false);
   const [treeDisplayMode, setTreeDisplayMode] =
     useState<FamilyTreeDisplayMode>("classic");
   const [activeTreeFocus, setActiveTreeFocus] = useState<{
@@ -240,6 +248,7 @@ export function ProductionFamilyTreePage({
     centralPersonId: string;
   } | null>(null);
   const [circularChartFocusPersonId, setCircularChartFocusPersonId] = useState("");
+  const [constellationFocusPersonId, setConstellationFocusPersonId] = useState("");
   const [fanChart, setFanChart] = useState<{
     direction: FanChartDirection;
     focusPersonId: string;
@@ -387,7 +396,9 @@ export function ProductionFamilyTreePage({
         : null,
     );
     setCircularChartFocusPersonId("");
+    setConstellationFocusPersonId("");
     setFanChart(null);
+    setTreeDisplayOpen(false);
   }, [routedFocusPersonId, selectedEntry?.id, selectedEntry?.rootPersonId]);
 
   async function createRoot(payload: FamilyTreePersonDialogSubmit) {
@@ -416,7 +427,14 @@ export function ProductionFamilyTreePage({
 
   function openTreeTools() {
     setTreeToolsNotice("");
+    setTreeDisplayOpen(false);
     setTreeToolsOpen(true);
+  }
+
+  function openTreeDisplay() {
+    if (!selectedEntry?.rootPersonId) return;
+    setTreeToolsOpen(false);
+    setTreeDisplayOpen(true);
   }
 
   async function setActiveTreeRoot(personId: string): Promise<boolean> {
@@ -460,18 +478,25 @@ export function ProductionFamilyTreePage({
     document.getElementById(FAMILY_TREE_GEDCOM_INPUT_ID)?.click();
   }
 
+  function openConstellationChart() {
+    const focusPersonId = activeTreeFocusPersonId || selectedEntry?.rootPersonId || "";
+    if (!focusPersonId) return;
+    setTreeDisplayOpen(false);
+    setConstellationFocusPersonId(focusPersonId);
+  }
+
   function openCircularAncestorChart() {
     const focusPersonId = activeTreeFocusPersonId || selectedEntry?.rootPersonId || "";
     if (!focusPersonId) return;
     trackProductAnalyticsAction("ancestor_chart_build");
-    setTreeToolsOpen(false);
+    setTreeDisplayOpen(false);
     setCircularChartFocusPersonId(focusPersonId);
   }
 
   function openFanChart(direction: FanChartDirection) {
     const focusPersonId = activeTreeFocusPersonId || selectedEntry?.rootPersonId || "";
     if (!focusPersonId) return;
-    setTreeToolsOpen(false);
+    setTreeDisplayOpen(false);
     setFanChart({ direction, focusPersonId });
   }
 
@@ -631,16 +656,14 @@ export function ProductionFamilyTreePage({
       {gedcomImportControl}
       {needsRoot ? (
         <div className="family-tree-v2-empty-tools">
-          <button
-            type="button"
-            className="button button-secondary family-tree-v2-tools-trigger"
-            aria-haspopup="dialog"
-            aria-expanded={treeToolsOpen}
-            onClick={openTreeTools}
-          >
-            Родове дерево
-            <span aria-hidden="true">⌄</span>
-          </button>
+          <FamilyTreeNavigation
+            treeTitle={selectedEntry?.title}
+            treeToolsOpen={treeToolsOpen}
+            treeDisplayOpen={treeDisplayOpen}
+            canDisplayTree={false}
+            onOpenTreeTools={openTreeTools}
+            onOpenTreeDisplay={openTreeDisplay}
+          />
         </div>
       ) : null}
 
@@ -669,7 +692,9 @@ export function ProductionFamilyTreePage({
           appearance={treeAppearance}
           displayMode={treeDisplayMode}
           treeToolsOpen={treeToolsOpen}
+          treeDisplayOpen={treeDisplayOpen}
           onOpenTreeTools={openTreeTools}
+          onOpenTreeDisplay={openTreeDisplay}
           onFocusPersonChange={handleActiveTreeFocusPersonChange}
           onOpenPerson={onOpenPerson}
           onSavePerson={onSavePerson}
@@ -692,7 +717,6 @@ export function ProductionFamilyTreePage({
           gedcomPhotoBackupCount={pendingGedcomPhotoCount}
           canExportGedcom={Boolean(selectedEntry?.id && selectedEntry.rootPersonId)}
           exportingGedcom={exportingGedcom}
-          displayMode={treeDisplayMode}
           appearance={treeAppearance}
           appearanceSyncState={treeAppearanceSyncState}
           notice={treeToolsNotice}
@@ -704,16 +728,6 @@ export function ProductionFamilyTreePage({
           onImportGedcom={selectGedcomFile}
           onOpenGedcomPhotoBackup={openGedcomPhotoRecovery}
           onExportGedcom={() => void exportGedcom()}
-          onSelectDisplayMode={(mode) => {
-            if (mode !== treeDisplayMode) {
-              trackProductAnalyticsAction("tree_mode_change");
-            }
-            setTreeDisplayMode(mode);
-            setTreeToolsOpen(false);
-          }}
-          onOpenCircularChart={openCircularAncestorChart}
-          onOpenAncestorFanChart={() => openFanChart("ancestors")}
-          onOpenDescendantFanChart={() => openFanChart("descendants")}
           onOpenStatistics={() => {
             if (!selectedEntry?.id) return;
             setTreeToolsOpen(false);
@@ -725,6 +739,28 @@ export function ProductionFamilyTreePage({
         />
       ) : null}
 
+      {treeDisplayOpen && selectedEntry?.rootPersonId ? (
+        <FamilyTreeDisplayWindow
+          treeTitle={selectedEntry.title}
+          displayMode={treeDisplayMode}
+          appearance={treeAppearance}
+          onAppearanceChange={updateTreeAppearance}
+          appearanceSyncState={treeAppearanceSyncState}
+          onSelectDisplayMode={(mode) => {
+            if (mode !== treeDisplayMode) {
+              trackProductAnalyticsAction("tree_mode_change");
+            }
+            setTreeDisplayMode(mode);
+            setTreeDisplayOpen(false);
+          }}
+          onOpenConstellationChart={openConstellationChart}
+          onOpenCircularChart={openCircularAncestorChart}
+          onOpenAncestorFanChart={() => openFanChart("ancestors")}
+          onOpenDescendantFanChart={() => openFanChart("descendants")}
+          onClose={() => setTreeDisplayOpen(false)}
+        />
+      ) : null}
+
       {gedcomPhotoRecovery ? (
         <GedcomPhotoBackupModal
           fileName="Фото з імпортованих GEDCOM"
@@ -733,6 +769,23 @@ export function ProductionFamilyTreePage({
           onBackup={onBackupGedcomPhotos}
           onClose={() => setGedcomPhotoRecovery(null)}
         />
+      ) : null}
+
+      {selectedEntry?.id && constellationFocusPersonId ? (
+        <Suspense fallback={<Modal title="Сузір’я роду" onClose={() => setConstellationFocusPersonId("")} viewportBounded><p role="status">Завантажуємо мапу родинних зв’язків…</p></Modal>}>
+          <FamilyConstellationWindow
+            key={`constellation:${selectedEntry.id}`}
+            treeId={selectedEntry.id}
+            focusPersonId={constellationFocusPersonId}
+            appearancePreferences={treeAppearance}
+            nameProfiles={persons}
+            timeProfiles={persons}
+            searchFocusPersons={searchCircularAncestorFocusPersons}
+            onFocusPersonChange={setConstellationFocusPersonId}
+            onOpenPerson={onOpenPerson}
+            onClose={() => setConstellationFocusPersonId("")}
+          />
+        </Suspense>
       ) : null}
 
       {selectedEntry?.id && circularChartFocusPersonId ? (
@@ -795,7 +848,9 @@ function LoadedFamilyTree({
   appearance,
   displayMode,
   treeToolsOpen,
+  treeDisplayOpen,
   onOpenTreeTools,
+  onOpenTreeDisplay,
   onFocusPersonChange,
   onOpenPerson,
   onSavePerson,
@@ -812,7 +867,9 @@ function LoadedFamilyTree({
   appearance: FamilyTreeAppearancePreferences;
   displayMode: FamilyTreeDisplayMode;
   treeToolsOpen: boolean;
+  treeDisplayOpen: boolean;
   onOpenTreeTools: () => void;
+  onOpenTreeDisplay: () => void;
   onFocusPersonChange: (personId: string) => void;
   onOpenPerson?: (personId: string) => void;
   onSavePerson?: FamilyTreeQuickPersonSaveHandler;
@@ -1171,10 +1228,12 @@ function LoadedFamilyTree({
   const displayedGraphWithPreferredNames = useMemo(
     () => applyFamilyTreeNameDisplay(
       displayedGraphWithoutPhotos,
-      appearance,
+      { marriedSurnameDisplay: appearance.marriedSurnameDisplay,
+        inferMarriedSurnameFromHusband: appearance.inferMarriedSurnameFromHusband },
       persons,
     ),
-    [appearance, displayedGraphWithoutPhotos, persons],
+    // A background/palette change must not restart the layout worker or camera.
+    [appearance.marriedSurnameDisplay, appearance.inferMarriedSurnameFromHusband, displayedGraphWithoutPhotos, persons],
   );
   const displayedGraph = useMemo(
     () => attachTrackerPersonPhotos(displayedGraphWithPreferredNames, persons),
@@ -2064,17 +2123,14 @@ function LoadedFamilyTree({
       aria-busy={activeLoading}
     >
       <div className="panel family-tree-v2-host-toolbar" role="toolbar" aria-label="Параметри родового дерева">
-        <button
-          type="button"
-          className="button button-secondary family-tree-v2-tools-trigger"
-          title={`Родове дерево: ${entryPoint.title || "без назви"}`}
-          aria-haspopup="dialog"
-          aria-expanded={treeToolsOpen}
-          onClick={onOpenTreeTools}
-        >
-          Родове дерево
-          <span aria-hidden="true">⌄</span>
-        </button>
+        <FamilyTreeNavigation
+          treeTitle={entryPoint.title}
+          treeToolsOpen={treeToolsOpen}
+          treeDisplayOpen={treeDisplayOpen}
+          canDisplayTree={true}
+          onOpenTreeTools={onOpenTreeTools}
+          onOpenTreeDisplay={onOpenTreeDisplay}
+        />
         <div className="family-tree-v2-history" aria-label="Історія фокусу">
           <button type="button" className="button button-secondary" disabled={specialPerspectiveActive || focusIndex <= 0} onClick={() => moveFocusHistoryBy(-1)}>
             ← Назад
@@ -2392,6 +2448,8 @@ function LoadedFamilyTree({
         graph={displayedGraph}
         options={layoutOptions}
         lineageColor={appearance.directLineageColor}
+        starryBackground={appearance.starryBackground}
+        starryAnimation={appearance.starryAnimation}
         lineagePalette={lineagePalette}
         maxRenderedNodes={MAX_RENDERED_FAMILY_TREE_NODES}
         initialCamera={cameraSnapshotsRef.current.get(viewKey)}

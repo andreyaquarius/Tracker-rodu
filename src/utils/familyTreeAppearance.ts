@@ -20,6 +20,9 @@ export interface FamilyTreeAppearancePreferences {
   /** Eight stable sector slots; an empty list means an automatic palette. */
   directLineageBranchColors: readonly string[];
   showCousinDescendantsByDefault: boolean;
+  /** Optional night sky for the classic tree and inherited chart appearance. */
+  starryBackground: boolean;
+  starryAnimation: boolean;
 }
 
 export const DEFAULT_FAMILY_TREE_APPEARANCE: FamilyTreeAppearancePreferences = {
@@ -30,6 +33,8 @@ export const DEFAULT_FAMILY_TREE_APPEARANCE: FamilyTreeAppearancePreferences = {
   directLineageGrouping: "single",
   directLineageBranchColors: [],
   showCousinDescendantsByDefault: false,
+  starryBackground: false,
+  starryAnimation: true,
 };
 
 export const DIRECT_LINEAGE_COLOR_PRESETS = [
@@ -155,6 +160,8 @@ export function normalizeFamilyTreeAppearance(
     directLineageBranchColors: branchColors,
     showCousinDescendantsByDefault:
       candidate.showCousinDescendantsByDefault === true,
+    starryBackground: candidate.starryBackground === true,
+    starryAnimation: typeof candidate.starryAnimation === "boolean" ? candidate.starryAnimation : true,
   };
 }
 

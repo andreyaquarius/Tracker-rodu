@@ -22,6 +22,7 @@ import type {
 } from "./types";
 import { useAppDatabase } from "./hooks/useAppDatabase";
 import { Layout } from "./components/Layout";
+import { useAppAppearanceAccount } from "./components/appearance/AppAppearanceProvider.tsx";
 import { UpgradeRequiredModal } from "./components/UpgradeRequiredModal";
 import type { PageKey } from "./components/Sidebar";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -816,6 +817,7 @@ export default function App() {
     setFeatureFlagsRevision((current) => current + 1);
   }, []);
   const [account, setAccount] = useState<SupabaseAccount | null>(null);
+  useAppAppearanceAccount(account?.id ?? null, authReady);
   const [productAnalyticsConsentOwnerId, setProductAnalyticsConsentOwnerId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<SupabaseWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<SupabaseWorkspace[]>([]);

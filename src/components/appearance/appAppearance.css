@@ -1,0 +1,183 @@
+/* Semantic night tokens. Light styles keep their exact existing fallback values.
+   Ink and surface tokens are separate: brand greens also serve as button backgrounds. */
+:root[data-app-theme="starry-dark"] {
+  color-scheme: dark;
+  color: #edf3ff;
+  background: #070c19;
+  --app-ink: #edf3ff;
+  --app-ink-muted: #b7c7dc;
+  --app-link: #9be4dd;
+  --app-info: #a6cfff;
+  --app-danger: #ffb3b4;
+  --app-warning: #f4d495;
+  --app-violet: #d0bcff;
+  --app-surface: #111c30;
+  --app-surface-soft: #17263c;
+  --app-surface-hover: #1e3249;
+  --app-success-surface: #193b3b;
+  --app-info-surface: #1c304b;
+  --app-warning-surface: #3b3123;
+  --app-danger-surface: #412837;
+  --app-violet-surface: #2f2847;
+  --app-border: #334760;
+  --app-border-strong: #607b99;
+  --app-focus: #87e8db;
+  --app-action-bg: #8cddeb;
+  --app-action-hover: #b1eef6;
+  --app-action-pressed: #72c7dc;
+  --app-action-ink: #102b3b;
+  --app-selected-bg: #263f5d;
+  --app-selected-ink: #d1f6ff;
+  --app-selected-border: #6394ba;
+  --app-danger-action-bg: #ffb3b4;
+  --app-danger-action-ink: #451c2e;
+  --app-glass: rgba(15, 25, 43, .96);
+  --app-overlay: rgba(2, 6, 16, .74);
+  --cream: #070c19;
+  --paper: var(--app-surface);
+  --line: var(--app-border);
+  --muted: var(--app-ink-muted);
+  --green-100: var(--app-success-surface);
+  --shadow: 0 16px 38px rgba(0, 0, 0, .25);
+  --border: var(--app-border);
+  --text-muted: var(--app-ink-muted);
+  --surface-soft: var(--app-surface-soft);
+  --surface: var(--app-surface);
+}
+:root[data-app-theme="standard"] { color-scheme: light; }
+#root { isolation: isolate; min-height: 100dvh; }
+.app-starry-sky { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: #070c19; }
+:root[data-app-theme="starry-dark"] body { background: transparent; }
+:root[data-app-theme="starry-dark"] .sidebar {
+  background: linear-gradient(165deg, #121e35 0%, #0c1727 65%, #122b37 100%);
+  border-right: 1px solid #32465e;
+}
+:root[data-app-theme="starry-dark"] .topbar { background: var(--app-glass); }
+:root[data-app-theme="starry-dark"] .hero { background: linear-gradient(120deg, #152b42, #193d44); border: 1px solid var(--app-border); }
+/* Older modules have their own action classes instead of .button-primary.
+   Keep the same paired foreground/background across those entry points. Do not
+   recolor brand variables globally: they also draw portraits, graphs and maps. */
+@media screen {
+:root[data-app-theme="starry-dark"] :is(
+  .hero .button, .public-cta,
+  .context-relationship-graph-v1__toolbar .context-relationship-graph-v1__fullscreen,
+  .context-relationship-graph-v1__details button,
+  .context-social-v1__button.is-primary,
+  .documentary-graph-v1__button.is-primary,
+  .research-graph-v1__button.is-primary,
+  .church-role-network-v1 button.is-primary
+) {
+  color: var(--app-action-ink); background: var(--app-action-bg); border-color: var(--app-action-bg);
+}
+:root[data-app-theme="starry-dark"] :is(
+  .button-primary, .hero .button, .public-cta,
+  .context-relationship-graph-v1__toolbar .context-relationship-graph-v1__fullscreen,
+  .context-relationship-graph-v1__details button,
+  .context-social-v1__button.is-primary,
+  .documentary-graph-v1__button.is-primary,
+  .research-graph-v1__button.is-primary,
+  .church-role-network-v1 button.is-primary
+):hover:not(:disabled) {
+  color: var(--app-action-ink); background: var(--app-action-hover); border-color: var(--app-action-hover);
+}
+:root[data-app-theme="starry-dark"] :is(.button-primary, .hero .button, .public-cta):active:not(:disabled) {
+  background: var(--app-action-pressed); border-color: var(--app-action-pressed);
+}
+:root[data-app-theme="starry-dark"] .button-primary:disabled { background: var(--app-action-bg); }
+/* Selected tabs use a quieter blue surface, distinct from a primary action. */
+:root[data-app-theme="starry-dark"] :is(
+  .pagination-pages button:is(.active, :hover:not(:disabled)),
+  .person-tabs button:is(.active, :hover),
+  .feedback-filters button.active,
+  .historical-place-tabs button.active,
+  .zagulyaky-moderation-tabs button.active,
+  .zagulyaky-places-explorer__view-switch button.active,
+  .workspace-viewer-toolstrip .button.active,
+  .workspace-image-presets .button.active,
+  .section-icon-picker button.selected,
+  .feature-flag-toggle.enabled,
+  .family-tree-mode-tabs button.active,
+  .family-tree-node-expand-active,
+  .family-tree-statistics-map-modes button:is(.active, :hover),
+  .family-tree-statistics-map-detail:hover,
+  .context-relationship-graph-v1__mode button[aria-pressed="true"],
+  .person-context-workspace-v1__views button.is-active,
+  .person-context-workspace-v1__research-button.is-active,
+  .research-graph-v1__layout-picker label.is-active
+) {
+  color: var(--app-selected-ink); background: var(--app-selected-bg); border-color: var(--app-selected-border);
+}
+:root[data-app-theme="starry-dark"] :is(.empty-mark:hover, .account-avatar, .team-member > span) {
+  color: var(--app-selected-ink); background: var(--app-selected-bg);
+}
+:root[data-app-theme="starry-dark"] .feedback-message.own { background: var(--app-selected-bg); border-color: var(--app-selected-border); }
+:root[data-app-theme="starry-dark"] .toast:not(.toast-error) { background: var(--app-selected-bg); }
+:root[data-app-theme="starry-dark"] :is(.login-page, .admin-sidebar) { background: #0c1727; }
+:root[data-app-theme="starry-dark"] .login-copy { background: radial-gradient(ellipse at 20% 20%, #27375a, transparent 65%), #0c1727; }
+}
+:root[data-app-theme="starry-dark"] .modal-backdrop:not(.modal-backdrop-windowed) { background: var(--app-overlay); }
+:root[data-app-theme="starry-dark"] :is(input, select, textarea) { caret-color: #edf3ff; accent-color: #84dacd; }
+:root[data-app-theme="starry-dark"] :is(input, textarea)::placeholder { color: #97abc4; opacity: 1; }
+:root[data-app-theme="starry-dark"] :is(button, a, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--app-focus); outline-offset: 3px;
+}
+:root[data-app-theme="starry-dark"] ::selection { background: #366276; color: #fff; }
+/* Native map tiles and document scans keep their true colors. Only map chrome is themed. */
+:root[data-app-theme="starry-dark"] :is(.leaflet-popup-content-wrapper, .leaflet-popup-tip, .leaflet-bar a) {
+  background: var(--app-surface); color: var(--app-ink);
+}
+:root[data-app-theme="starry-dark"] .leaflet-container { background: #182c37; }
+
+.app-appearance-settings { padding: 24px; margin-bottom: 24px; }
+.app-appearance-settings .section-heading { margin-bottom: 18px; }
+.app-appearance-settings .section-heading p { max-width: 740px; margin-bottom: 0; }
+.app-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.app-theme-option {
+  display: flex; flex-direction: column; gap: 9px; min-width: 0; padding: 12px;
+  color: var(--app-ink, #20312d); background: var(--app-surface-soft, #faf9f4);
+  border: 1px solid var(--app-border, #ced7d1); border-radius: 12px; cursor: pointer;
+}
+.app-theme-option[data-selected="true"] { border-color: var(--app-focus, #22574d); box-shadow: 0 0 0 1px var(--app-focus, #22574d); }
+.app-theme-option:focus-within { outline: 2px solid var(--app-focus, #22574d); outline-offset: 3px; }
+.app-theme-option > span { margin: 0; text-transform: none; letter-spacing: 0; color: inherit; }
+.app-theme-option .app-theme-option-heading { display: flex; align-items: center; gap: 9px; font-size: 13px; line-height: 1.4; }
+.app-theme-option input { flex: 0 0 auto; width: 17px; height: 17px; min-height: 0; margin: 0; }
+.app-theme-option > small { color: var(--app-ink-muted, #4f5f5a); line-height: 1.5; }
+.app-theme-sample { position: relative; height: 104px; overflow: hidden; border-radius: 8px; display: flex !important; align-items: center; justify-content: center; gap: 12px; }
+.app-theme-sample i { width: 23%; height: 35px; border-radius: 6px; border: 1px solid #a7bbae; background: #fffdf8; box-shadow: 0 3px 8px #0001; }
+.app-theme-sample i:nth-child(2) { transform: translateY(15px); }
+.app-theme-sample-standard { background: #eeeade; }
+.app-theme-sample-starry-dark { background: radial-gradient(ellipse at 20% 15%, #39316b, transparent 65%), radial-gradient(ellipse at 90% 85%, #155360, transparent 65%), #070c19; }
+.app-theme-sample-starry-dark::before { content: ""; position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #dcf5ff; left: 10%; top: 25%; box-shadow: 32px 42px #9ee4ed, 67px -12px #faf9ff, 102px 57px #ad96ef, 158px 15px #fff, 184px 42px #90bdf2, 240px -8px #c3eeff, 285px 52px #c5abf0; }
+.app-theme-sample-starry-dark i { border-color: #7bc7cc; background: #18243d; box-shadow: 0 0 12px #70cbd322; }
+.app-appearance-settings .app-sky-motion, .app-appearance-compact .app-sky-motion { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); gap: 16px; }
+.app-sky-motion strong { display: block; font-size: 13px; }
+.app-sky-motion span { display: block; font-size: 12px; color: var(--muted); margin-top: 5px; line-height: 1.55; }
+.app-sky-motion input { flex: 0 0 auto; width: 20px; height: 20px; min-height: 0; }
+.app-appearance-compact { margin-top: 12px; padding-block: 14px; border-block: 1px solid var(--line); }
+.app-appearance-compact > strong { display: block; margin-bottom: 10px; }
+.app-appearance-compact .app-theme-options { grid-template-columns: 1fr; gap: 9px; }
+.app-appearance-compact .app-theme-option { padding: 10px; }
+.app-appearance-warning { color: var(--app-warning, #86632c); font-size: 12px; }
+@media (max-width: 560px) {
+  .app-appearance-settings { padding: 16px; }
+  .app-theme-options { grid-template-columns: 1fr; }
+  .app-theme-sample { height: 84px; }
+}
+@media print {
+  .app-starry-sky { display: none; }
+  :root[data-app-theme="starry-dark"] {
+    color-scheme: light; color: #20312d; background: #fff;
+    --app-ink: initial; --app-ink-muted: initial; --app-link: initial; --app-info: initial;
+    --app-danger: initial; --app-warning: initial; --app-violet: initial;
+    --app-surface: initial; --app-surface-soft: initial; --app-surface-hover: initial;
+    --app-success-surface: initial; --app-info-surface: initial; --app-warning-surface: initial;
+    --app-danger-surface: initial; --app-violet-surface: initial;
+    --app-border: initial; --app-border-strong: initial; --app-focus: initial; --app-glass: initial;
+    --app-action-bg: initial; --app-action-hover: initial; --app-action-pressed: initial; --app-action-ink: initial;
+    --app-selected-bg: initial; --app-selected-ink: initial; --app-selected-border: initial;
+    --app-danger-action-bg: initial; --app-danger-action-ink: initial;
+    --cream: #f4f2ea; --paper: #fffdf8; --line: #deddd5; --muted: #4f5f5a; --green-100: #dce9e2;
+    --border: #deddd5; --text-muted: #4f5f5a; --surface-soft: #f7f7f2; --surface: #fffdf8;
+  }
+}

@@ -16,6 +16,7 @@ import {
 interface ModalProps {
   title: string;
   children: ReactNode;
+  headerActions?: ReactNode;
   onClose: () => void;
   className?: string;
   /** Use the entire viewport instead of reserving space for the workspace sidebar. */
@@ -43,6 +44,7 @@ const MINIMIZED_CARD_HEIGHT = 58;
 export function Modal({
   title,
   children,
+  headerActions,
   onClose,
   className = "",
   viewportBounded = false,
@@ -263,6 +265,7 @@ export function Modal({
         <div className="modal-header" onPointerDown={startDrag}>
           <h2 id={titleId}>{title}</h2>
           <div className="modal-window-controls">
+            {headerActions}
             {minimizable && !fullscreen ? (
               <button
                 type="button"

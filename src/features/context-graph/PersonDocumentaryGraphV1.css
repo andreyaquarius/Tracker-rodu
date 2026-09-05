@@ -1,7 +1,7 @@
 .documentary-graph-v1 {
   --documentary-border: var(--line, #deddd5);
   --documentary-paper: var(--paper, #fffdf8);
-  --documentary-ink: var(--green-950, #102f2a);
+  --documentary-ink: var(--app-ink, var(--green-950, #102f2a));
   --documentary-muted: var(--muted, #53645f);
   --documentary-person: #165f54;
   --documentary-finding: #b7791f;
@@ -123,7 +123,7 @@
 }
 
 .documentary-graph-v1__path li:not(:last-child)::after {
-  color: #96651f;
+  color: var(--app-warning, #96651f);
   content: "→";
   font-weight: 900;
 }
@@ -287,7 +287,7 @@
 .documentary-graph-v1__depth-filter span,
 .documentary-graph-v1__entity-filter span {
   align-items: center;
-  background: #f4f4ef;
+  background: var(--app-surface-soft, #f4f4ef);
   border: 1px solid var(--documentary-border);
   border-radius: 999px;
   cursor: pointer;
@@ -307,9 +307,9 @@
 
 .documentary-graph-v1__depth-filter input:checked + span,
 .documentary-graph-v1__entity-filter input:checked + span {
-  background: #e3f1ed;
-  border-color: #80aaa1;
-  color: #174b43;
+  background: var(--app-success-surface, #e3f1ed);
+  border-color: var(--app-border-strong, #80aaa1);
+  color: var(--app-ink, #174b43);
   box-shadow: inset 0 0 0 1px #80aaa1;
 }
 
@@ -337,8 +337,8 @@
 
 .documentary-graph-v1__field-grid input,
 .documentary-graph-v1__field-grid select {
-  background: #fff;
-  border: 1px solid #cbd4d0;
+  background: var(--app-surface, #fff);
+  border: 1px solid var(--app-border, #cbd4d0);
   border-radius: 0.65rem;
   color: var(--documentary-ink);
   min-height: 2.65rem;
@@ -372,15 +372,15 @@
 }
 
 .documentary-graph-v1__message.is-error {
-  background: #fff1ef;
-  border-color: #e6aaa4;
-  color: #92362f;
+  background: var(--app-danger-surface, #fff1ef);
+  border-color: var(--app-border, #e6aaa4);
+  color: var(--app-danger, #92362f);
 }
 
 .documentary-graph-v1__message.is-warning {
-  background: #fff7df;
-  border-color: #e9ce87;
-  color: #684914;
+  background: var(--app-warning-surface, #fff7df);
+  border-color: var(--app-border, #e9ce87);
+  color: var(--app-ink, #684914);
 }
 
 .documentary-graph-v1__message button {
@@ -429,21 +429,21 @@
   width: 0.72rem;
 }
 
-.documentary-graph-v1__legend .is-person { color: var(--documentary-person); }
+.documentary-graph-v1__legend .is-person { color: var(--app-link, var(--documentary-person)); }
 .documentary-graph-v1__legend .is-person i { border-radius: 50%; }
-.documentary-graph-v1__legend .is-finding { color: var(--documentary-finding); }
+.documentary-graph-v1__legend .is-finding { color: var(--app-warning, var(--documentary-finding)); }
 .documentary-graph-v1__legend .is-finding i { border-radius: 0.2rem; }
-.documentary-graph-v1__legend .is-person_event { color: var(--documentary-event); }
+.documentary-graph-v1__legend .is-person_event { color: var(--app-info, var(--documentary-event)); }
 .documentary-graph-v1__legend .is-person_event i { transform: rotate(45deg) scale(0.78); }
-.documentary-graph-v1__legend .is-document { color: var(--documentary-document); }
-.documentary-graph-v1__legend .is-place { color: var(--documentary-place); }
+.documentary-graph-v1__legend .is-document { color: var(--app-warning, var(--documentary-document)); }
+.documentary-graph-v1__legend .is-place { color: var(--app-danger, var(--documentary-place)); }
 .documentary-graph-v1__legend .is-place i { border-radius: 50% 50% 50% 0; transform: rotate(-45deg) scale(0.86); }
 
 .documentary-graph-v1__canvas {
   background:
     linear-gradient(rgba(22, 95, 84, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(22, 95, 84, 0.035) 1px, transparent 1px),
-    #fbfbf7;
+    var(--app-surface, #fbfbf7);
   background-size: 28px 28px;
   min-height: 500px;
   overflow-x: auto;
@@ -460,7 +460,7 @@
 
 .documentary-graph-v1__edges path {
   fill: none;
-  stroke: #91a49e;
+  stroke: var(--app-ink-muted, #91a49e);
   stroke-linecap: round;
   stroke-width: 1.5;
   transition: opacity 120ms ease, stroke 120ms ease, stroke-width 120ms ease;
@@ -471,7 +471,7 @@
 }
 
 .documentary-graph-v1__edges path.is-selected {
-  stroke: #b27625;
+  stroke: var(--app-warning, #b27625);
   stroke-width: 3;
 }
 
@@ -486,16 +486,16 @@
 .documentary-graph-v1__node > path,
 .documentary-graph-v1__document-shape path,
 .documentary-graph-v1__place-shape path {
-  fill: #fffdf8;
+  fill: var(--app-surface, #fffdf8);
   stroke-width: 2;
   transition: filter 120ms ease, stroke-width 120ms ease;
 }
 
-.documentary-graph-v1__node.is-person > circle { fill: #e7f3ef; stroke: var(--documentary-person); }
-.documentary-graph-v1__node.is-finding > rect { fill: #fff4dc; stroke: var(--documentary-finding); }
-.documentary-graph-v1__node.is-person_event > polygon { fill: #edf0f8; stroke: var(--documentary-event); }
-.documentary-graph-v1__node.is-document .documentary-graph-v1__document-shape path { fill: #f6efe7; stroke: var(--documentary-document); }
-.documentary-graph-v1__node.is-place .documentary-graph-v1__place-shape path { fill: #fff0ed; stroke: var(--documentary-place); }
+.documentary-graph-v1__node.is-person > circle { fill: var(--app-surface-soft, #e7f3ef); stroke: var(--app-link, var(--documentary-person)); }
+.documentary-graph-v1__node.is-finding > rect { fill: var(--app-warning-surface, #fff4dc); stroke: var(--app-warning, var(--documentary-finding)); }
+.documentary-graph-v1__node.is-person_event > polygon { fill: var(--app-surface-soft, #edf0f8); stroke: var(--app-info, var(--documentary-event)); }
+.documentary-graph-v1__node.is-document .documentary-graph-v1__document-shape path { fill: var(--app-warning-surface, #f6efe7); stroke: var(--app-warning, var(--documentary-document)); }
+.documentary-graph-v1__node.is-place .documentary-graph-v1__place-shape path { fill: var(--app-danger-surface, #fff0ed); stroke: var(--app-danger, var(--documentary-place)); }
 
 .documentary-graph-v1__document-shape .is-fold {
   fill: none;
@@ -503,8 +503,8 @@
 }
 
 .documentary-graph-v1__place-shape .is-hole {
-  fill: #fbfbf7;
-  stroke: var(--documentary-place);
+  fill: var(--app-surface, #fbfbf7);
+  stroke: var(--app-danger, var(--documentary-place));
   stroke-width: 2;
 }
 
@@ -554,7 +554,7 @@
 }
 
 .documentary-graph-v1__empty > span {
-  color: #a97a36;
+  color: var(--app-warning, #a97a36);
   font-size: 2.5rem;
 }
 
@@ -571,7 +571,7 @@
 
 .documentary-graph-v1__skeleton::after {
   animation: documentary-shimmer 1.15s linear infinite;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.78), transparent);
+  background: linear-gradient(90deg, transparent, var(--app-glass, rgba(255, 255, 255, 0.78)), transparent);
   content: "";
   inset: 0;
   position: absolute;
@@ -579,7 +579,7 @@
 }
 
 .documentary-graph-v1__skeleton span {
-  background: #e5e7e1;
+  background: var(--app-surface-soft, #e5e7e1);
   border-radius: 1rem;
   height: 70px;
   position: absolute;
@@ -622,7 +622,7 @@
 }
 
 .documentary-graph-v1__accessible-list button {
-  background: #f7f7f2;
+  background: var(--app-surface-soft, #f7f7f2);
   border: 1px solid var(--documentary-border);
   border-radius: 0.65rem;
   color: var(--documentary-ink);
@@ -635,8 +635,8 @@
 }
 
 .documentary-graph-v1__accessible-list button[aria-pressed="true"] {
-  background: #e7f3ef;
-  border-color: #80aaa1;
+  background: var(--app-surface-soft, #e7f3ef);
+  border-color: var(--app-border-strong, #80aaa1);
 }
 
 .documentary-graph-v1__accessible-list button span {
@@ -690,14 +690,14 @@
   text-transform: uppercase;
 }
 
-.documentary-graph-v1__entity-badge.is-person { color: var(--documentary-person); }
-.documentary-graph-v1__entity-badge.is-finding { color: var(--documentary-finding); }
-.documentary-graph-v1__entity-badge.is-person_event { color: var(--documentary-event); }
-.documentary-graph-v1__entity-badge.is-document { color: var(--documentary-document); }
-.documentary-graph-v1__entity-badge.is-place { color: var(--documentary-place); }
+.documentary-graph-v1__entity-badge.is-person { color: var(--app-link, var(--documentary-person)); }
+.documentary-graph-v1__entity-badge.is-finding { color: var(--app-warning, var(--documentary-finding)); }
+.documentary-graph-v1__entity-badge.is-person_event { color: var(--app-info, var(--documentary-event)); }
+.documentary-graph-v1__entity-badge.is-document { color: var(--app-warning, var(--documentary-document)); }
+.documentary-graph-v1__entity-badge.is-place { color: var(--app-danger, var(--documentary-place)); }
 
 .documentary-graph-v1__privacy-note {
-  background: #f1f1ec;
+  background: var(--app-surface-soft, #f1f1ec);
   border-radius: 0.65rem;
   padding: 0.65rem;
 }
@@ -708,10 +708,10 @@
 }
 
 .documentary-graph-v1__detail-actions button {
-  background: #fff;
-  border: 1px solid #9db3ad;
+  background: var(--app-surface, #fff);
+  border: 1px solid var(--app-border-strong, #9db3ad);
   border-radius: 0.62rem;
-  color: #164b42;
+  color: var(--app-ink, #164b42);
   font-weight: 800;
   min-height: 2.45rem;
   padding: 0.45rem 0.65rem;
@@ -739,7 +739,7 @@
 }
 
 .documentary-graph-v1__evidence-list li {
-  background: #f7f7f2;
+  background: var(--app-surface-soft, #f7f7f2);
   border-radius: 0.62rem;
   display: grid;
   gap: 0.2rem;
@@ -752,10 +752,10 @@
   text-transform: uppercase;
 }
 
-.documentary-graph-v1__evidence-list li > span.is-proven { color: #24704c; }
-.documentary-graph-v1__evidence-list li > span.is-likely { color: #816019; }
+.documentary-graph-v1__evidence-list li > span.is-proven { color: var(--app-link, #24704c); }
+.documentary-graph-v1__evidence-list li > span.is-likely { color: var(--app-warning, #816019); }
 .documentary-graph-v1__evidence-list li > span.is-disputed,
-.documentary-graph-v1__evidence-list li > span.is-disproven { color: #9a4038; }
+.documentary-graph-v1__evidence-list li > span.is-disproven { color: var(--app-danger, #9a4038); }
 
 .documentary-graph-v1__evidence-list li small {
   color: var(--documentary-muted);

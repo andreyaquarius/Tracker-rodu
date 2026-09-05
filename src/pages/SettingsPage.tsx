@@ -2,6 +2,7 @@ import type { AppDatabase, SectionParentKey } from "../types";
 import { CustomSectionBuilder } from "../components/CustomSectionBuilder";
 import { AiAgentSettings } from "../components/AiAgentSettings";
 import { ProductAnalyticsPreferences } from "../components/ProductAnalyticsPreferences";
+import { AppAppearanceSettings } from "../components/appearance/AppAppearanceSettings.tsx";
 import { TelegramBotSettings } from "../components/settings/TelegramBotSettings";
 import { openAnalyticsPreferences } from "../services/siteAnalytics";
 import type { SupabaseAccount } from "../services/supabaseAuth";
@@ -53,6 +54,7 @@ export function SettingsPage({
         </div>
       </div>
 
+      <AppAppearanceSettings />
       <section className="panel settings-panel">
         <div className="section-heading">
           <div>

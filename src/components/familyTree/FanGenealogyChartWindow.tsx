@@ -10,6 +10,10 @@ import {
 } from "react";
 import { Modal } from "../Modal.tsx";
 import { AncestorChartColorControls } from "./AncestorChartColorControls.tsx";
+import { StarryAnimationToggle, StarryBackgroundToggle } from "./StarryBackgroundToggle.tsx";
+import { useTreeSkyAppearance } from "../appearance/useTreeSkyAppearance.ts";
+import { StarrySkyBackground } from "../../features/family-tree-view/appearance/StarrySkyBackground.tsx";
+import { starrySkyViewportBounds, starryTreeColorScheme, starryTreeTone } from "../../features/family-tree-view/appearance/starrySkyTheme.ts";
 import { FamilyTreeChartBrand } from "./FamilyTreeChartBrand.tsx";
 import type { FamilyTreeNeighborhoodClient } from "../../features/family-tree-view/data/neighborhoodClient.ts";
 import { useFamilyTreeNeighborhood } from "../../features/family-tree-view/react/useFamilyTreeNeighborhood.ts";
@@ -138,7 +142,8 @@ export function FanGenealogyChartWindow({
     ),
     [appearancePreferences],
   );
-  const [chartAppearance, setChartAppearance] = useState(inheritedAppearance);
+  const [localChartAppearance, setChartAppearance] = useState(inheritedAppearance);
+  const chartAppearance = useTreeSkyAppearance(localChartAppearance);
   const [chartColorsDirty, setChartColorsDirty] = useState(false);
   const [camera, setCamera] = useState<FanCamera>({ zoom: 1, x: 0, y: 0 });
   const [svgSize, setSvgSize] = useState({ width: 1, height: 1 });
@@ -155,7 +160,10 @@ export function FanGenealogyChartWindow({
   }, [inheritedAppearance]);
 
   const chartColorScheme = useMemo(
-    () => resolveFamilyTreeChartColorScheme(chartAppearance),
+    () => {
+      const scheme = resolveFamilyTreeChartColorScheme(chartAppearance);
+      return chartAppearance.starryBackground ? starryTreeColorScheme(scheme) : scheme;
+    },
     [chartAppearance],
   );
   const chartColorStyle = useMemo(
@@ -719,9 +727,19 @@ export function FanGenealogyChartWindow({
                 ) : null}
               </div>
               <div className="circular-ancestor-view-controls" role="group" aria-label="Вигляд і збереження діаграми">
+                <StarryAnimationToggle enabled={chartAppearance.starryAnimation} skyEnabled={chartAppearance.starryBackground}
+                  onChange={starryAnimation => {
+                    setChartAppearance(current => ({ ...current, starryAnimation }));
+                    setChartColorsDirty(true);
+                  }} />
+                <StarryBackgroundToggle enabled={chartAppearance.starryBackground}
+                  onChange={starryBackground => {
+                    setChartAppearance(current => ({ ...current, starryBackground }));
+                    setChartColorsDirty(true);
+                  }} />
                 {direction === "ancestors" ? (
                   <AncestorChartColorControls
-                    appearance={chartAppearance}
+                    appearance={localChartAppearance}
                     inheritedAppearance={inheritedAppearance}
                     dirty={chartColorsDirty}
                     onChange={(nextAppearance) => {
@@ -824,7 +842,8 @@ export function FanGenealogyChartWindow({
         <div className="circular-ancestor-content">
           <div
             className="circular-ancestor-canvas-wrap fan-genealogy-canvas-wrap"
-            style={direction === "ancestors" ? chartColorStyle : undefined}
+            style={direction === "ancestors" || chartAppearance.starryBackground ? chartColorStyle : undefined}
+            data-starry={chartAppearance.starryBackground}
             tabIndex={0}
             aria-label={`Інтерактивна віялова діаграма ${direction === "ancestors" ? "предків" : "нащадків"}. Клавіші плюс і мінус змінюють масштаб, стрілки рухають полотно, Home вміщує діаграму.`}
             onKeyDown={handleCanvasKeyDown}
@@ -836,11 +855,12 @@ export function FanGenealogyChartWindow({
                   <span><i className="maternal" style={{ backgroundColor: chartColorScheme.maternal.fill }} /> Материнська гілка</span>
                 </>
               ) : <span><i className="descendant" /> Гілки дітей</span>}
-              <span><i className="duplicate" style={direction === "ancestors" ? { backgroundColor: chartColorScheme.duplicate.fill } : undefined} /> Повторна особа</span>
+              <span><i className="duplicate" style={direction === "ancestors" || chartAppearance.starryBackground ? { backgroundColor: chartColorScheme.duplicate.fill } : undefined} /> Повторна особа</span>
             </div>
             <svg
               ref={svgRef}
-              style={direction === "ancestors" ? chartColorStyle : undefined}
+              data-starry={chartAppearance.starryBackground}
+              style={direction === "ancestors" || chartAppearance.starryBackground ? chartColorStyle : undefined}
               className={`circular-ancestor-chart fan-genealogy-chart ${dragRef.current ? "is-dragging" : ""}`}
               viewBox={`${camera.x - viewWidth / 2} ${baseCenterY + camera.y - viewHeight / 2} ${viewWidth} ${viewHeight}`}
               preserveAspectRatio="xMidYMid meet"
@@ -855,6 +875,8 @@ export function FanGenealogyChartWindow({
                   <feDropShadow dx="0" dy="3" stdDeviation="4" floodColor="#173f36" floodOpacity=".18" />
                 </filter>
               </defs>
+              {chartAppearance.starryBackground ? <StarrySkyBackground moving={chartAppearance.starryAnimation}
+                {...starrySkyViewportBounds({ x: camera.x - viewWidth / 2, y: baseCenterY + camera.y - viewHeight / 2, width: viewWidth, height: viewHeight }, svgSize)} /> : null}
               <g className="fan-genealogy-grid">
                 {Array.from({ length: visibleGenerations }, (_, index) => index + 1).map((generation) => (
                   <path
@@ -885,7 +907,7 @@ export function FanGenealogyChartWindow({
                           slot: occurrence.slot,
                           generation: occurrence.generation,
                         })
-                      : undefined}
+                      : chartAppearance.starryBackground ? starryTreeTone(fanSectorColor(occurrence)) : undefined}
                     onSelect={() => {
                       if (lastPointerGestureDraggedRef.current) {
                         lastPointerGestureDraggedRef.current = false;
@@ -901,7 +923,7 @@ export function FanGenealogyChartWindow({
                   occurrence={model.occurrences[0]}
                   chartId={chartId}
                   selected={selectedOccurrence?.occurrenceId === model.occurrences[0].occurrenceId}
-                  tone={direction === "ancestors" ? chartColorScheme.focus : undefined}
+                  tone={direction === "ancestors" || chartAppearance.starryBackground ? chartColorScheme.focus : undefined}
                   onSelect={() => setSelectedOccurrenceId(model.occurrences[0]!.occurrenceId)}
                 />
               ) : null}
