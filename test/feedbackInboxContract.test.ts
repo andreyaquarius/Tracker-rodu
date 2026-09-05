@@ -35,6 +35,11 @@ test("feedback UI is asynchronous, private and usable by users and administrator
   assert.match(page, /Нове звернення/);
   assert.match(page, /statusLabels/);
   assert.match(page, /adminFilter/);
+  assert.match(page, /loadFeedbackReplyDraft/);
+  assert.match(page, /saveFeedbackReplyDraft/);
+  assert.match(page, /clearFeedbackReplyDraft/);
+  assert.match(page, /beforeunload/);
+  assert.match(page, /CHUNK_LOAD_RECOVERY_DEFERRED_EVENT/);
   assert.match(styles, /\.feedback-workspace\s*\{/);
   assert.match(styles, /\.feedback-filters\s*\{[^}]*flex-wrap:\s*wrap;[^}]*overflow:\s*visible;/s);
   assert.doesNotMatch(styles, /\.feedback-filters\s*\{[^}]*overflow-x:\s*auto;/s);

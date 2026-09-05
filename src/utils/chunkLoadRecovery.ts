@@ -1,4 +1,7 @@
+import { hasUnsavedWork } from "./unsavedWork.ts";
+
 const CHUNK_RECOVERY_PREFIX = "tracker-rodu:chunk-recovery:";
+export const CHUNK_LOAD_RECOVERY_DEFERRED_EVENT = "tracker-rodu:chunk-recovery-deferred";
 
 const CHUNK_FAILURE_PATTERNS = [
   /failed to fetch dynamically imported module/i,
@@ -22,6 +25,8 @@ export interface ChunkLoadRecoveryEnvironment {
   removeEventListener(type: "vite:preloadError", listener: EventListener): void;
   storage: StorageLike;
   reload(): void;
+  hasUnsavedChanges?(): boolean;
+  deferReload?(): void;
 }
 
 interface VitePreloadErrorEvent extends Event {
@@ -45,6 +50,11 @@ export function installChunkLoadRecovery(
 
   const handlePreloadError: EventListener = event => {
     const payload = (event as VitePreloadErrorEvent).payload;
+    if (environment.hasUnsavedChanges?.()) {
+      event.preventDefault();
+      environment.deferReload?.();
+      return;
+    }
     const marker = `${CHUNK_RECOVERY_PREFIX}${fingerprint(
       chunkFailureMessage(payload),
     )}`;
@@ -90,6 +100,8 @@ function browserEnvironment(): ChunkLoadRecoveryEnvironment | undefined {
       window.removeEventListener(type, listener),
     storage,
     reload: () => window.location.reload(),
+    hasUnsavedChanges: hasUnsavedWork,
+    deferReload: () => window.dispatchEvent(new Event(CHUNK_LOAD_RECOVERY_DEFERRED_EVENT)),
   };
 }
 

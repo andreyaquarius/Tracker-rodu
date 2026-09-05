@@ -17,10 +17,37 @@ test("Google Drive Picker is bound to the current OAuth token, browser key, app 
   assert.match(drive, /\.setDeveloperKey\(/);
   assert.match(drive, /\.setAppId\(/);
   assert.match(drive, /\.setOrigin\(window\.location\.origin\)/);
+  assert.equal(
+    drive.match(/\.setSize\(viewportSession\.width, viewportSession\.height\)/g)?.length,
+    2,
+  );
   assert.match(drive, /DocsViewMode\.LIST/);
   assert.match(drive, /Action:\s*\{[^}]*ERROR:\s*string/);
   assert.match(drive, /action === pickerApi\.Action\.ERROR[\s\S]{0,180}fail\(/);
   assert.match(drive, /\.setMaxItems\(maxItems\)/);
+});
+
+test("Google Picker stays above Tracker dialogs and inside the current visual viewport", () => {
+  const drive = source("../src/services/googleDriveStorage.ts");
+  const styles = source("../src/styles.css");
+
+  assert.match(drive, /GOOGLE_PICKER_MIN_WIDTH = 566/);
+  assert.match(drive, /GOOGLE_PICKER_MIN_HEIGHT = 350/);
+  assert.match(drive, /window\.visualViewport/);
+  assert.match(drive, /--google-picker-scale/);
+  assert.match(drive, /viewportSession\.close\(\)/);
+  assert.match(
+    styles,
+    /html\.google-picker-open \.picker-dialog-bg\s*\{[^}]*position:\s*fixed\s*!important/s,
+  );
+  assert.match(
+    styles,
+    /html\.google-picker-open \.picker-dialog\s*\{[^}]*position:\s*fixed\s*!important/s,
+  );
+  assert.match(
+    styles,
+    /transform:\s*translate\(-50%, -50%\) scale\(var\(--google-picker-scale, 1\)\)\s*!important/,
+  );
 });
 
 test("attachment editor exposes Picker and attaches its selected files", () => {

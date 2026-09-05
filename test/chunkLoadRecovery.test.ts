@@ -104,6 +104,37 @@ test("different stale chunk fingerprints can each recover once", () => {
   uninstall();
 });
 
+test("automatic recovery defers a reload while an editor contains unsaved work", () => {
+  const target = new EventTarget();
+  const storage = memoryStorage();
+  let dirty = true;
+  let reloads = 0;
+  let deferred = 0;
+  const environment: ChunkLoadRecoveryEnvironment = {
+    addEventListener: (type, listener) => target.addEventListener(type, listener),
+    removeEventListener: (type, listener) => target.removeEventListener(type, listener),
+    storage,
+    reload: () => { reloads += 1; },
+    hasUnsavedChanges: () => dirty,
+    deferReload: () => { deferred += 1; },
+  };
+  const uninstall = installChunkLoadRecovery(environment);
+  const message = "Failed to load module script: /assets/AdminPanel-old.js";
+
+  const deferredEvent = preloadFailure(message);
+  target.dispatchEvent(deferredEvent);
+
+  assert.equal(deferredEvent.defaultPrevented, true);
+  assert.equal(reloads, 0, "an open draft must never be destroyed by recovery");
+  assert.equal(deferred, 1, "the active editor must be told why recovery was deferred");
+  assert.equal(storage.length, 0, "a deferred failure may be retried after the draft is saved");
+
+  dirty = false;
+  target.dispatchEvent(preloadFailure(message));
+  assert.equal(reloads, 1);
+  uninstall();
+});
+
 test("automatic recovery fails closed when session storage cannot persist its loop guard", () => {
   const brokenStorage: MemoryStorage = {
     length: 0,

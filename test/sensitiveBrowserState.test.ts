@@ -40,6 +40,7 @@ test("account privacy cleanup removes private mirrors but never the auth session
     "family-tree-manual-positions-v3:tree-a:root-a:ancestors": "private positions",
     "tracker-rodu.family-tree-appearance.v1:project-a:tree-a": "private appearance",
     "tracker-rodu.family-tree-view-preferences.v1:user-a:project-a:tree-a": "private view settings",
+    "tracker-rodu.feedback-draft.v1:user-a:reply:thread-a": "private unsent reply",
     "tracker-rodu-active-workspace": "project-a",
     "tracker-rodu-account-onboarded": "1",
     "tracker-rodu-ai-finding-indexing-consent": "yes",
@@ -51,11 +52,12 @@ test("account privacy cleanup removes private mirrors but never the auth session
 
   const removed = clearSensitiveLocalStorage(storage);
 
-  assert.equal(removed, 11);
+  assert.equal(removed, 12);
   assert.equal(storage.has("tracker-rodu-project-people:project-a"), false);
   assert.equal(storage.has("family-tree-viewport:tree-a:root-a:ancestors"), false);
   assert.equal(storage.has("tracker-rodu-active-workspace"), false);
   assert.equal(storage.has("tracker-rodu-google-drive-connected"), false);
+  assert.equal(storage.has("tracker-rodu.feedback-draft.v1:user-a:reply:thread-a"), false);
   assert.equal(storage.has("sb-production-auth-token"), true);
   assert.equal(storage.has("tracker-rodu-analytics-consent-v1"), true);
   assert.equal(storage.has("tracker-rodu.sidebar-collapsed.v1"), true);

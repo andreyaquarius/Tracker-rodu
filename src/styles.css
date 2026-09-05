@@ -4209,6 +4209,30 @@ tbody tr:hover { background: #fbfaf5; }
   background: rgba(10, 28, 24, 0.72);
   backdrop-filter: blur(5px);
 }
+
+/* Google Picker injects a document-positioned dialog after Tracker renders.
+   Anchor it to the visual viewport so long forms and mobile scrolling cannot
+   leave only the translucent Google backdrop visible. */
+html.google-picker-open,
+html.google-picker-open body {
+  overflow: hidden !important;
+}
+html.google-picker-open .picker-dialog-bg {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  z-index: 2147483000 !important;
+}
+html.google-picker-open .picker-dialog {
+  position: fixed !important;
+  top: var(--google-picker-center-y, 50%) !important;
+  left: var(--google-picker-center-x, 50%) !important;
+  margin: 0 !important;
+  z-index: 2147483001 !important;
+  transform: translate(-50%, -50%) scale(var(--google-picker-scale, 1)) !important;
+  transform-origin: center center !important;
+}
 .scan-preview-modal {
   position: relative;
   width: min(1180px, 100%);

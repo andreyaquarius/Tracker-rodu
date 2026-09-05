@@ -20,6 +20,17 @@ import {
   trackProductAnalyticsAction,
   trackProductAnalyticsOperation,
 } from "../services/productAnalytics.ts";
+import {
+  clearFeedbackComposerDraft,
+  clearFeedbackReplyDraft,
+  loadFeedbackComposerDraft,
+  loadFeedbackReplyDraft,
+  saveFeedbackComposerDraft,
+  saveFeedbackReplyDraft,
+  type FeedbackComposerDraft,
+} from "../utils/feedbackDrafts.ts";
+import { CHUNK_LOAD_RECOVERY_DEFERRED_EVENT } from "../utils/chunkLoadRecovery.ts";
+import { setUnsavedWork } from "../utils/unsavedWork.ts";
 
 interface FeedbackPageProps {
   account: SupabaseAccount;
@@ -51,16 +62,36 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [reply, setReply] = useState("");
+  const [replyDraft, setReplyDraft] = useState({ threadId: "", body: "" });
   const [showComposer, setShowComposer] = useState(() => !isAdmin && startComposer);
-  const [subject, setSubject] = useState("");
-  const [category, setCategory] = useState<FeedbackCategory>("question");
-  const [body, setBody] = useState("");
+  const [composerDraftState, setComposerDraftState] = useState(() => ({
+    userId: account.id,
+    draft: loadFeedbackComposerDraft(account.id),
+  }));
   const [adminFilter, setAdminFilter] = useState<AdminFilter>("all");
   const [search, setSearch] = useState("");
   const selectionGeneration = useRef(0);
 
   const selectedThread = threads.find((thread) => thread.id === selectedThreadId) ?? null;
+  const reply = replyDraft.threadId === selectedThreadId ? replyDraft.body : "";
+  const composerDraft: FeedbackComposerDraft = composerDraftState.userId === account.id
+    ? composerDraftState.draft
+    : loadFeedbackComposerDraft(account.id);
+  const { subject, category, body } = composerDraft;
+  const hasUnsavedDraft = Boolean(
+    reply || (showComposer && (subject || body)),
+  );
+  const updateComposerDraft = (patch: Partial<FeedbackComposerDraft>) => {
+    setComposerDraftState((current) => ({
+      userId: account.id,
+      draft: {
+        ...(current.userId === account.id
+          ? current.draft
+          : loadFeedbackComposerDraft(account.id)),
+        ...patch,
+      },
+    }));
+  };
   const visibleThreads = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return threads.filter((thread) => {
@@ -101,6 +132,54 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
   useEffect(() => {
     if (!isAdmin && startComposer) setShowComposer(true);
   }, [isAdmin, startComposer]);
+
+  useEffect(() => {
+    setComposerDraftState({
+      userId: account.id,
+      draft: loadFeedbackComposerDraft(account.id),
+    });
+  }, [account.id]);
+
+  useEffect(() => {
+    setReplyDraft({
+      threadId: selectedThreadId,
+      body: loadFeedbackReplyDraft(account.id, selectedThreadId),
+    });
+  }, [account.id, selectedThreadId]);
+
+  useEffect(() => {
+    if (composerDraftState.userId !== account.id) return;
+    saveFeedbackComposerDraft(account.id, composerDraftState.draft);
+  }, [account.id, composerDraftState]);
+
+  useEffect(() => {
+    if (!selectedThreadId || replyDraft.threadId !== selectedThreadId) return;
+    saveFeedbackReplyDraft(account.id, selectedThreadId, replyDraft.body);
+  }, [account.id, replyDraft, selectedThreadId]);
+
+  useEffect(() => {
+    const key = `feedback:${account.id}`;
+    setUnsavedWork(key, hasUnsavedDraft);
+    return () => setUnsavedWork(key, false);
+  }, [account.id, hasUnsavedDraft]);
+
+  useEffect(() => {
+    if (!hasUnsavedDraft) return;
+    const guard = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", guard);
+    return () => window.removeEventListener("beforeunload", guard);
+  }, [hasUnsavedDraft]);
+
+  useEffect(() => {
+    const explainDeferredReload = () => {
+      setNotice("Доступна нова версія застосунку. Автоматичне оновлення відкладено, щоб не втратити ваш текст. Чернетку збережено в цьому браузері: надішліть відповідь або скопіюйте текст, а потім оновіть сторінку вручну.");
+    };
+    window.addEventListener(CHUNK_LOAD_RECOVERY_DEFERRED_EVENT, explainDeferredReload);
+    return () => window.removeEventListener(CHUNK_LOAD_RECOVERY_DEFERRED_EVENT, explainDeferredReload);
+  }, []);
 
   useEffect(() => {
     const generation = ++selectionGeneration.current;
@@ -147,9 +226,11 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
         category,
         body: normalizedBody,
       }, account.id);
-      setSubject("");
-      setCategory("question");
-      setBody("");
+      clearFeedbackComposerDraft(account.id);
+      setComposerDraftState({
+        userId: account.id,
+        draft: { subject: "", category: "question", body: "" },
+      });
       setShowComposer(false);
       setNotice("Звернення надіслано. Відповідь з’явиться в цій приватній скриньці.");
       await refreshThreads(threadId);
@@ -171,7 +252,8 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
     setNotice("");
     try {
       await postFeedbackMessage(selectedThread.id, normalizedReply, account.id);
-      setReply("");
+      clearFeedbackReplyDraft(account.id, selectedThread.id);
+      setReplyDraft({ threadId: selectedThread.id, body: "" });
       setNotice(isAdmin ? "Відповідь надіслано користувачу." : "Повідомлення додано до звернення.");
       const nextMessages = await loadFeedbackMessages(selectedThread.id, account.id);
       setMessages(nextMessages);
@@ -252,7 +334,9 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
           <div className="feedback-composer-grid">
             <label>
               <span>Тип звернення</span>
-              <select value={category} onChange={(event) => setCategory(event.target.value as FeedbackCategory)}>
+              <select value={category} onChange={(event) => updateComposerDraft({
+                category: event.target.value as FeedbackCategory,
+              })}>
                 {Object.entries(categoryLabels).map(([value, label]) => (
                   <option value={value} key={value}>{label}</option>
                 ))}
@@ -262,7 +346,7 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
               <span>Тема</span>
               <input
                 value={subject}
-                onChange={(event) => setSubject(event.target.value)}
+                onChange={(event) => updateComposerDraft({ subject: event.target.value })}
                 minLength={3}
                 maxLength={160}
                 placeholder="Коротко опишіть питання або пропозицію"
@@ -274,13 +358,13 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
             <span>Повідомлення</span>
             <textarea
               value={body}
-              onChange={(event) => setBody(event.target.value)}
+              onChange={(event) => updateComposerDraft({ body: event.target.value })}
               maxLength={5000}
               rows={6}
               placeholder="Опишіть деталі. Не додавайте паролі, ключі доступу чи інші секретні дані."
               required
             />
-            <small>{body.length} / 5000</small>
+            <small>{body.length} / 5000 · чернетка автоматично зберігається в цьому браузері</small>
           </label>
           <div className="feedback-composer-actions">
             <button type="button" className="button button-secondary" onClick={() => setShowComposer(false)} disabled={busy}>Скасувати</button>
@@ -387,7 +471,10 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
                   <span>{isAdmin ? "Відповідь користувачу" : "Додати повідомлення"}</span>
                   <textarea
                     value={reply}
-                    onChange={(event) => setReply(event.target.value)}
+                    onChange={(event) => setReplyDraft({
+                      threadId: selectedThreadId,
+                      body: event.target.value,
+                    })}
                     rows={4}
                     maxLength={5000}
                     placeholder={isAdmin ? "Напишіть відповідь. Користувач прочитає її у своїй скриньці." : "Уточніть питання або додайте інформацію."}
@@ -395,7 +482,7 @@ export function FeedbackPage({ account, isAdmin, startComposer = false }: Feedba
                   />
                 </label>
                 <div className="feedback-reply-footer">
-                  <small>{reply.length} / 5000 · відповідь не надсилається як онлайн-чат</small>
+                  <small>{reply.length} / 5000 · чернетка автоматично зберігається в цьому браузері</small>
                   <button type="submit" className="button button-primary" disabled={busy || !reply.trim()}>
                     {busy ? "Надсилаємо…" : "Надіслати"}
                   </button>

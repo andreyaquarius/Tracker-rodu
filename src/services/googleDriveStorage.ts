@@ -3,6 +3,11 @@ const GOOGLE_DRIVE_API = "https://www.googleapis.com/drive/v3";
 const GOOGLE_DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const GOOGLE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 const GOOGLE_PICKER_SCRIPT = "https://apis.google.com/js/api.js";
+const GOOGLE_PICKER_MIN_WIDTH = 566;
+const GOOGLE_PICKER_MIN_HEIGHT = 350;
+const GOOGLE_PICKER_MAX_WIDTH = 1051;
+const GOOGLE_PICKER_MAX_HEIGHT = 650;
+const GOOGLE_PICKER_VIEWPORT_GUTTER = 16;
 
 type StoredToken = {
   accessToken: string;
@@ -69,6 +74,7 @@ type GooglePickerBuilder = {
   setMaxItems: (maxItems: number) => GooglePickerBuilder;
   setOAuthToken: (accessToken: string) => GooglePickerBuilder;
   setOrigin: (origin: string) => GooglePickerBuilder;
+  setSize: (width: number, height: number) => GooglePickerBuilder;
   setTitle: (title: string) => GooglePickerBuilder;
   build: () => GooglePicker;
 };
@@ -273,17 +279,20 @@ export async function pickGoogleDriveFiles(
     .setIncludeFolders(false)
     .setSelectFolderEnabled(false)
     .setMode(pickerApi.DocsViewMode.LIST);
+  const viewportSession = beginGooglePickerViewportSession();
 
   return new Promise<GoogleDrivePickerFile[]>((resolve, reject) => {
     let settled = false;
     const finish = (files: GoogleDrivePickerFile[]) => {
       if (settled) return;
       settled = true;
+      viewportSession.close();
       resolve(files);
     };
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      viewportSession.close();
       reject(error);
     };
 
@@ -294,6 +303,7 @@ export async function pickGoogleDriveFiles(
         .setDeveloperKey(apiKey)
         .setAppId(appId)
         .setOrigin(window.location.origin)
+        .setSize(viewportSession.width, viewportSession.height)
         .setLocale("uk")
         .setTitle(options.title?.trim() || "Оберіть документи з Google Drive")
         .setCallback((response) => {
@@ -376,17 +386,20 @@ export async function pickGoogleDriveFolder(
     .setIncludeFolders(true)
     .setSelectFolderEnabled(true)
     .setMode(pickerApi.DocsViewMode.LIST);
+  const viewportSession = beginGooglePickerViewportSession();
 
   return new Promise<GoogleDrivePickerFolder | null>((resolve, reject) => {
     let settled = false;
     const finish = (folder: GoogleDrivePickerFolder | null) => {
       if (settled) return;
       settled = true;
+      viewportSession.close();
       resolve(folder);
     };
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      viewportSession.close();
       reject(error);
     };
 
@@ -397,6 +410,7 @@ export async function pickGoogleDriveFolder(
         .setDeveloperKey(apiKey)
         .setAppId(appId)
         .setOrigin(window.location.origin)
+        .setSize(viewportSession.width, viewportSession.height)
         .setLocale("uk")
         .setTitle(title.trim() || "Оберіть папку для збереження")
         .setMaxItems(1)
@@ -450,6 +464,96 @@ export async function pickGoogleDriveFolder(
         : new Error("Не вдалося відкрити вікно вибору папки Google Drive."));
     }
   });
+}
+
+interface GooglePickerViewportSession {
+  width: number;
+  height: number;
+  close(): void;
+}
+
+/**
+ * Google Picker uses a document-positioned dialog with a 566x350 minimum.
+ * Keep it above Tracker modals and centered in the current visual viewport.
+ * Narrow phones scale the complete minimum-size dialog so that the close and
+ * select controls cannot be stranded beyond the screen edges.
+ */
+function beginGooglePickerViewportSession(): GooglePickerViewportSession {
+  const root = document.documentElement;
+  const visualViewport = window.visualViewport;
+  const availableWidth = Math.max(
+    1,
+    Math.floor(
+      (visualViewport?.width ?? window.innerWidth) - GOOGLE_PICKER_VIEWPORT_GUTTER * 2,
+    ),
+  );
+  const availableHeight = Math.max(
+    1,
+    Math.floor(
+      (visualViewport?.height ?? window.innerHeight) - GOOGLE_PICKER_VIEWPORT_GUTTER * 2,
+    ),
+  );
+  const width = Math.min(
+    GOOGLE_PICKER_MAX_WIDTH,
+    Math.max(GOOGLE_PICKER_MIN_WIDTH, availableWidth),
+  );
+  const height = Math.min(
+    GOOGLE_PICKER_MAX_HEIGHT,
+    Math.max(GOOGLE_PICKER_MIN_HEIGHT, availableHeight),
+  );
+  let closed = false;
+
+  const position = () => {
+    if (closed) return;
+    const viewport = window.visualViewport;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const scale = Math.min(
+      1,
+      Math.max(
+        0.25,
+        (viewportWidth - GOOGLE_PICKER_VIEWPORT_GUTTER * 2) / width,
+      ),
+      Math.max(
+        0.25,
+        (viewportHeight - GOOGLE_PICKER_VIEWPORT_GUTTER * 2) / height,
+      ),
+    );
+
+    root.style.setProperty(
+      "--google-picker-center-x",
+      `${viewportLeft + viewportWidth / 2}px`,
+    );
+    root.style.setProperty(
+      "--google-picker-center-y",
+      `${viewportTop + viewportHeight / 2}px`,
+    );
+    root.style.setProperty("--google-picker-scale", String(scale));
+  };
+
+  root.classList.add("google-picker-open");
+  position();
+  window.addEventListener("resize", position);
+  visualViewport?.addEventListener("resize", position);
+  visualViewport?.addEventListener("scroll", position);
+
+  return {
+    width,
+    height,
+    close: () => {
+      if (closed) return;
+      closed = true;
+      window.removeEventListener("resize", position);
+      visualViewport?.removeEventListener("resize", position);
+      visualViewport?.removeEventListener("scroll", position);
+      root.classList.remove("google-picker-open");
+      root.style.removeProperty("--google-picker-center-x");
+      root.style.removeProperty("--google-picker-center-y");
+      root.style.removeProperty("--google-picker-scale");
+    },
+  };
 }
 
 export function isGoogleDriveAuthorized(): boolean {

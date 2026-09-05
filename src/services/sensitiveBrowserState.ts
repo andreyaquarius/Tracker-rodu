@@ -11,6 +11,7 @@ import {
 import {
   FAMILY_TREE_VIEW_PREFERENCES_STORAGE_PREFIX,
 } from "../utils/familyTreeViewPreferences.ts";
+import { FEEDBACK_DRAFT_STORAGE_PREFIX } from "../utils/feedbackDrafts.ts";
 
 export const SENSITIVE_LOCAL_STORAGE_PREFIXES = Object.freeze([
   PROJECT_CACHE_PREFIX,
@@ -19,6 +20,7 @@ export const SENSITIVE_LOCAL_STORAGE_PREFIXES = Object.freeze([
   "family-tree-manual-positions-v3:",
   "tracker-rodu.family-tree-appearance.v1:",
   FAMILY_TREE_VIEW_PREFERENCES_STORAGE_PREFIX,
+  FEEDBACK_DRAFT_STORAGE_PREFIX,
 ]);
 
 export const SENSITIVE_LOCAL_STORAGE_KEYS = Object.freeze([
