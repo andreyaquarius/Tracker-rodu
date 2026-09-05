@@ -772,6 +772,7 @@ export function PersonFormModal({
           <PersonEventsEditor
             personId={person?.id ?? "draft"}
             projectId={projectId}
+            drivePersonName={displayedFullName || "Без імені"}
             events={personEvents}
             onChange={(events) => update("events", events)}
           />

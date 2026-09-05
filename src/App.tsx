@@ -649,6 +649,14 @@ function projectAttachmentFields(
     fields.deathScans = scanList(record.deathScans);
     fields.mentionScans = scanList(record.mentionScans);
     fields.photos = scanList(record.photos);
+    const events = Array.isArray(record.events)
+      ? record.events as Array<{ id?: unknown; scans?: unknown }>
+      : [];
+    for (const event of events) {
+      const eventId = String(event.id ?? "").trim();
+      if (!eventId) continue;
+      fields[`event:${eventId}`] = scanList(event.scans);
+    }
   }
   if (collection === "archiveRequests") {
     fields.requestScans = scanList(record.requestScans);

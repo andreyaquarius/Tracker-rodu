@@ -266,6 +266,7 @@ test("timeline resolves saved scans beside their corresponding life events", () 
   const marriageScan = photo("marriage-record");
   const deathScan = photo("death-record");
   const mentionScan = photo("mention-record");
+  const censusScan = photo("census-record");
   const value = person({
     birthScans: [birthScan],
     marriageScans: [marriageScan],
@@ -278,6 +279,23 @@ test("timeline resolves saved scans beside their corresponding life events", () 
   assert.deepEqual(personTimelineAttachments(value, { type: "death" }), [deathScan]);
   assert.deepEqual(personTimelineAttachments(value, { type: "mention" }), [mentionScan]);
   assert.deepEqual(personTimelineAttachments(value, { type: "census" }), []);
+  assert.deepEqual(
+    personTimelineAttachments(value, {
+      type: "census",
+      source: "event",
+      scans: [censusScan],
+    }),
+    [censusScan],
+  );
+  assert.deepEqual(
+    personTimelineAttachments(value, {
+      type: "mention",
+      source: "event",
+      scans: [censusScan],
+    }),
+    [censusScan],
+    "an additional mention must not inherit every general mention attachment",
+  );
 });
 
 test("timeline keeps genuinely conflicting core facts instead of hiding them as duplicates", () => {

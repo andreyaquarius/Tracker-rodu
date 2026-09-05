@@ -7,6 +7,7 @@ import {
   personEventTemporalContextForPlaceLookup,
 } from "../utils/personEventGeo.ts";
 import { HistoricalPlaceField } from "./HistoricalPlaceField.tsx";
+import { ScanAttachmentsEditor } from "./ScanAttachments.tsx";
 
 const CORE_FIELD_EVENTS = new Set<PersonEventType>(["birth", "marriage", "death", "residence"]);
 
@@ -19,11 +20,13 @@ export function PersonEventsEditor({
   events,
   onChange,
   projectId,
+  drivePersonName,
 }: {
   personId: string;
   events: PersonEvent[];
   onChange: (events: PersonEvent[]) => void;
   projectId?: string;
+  drivePersonName?: string;
 }) {
   const editableEvents = events.filter((event) => !isSyntheticFieldEvent(event));
 
@@ -43,6 +46,7 @@ export function PersonEventsEditor({
         placeName: null,
         geo: null,
         notes: null,
+        scans: [],
       },
     ]);
   };
@@ -178,6 +182,18 @@ export function PersonEventsEditor({
                   onChange={(changeEvent) => updateEvent(event.id, { notes: changeEvent.target.value || null })}
                 />
               </label>
+              <ScanAttachmentsEditor
+                title="Файли події"
+                description="Прикріпіть скан, фотографію, PDF або інший файл, що підтверджує саме цю подію."
+                driveFolderPath={[
+                  "Особи",
+                  drivePersonName?.trim() || "Без імені",
+                  "Події",
+                  event.title?.trim() || personEventLabel(event.type),
+                ]}
+                scans={event.scans ?? []}
+                onChange={(scans) => updateEvent(event.id, { scans })}
+              />
               <div className="person-event-row-actions field-wide">
                 <button
                   type="button"

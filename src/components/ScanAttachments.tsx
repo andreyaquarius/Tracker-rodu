@@ -225,10 +225,19 @@ export function ScanAttachmentsEditor({
     setError("");
     try {
       const attached = await attachAttachmentReference(fileReference, policy, range);
-      if (maxFiles && scans.length + attached.length > maxFiles) {
+      const existingIdentities = new Set(scans.map(attachmentStorageIdentity));
+      const unique = attached.filter((scan, index) => {
+        const identity = attachmentStorageIdentity(scan);
+        return !existingIdentities.has(identity)
+          && attached.findIndex((candidate) => attachmentStorageIdentity(candidate) === identity) === index;
+      });
+      if (!unique.length) {
+        throw new Error("Усі вибрані файли вже прикріплено.");
+      }
+      if (maxFiles && scans.length + unique.length > maxFiles) {
         throw new Error(limitMessage || "Вибрано більше файлів, ніж дозволено для цього поля.");
       }
-      onChange([...scans, ...attached]);
+      onChange([...scans, ...unique]);
       setDriveAttachOpen(false);
     } catch (attachError) {
       setError(attachError instanceof Error ? attachError.message : "Не вдалося прикріпити джерело.");
@@ -534,6 +543,10 @@ function uploadedReplacement(
     availability: "available",
     ...(preserveAvatarCrop && scan.avatarCrop ? { avatarCrop: scan.avatarCrop } : {}),
   };
+}
+
+function attachmentStorageIdentity(scan: ScanAttachment): string {
+  return `${scan.storage}:${scan.storagePath || scan.id}`;
 }
 
 function ScanUploadProgress({ progress }: { progress: UploadProgressState }) {

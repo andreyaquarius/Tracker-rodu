@@ -141,6 +141,8 @@ export interface PersonEvent {
   address?: string | null;
   geo?: GeoPoint | null;
   notes?: string | null;
+  /** Files and source scans linked to this exact additional life event. */
+  scans?: ScanAttachment[];
 }
 
 export type CustomFieldModule =

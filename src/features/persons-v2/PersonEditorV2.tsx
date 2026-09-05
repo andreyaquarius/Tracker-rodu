@@ -1949,6 +1949,7 @@ export function PersonEditorV2({
               <PersonEventsEditor
                 personId={persistedPerson?.id ?? "draft"}
                 projectId={projectId}
+                drivePersonName={drivePersonName}
                 events={personEvents}
                 onChange={(events) => update("events", events)}
               />

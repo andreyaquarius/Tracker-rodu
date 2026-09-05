@@ -7,6 +7,7 @@ import type {
   Person,
   PersonEvent,
   PersonEventType,
+  ScanAttachment,
 } from "../types";
 import { createId } from "./id.ts";
 
@@ -197,7 +198,20 @@ function normalizePersonEvent(value: unknown, personId: string): PersonEvent | n
     address: typeof record.address === "string" && record.address ? record.address : null,
     geo: normalizeGeo(record.geo),
     notes: typeof record.notes === "string" && record.notes ? record.notes : null,
+    scans: normalizePersonEventScans(record.scans),
   };
+}
+
+function normalizePersonEventScans(value: unknown): ScanAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is ScanAttachment => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const record = item as Record<string, unknown>;
+    return typeof record.id === "string"
+      && typeof record.name === "string"
+      && (record.storage === "google-drive" || record.storage === "external-url")
+      && typeof record.storagePath === "string";
+  });
 }
 
 export function normalizePersonEvents(value: unknown, person: Pick<Person, "id" | "birthDate" | "birthPlace" | "marriageDate" | "marriagePlace" | "deathDate" | "deathPlace" | "residencePlaces">): PersonEvent[] {

@@ -304,6 +304,7 @@ export function calculatePersonProfileCompleteness(person: Person): PersonProfil
     ...(person.marriageScans ?? []),
     ...(person.deathScans ?? []),
     ...(person.mentionScans ?? []),
+    ...(person.events ?? []).flatMap((event) => event.scans ?? []),
   ].length > 0;
   const sections = [
     completenessSection("identity", "Основне", [
@@ -407,20 +408,33 @@ export function buildPersonTimeline(
 
 /**
  * Resolves the durable scan group saved for a timeline event.
- * Person attachments live beside the event fields, so timeline views must
- * explicitly join both pieces instead of expecting files inside PersonEvent.
+ * Canonical attachments live beside the person fields, while additional-event
+ * attachments live on the exact PersonEvent. Timeline views join both sources.
  */
 export function personTimelineAttachments(
   person: Person,
-  event: Pick<PersonTimelineItem, "type">,
+  event: Pick<PersonTimelineItem, "type" | "scans"> & Partial<Pick<PersonTimelineItem, "source">>,
 ): readonly ScanAttachment[] {
-  switch (event.type) {
-    case "birth": return person.birthScans ?? [];
-    case "marriage": return person.marriageScans ?? [];
-    case "death": return person.deathScans ?? [];
-    case "mention": return person.mentionScans ?? [];
-    default: return [];
+  const canonical = event.source === "event"
+    ? []
+    : event.type === "birth"
+    ? person.birthScans ?? []
+    : event.type === "marriage"
+      ? person.marriageScans ?? []
+      : event.type === "death"
+        ? person.deathScans ?? []
+        : event.type === "mention"
+          ? person.mentionScans ?? []
+          : [];
+  const result: ScanAttachment[] = [];
+  const seen = new Set<string>();
+  for (const scan of [...(event.scans ?? []), ...canonical]) {
+    const identity = `${scan.storage}:${scan.storagePath || scan.id}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    result.push(scan);
   }
+  return result;
 }
 
 /**
@@ -858,6 +872,7 @@ function isMeaningfulEvent(event: PersonEvent): boolean {
     || collapseWhitespace(event.cause ?? "")
     || collapseWhitespace(event.address ?? "")
     || collapseWhitespace(event.notes ?? "")
+    || (event.scans?.length ?? 0) > 0
     || hasCoordinates
     || hasCustomTitle
   );

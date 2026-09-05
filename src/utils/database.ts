@@ -426,9 +426,10 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
       const sourcePhotos = item.photos ?? [];
       const photos = mapScans(sourcePhotos);
       const primaryIndex = sourcePhotos.findIndex((photo) => photo.id === item.primaryPhotoId);
+      const mappedPersonId = mapRequired(persons, item.id);
       return {
         ...item,
-        id: mapRequired(persons, item.id),
+        id: mappedPersonId,
         researchId: mapReference(researches, item.researchId),
         birthScans: mapScans(item.birthScans),
         marriageScans: mapScans(item.marriageScans),
@@ -438,9 +439,13 @@ export function cloneDatabaseForProjectImport(source: AppDatabase): AppDatabase 
         primaryPhotoId: photos[primaryIndex >= 0 ? primaryIndex : 0]?.id ?? "",
         events: syncPersonEventsFromFields({
           ...item,
-          id: mapRequired(persons, item.id),
+          id: mappedPersonId,
           researchId: mapReference(researches, item.researchId),
-        }),
+        }).map((event) => ({
+          ...event,
+          personId: mappedPersonId,
+          scans: mapScans(event.scans ?? []),
+        })),
         customFields: mapCustomFields("persons", item.customFields),
       };
     }),

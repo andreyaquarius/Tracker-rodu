@@ -1,6 +1,7 @@
 import type { PersonEvent } from "../types";
 import { personEventLabel } from "../utils/geo";
 import { formatDateForDisplay } from "../utils/dateHelpers";
+import { ScanAttachmentsView } from "./ScanAttachments.tsx";
 
 const CORE_FIELD_EVENT_TYPES = new Set(["birth", "marriage", "death"]);
 
@@ -9,7 +10,7 @@ function isVisibleEvent(event: PersonEvent): boolean {
   if (event.type === "residence" && event.id === "residence") return false;
   return Boolean(
     event.title || event.date || event.placeName || event.value || event.age
-      || event.cause || event.address || event.notes,
+      || event.cause || event.address || event.notes || event.scans?.length,
   );
 }
 
@@ -30,6 +31,7 @@ export function PersonEventsView({ events }: { events: PersonEvent[] }) {
           {event.address && event.address !== event.placeName ? <p><b>Адреса:</b> {event.address}</p> : null}
           {event.cause ? <p><b>Причина:</b> {event.cause}</p> : null}
           {event.notes ? <p>{event.notes}</p> : null}
+          {event.scans?.length ? <ScanAttachmentsView scans={event.scans} /> : null}
         </article>
       ))}
     </div>

@@ -6,8 +6,8 @@ import type {
 import { createId } from "../utils/id";
 import { nowIso } from "../utils/dateHelpers";
 import { getSupabaseClient, getSupabaseSession } from "./supabaseAuth";
+import { projectAttachmentMetadataRows } from "./projectAttachmentMetadataRows.ts";
 
-const GOOGLE_DRIVE_STORAGE = "google-drive";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -111,27 +111,7 @@ export async function syncProjectAttachmentMetadata(
   fields: Record<string, ScanAttachment[]>,
 ): Promise<void> {
   const client = getSupabaseClient();
-  const rows = Object.entries(fields).flatMap(([fieldKey, scans]) =>
-    scans
-      .filter(
-        (scan) =>
-          scan.storage === "google-drive" &&
-          Boolean(scan.storagePath),
-      )
-      .map((scan) => ({
-        id: scan.id,
-        project_id: projectId,
-        owner_type: ownerType,
-        owner_id: ownerId,
-        field_key: fieldKey,
-        storage_bucket: GOOGLE_DRIVE_STORAGE,
-        storage_path: scan.storagePath!,
-        file_name: scan.name,
-        mime_type: scan.mimeType || "application/octet-stream",
-        size_bytes: scan.size,
-        created_at: scan.createdAt,
-      })),
-  );
+  const rows = projectAttachmentMetadataRows(projectId, ownerType, ownerId, fields);
 
   const existing = await client
     .from("attachments")
