@@ -17,7 +17,13 @@ test("static sitemap exposes only the two public Zagulyaky catalogue URLs", () =
 
   assert.ok(urls.includes("https://trekerrodu.com.ua/zahuliaky/"));
   assert.ok(urls.includes("https://trekerrodu.com.ua/zahuliaky/documents/"));
-  assert.equal(urls.includes("https://trekerrodu.com.ua/zahuliaky/my/"), false);
+  assert.equal(
+    urls.some((url) => {
+      const parsed = new URL(url);
+      return parsed.hostname === "trekerrodu.com.ua" && parsed.pathname === "/zahuliaky/my/";
+    }),
+    false,
+  );
   assert.ok(urls.every((url) => new URL(url).pathname.endsWith("/")));
   assert.match(robots, /^Sitemap: https:\/\/trekerrodu\.com\.ua\/sitemap-zagulyaky\.xml$/m);
 });
