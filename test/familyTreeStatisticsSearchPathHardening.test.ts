@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+function escapeRegExpLiteral(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
 const migration = readFileSync(
   new URL(
     "../supabase/migrations/202608250004_family_tree_statistics_search_path_hardening.sql",
@@ -38,7 +42,7 @@ test("family-tree statistics keeps pg_temp last and qualifies shared scratch rel
   );
 
   for (const functionIdentifier of protectedFunctions) {
-    assert.match(migration, new RegExp(`'${functionIdentifier.replace(/[().]/g, "\\$&")}'::regprocedure`));
+    assert.match(migration, new RegExp(`'${escapeRegExpLiteral(functionIdentifier)}'::regprocedure`));
   }
   for (const scratchRelation of scratchRelations) {
     assert.match(migration, new RegExp(`'${scratchRelation}'`));
