@@ -3835,7 +3835,9 @@ export default function App() {
         refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("findings", previousEntity, saved);
         syncEntityAttachmentMetadata("findings", saved);
-        if (saved.participants.some((participant) => participant.personId)) {
+        // Also sync an empty participant list: it retracts source-owned facts
+        // from people who were unlinked, including the very last participant.
+        {
           // The finding is already saved: a projection failure must not roll it
           // back in the UI or misreport the source as lost.
           try {
@@ -3859,7 +3861,7 @@ export default function App() {
               saveProjectPeopleCache(projectId, mergePersons(cached.persons), cached.relations);
             }
             if (synced.conflictCount && activeWorkspaceIdRef.current === projectId) {
-              notify("Події зі знахідки додано. Є розбіжності з картками або неоднозначні партнери: наявні дані збережено. Перевірте хронологію та записи шлюбів.", true);
+              notify("Зв’язки та події зі знахідки синхронізовано. Є розбіжності з картками або неоднозначні партнери: наявні дані збережено. Перевірте хронологію та записи шлюбів.", true);
             }
           } catch (error) {
             if (activeWorkspaceIdRef.current === projectId) notify(

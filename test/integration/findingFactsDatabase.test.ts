@@ -40,7 +40,7 @@ test("finding facts: real SQL, existing person-save bridge, role-safe events and
         role text default '',name text default '',notes text default '',context_target_participant_id uuid);
     `);
     const foundation = migration("202606290003_family_tree_graph_foundation");
-    await db.exec(foundation.slice(foundation.indexOf("create table if not exists public.family_trees"), foundation.indexOf("create table if not exists public.parent_sets")));
+    await db.exec(foundation.slice(foundation.indexOf("create table if not exists public.family_trees"), foundation.indexOf("create table if not exists public.tree_layout_positions")));
     const timeline = migration("202606290004_family_tree_person_facts");
     await db.exec(timeline.slice(timeline.indexOf("create table if not exists public.person_timeline_events"), timeline.indexOf("do $$")));
     await db.exec(`alter table person_timeline_events add place_id uuid,add place_original_text text,add place_resolution_status text;
@@ -62,6 +62,10 @@ test("finding facts: real SQL, existing person-save bridge, role-safe events and
     // Exercise the older core-date projection too (the historical-name half
     // is unrelated). This detects duplicates between the two person bridges.
     const legacy = migration("202607010001_family_tree_legacy_sync");
+    // The real expression/partial couple index is essential: without it the
+    // old delete -> relink duplicate error was invisible to this fixture.
+    await db.exec(`create table person_relations(id uuid primary key);`);
+    await db.exec(legacy.slice(legacy.indexOf("create table if not exists public.legacy_person_relation_graph_edges"),legacy.indexOf("create or replace function public.family_tree_evidence_status_from_legacy")));
     const eventProjection = legacy.slice(legacy.indexOf("  delete from public.person_timeline_events"),legacy.indexOf("create or replace function public.family_tree_sync_legacy_relation"));
     await db.exec(`create function public.family_tree_confidence_for_evidence(text) returns integer language sql as $$ select 50 $$;
       create function public.test_legacy_core_projection() returns trigger language plpgsql security definer as $$
@@ -96,6 +100,17 @@ test("finding facts: real SQL, existing person-save bridge, role-safe events and
       assert.equal(marriage.start_date,'1892-01-24'); assert.equal(marriage.start_place,'Вербівка');
       const canonical = await query("select source_finding_id from person_timeline_events");
       assert.equal(canonical.length,4); assert.ok(canonical.every((row) => row.source_finding_id===id(201)));
+    });
+    await t.test("reproduces production 23505 after marriage deletion, then relinks using the existing group", async () => {
+      const group = (await query("select family_group_id from partner_relationships"))[0].family_group_id;
+      await query("delete from partner_relationships");
+      await assert.rejects(sync(), (error: any) => error.code==='23505' && error.message.includes('family_groups_couple_pair_uq'));
+      await db.exec("reset role");
+      await db.exec(migration("202609060004_finding_fact_unlink_and_relink"));
+      await asUser(1);
+      await sync();
+      assert.equal((await query("select family_group_id from partner_relationships"))[0].family_group_id, group);
+      assert.equal((await query("select * from family_groups")).length, 1);
     });
     await t.test("repeat saves do not duplicate events or relationships; corrections update owned facts", async () => {
       await sync(); assert.equal((await events(101)).length,1);
@@ -140,6 +155,105 @@ test("finding facts: real SQL, existing person-save bridge, role-safe events and
       const marriage = (await query("select * from partner_relationships"))[0];
       assert.equal(marriage.end_date,'1901-02-03'); assert.equal(marriage.start_date,'1892-01-25');
       assert.equal((await events(102))[0].type,'divorce'); assert.equal((await readPerson(102)).marriage_date,'1892-01-25');
+    });
+    const isolated = async (name: string, check: () => Promise<void>) => t.test(name, async () => {
+      await db.exec("begin");
+      try { await check(); } finally { await db.exec("rollback"); }
+    });
+    const newPair = async () => {
+      await db.exec("reset role");
+      await query(`insert into persons(id,project_id,full_name,birth_date) values
+        ($1,$3,'Новий наречений','1860'),($2,$3,'Нова наречена','1865')`,[id(108),id(109),id(10)]);
+      await query(`insert into findings(id,project_id,finding_type,event_date,place)
+        values($1,$2,'шлюб','1890-02-03','Тестове місце')`,[id(203),id(10)]);
+      await query(`insert into finding_participants(id,project_id,finding_id,person_id,role,name) values
+        ($1,$3,$4,$5,'Наречений','Наречений'),($2,$3,$4,$6,'Наречена','Наречена')`,[id(311),id(312),id(10),id(203),id(108),id(109)]);
+      await asUser(1);
+      await sync(203);
+      return (await query("select * from partner_relationships where person_a_id=$1 or person_b_id=$1",[id(108)]))[0];
+    };
+    const unlink = async (finding=203) => {
+      await query("update finding_participants set person_id=null where finding_id=$1",[id(finding)]);
+      return sync(finding);
+    };
+    await isolated("unlink last participants removes owned profile/timeline/marriage facts and permits fresh reattachment", async () => {
+      const old = await newPair();
+      const result = await unlink();
+      assert.ok(result.personIds.includes(id(108)) && result.personIds.includes(id(109)));
+      assert.deepEqual(result.conflicts,[]);
+      assert.equal((await readPerson(108)).marriage_date,'');
+      assert.equal((await readPerson(109)).marriage_place,'');
+      assert.equal((await readPerson(108)).birth_date,'1860');
+      assert.deepEqual(await events(108),[]);
+      assert.equal((await query("select * from person_timeline_events where source_finding_id=$1",[id(203)])).length,0);
+      assert.equal((await query("select * from partner_relationships where id=$1",[old.id])).length,0);
+      assert.equal((await readPerson(108)).custom_fields.__trackerRoduFindingFacts[id(203)],undefined);
+      await query("update finding_participants set person_id=case when id=$1 then $2::uuid else $3::uuid end where finding_id=$4",[id(311),id(108),id(109),id(203)]);
+      await sync(203); await sync(203);
+      const rows = await query("select * from partner_relationships where person_a_id=$1 or person_b_id=$1",[id(108)]);
+      assert.equal(rows.length,1); assert.equal(rows[0].family_group_id,old.family_group_id);
+      assert.equal((await readPerson(108)).marriage_date,'1890-02-03'); assert.equal((await events(108)).length,1);
+    });
+    await isolated("marriage deletion plus unlink/relink preserves the couple group, children and parent sets", async () => {
+      const old = await newPair();
+      await query("insert into parent_sets(id,project_id,tree_id,child_id,family_group_id) values($1,$2,$3,$4,$5)",[id(501),id(10),old.tree_id,id(105),old.family_group_id]);
+      await query("insert into parent_child_relationships(project_id,tree_id,parent_id,child_id,parent_set_id,family_group_id) values($1,$2,$3,$4,$5,$6)",[id(10),old.tree_id,id(108),id(105),id(501),old.family_group_id]);
+      await query("insert into family_group_members(project_id,family_group_id,person_id,member_role) values($1,$2,$3,'child')",[id(10),old.family_group_id,id(105)]);
+      await query("delete from partner_relationships where id=$1",[old.id]);
+      await unlink();
+      await query("update finding_participants set person_id=case when id=$1 then $2::uuid else $3::uuid end where finding_id=$4",[id(311),id(108),id(109),id(203)]);
+      await sync(203);
+      assert.equal((await query("select * from parent_sets where id=$1",[id(501)]))[0].family_group_id,old.family_group_id);
+      assert.equal((await query("select * from parent_child_relationships where parent_set_id=$1",[id(501)])).length,1);
+      assert.equal((await query("select * from family_group_members where family_group_id=$1 and member_role='child'",[old.family_group_id])).length,1);
+      assert.equal((await query("select * from partner_relationships where source_finding_id=$1",[id(203)]))[0].family_group_id,old.family_group_id);
+    });
+    await isolated("switching a participant cleans the former person's facts and the obsolete couple only", async () => {
+      const old = await newPair();
+      await query("update finding_participants set person_id=$1 where id=$2",[id(105),id(311)]);
+      const result = await sync(203);
+      assert.ok(result.personIds.includes(id(108)));
+      assert.equal((await readPerson(108)).marriage_date,''); assert.deepEqual(await events(108),[]);
+      assert.equal((await readPerson(105)).marriage_date,'1890-02-03');
+      assert.equal((await query("select * from partner_relationships where id=$1",[old.id])).length,0);
+      assert.equal((await query("select * from partner_relationships where source_finding_id=$1",[id(203)])).length,1);
+      assert.equal((await query("select * from partner_relationships where source_finding_id=$1",[id(201)])).length,1);
+    });
+    await isolated("manual dates and manually accepted marriages survive unlinking their source", async () => {
+      const old = await newPair();
+      await db.exec("reset role");
+      await query("update persons set marriage_date='1889' where id=$1",[id(108)]);
+      await asUser(1);
+      await query(`update partner_relationships set start_date='1888',metadata=metadata||'{"source":"person_marriage_editor"}' where id=$1`,[old.id]);
+      await unlink();
+      assert.equal((await readPerson(108)).marriage_date,'1889'); assert.deepEqual(await events(108),[]);
+      const row = (await query("select * from partner_relationships where id=$1",[old.id]))[0];
+      assert.equal(row.start_date,'1888'); assert.equal(row.source_finding_id,null);
+      assert.deepEqual(row.metadata.findingFacts,{});
+    });
+    await isolated("corroborating sources retain the fact until the last source is unlinked", async () => {
+      const old = await newPair();
+      await query("insert into findings(id,project_id,finding_type,event_date,place) values($1,$2,'шлюб','1890-02-03','Тестове місце')",[id(204),id(10)]);
+      await query(`insert into finding_participants(id,project_id,finding_id,person_id,role,name) values
+        ($1,$3,$4,$5,'Наречений','Наречений'),($2,$3,$4,$6,'Наречена','Наречена')`,[id(313),id(314),id(10),id(204),id(108),id(109)]);
+      await sync(204); await unlink(203);
+      assert.equal((await readPerson(108)).marriage_date,'1890-02-03');
+      let row=(await query("select * from partner_relationships where id=$1",[old.id]))[0];
+      assert.equal(row.start_date,'1890-02-03'); assert.equal(row.source_finding_id,id(204));
+      assert.equal((await events(108)).length,1);
+      await unlink(204);
+      assert.equal((await readPerson(108)).marriage_date,''); assert.deepEqual(await events(108),[]);
+      assert.equal((await query("select * from partner_relationships where id=$1",[old.id])).length,0);
+    });
+    await isolated("couple reuse works with reversed stored partner order", async () => {
+      const old = await newPair();
+      await query("delete from partner_relationships where id=$1",[old.id]);
+      await query("update family_groups set primary_partner_1_id=$1,primary_partner_2_id=$2 where id=$3",[id(109),id(108),old.family_group_id]);
+      await sync(203);
+      assert.equal((await query("select * from partner_relationships where source_finding_id=$1",[id(203)]))[0].family_group_id,old.family_group_id);
+    });
+    await isolated("private cleanup cannot be called directly to bypass the public edit guard", async () => {
+      await assert.rejects(query("select security_private.detach_obsolete_finding_facts_v1($1,$2,'{}','{}')",[id(10),id(201)]),(e:any)=>e.code==='42501');
     });
     await t.test("viewer, anonymous and cross-project calls cannot modify people", async () => {
       await asUser(2); await assert.rejects(sync(),(e: any) => e.code==='42501');
