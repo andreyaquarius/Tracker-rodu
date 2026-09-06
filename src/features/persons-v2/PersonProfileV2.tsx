@@ -47,6 +47,7 @@ import {
   primaryPersonPhoto,
 } from "../../utils/personPhotos.ts";
 import { PersonPhotoAlbumV2 } from "./PersonPhotoAlbumV2.tsx";
+import { PersonTaggedPhotos } from "./PersonTaggedPhotos.tsx";
 import type { ProjectPersonMarriage } from "../../services/projectPersonMarriages.ts";
 import { formatFlexibleDateForDisplay } from "../../utils/dateHelpers.ts";
 import { PersonNamesProfileSectionV2 } from "./PersonNamesProfileSectionV2.tsx";
@@ -85,6 +86,7 @@ type PersonProfileRelatedRecordV2 =
   | ArchiveRequest;
 
 export interface PersonProfileV2Props {
+  projectId?: string;
   db: AppDatabase;
   person: Person;
   personNames?: readonly PersonName[];
@@ -131,7 +133,7 @@ export interface PersonProfileV2Props {
     person: Person,
   ) => void;
   onSelectEvent?: (event: PersonTimelineItem) => void;
-  onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[]) => void;
+  onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[], focusTagId?: string) => void;
 }
 
 interface LinkedRelationV2 {
@@ -161,6 +163,7 @@ const profileTabLabelsV2: Record<PersonProfileTabV2, string> = {
 };
 
 export function PersonProfileV2({
+  projectId,
   db,
   person,
   personNames = [],
@@ -528,6 +531,7 @@ export function PersonProfileV2({
           ) : null}
         </section>
       ))}
+      {projectId ? <PersonTaggedPhotos key={`${projectId}:${person.id}`} projectId={projectId} personId={person.id} onOpenPhoto={onOpenPhoto} /> : null}
     </article>
   );
 }

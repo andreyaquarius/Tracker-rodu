@@ -1,0 +1,34 @@
+.photo-people { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 310px); width: 100%; height: 100%; min-height: 0; background: var(--app-surface, var(--paper)); color: var(--app-ink, var(--green-950)); text-align: left; }
+.photo-people__canvas { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.photo-people__tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px; }
+.photo-people__scroll { overflow: auto; flex: 1; min-height: 0; padding: 12px; background: var(--app-surface-soft, var(--cream)); }
+.photo-people__scale { min-width: 100%; }
+.photo-people__image { position: relative; width: 100%; line-height: 0; user-select: none; }
+.photo-people__image > img { display: block; width: 100%; height: auto; max-width: none; pointer-events: none; }
+.photo-people__image.is-drawing { touch-action: none; cursor: crosshair; }
+.photo-people__rect { position: absolute; border: 2px solid #fff; outline: 1px solid #123b31; border-radius: 3px; background: transparent; padding: 0; min-width: 0; min-height: 0; }
+.photo-people__rect > span { position: absolute; left: 0; top: 0; max-width: max(120px, 100%); background: #123b31; color: #fff; padding: 3px 6px; font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; text-align: left; }
+.photo-people__rect.is-selected, .photo-people__rect:focus-visible { border: 3px solid #ffcf5c; outline: 2px solid #342600; }
+.photo-people__rect.is-draft { border: 3px dashed #ffcf5c; outline: 1px solid #342600; pointer-events: none; }
+.photo-people__image.is-drawing .photo-people__rect { pointer-events: none; }
+.photo-people__sidebar { padding: 14px; overflow: auto; border-left: 1px solid var(--app-border, var(--line)); }
+.photo-people__sidebar p { font-size: 13px; margin: 10px 0; }
+.photo-people__sidebar [role="alert"] { color: var(--app-danger, var(--red)); }
+.photo-people__sidebar fieldset { border: 0; padding: 0; min-width: 0; }
+.photo-people__sidebar label { display: grid; gap: 4px; font-size: 12px; }
+.photo-people__sidebar input { width: 100%; min-width: 0; padding: 8px; background: var(--app-surface, var(--paper)); color: inherit; border: 1px solid var(--app-border, var(--line)); border-radius: 6px; }
+.photo-people__coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.photo-people__list { list-style: none; padding: 0; display: grid; gap: 5px; max-height: 220px; overflow: auto; }
+.photo-people__list button { width: 100%; min-height: 44px; text-align: left; background: var(--app-surface-soft, var(--cream)); color: inherit; border: 1px solid var(--app-border, var(--line)); border-radius: 6px; padding: 8px; }
+.photo-people__list button[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--amber); }
+.photo-people__list small { display: block; }
+.photo-people__selected { display: grid; gap: 8px; margin: 12px 0; }
+.person-tagged-photos { padding: 18px; margin-top: 18px; background: var(--app-surface, var(--paper)); border: 1px solid var(--app-border, var(--line)); border-radius: 12px; }
+.person-tagged-photos__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.person-tagged-photos__tile { padding: 10px; border: 1px solid var(--app-border, var(--line)); border-radius: 8px; overflow: hidden; }
+.person-tagged-photos__tile img { width: 100%; height: 130px; object-fit: contain; }
+.person-tagged-photos__tile button { width: 100%; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .photo-people { grid-template-columns: 1fr; grid-template-rows: minmax(180px, 45%) minmax(0, 1fr); }
+  .photo-people__sidebar { border-left: 0; border-top: 1px solid var(--app-border, var(--line)); }
+}

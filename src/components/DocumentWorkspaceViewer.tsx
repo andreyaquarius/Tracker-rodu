@@ -8,6 +8,7 @@ import {
   type WheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { PhotoPeoplePanel } from "./PhotoPeoplePanel.tsx";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import type { DocumentFragmentSelection, ScanAttachment } from "../types";
 import type { StoredDocumentSource } from "../services/document-sources/contracts.ts";
@@ -129,6 +130,7 @@ export type DocumentScanViewerContext = {
 };
 
 export type ActiveDocumentScanViewer = {
+  photoTagId?: string;
   scan: ScanAttachment;
   scans?: ScanAttachment[];
   pageIndex?: number;
@@ -322,6 +324,7 @@ let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
 
 interface DocumentWorkspaceViewerProps {
   viewer: ActiveDocumentScanViewer | null;
+  photoTagging?: { projectId: string; canEdit: boolean; onOpenPerson: (id: string) => void };
   externalPdfViewerV2?: Omit<ExternalPdfViewerV2Context, "documentId">;
   onClose: () => void;
   onOpenDocument: (documentId: string) => void;
@@ -330,6 +333,7 @@ interface DocumentWorkspaceViewerProps {
 
 export function DocumentWorkspaceViewer({
   viewer,
+  photoTagging,
   externalPdfViewerV2,
   onClose,
   onOpenDocument,
@@ -384,6 +388,7 @@ export function DocumentWorkspaceViewer({
     });
   }
   const [mode, setMode] = useState<ViewerMode>("window");
+  const [showPhotoTags, setShowPhotoTags] = useState(Boolean(viewer?.photoTagId));
   const [position, setPosition] = useState<ViewerPosition | null>(null);
   const [viewerSize, setViewerSize] = useState<ViewerSize | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -440,6 +445,9 @@ export function DocumentWorkspaceViewer({
 
   const pages = viewer?.scans?.length ? viewer.scans : viewer ? [viewer.scan] : [];
   const currentScan = pages[currentIndex] ?? viewer?.scan ?? null;
+  useEffect(() => {
+    setShowPhotoTags(Boolean(viewer?.photoTagId && currentScan?.id === viewer.scan.id));
+  }, [currentScan?.id, viewer?.photoTagId]);
   const currentPreview = currentScan
     ? previewCacheRef.current.get(currentScan.id)
     : undefined;
@@ -1209,7 +1217,7 @@ export function DocumentWorkspaceViewer({
   ]);
 
   useEffect(() => {
-    if (!viewer || navigationPageCount < 2 || mode === "minimized" || selectionMode) return undefined;
+    if (!viewer || navigationPageCount < 2 || mode === "minimized" || selectionMode || showPhotoTags) return undefined;
 
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -1238,7 +1246,7 @@ export function DocumentWorkspaceViewer({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewer, pageCount, navigationPageCount, isInteractivePdf, mode, selectionMode]);
+  }, [viewer, pageCount, navigationPageCount, isInteractivePdf, mode, selectionMode, showPhotoTags]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -2385,6 +2393,7 @@ export function DocumentWorkspaceViewer({
     ? finePdfRotation === 0
     : normalizeSignedRotation(rotation) === 0;
   const canSelectFragment =
+    !showPhotoTags &&
     (kind === "image" || isInteractivePdf) &&
     Boolean(blobUrl) &&
     !loading &&
@@ -2541,7 +2550,14 @@ export function DocumentWorkspaceViewer({
           <small>{pageLabel}</small>
         </div>
         <div className="workspace-viewer-header-actions">
-          {(kind === "image" || isInteractivePdf) && blobUrl ? (
+          {kind === "image" && blobUrl && photoTagging ? (
+            <button type="button" className="button button-secondary" aria-pressed={showPhotoTags}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => { setShowPhotoTags((value) => !value); setImageToolsOpen(false); setSelectionMode(false); }}>
+              {showPhotoTags ? "Повернутися до фото" : "Люди на фото"}
+            </button>
+          ) : null}
+          {(kind === "image" || isInteractivePdf) && blobUrl && !showPhotoTags ? (
             <div className="workspace-viewer-toolstrip" onPointerDown={(event) => event.stopPropagation()}>
               <button
                 type="button"
@@ -2602,7 +2618,7 @@ export function DocumentWorkspaceViewer({
         </div>
       </div>
 
-      <div ref={previewViewportRef} className="workspace-viewer-body" onWheelCapture={handlePreviewWheel}>
+      <div ref={previewViewportRef} className="workspace-viewer-body" onWheelCapture={showPhotoTags ? undefined : handlePreviewWheel}>
         {imageToolsOpen && (kind === "image" || isInteractivePdf) && blobUrl ? (
           <section
             id={imageToolsPanelId}
@@ -2771,6 +2787,13 @@ export function DocumentWorkspaceViewer({
               </button>
             </div>
           </div>
+        ) : kind === "image" && blobUrl && showPhotoTags && photoTagging ? (
+          activeScan.storage === "google-drive" ? <PhotoPeoplePanel
+            key={`${photoTagging.projectId}:${activeScan.id}:${activeScan.storagePath}`}
+            projectId={photoTagging.projectId} photo={activeScan} imageUrl={blobUrl}
+            canEdit={photoTagging.canEdit} focusTagId={viewer.photoTagId}
+            onOpenPerson={photoTagging.onOpenPerson}
+          /> : <div className="workspace-viewer-state">Для довговічних позначок додайте фото з Google Drive до особи, документа або знахідки та збережіть запис.</div>
         ) : kind === "image" && blobUrl ? (
           <>
             {rotationControl}
