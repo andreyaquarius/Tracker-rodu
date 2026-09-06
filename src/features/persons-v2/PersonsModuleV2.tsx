@@ -111,7 +111,7 @@ export interface PersonsModuleV2Props {
   onNavigate: (target: PersonRouteTarget, options?: { replace?: boolean }) => void;
   onShowInTree?: (person: Person) => void;
   onOpenMap?: (person: Person) => void;
-  onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[]) => void;
+  onOpenPhoto?: (photo: ScanAttachment, photos: readonly ScanAttachment[], focusTagId?: string) => void;
   onSavePerson: PersonSaveHandler;
   onDeletePersons?: (personIds: readonly string[]) => Promise<void>;
   onListRootRequirements?: (
@@ -848,6 +848,7 @@ function PersonsModuleV2StandardRoutes({
         {detail.loading ? <PersonDetailNoticeV2>Завантажуємо пов’язані матеріали…</PersonDetailNoticeV2> : null}
         {detail.error ? <PersonDetailNoticeV2 error>{detail.error}</PersonDetailNoticeV2> : null}
         <PersonProfileV2
+          projectId={projectId}
           db={db}
           person={routePerson}
           personNames={detail.personNames}

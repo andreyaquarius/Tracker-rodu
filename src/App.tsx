@@ -4750,10 +4750,12 @@ export default function App() {
     scan: ScanAttachment,
     context?: DocumentScanViewerContext,
     scans?: ScanAttachment[],
+    photoTagId?: string,
   ) => {
     const pages = scans?.length ? scans : [scan];
     setScanViewer({
       scan,
+      photoTagId,
       scans: pages,
       pageIndex: Math.max(0, pages.findIndex((item) => item.id === scan.id)),
       context,
@@ -6198,7 +6200,7 @@ export default function App() {
                 }}
                 onShowInTree={canUseFamilyTreeFeature ? showPersonInFamilyTree : undefined}
                 onOpenMap={showPersonOnMap}
-                onOpenPhoto={(photo, photos) => openScanViewer(photo, undefined, [...photos])}
+                onOpenPhoto={(photo, photos, photoTagId) => openScanViewer(photo, undefined, [...photos], photoTagId)}
                 onSavePerson={savePerson}
                 onDeletePersons={deletePersons}
                 onListRootRequirements={workspace ? listPersonRootRequirements : undefined}
@@ -6451,6 +6453,14 @@ export default function App() {
       <DocumentWorkspaceViewer
         key={`${scanViewer?.openedAt ?? "closed"}:${externalPdfViewerV2Enabled ? "v2" : "legacy"}`}
         viewer={scanViewer}
+        photoTagging={workspace ? {
+          projectId: workspace.projectId,
+          canEdit: workspace.role !== "viewer",
+          onOpenPerson: (personId) => {
+            setScanViewer(null);
+            routerNavigate(personPath(workspace.projectSlug, personId, "profile"));
+          },
+        } : undefined}
         externalPdfViewerV2={externalPdfViewerV2Enabled && workspace && account ? {
           enabled: true,
           projectId: workspace.projectId,

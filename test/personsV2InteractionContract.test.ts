@@ -127,7 +127,7 @@ test("persons V2 exposes a real photo album and opens photos from the profile ca
   assert.match(album, /photo\.availability/u);
   assert.match(album, /Головне фото/u);
   assert.match(moduleSource, /onOpenPhoto=\{onOpenPhoto\}/u);
-  assert.match(app, /onOpenPhoto=\{\(photo, photos\) => openScanViewer\(photo, undefined, \[\.\.\.photos\]\)\}/u);
+  assert.match(app, /onOpenPhoto=\{\(photo, photos, photoTagId\) => openScanViewer\(photo, undefined, \[\.\.\.photos\], photoTagId\)\}/u);
   assert.match(styles, /\.persons-v2-photo-album__grid[\s\S]*?repeat\(auto-fill, minmax\(min\(100%, 220px\), 1fr\)\)/u);
   assert.match(styles, /button\.persons-v2-photo-album__preview:focus-visible/u);
 });
