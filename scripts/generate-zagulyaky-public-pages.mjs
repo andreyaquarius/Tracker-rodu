@@ -573,8 +573,13 @@ export function renderZagulyakySeoPage(template, page) {
   );
   let html = template
     .replace(/<noscript>[\s\S]*?<\/noscript>\s*/i, "")
-    .replace(/<script\b(?=[^>]*\btype=["']application\/ld\+json["'])[^>]*>[\s\S]*?<\/script>\s*/gi, "")
     .replace(new RegExp(`<meta\\b(?=[^>]*\\bname=["']${STATIC_SEO_MARKER_NAME}["'])[^>]*>\\s*`, "gi"), "");
+  const jsonLdScriptPattern = /<script\b(?=[^>]*\btype=["']application\/ld\+json["'])[^>]*>[\s\S]*?<\/script>\s*/gi;
+  let previousHtml;
+  do {
+    previousHtml = html;
+    html = html.replace(jsonLdScriptPattern, "");
+  } while (html !== previousHtml);
   html = replaceRequired(html, /<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(page.title)}</title>`, "title");
   html = replaceMeta(html, "name", "description", page.description);
   html = replaceMeta(html, "name", "robots", "index, follow");
