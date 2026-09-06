@@ -50,7 +50,7 @@ test("request editor keeps archive suggestions and accepts a free-form instituti
   assert.doesNotMatch(requestConfig, /key:\s*"archiveDetails"[^}\n]*required:\s*true/u);
 
   const crudPage = source("../src/pages/CrudPage.tsx");
-  assert.match(crudPage, /onChange=\{\(value\) => setForm\(\(current\) => \(\{ \.\.\.current, \[field\.key\]: value \}\)\)\}/u);
+  assert.match(crudPage, /onChange=\{\(value\) => setForm\(\(current\) => \{[\s\S]*?return \{ \.\.\.current, \[field\.key\]: value \};/u);
   assert.match(crudPage, /return \{[\s\S]*?\.\.\.sourceForm,[\s\S]*?id:\s*entity\?\.id/u);
   assert.match(
     crudPage,

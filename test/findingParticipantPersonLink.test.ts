@@ -7,6 +7,7 @@ import {
   findingLinkedPersonIds,
   findingLinksPerson,
   findingStandalonePersonIds,
+  withFindingParticipants,
 } from "../src/utils/findingParticipantLinks.ts";
 import {
   cloneDatabaseForProjectImport,
@@ -94,14 +95,16 @@ test("canonicalizing a duplicate legacy link prevents a stale link after partici
   assert.deepEqual(findingLinkedPersonIds(afterUnlink), []);
 });
 
-test("the finding editor exposes an optional existing-person selector per participant", () => {
+test("the finding editor exposes optional person search per participant and preserves source text", () => {
   const crudPage = readFileSync(new URL("../src/pages/CrudPage.tsx", import.meta.url), "utf8");
-  assert.match(crudPage, /<span>Картка особи<\/span>/);
-  assert.match(crudPage, /value=\{participant\.personId \?\? ""\}/);
+  assert.match(crudPage, /<strong>Картка особи<\/strong>/);
+  assert.match(crudPage, /selectedId=\{participant\.personId \?\? ""\}/);
   assert.match(crudPage, /personId:\s*personId \|\| undefined/);
   assert.match(crudPage, /participant\.id === personSeed\.participantId[\s\S]*?personId: linkedPerson\.id/);
   assert.match(crudPage, /participant\.name\.trim\(\) && !participant\.personId/);
-  assert.match(crudPage, /onPersonUnlink\(participant\.personId\)/);
+  assert.match(crudPage, /<FindingPersonPicker[\s\S]*?originalName=\{participant\.name\}/);
+  assert.match(crudPage, /!participant\.name\.trim\(\) && selectedPerson/);
+  assert.match(crudPage, /field\.key === "participants"[\s\S]*?withFindingParticipants\(/);
   assert.match(crudPage, /<span>Для кого виконувалась роль<\/span>/);
   assert.match(crudPage, /contextTargetParticipantId:\s*event\.target\.value \|\| undefined/);
   assert.match(crudPage, /suggestedContextTargetParticipantId/);
@@ -219,8 +222,68 @@ test("person deletion and participant unlink clear both link representations", (
     app,
     /function withoutFindingPersonLinks[\s\S]*?participants: finding\.participants\.map[\s\S]*?personId: undefined/,
   );
-  assert.match(crudPage, /onParticipantPersonUnlink[\s\S]*?personIds:[\s\S]*?filter\(\(id\) => id !== personId\)/);
-  assert.match(crudPage, /personIds: personSeed\.participantId[\s\S]*?selected\.filter/);
+  assert.match(crudPage, /withFindingParticipants\(\{[\s\S]*?current\.personIds[\s\S]*?current\.participants/);
+  assert.match(crudPage, /personIds: personSeed\.participantId[\s\S]*?withFindingParticipants/);
+});
+
+test("linking a participant absorbs the same legacy link without losing unrelated legacy people", () => {
+  const source = {
+    personIds: ["groom", "legacy-other"],
+    participants: [{ id: "p1", role: "Наречений", name: "Захарій Фомовъ Корзунъ", notes: "Оригінал" }],
+  };
+  const next = withFindingParticipants(source, [{ ...source.participants[0], personId: "groom" }]);
+  assert.deepEqual(next.personIds, ["legacy-other"]);
+  assert.equal(next.participants[0].name, "Захарій Фомовъ Корзунъ");
+  assert.equal(next.participants[0].notes, "Оригінал");
+  assert.deepEqual(findingLinkedPersonIds(next), ["legacy-other", "groom"]);
+  assert.equal(findingLinksPerson(next, "groom"), true);
+  assert.deepEqual(source.personIds, ["groom", "legacy-other"], "Input is not mutated");
+});
+
+test("reassign, unlink and remove cannot resurrect duplicate legacy links", () => {
+  const source = {
+    personIds: ["old", "unassigned"],
+    participants: [{ id: "p1", personId: "old", role: "Наречений", name: "Ім’я з джерела", notes: "" }],
+  };
+  const changed = withFindingParticipants(source, [{ ...source.participants[0], personId: "new" }]);
+  assert.deepEqual(findingLinkedPersonIds(changed), ["unassigned", "new"]);
+  const unlinked = withFindingParticipants(source, [{ ...source.participants[0], personId: undefined }]);
+  assert.deepEqual(findingLinkedPersonIds(unlinked), ["unassigned"]);
+  const removed = withFindingParticipants(source, []);
+  assert.deepEqual(findingLinkedPersonIds(removed), ["unassigned"]);
+});
+
+test("removing one of multiple participant roles keeps the other explicit card link", () => {
+  const source = {
+    personIds: ["shared"],
+    participants: [
+      { id: "p1", personId: "shared", role: "Свідок", name: "Іван", notes: "" },
+      { id: "p2", personId: "shared", role: "Сусід", name: "Іван", notes: "" },
+    ],
+  };
+  const next = withFindingParticipants(source, [source.participants[1]]);
+  assert.deepEqual(next.personIds, []);
+  assert.deepEqual(findingLinkedPersonIds(next), ["shared"]);
+});
+
+test("legacy names alone never assign identity or a social target", () => {
+  const source = {
+    personIds: ["legacy"],
+    participants: [{ id: "p1", role: "Хрещена мати", name: "Олена", notes: "" }],
+  };
+  const next = withFindingParticipants(source, [...source.participants]);
+  assert.deepEqual(next, source);
+  assert.equal("personId" in next.participants[0], false);
+  assert.equal("contextTargetParticipantId" in next.participants[0], false);
+});
+
+test("findings have one editable identity source and an explicit legacy assignment path", () => {
+  const crud = readFileSync(new URL("../src/pages/CrudPage.tsx", import.meta.url), "utf8");
+  assert.match(crud, /config\.fields\.filter\(\(field\) => !\(config\.collection === "findings" && field\.key === "personIds"\)\)/);
+  assert.match(crud, /Вказати учасника/);
+  assert.match(crud, /if \(!target \|\| target\.personId\) return/);
+  assert.match(crud, /if \(personId && !selectedPerson\) return/);
+  assert.doesNotMatch(crud, /<select\s+value=\{participant\.personId/);
 });
 
 test("project backup import remaps participant person links to cloned person ids", () => {

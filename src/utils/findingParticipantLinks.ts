@@ -99,3 +99,20 @@ export function findingStandalonePersonIds(
       .filter((personId) => personId && !participantPersonIds.has(personId)),
   )];
 }
+
+/**
+ * Update the single editable source of finding links. Drop duplicate legacy
+ * links both before and after the edit, so removing/replacing a participant
+ * cannot resurrect their old card. Unassigned legacy links remain intact.
+ */
+export function withFindingParticipants<T extends Pick<Finding, "personIds" | "participants">>(
+  finding: T,
+  participants: FindingParticipant[],
+): T {
+  const standaloneIds = findingStandalonePersonIds(finding);
+  return {
+    ...finding,
+    participants,
+    personIds: findingStandalonePersonIds({ personIds: standaloneIds, participants }),
+  };
+}

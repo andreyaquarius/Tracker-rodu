@@ -1,0 +1,44 @@
+.finding-person-picker { display: grid; gap: 10px; min-width: 0; }
+.finding-person-picker > label { display: grid; gap: 7px; }
+.finding-person-picker > label > span { font-weight: 700; }
+.finding-person-picker input { min-width: 0; width: 100%; }
+.finding-person-picker__hint, .finding-person-picker__empty { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.finding-person-picker__heading, .finding-person-picker__footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.finding-person-picker__heading > span, .finding-person-picker__footer > small { font-size: 12px; color: var(--muted); }
+.finding-person-picker__results { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; }
+.finding-person-picker__results > li { min-width: 0; }
+.finding-person-picker__option { display: flex; width: 100%; gap: 12px; align-items: center; justify-content: space-between; text-align: left; padding: 12px; border: 1px solid var(--app-border, var(--line)); border-radius: 12px; color: var(--app-ink, var(--green-900)); background: var(--app-surface, #fffdf8); cursor: pointer; }
+.finding-person-picker__option:hover:not(:disabled), .finding-person-picker__option[aria-pressed="true"] { background: var(--app-selected-bg, var(--green-100)); border-color: var(--app-selected-border, var(--green-800)); }
+.finding-person-picker__option:focus-visible { outline: 3px solid var(--app-selected-border, var(--green-800)); outline-offset: -3px; }
+.finding-person-picker__option:disabled { opacity: .65; cursor: wait; }
+.finding-person-picker__identity { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.finding-person-picker__identity > strong { font-size: 14px; }
+.finding-person-picker__identity > span, .finding-person-picker__identity > small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.finding-person-picker__action { flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--app-link, var(--green-800)); }
+.finding-person-picker__selected { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border: 1px solid var(--app-selected-border, var(--green-800)); border-radius: 12px; background: var(--app-selected-bg, var(--green-100)); color: var(--app-selected-ink, var(--green-900)); }
+.finding-person-picker__selected > div { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.finding-person-picker__selected small, .finding-person-picker__selected span { font-size: 12px; }
+.finding-person-picker__selected > button { flex-shrink: 0; }
+.finding-participant-card { display: grid; gap: 9px; min-width: 0; }
+.finding-participant-card > strong { font-size: 11px; text-transform: uppercase; }
+.finding-participant-card > .button { justify-self: start; }
+.finding-participants-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.finding-participants-actions > span, .finding-participants-actions > strong { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.finding-participants-actions > .button { white-space: normal; }
+.finding-legacy-links { display: grid; gap: 10px; margin-bottom: 16px; padding: 12px; background: var(--app-surface-soft, #f5f8f6); border: 1px solid var(--app-border, var(--line)); border-radius: 10px; }
+.finding-legacy-links > p { margin: 0; font-size: 12px; color: var(--muted); }
+.finding-legacy-links__card { display: grid; gap: 8px; }
+.finding-legacy-links__targets { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 0; }
+.finding-participant-card .finding-person-picker { border-top: 1px solid var(--app-border, var(--line)); padding-top: 12px; }
+@container finding-editor (max-width: 600px) {
+  .finding-editor-form .participant-row > .finding-participant-card { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .finding-editor-form .participant-row > .finding-participant-card { grid-column: 1 / -1; }
+}
+@media (max-width: 480px) {
+  .finding-person-picker__option, .finding-person-picker__selected { align-items: flex-start; flex-direction: column; }
+  .finding-person-picker__action { align-self: flex-end; }
+  .finding-person-picker__selected > button, .finding-person-picker__footer > button { width: 100%; }
+  .finding-person-picker__results { max-height: 300px; }
+}

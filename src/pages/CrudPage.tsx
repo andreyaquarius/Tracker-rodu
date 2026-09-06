@@ -42,8 +42,9 @@ import {
   suggestedContextTargetParticipantId,
   sortFindingParticipants,
 } from "../utils/findingParticipants";
-import { findingLinkedPersonIds } from "../utils/findingParticipantLinks";
+import { findingLinkedPersonIds, findingStandalonePersonIds, withFindingParticipants } from "../utils/findingParticipantLinks";
 import { PersonSelector } from "../components/PersonSelector";
+import { FindingPersonPicker } from "../components/FindingPersonPicker";
 import { PersonFormModal, type PersonInitialDraft } from "../components/PersonFormModal";
 import {
   ScanAttachmentsEditor,
@@ -1408,6 +1409,12 @@ export function EntityModal({
         : initialValue;
     }
     if (config.collection === "findings") {
+      // Canonicalize old duplicate links before any editing path (including AI
+      // participant replacement) can remove or change a participant's card.
+      defaults.personIds = findingStandalonePersonIds({
+        personIds: Array.isArray(defaults.personIds) ? defaults.personIds as string[] : [],
+        participants: Array.isArray(defaults.participants) ? defaults.participants as FindingParticipant[] : [],
+      });
       defaults.geo = (initial.geo as GeoPoint | null | undefined) ?? null;
       if (initial.fragmentSelection) {
         defaults.fragmentSelection = initial.fragmentSelection as DocumentFragmentSelection;
@@ -1490,6 +1497,14 @@ export function EntityModal({
     () => mergePersonsById(persons, locallyCreatedPersons),
     [persons, locallyCreatedPersons],
   );
+  const findingNamePersons = useMemo(() => availablePersons.filter((person) => (
+    !String(form.researchId ?? "") || !person.researchId || person.researchId === String(form.researchId ?? "")
+    || (Array.isArray(form.participants) ? form.participants as FindingParticipant[] : [])
+      .some((participant) => participant.personId === person.id)
+  )), [availablePersons, form.researchId, form.participants]);
+  const findingNamePersonAvailable = findingNamePersons.some(
+    (person) => person.id === findingNameCapture?.existingPersonId,
+  );
   const customDefinitions = definitionsForModule(customFieldDefinitions, config.collection);
   const [customValues, setCustomValues] = useState<CustomFieldValues>(() =>
     normalizeCustomFieldValues((entity as unknown as { customFields?: unknown } | null)?.customFields),
@@ -1519,7 +1534,14 @@ export function EntityModal({
       ...(persistedEntity ?? entity ?? {}),
       ...sourceForm,
       ...(config.collection === "findings"
-        ? { people: participantSummary(sourceParticipants, findingType), participants: sourceParticipants }
+        ? {
+            people: participantSummary(sourceParticipants, findingType),
+            participants: sourceParticipants,
+            personIds: findingStandalonePersonIds({
+              personIds: Array.isArray(sourceForm.personIds) ? sourceForm.personIds as string[] : [],
+              participants: sourceParticipants,
+            }),
+          }
         : {}),
       ...(supportsCustomFields(config.collection) ? { customFields: customValues } : {}),
       ...(config.collection === "tasks"
@@ -1547,7 +1569,7 @@ export function EntityModal({
     return true;
   };
 
-  const captureFindingNameForChoice = (choice: PersonSeedChoice) => {
+  const captureFindingNameForChoice = (choice: PersonSeedChoice, createNew = false) => {
     if (config.collection !== "findings" || !entity?.id) {
       window.alert("Спочатку збережіть знахідку. Після цього можна прив’язати точне написання імені до особи.");
       return;
@@ -1563,8 +1585,9 @@ export function EntityModal({
       documentId: String(form.documentId ?? "").trim() || null,
       originalText: choice.originalText ?? String(form.personsText ?? ""),
       normalizedFullName: String(choice.draft.fullName ?? ""),
-      targetMode: "",
-      existingPersonId: "",
+      targetMode: createNew ? "new" : "existing",
+      existingPersonId: (Array.isArray(form.participants) ? form.participants as FindingParticipant[] : [])
+        .find((participant) => participant.id === choice.participantId)?.personId ?? "",
       confirmed: false,
     });
   };
@@ -1586,7 +1609,10 @@ export function EntityModal({
       ...sourceForm,
       participants: linkedParticipants,
       personIds: participantId
-        ? selected.filter((linkedPersonId) => linkedPersonId !== personId)
+        ? withFindingParticipants({
+            personIds: selected,
+            participants: sourceForm.participants as FindingParticipant[],
+          }, linkedParticipants as FindingParticipant[]).personIds
         : [...new Set([...selected, personId])],
     };
     setForm(nextForm);
@@ -1762,7 +1788,7 @@ export function EntityModal({
         aria-busy={savePending}
       >
         <div className="form-grid">
-          {config.fields.map((field) => (
+          {config.fields.filter((field) => !(config.collection === "findings" && field.key === "personIds")).map((field) => (
             <FormField
               key={field.key}
               field={field}
@@ -1771,6 +1797,9 @@ export function EntityModal({
               documents={documents}
               findings={findings}
               persons={availablePersons}
+              projectId={projectId}
+              legacyPersonIds={Array.isArray(form.personIds) ? form.personIds as string[] : []}
+              onLegacyPersonIdsChange={(personIds) => setForm((current) => ({ ...current, personIds }))}
               researchId={String(form.researchId ?? "")}
               researchRequired={researchRequired}
               required={fieldRequired(field)}
@@ -1795,17 +1824,19 @@ export function EntityModal({
                   : undefined
               }
               onOpenScanViewer={onOpenScanViewer}
-              onParticipantPersonUnlink={(personId) => setForm((current) => ({
-                ...current,
-                personIds: Array.isArray(current.personIds)
-                  ? (current.personIds as string[]).filter((id) => id !== personId)
-                  : [],
-              }))}
               onDocumentChange={config.collection === "findings" ? changeFindingDocument : undefined}
-              onCreatePerson={() => {
+              onCreatePerson={(participantId) => {
                 if (config.collection === "findings") {
                   if (!entity?.id) {
                     window.alert("Спочатку збережіть знахідку. Після збереження відкрийте її ще раз і прив’яжіть точне написання імені до особи.");
+                    return;
+                  }
+                  if (participantId) {
+                    const participant = (form.participants as FindingParticipant[])
+                      .find((item) => item.id === participantId);
+                    if (participant?.name.trim()) {
+                      captureFindingNameForChoice(createPersonSeedFromFinding(form, participant), !participant.personId);
+                    }
                     return;
                   }
                   const choices = personSeedChoicesFromFinding(form);
@@ -1825,7 +1856,18 @@ export function EntityModal({
                   : String(form.relatedPeople ?? "");
                 setPersonSeed(createBasicPersonSeed(seed, String(form.researchId ?? "")));
               }}
-              onChange={(value) => setForm((current) => ({ ...current, [field.key]: value }))}
+              onChange={(value) => setForm((current) => {
+                if (config.collection === "findings" && field.key === "participants") {
+                  return {
+                    ...current,
+                    ...withFindingParticipants({
+                      personIds: Array.isArray(current.personIds) ? current.personIds as string[] : [],
+                      participants: Array.isArray(current.participants) ? current.participants as FindingParticipant[] : [],
+                    }, value as FindingParticipant[]),
+                  };
+                }
+                return { ...current, [field.key]: value };
+              })}
             />
           ))}
           {config.collection === "findings" ? (
@@ -2014,24 +2056,18 @@ export function EntityModal({
               </label>
             </fieldset>
             {findingNameCapture.targetMode === "existing" ? (
-              <label>
-                <span>Наявна особа *</span>
-                <select
-                  disabled={findingNamePending}
-                  value={findingNameCapture.existingPersonId}
-                  onChange={(event) => setFindingNameCapture((current) => current
-                    ? { ...current, existingPersonId: event.target.value }
-                    : current)}
-                >
-                  <option value="">Оберіть особу</option>
-                  {availablePersons
-                    .filter((person) => !String(form.researchId ?? "") || person.researchId === String(form.researchId ?? ""))
-                    .sort((left, right) => personDisplayName(left).localeCompare(personDisplayName(right), "uk"))
-                    .map((person) => (
-                      <option key={person.id} value={person.id}>{personDisplayName(person)}</option>
-                    ))}
-                </select>
-              </label>
+              <FindingPersonPicker
+                key={`${projectId}:${findingNameCapture.findingId}:${findingNameCapture.choice.key}`}
+                persons={findingNamePersons}
+                projectId={projectId}
+                originalName={findingNameCapture.originalText}
+                normalizedName={findingNameCapture.normalizedFullName}
+                selectedId={findingNameCapture.existingPersonId}
+                disabled={findingNamePending}
+                onSelect={(existingPersonId) => setFindingNameCapture((current) => current
+                  ? { ...current, existingPersonId }
+                  : current)}
+              />
             ) : null}
             <label className="checkbox-field finding-person-name-capture__confirm">
               <input
@@ -2066,7 +2102,7 @@ export function EntityModal({
                   || !findingNameCapture.originalText.trim()
                   || !findingNameCapture.normalizedFullName.trim()
                   || !findingNameCapture.targetMode
-                  || (findingNameCapture.targetMode === "existing" && !findingNameCapture.existingPersonId)
+                  || (findingNameCapture.targetMode === "existing" && !findingNamePersonAvailable)
                 }
                 onClick={async () => {
                   const capture = findingNameCapture;
@@ -2167,7 +2203,10 @@ export function EntityModal({
               ...form,
               participants: linkedParticipants,
               personIds: personSeed.participantId
-                ? selected.filter((personId) => personId !== linkedPerson.id)
+                ? withFindingParticipants({
+                    personIds: selected,
+                    participants: form.participants as FindingParticipant[],
+                  }, linkedParticipants as FindingParticipant[]).personIds
                 : [...new Set([...selected, linkedPerson.id])],
             };
             setForm(nextForm);
@@ -3303,6 +3342,9 @@ function FormField({
   documents,
   findings,
   persons,
+  projectId,
+  legacyPersonIds,
+  onLegacyPersonIdsChange,
   researchId,
   researchRequired,
   required,
@@ -3314,7 +3356,6 @@ function FormField({
   scanDriveFolderPath,
   scanUploadBlockedMessage,
   onCreatePerson,
-  onParticipantPersonUnlink,
   onDocumentChange,
   onOpenScanViewer,
   onChange,
@@ -3325,6 +3366,9 @@ function FormField({
   documents: DocumentRecord[];
   findings: Finding[];
   persons: Person[];
+  projectId: string;
+  legacyPersonIds: string[];
+  onLegacyPersonIdsChange: (ids: string[]) => void;
   researchId: string;
   researchRequired: boolean;
   required: boolean;
@@ -3335,8 +3379,7 @@ function FormField({
   externalPdfSourceAdd?: ExternalPdfSourceAddContext;
   scanDriveFolderPath?: string[];
   scanUploadBlockedMessage?: string;
-  onCreatePerson: () => void;
-  onParticipantPersonUnlink: (personId: string) => void;
+  onCreatePerson: (participantId?: string) => void;
   onDocumentChange?: (value: string) => void;
   onOpenScanViewer?: (
     scan: ScanAttachment,
@@ -3362,9 +3405,12 @@ function FormField({
         participants={participants}
         findingType={findingType}
         persons={persons}
+        projectId={projectId}
+        legacyPersonIds={legacyPersonIds}
+        onLegacyPersonIdsChange={onLegacyPersonIdsChange}
+        onCaptureName={onCreatePerson}
         researchId={researchId}
         required={required}
-        onPersonUnlink={onParticipantPersonUnlink}
         onChange={onChange}
       />
     );
@@ -3662,23 +3708,33 @@ function personName(person: Person): string {
     "Особа без імені";
 }
 
-function ParticipantsEditor({
+export function ParticipantsEditor({
   participants,
   findingType,
   persons,
+  projectId,
+  legacyPersonIds,
+  onLegacyPersonIdsChange,
+  onCaptureName,
   researchId,
   required,
-  onPersonUnlink,
   onChange,
 }: {
   participants: FindingParticipant[];
   findingType: string;
   persons: Person[];
+  projectId: string;
+  legacyPersonIds: string[];
+  onLegacyPersonIdsChange: (ids: string[]) => void;
+  onCaptureName: (participantId?: string) => void;
   researchId: string;
   required?: boolean;
-  onPersonUnlink: (personId: string) => void;
-  onChange: (value: FormValue) => void;
+  onChange: (value: FindingParticipant[]) => void;
 }) {
+  // Expand one search at a time instead of querying for every row in a long record.
+  const [searchParticipantId, setSearchParticipantId] = useState("");
+  const [legacyAssignmentId, setLegacyAssignmentId] = useState("");
+  const searchToggleRefs = useRef(new Map<string, HTMLButtonElement>());
   const roles = participantRoles(findingType);
   const addParticipant = () => {
     onChange([
@@ -3697,8 +3753,7 @@ function ParticipantsEditor({
     ));
   };
   const removeParticipant = (id: string) => {
-    const removed = participants.find((participant) => participant.id === id);
-    if (removed?.personId) onPersonUnlink(removed.personId);
+    if (searchParticipantId === id) setSearchParticipantId("");
     onChange(
       participants
         .filter((participant) => participant.id !== id)
@@ -3707,33 +3762,84 @@ function ParticipantsEditor({
           : participant),
     );
   };
-  const participantPersonIds = new Set(
-    participants.map((participant) => participant.personId).filter(Boolean),
-  );
-  const selectablePersons = persons
+  const standaloneIds = findingStandalonePersonIds({ personIds: legacyPersonIds, participants });
+  const selectablePersons = useMemo(() => {
+    const linkedIds = new Set([...legacyPersonIds, ...participants.map((participant) => participant.personId)]);
+    return persons
     .filter((person) =>
       !researchId ||
       !person.researchId ||
       person.researchId === researchId ||
-      participantPersonIds.has(person.id)
+      linkedIds.has(person.id)
     )
     .sort((left, right) => personName(left).localeCompare(personName(right), "uk"));
+  }, [persons, researchId, participants, legacyPersonIds]);
+  const assignLegacyPerson = (personId: string, targetId?: string) => {
+    const person = persons.find((item) => item.id === personId);
+    if (!person || !standaloneIds.includes(personId)) return;
+    if (targetId) {
+      // Identity is chosen explicitly; never replace an already linked participant.
+      const target = participants.find((item) => item.id === targetId);
+      if (!target || target.personId) return;
+      updateParticipant(targetId, {
+        personId,
+        ...(!target.name.trim() ? { name: personName(person) } : {}),
+      });
+    } else {
+      onChange([...participants, { id: createId(), personId, role: "Інша особа", name: personName(person), notes: "" }]);
+    }
+    setLegacyAssignmentId("");
+  };
 
   return (
     <fieldset className="participants-editor field-wide">
       <div className="participants-heading">
         <div>
           <legend>Учасники запису{required ? " *" : ""}</legend>
-          <p>Додайте всіх осіб, згаданих у джерелі, та вкажіть їхню роль.</p>
+          <p>Виберіть картку один раз у рядку учасника — знахідка з’явиться в картці цієї особи.</p>
           <p>
             Точні неродинні ролі автоматично з’являться в «Соціальному колі» після
             збереження, якщо обидва учасники прив’язані до карток осіб.
           </p>
         </div>
-        <button type="button" className="button button-secondary" onClick={addParticipant}>
-          + Додати особу
-        </button>
+        <div className="finding-participants-actions">
+          <button type="button" className="button button-secondary" onClick={addParticipant}>
+            + Додати учасника
+          </button>
+          {!participants.length ? <button type="button" className="button button-secondary" onClick={() => onCaptureName()}>
+            Ім’я зі знахідки
+          </button> : null}
+        </div>
       </div>
+      {standaloneIds.length ? (
+        <section className="finding-legacy-links" aria-label="Раніше пов’язані особи">
+          <strong>Раніше пов’язані особи без ролі</strong>
+          <p>Ці зв’язки збережено. Вкажіть відповідного учасника або додайте окремого — повторно шукати картку не потрібно.</p>
+          {standaloneIds.map((personId) => {
+            const person = persons.find((item) => item.id === personId);
+            return <div key={personId} className="finding-legacy-links__card">
+              <div className="finding-participants-actions">
+                <strong>{person ? participantPersonOptionLabel(person) : "Раніше прив’язана картка (не завантажена)"}</strong>
+                <button type="button" className="button button-secondary" disabled={!person}
+                  aria-expanded={legacyAssignmentId === personId}
+                  onClick={() => setLegacyAssignmentId((current) => current === personId ? "" : personId)}>Вказати учасника</button>
+                <button type="button" className="button button-secondary"
+                  onClick={() => onLegacyPersonIdsChange(standaloneIds.filter((id) => id !== personId))}>Відв’язати</button>
+              </div>
+              {legacyAssignmentId === personId ? <div className="finding-legacy-links__targets">
+                {participants.filter((item) => !item.personId).map((item) => (
+                  <button type="button" className="button button-secondary" key={item.id}
+                    onClick={() => assignLegacyPerson(personId, item.id)}>
+                    {item.role || "Без ролі"}: {item.name || "Ім’я не вказано"}
+                  </button>
+                ))}
+                <button type="button" className="button button-secondary"
+                  onClick={() => assignLegacyPerson(personId)}>+ Додати окремим учасником</button>
+              </div> : null}
+            </div>;
+          })}
+        </section>
+      ) : null}
       {participants.length ? (
         <div className="participant-list">
           {participants.map((participant, index) => {
@@ -3806,37 +3912,58 @@ function ParticipantsEditor({
                     onChange={(event) => updateParticipant(participant.id, { name: event.target.value })}
                   />
                 </label>
-                <label className="participant-person-link">
-                  <span>Картка особи</span>
-                  <select
-                    value={participant.personId ?? ""}
-                    onChange={(event) => {
-                      const personId = event.target.value;
-                      const selectedPerson = persons.find((person) => person.id === personId);
-                      if (participant.personId && participant.personId !== personId) {
-                        onPersonUnlink(participant.personId);
-                      }
+                <div className="participant-person-link finding-participant-card">
+                  <strong>Картка особи</strong>
+                  <div className="finding-participants-actions">
+                    <span>{participant.personId
+                      ? (() => {
+                          const person = persons.find((item) => item.id === participant.personId);
+                          return person ? `✓ ${participantPersonOptionLabel(person)}` : "Картку прив’язано (не завантажена)";
+                        })()
+                      : "Не прив’язано — лише текст"}</span>
+                    <button type="button" className="button button-secondary"
+                      ref={(button) => {
+                        if (button) searchToggleRefs.current.set(participant.id, button);
+                        else searchToggleRefs.current.delete(participant.id);
+                      }}
+                      aria-expanded={searchParticipantId === participant.id}
+                      onClick={() => setSearchParticipantId((current) => current === participant.id ? "" : participant.id)}>
+                      {searchParticipantId === participant.id ? "Закрити пошук" : participant.personId ? "Змінити картку" : "Знайти особу / збіги"}
+                    </button>
+                    {participant.personId ? <button type="button" className="button button-secondary"
+                      onClick={() => updateParticipant(participant.id, { personId: undefined })}>Відв’язати</button> : null}
+                  </div>
+                  {searchParticipantId === participant.id ? <FindingPersonPicker
+                    key={participant.id}
+                    projectId={projectId}
+                    persons={selectablePersons}
+                    originalName={participant.name}
+                    normalizedName={participant.name}
+                    selectedId={participant.personId ?? ""}
+                    required={false}
+                    showSelectedCard={false}
+                    autoFocus
+                    onSelect={(personId) => {
+                      const selectedPerson = selectablePersons.find((person) => person.id === personId);
+                      if (personId && !selectedPerson) return;
                       updateParticipant(participant.id, {
                         personId: personId || undefined,
-                        ...(!participant.name.trim() && selectedPerson
-                          ? { name: personName(selectedPerson) }
-                          : {}),
+                        ...(!participant.name.trim() && selectedPerson ? { name: personName(selectedPerson) } : {}),
                       });
+                      setSearchParticipantId("");
+                      searchToggleRefs.current.get(participant.id)?.focus();
                     }}
-                  >
-                    <option value="">Не прив’язано — лише текст</option>
-                    {selectablePersons.map((person) => (
-                      <option key={person.id} value={person.id}>
-                        {participantPersonOptionLabel(person)}
-                      </option>
-                    ))}
-                  </select>
+                  /> : null}
                   <small>
                     {socialDefinition
                       ? "Картка потрібна для автоматичного зв’язку; написання з джерела збережеться окремо."
-                      : "Необов’язково. Написання з джерела збережеться окремо."}
+                      : "Ця сама прив’язка показує знахідку в картці особи. Написання з джерела не змінюється."}
                   </small>
-                </label>
+                  <button type="button" className="button button-secondary" disabled={!participant.name.trim()}
+                    onClick={() => onCaptureName(participant.id)}>
+                    {participant.personId ? "Зберегти написання з джерела" : "Створити картку з цього імені"}
+                  </button>
+                </div>
                 {socialDefinition ? (
                   <label className="participant-context-target">
                     <span>Для кого виконувалась роль</span>
