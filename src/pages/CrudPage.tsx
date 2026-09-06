@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   AppEntity,
   AppDatabase,
@@ -1449,6 +1449,19 @@ export function EntityModal({
   const [savePending, setSavePending] = useState(false);
   const [saveError, setSaveError] = useState("");
   const savePendingRef = useRef(false);
+  const [attachmentPending, setAttachmentPending] = useState(false);
+  const attachmentPendingRef = useRef(false);
+  const handleAttachmentBusyChange = useCallback((busy: boolean) => {
+    attachmentPendingRef.current = busy;
+    setAttachmentPending(busy);
+  }, []);
+  const closeEditor = () => {
+    if (attachmentPendingRef.current) {
+      setSaveError("Дочекайтеся завершення завантаження вкладення, потім збережіть знахідку.");
+      return;
+    }
+    if (!savePendingRef.current) onClose();
+  };
   const persistedEntityRef = useRef<AppEntity | null>(entity);
   const persistedBaseUpdatedAtRef = useRef<string>(entity?.updatedAt ?? "");
   const findingPlaceDecisionTouchedRef = useRef(false);
@@ -1558,6 +1571,10 @@ export function EntityModal({
   };
 
   const persistExistingFindingDraft = async (nextForm: FormRecord): Promise<boolean> => {
+    if (attachmentPendingRef.current) {
+      setSaveError("Дочекайтеся завершення завантаження вкладення перед збереженням.");
+      return false;
+    }
     if (config.collection !== "findings" || !entity || !onPersist) return false;
     const timestamp = nowIso();
     const entityToPersist = buildEntityForSave(nextForm, timestamp);
@@ -1660,6 +1677,10 @@ export function EntityModal({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (savePendingRef.current) return;
+    if (attachmentPendingRef.current) {
+      setSaveError("Дочекайтеся завершення завантаження вкладення перед збереженням.");
+      return;
+    }
     if (config.collection === "findings" && entity?.id && projectId.trim()) {
       if (findingPlaceLoadPending) {
         setSaveError("Дочекайтеся перевірки збереженої прив’язки історичного місця.");
@@ -1775,7 +1796,7 @@ export function EntityModal({
   return (
     <Modal
       title={`${entity ? "Редагувати" : "Додати"} ${config.singular}`}
-      onClose={onClose}
+      onClose={closeEditor}
       className={config.collection === "findings" ? "finding-editor-modal" : ""}
       mode="window"
       stackIndex={stackIndex}
@@ -1785,7 +1806,7 @@ export function EntityModal({
       <form
         className={config.collection === "findings" ? "finding-editor-form" : undefined}
         onSubmit={submit}
-        aria-busy={savePending}
+        aria-busy={savePending || attachmentPending}
       >
         <div className="form-grid">
           {config.fields.filter((field) => !(config.collection === "findings" && field.key === "personIds")).map((field) => (
@@ -1818,6 +1839,9 @@ export function EntityModal({
                   : undefined
               }
               scanDriveFolderPath={scanDriveFolderPath(config.collection, field, form, availablePersons)}
+              allowClipboardImages={config.collection === "findings"}
+              scanDisabled={savePending}
+              onScanBusyChange={config.collection === "findings" ? handleAttachmentBusyChange : undefined}
               scanUploadBlockedMessage={
                 field.type === "scans" && archiveReferenceMissingLabels.length
                   ? `Перед завантаженням файлу заповніть: ${archiveReferenceMissingLabels.join(", ")}.`
@@ -1946,9 +1970,9 @@ export function EntityModal({
               Допомога з дослідженням у GeneHelp
             </button>
           ) : null}
-          <button type="button" className="button button-ghost" onClick={onClose} disabled={savePending}>Скасувати</button>
-          <button type="submit" className="button button-primary" disabled={savePending}>
-            {savePending ? "Збереження…" : "Зберегти"}
+          <button type="button" className="button button-ghost" onClick={closeEditor} disabled={savePending || attachmentPending}>Скасувати</button>
+          <button type="submit" className="button button-primary" disabled={savePending || attachmentPending}>
+            {attachmentPending ? "Завантаження вкладення…" : savePending ? "Збереження…" : "Зберегти"}
           </button>
         </div>
       </form>
@@ -3357,6 +3381,9 @@ function FormField({
   externalPdfSourceAdd,
   scanDriveFolderPath,
   scanUploadBlockedMessage,
+  allowClipboardImages,
+  scanDisabled,
+  onScanBusyChange,
   onCreatePerson,
   onDocumentChange,
   onOpenScanViewer,
@@ -3381,6 +3408,9 @@ function FormField({
   externalPdfSourceAdd?: ExternalPdfSourceAddContext;
   scanDriveFolderPath?: string[];
   scanUploadBlockedMessage?: string;
+  allowClipboardImages?: boolean;
+  scanDisabled?: boolean;
+  onScanBusyChange?: (busy: boolean) => void;
   onCreatePerson: (participantId?: string) => void;
   onDocumentChange?: (value: string) => void;
   onOpenScanViewer?: (
@@ -3429,6 +3459,9 @@ function FormField({
         policy={field.attachmentPolicy}
         driveFolderPath={scanDriveFolderPath}
         uploadBlockedMessage={scanUploadBlockedMessage}
+        allowClipboardImages={allowClipboardImages}
+        disabled={scanDisabled}
+        onBusyChange={onScanBusyChange}
         externalPdfSourceAdd={externalPdfSourceAdd}
         scans={scans}
         onChange={onChange}

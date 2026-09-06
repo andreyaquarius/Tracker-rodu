@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from "react";
 import { createPortal } from "react-dom";
+import { consumeClipboardImagePaste, readClipboardImageFiles } from "../utils/clipboardImages.ts";
 import type { ScanAttachment } from "../types";
 import type { ResolvedPdfSource } from "../services/document-sources/contracts.ts";
 import {
@@ -57,6 +58,9 @@ export function ScanAttachmentsEditor({
   driveFolderPath,
   uploadBlockedMessage,
   externalPdfSourceAdd,
+  allowClipboardImages = false,
+  disabled = false,
+  onBusyChange,
   scans,
   onChange,
   onPreview,
@@ -70,11 +74,21 @@ export function ScanAttachmentsEditor({
   driveFolderPath?: string[];
   uploadBlockedMessage?: string;
   externalPdfSourceAdd?: ExternalPdfSourceAddContext;
+  allowClipboardImages?: boolean;
+  disabled?: boolean;
+  onBusyChange?: (busy: boolean) => void;
   scans: ScanAttachment[];
   onChange: (scans: ScanAttachment[]) => void;
   onPreview?: (scan: ScanAttachment, scans?: ScanAttachment[]) => void;
 }) {
   const [uploading, setUploading] = useState(false);
+  const [readingClipboard, setReadingClipboard] = useState(false);
+  const [clipboardNotice, setClipboardNotice] = useState("");
+  const editorRef = useRef<HTMLFieldSetElement>(null);
+  const uploadPendingRef = useRef(false);
+  const clipboardPendingRef = useRef(false);
+  const scansRef = useRef(scans);
+  scansRef.current = scans;
   const [driveReady, setDriveReady] = useState(false);
   const [pickerReady, setPickerReady] = useState(false);
   const [driveConnectionState, setDriveConnectionState] = useState(
@@ -89,6 +103,10 @@ export function ScanAttachmentsEditor({
   const [replacementScan, setReplacementScan] = useState<ScanAttachment | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replacementInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    onBusyChange?.(uploading || attachingDriveFile || readingClipboard);
+  }, [uploading, attachingDriveFile, readingClipboard, onBusyChange]);
 
   useEffect(() => {
     let active = true;
@@ -162,8 +180,16 @@ export function ScanAttachmentsEditor({
     fileInputRef.current?.click();
   };
 
-  const addFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
+  const addFiles = async (files: FileList | File[] | null): Promise<boolean> => {
+    if (disabled || uploadPendingRef.current || uploading || attachingDriveFile) {
+      setError("Дочекайтеся завершення поточної операції та вставте скриншот ще раз.");
+      return false;
+    }
+    if (uploadBlockedMessage) {
+      setError(uploadBlockedMessage);
+      return false;
+    }
+    if (!files?.length) return false;
     const selected = Array.from(files);
     if (maxFiles && scans.length + selected.length > maxFiles) {
       setError(
@@ -172,10 +198,19 @@ export function ScanAttachmentsEditor({
           ? "До однієї знахідки можна прикріпити лише один файл."
           : `Можна прикріпити не більше ${maxFiles} файлів.`),
       );
-      return;
+      return false;
     }
+    const actualDriveState = getGoogleDriveConnectionState();
+    setDriveConnectionState(actualDriveState);
+    if (!actualDriveState.authorized) {
+      setError("Спочатку підключіть сховище кнопкою вище, потім вставте скриншот або виберіть файл ще раз.");
+      return false;
+    }
+    uploadPendingRef.current = true;
+    onBusyChange?.(true);
     setUploading(true);
     setError("");
+    setClipboardNotice("");
     setUploadProgress(null);
     const added: ScanAttachment[] = [];
     try {
@@ -201,11 +236,15 @@ export function ScanAttachmentsEditor({
           }),
         }));
       }
-      onChange([...scans, ...added]);
+      onChange([...scansRef.current, ...added]);
+      return true;
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Не вдалося додати файл.");
-      if (added.length) onChange([...scans, ...added]);
+      if (added.length) onChange([...scansRef.current, ...added]);
+      return false;
     } finally {
+      uploadPendingRef.current = false;
+      onBusyChange?.(clipboardPendingRef.current);
       setUploading(false);
       setUploadProgress(null);
     }
@@ -244,6 +283,61 @@ export function ScanAttachmentsEditor({
       throw attachError;
     } finally {
       setAttachingDriveFile(false);
+    }
+  };
+
+  const pasteImages = async (files: File[]) => {
+    if (clipboardPendingRef.current) {
+      setError("Дочекайтеся завершення поточної операції та вставте скриншот ще раз.");
+      return;
+    }
+    setClipboardNotice("");
+    if (await addFiles(files)) setClipboardNotice("Скриншот прикріплено. Збережіть знахідку, щоб зберегти вкладення.");
+  };
+
+  useEffect(() => {
+    if (!allowClipboardImages) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    // Bind to this form, not document/window: other findings, nested dialogs
+    // and text editors must not accidentally receive or duplicate uploads.
+    const scope = editor.closest("form") ?? editor;
+    const handlePaste = (event: ClipboardEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)
+        || target.closest("form") !== editor.closest("form")
+        || target.closest('[role="dialog"]') !== editor.closest('[role="dialog"]')) return;
+      consumeClipboardImagePaste(event, (files) => { void pasteImages(files); });
+    };
+    scope.addEventListener("paste", handlePaste as EventListener);
+    return () => scope.removeEventListener("paste", handlePaste as EventListener);
+  });
+
+  const pasteFromClipboard = async () => {
+    if (disabled || uploadPendingRef.current || uploading || attachingDriveFile || clipboardPendingRef.current) return;
+    setError("");
+    setClipboardNotice("");
+    if (!navigator.clipboard?.read) {
+      setError("Натисніть Ctrl+V (⌘V на Mac) у формі знахідки, щоб вставити скриншот.");
+      return;
+    }
+    clipboardPendingRef.current = true;
+    onBusyChange?.(true);
+    setReadingClipboard(true);
+    try {
+      const files = await readClipboardImageFiles(() => navigator.clipboard.read());
+      if (!editorRef.current?.isConnected) return;
+      if (!files.length) {
+        setError("У буфері немає зображення. Зробіть скриншот (Win+Shift+S) або скопіюйте зображення й повторіть вставлення.");
+      } else if (await addFiles(files)) {
+        setClipboardNotice("Скриншот прикріплено. Збережіть знахідку, щоб зберегти вкладення.");
+      }
+    } catch {
+      setError("Браузер не надав доступ до буфера. Натисніть Ctrl+V (⌘V на Mac) у формі знахідки — окремий дозвіл для цього не потрібен.");
+    } finally {
+      clipboardPendingRef.current = false;
+      onBusyChange?.(false);
+      setReadingClipboard(false);
     }
   };
 
@@ -391,13 +485,23 @@ export function ScanAttachmentsEditor({
   };
 
   return (
-    <fieldset className="scan-picker field-wide">
+    <fieldset ref={editorRef} className="scan-picker field-wide" disabled={disabled || uploading || attachingDriveFile || readingClipboard}>
       <div className="scan-picker-heading">
         <div>
           <legend>{title}</legend>
           <p>{description}</p>
         </div>
         <div className="scan-picker-actions">
+          {allowClipboardImages ? (
+            <button
+              type="button"
+              className="button button-secondary scan-upload-button"
+              disabled={limitReached}
+              onClick={() => void pasteFromClipboard()}
+            >
+              {readingClipboard ? "Читання скриншота…" : "Вставити скриншот"}
+            </button>
+          ) : null}
           <button
             type="button"
             className={`button button-secondary scan-upload-button ${uploading || limitReached ? "disabled" : ""}`}
@@ -463,7 +567,15 @@ export function ScanAttachmentsEditor({
           }}
         />
       </div>
-      {error ? <div className="alert alert-error">{error}</div> : null}
+      {allowClipboardImages ? (
+        <p className="scan-clipboard-hint">
+          Виділіть область екрана: <kbd>Win+Shift+S</kbd>. Поверніться до форми знахідки,
+          натисніть у будь-якому полі та вставте <kbd>Ctrl+V</kbd> (на Mac — <kbd>⌘V</kbd>)
+          або натисніть «Вставити скриншот». Зберігати зображення на комп’ютер не потрібно.
+        </p>
+      ) : null}
+      {clipboardNotice ? <p className="scan-clipboard-notice" role="status">{clipboardNotice}</p> : null}
+      {error ? <div className="alert alert-error" role="alert">{error}</div> : null}
       {uploadProgress ? <ScanUploadProgress progress={uploadProgress} /> : null}
       {scans.length ? (
         <div className="scan-list">

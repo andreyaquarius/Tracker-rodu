@@ -46,6 +46,6 @@ test("CRUD modal awaits save, keeps failure visible and blocks duplicate submit"
   assert.match(source, /await settleEntitySave\(\(\) => onSave\(/u);
   assert.match(source, /if \(outcome\.status === "failed"\)[\s\S]*setSaveError\(outcome\.message\)[\s\S]*return;/u);
   assert.match(source, /if \(outcome\.status === "failed"\)[\s\S]*return;[\s\S]*onClose\(\);/u);
-  assert.match(source, /type="submit"[\s\S]*disabled=\{savePending\}/u);
+  assert.match(source, /type="submit"[\s\S]*disabled=\{savePending \|\| attachmentPending\}/u);
   assert.match(source, /role="alert"/u);
 });
