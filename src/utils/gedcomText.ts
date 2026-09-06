@@ -20,14 +20,20 @@ export function normalizeGedcomDisplayText(value: string): string {
     text = decoded;
   }
 
+  for (let pass = 0; pass < 8; pass += 1) {
+    const sanitized = text
+      .replace(/<\s*br\s*\/?\s*>/giu, "\n")
+      .replace(/<\s*\/\s*(?:p|div|li)\s*>/giu, "\n")
+      .replace(/<\s*li(?:\s[^>]*)?>/giu, "• ")
+      .replace(/<\s*(?:p|div)(?:\s[^>]*)?>/giu, "")
+      .replace(/<\s*LinkURL\s*>([\s\S]*?)<\s*\/\s*LinkURL\s*>/giu, "$1")
+      .replace(/<\s*LinkName\s*>([\s\S]*?)<\s*\/\s*LinkName\s*>/giu, "$1")
+      .replace(/<\/?[A-Za-z][^>]*>/gu, "");
+    if (sanitized === text) break;
+    text = sanitized;
+  }
+
   text = text
-    .replace(/<\s*br\s*\/?\s*>/giu, "\n")
-    .replace(/<\s*\/\s*(?:p|div|li)\s*>/giu, "\n")
-    .replace(/<\s*li(?:\s[^>]*)?>/giu, "• ")
-    .replace(/<\s*(?:p|div)(?:\s[^>]*)?>/giu, "")
-    .replace(/<\s*LinkURL\s*>([\s\S]*?)<\s*\/\s*LinkURL\s*>/giu, "$1")
-    .replace(/<\s*LinkName\s*>([\s\S]*?)<\s*\/\s*LinkName\s*>/giu, "$1")
-    .replace(/<\/?[A-Za-z][^>]*>/gu, "")
     .replace(/\r\n?/g, "\n")
     .replace(/[\t\f\v ]+\n/g, "\n")
     .replace(/\n[\t\f\v ]+/g, "\n")
