@@ -27,6 +27,9 @@ export interface ScanAttachment {
   /** Resource key required by Google Drive for some link-shared files. */
   driveResourceKey?: string;
   deleteOnRemove?: boolean;
+  /** Read-only file reference; attachment metadata stays with its source. */
+  referenceOwnerType?: "findings";
+  referenceOwnerId?: EntityId;
   /** Imported GEDCOM can reference a local file that the browser cannot read. */
   availability?: "available" | "missing-local";
   sourceKind?: "gedcom";
@@ -143,6 +146,12 @@ export interface PersonEvent {
   notes?: string | null;
   /** Files and source scans linked to this exact additional life event. */
   scans?: ScanAttachment[];
+  /** Explicit finding provenance; source facts are not inferred from names. */
+  sourceFindingId?: EntityId;
+  sourceDocumentId?: EntityId | null;
+  relatedPersonIds?: EntityId[];
+  /** Last fields written by source sync, used to preserve subsequent manual edits. */
+  sourceSnapshot?: Record<string, unknown>;
 }
 
 export type CustomFieldModule =

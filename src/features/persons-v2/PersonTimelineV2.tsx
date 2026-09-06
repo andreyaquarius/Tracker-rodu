@@ -17,6 +17,7 @@ export interface PersonTimelineV2Props {
   items?: readonly PersonTimelineItem[];
   emptyMessage?: string;
   onSelectEvent?: (event: PersonTimelineItem) => void;
+  onOpenFinding?: (findingId: string) => void;
   onOpenAttachment?: (
     attachment: ScanAttachment,
     attachments: readonly ScanAttachment[],
@@ -28,6 +29,7 @@ export function PersonTimelineV2({
   items,
   emptyMessage = "Для цієї особи ще не додано життєвих подій.",
   onSelectEvent,
+  onOpenFinding,
   onOpenAttachment,
 }: PersonTimelineV2Props) {
   const timeline = items ?? buildPersonTimeline(person);
@@ -52,6 +54,7 @@ export function PersonTimelineV2({
                 event={event}
                 attachments={attachments}
                 onSelectEvent={onSelectEvent}
+                onOpenFinding={onOpenFinding}
                 onOpenAttachment={onOpenAttachment}
               />
             </article>
@@ -66,11 +69,13 @@ function PersonTimelineContentV2({
   event,
   attachments,
   onSelectEvent,
+  onOpenFinding,
   onOpenAttachment,
 }: {
   event: PersonTimelineItem;
   attachments: readonly ScanAttachment[];
   onSelectEvent?: (event: PersonTimelineItem) => void;
+  onOpenFinding?: (findingId: string) => void;
   onOpenAttachment?: (
     attachment: ScanAttachment,
     attachments: readonly ScanAttachment[],
@@ -102,11 +107,16 @@ function PersonTimelineContentV2({
         {displaySubtitle ? <span className="persons-v2-timeline__original-title">{displaySubtitle}</span> : null}
         {place ? <span>{place}</span> : null}
         {details ? <small>{details}</small> : null}
-        {event.notes ? <small>{event.notes}</small> : null}
+        {event.notes ? event.sourceFindingId ? (
+          <details className="persons-v2-timeline__source-details">
+            <summary>Відомості зі знахідки</summary>
+            <small style={{ whiteSpace: "pre-line" }}>{event.notes}</small>
+          </details>
+        ) : <small>{event.notes}</small> : null}
       </span>
       <span className="persons-v2-timeline__footer">
         <span className="persons-v2-timeline__meta">
-          {event.source === "core" ? "Основний факт" : "Додаткова подія"}
+          {event.sourceFindingId ? "Зі знахідки" : event.source === "core" ? "Основний факт" : "Додаткова подія"}
         </span>
         {attachments.length ? (
           onOpenAttachment ? (
@@ -137,6 +147,10 @@ function PersonTimelineContentV2({
           >
             Відкрити подію
           </button>
+        ) : null}
+        {event.sourceFindingId && onOpenFinding ? (
+          <button type="button" className="persons-v2-timeline__open-event"
+            onClick={() => onOpenFinding(event.sourceFindingId!)}>Відкрити знахідку</button>
         ) : null}
       </span>
     </>

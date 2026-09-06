@@ -729,6 +729,10 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
             person={person}
             items={timeline.slice(0, 5)}
             onOpenAttachment={onOpenPhoto}
+            onOpenFinding={onOpenFinding ? (id) => {
+              const finding = findings.find((item) => item.id === id);
+              if (finding) onOpenFinding(finding);
+            } : undefined}
           />
         </ProfileSectionV2>
 
@@ -861,6 +865,8 @@ function TimelinePanelV2({
   onOpenMap,
   onSelectEvent,
   onOpenPhoto,
+  findings,
+  onOpenFinding,
 }: PersonProfilePanelV2Props) {
   return (
     <div className="persons-v2-profile__timeline-layout">
@@ -872,6 +878,10 @@ function TimelinePanelV2({
           person={person}
           items={timeline}
           onSelectEvent={onSelectEvent}
+          onOpenFinding={onOpenFinding ? (id) => {
+            const finding = findings.find((item) => item.id === id);
+            if (finding) onOpenFinding(finding);
+          } : undefined}
           onOpenAttachment={onOpenPhoto}
         />
       </ProfileSectionV2>

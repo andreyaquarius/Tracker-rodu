@@ -52,17 +52,19 @@ export function personEventTypeDisplayLabel(rawType?: string | null): string {
 
 /** Uses the canonical Ukrainian title while preserving meaningful custom titles as a subtitle. */
 export function personTimelineEventDisplayTitle(
-  event: Pick<PersonEvent, "type" | "title">,
+  event: Pick<PersonEvent, "type" | "title" | "sourceFindingId">,
 ): string {
   const customTitle = event.title?.trim() ?? "";
+  if (event.sourceFindingId && event.type === "mention" && customTitle) return customTitle;
   if (event.type === "other" && customTitle) return customTitle;
   return personEventLabel(event.type);
 }
 
 export function personTimelineEventDisplaySubtitle(
-  event: Pick<PersonEvent, "type" | "title">,
+  event: Pick<PersonEvent, "type" | "title" | "sourceFindingId">,
 ): string {
   const customTitle = event.title?.trim() ?? "";
+  if (event.sourceFindingId && event.type === "mention") return "";
   if (!customTitle || event.type === "other") return "";
   const canonicalTitle = personEventLabel(event.type);
   const normalizedTitle = normalizeEventText(customTitle);

@@ -88,6 +88,7 @@ import {
 } from "../../utils/personKinship.ts";
 import {
   listProjectPersonMarriages,
+  subscribeProjectPersonMarriages,
   saveProjectPersonMarriages,
   type ProjectPersonMarriage,
   type ProjectPersonMarriageDraft,
@@ -412,7 +413,11 @@ function PersonsModuleV2StandardRoutes({
     requirements: ProjectPersonRootRequirement[];
   } | null>(null);
   const [gedcomDatasetMarkers, setGedcomDatasetMarkers] = useState<GedcomImportDatasetMarker[]>([]);
-  const marriageRequestKey = `${projectId ?? ""}\u001f${pedigreeContext?.treeId ?? ""}`;
+  const [marriageRevision, setMarriageRevision] = useState(0);
+  useEffect(() => subscribeProjectPersonMarriages((changedProjectId) => {
+    if (changedProjectId === projectId) setMarriageRevision((value) => value + 1);
+  }), [projectId]);
+  const marriageRequestKey = `${projectId ?? ""}\u001f${pedigreeContext?.treeId ?? ""}\u001f${marriageRevision}`;
   const [marriageLoad, setMarriageLoad] = useState<{
     requestKey: string;
     status: "loading" | "ready" | "error";

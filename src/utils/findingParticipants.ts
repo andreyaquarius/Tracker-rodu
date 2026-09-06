@@ -154,6 +154,7 @@ const rolesByType: Record<string, string[]> = {
   народження: birthRoles,
   хрещення: birthRoles,
   шлюб: marriageRoles,
+  розлучення: ["Колишній чоловік", "Колишня дружина", "Чоловік", "Дружина", ...commonRoles],
   смерть: deathRoles,
   поховання: deathRoles,
   згадка: ["Згадана особа", "Родич", "Сусід", "Автор або укладач", ...commonRoles],

@@ -199,6 +199,13 @@ function normalizePersonEvent(value: unknown, personId: string): PersonEvent | n
     geo: normalizeGeo(record.geo),
     notes: typeof record.notes === "string" && record.notes ? record.notes : null,
     scans: normalizePersonEventScans(record.scans),
+    ...(typeof record.sourceFindingId === "string" && record.sourceFindingId ? {
+      sourceFindingId: record.sourceFindingId,
+      sourceDocumentId: typeof record.sourceDocumentId === "string" ? record.sourceDocumentId : null,
+      relatedPersonIds: Array.isArray(record.relatedPersonIds)
+        ? record.relatedPersonIds.filter((id): id is string => typeof id === "string") : [],
+      sourceSnapshot: asRecord(record.sourceSnapshot),
+    } : {}),
   };
 }
 
@@ -231,9 +238,9 @@ export function normalizePersonEvents(value: unknown, person: Pick<Person, "id" 
     return [savedEvent
       ? {
           ...savedEvent,
-          id: event.id,
+          id: savedEvent.sourceFindingId ? savedEvent.id : event.id,
           personId: person.id,
-          title: event.title,
+          title: savedEvent.sourceFindingId ? savedEvent.title : event.title,
           date: event.date,
           placeName: event.placeName,
         }
@@ -258,9 +265,9 @@ export function syncPersonEventsFromFields(person: Person): PersonEvent[] {
     return [previous
       ? {
           ...previous,
-          id: event.id,
+          id: previous.sourceFindingId ? previous.id : event.id,
           personId: person.id,
-          title: event.title,
+          title: previous.sourceFindingId ? previous.title : event.title,
           date: event.date,
           placeName: event.placeName,
         }

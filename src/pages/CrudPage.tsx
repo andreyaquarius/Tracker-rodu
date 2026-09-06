@@ -2624,7 +2624,7 @@ function createPersonSeedFromFinding(
 
   if (!shouldApplyEvent) {
     draft.mentionScans = scans;
-  } else if (eventType === "birth" || eventType === "baptism") {
+  } else if (eventType === "birth") {
     draft.birthDate = eventDate;
     draft.birthPlace = place;
     draft.birthScans = scans;
@@ -2632,11 +2632,11 @@ function createPersonSeedFromFinding(
     draft.marriageDate = eventDate;
     draft.marriagePlace = place;
     draft.marriageScans = scans;
-  } else if (eventType === "death" || eventType === "burial") {
+  } else if (eventType === "death") {
     draft.deathDate = eventDate;
     draft.deathPlace = place;
     draft.deathScans = scans;
-  } else {
+  } else if (eventType === "residence") {
     draft.residencePlaces = place;
     draft.mentionScans = scans;
   }
@@ -3271,7 +3271,9 @@ function cleanPersonName(rawName: string): string {
 function personEventTypeFromFinding(findingType: string): PersonEventType | null {
   const normalized = findingType.trim().toLocaleLowerCase("uk");
   if (!normalized) return null;
-  if (normalized.includes("народ") || normalized.includes("хрещ") || normalized.includes("birth") || normalized.includes("bapt")) return "birth";
+  if (normalized.includes("хрещ") || normalized.includes("bapt")) return "baptism";
+  if (normalized.includes("народ") || normalized.includes("birth")) return "birth";
+  if (normalized.includes("розлуч") || normalized.includes("divorce")) return "divorce";
   if (normalized.includes("шлюб") || normalized.includes("marriage")) return "marriage";
   if (normalized.includes("смерт") || normalized.includes("помер") || normalized.includes("death")) return "death";
   if (normalized.includes("похов") || normalized.includes("burial")) return "burial";

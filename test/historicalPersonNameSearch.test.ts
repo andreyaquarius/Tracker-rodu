@@ -25,7 +25,9 @@ test("maps a historical spelling match to the existing person profile", () => {
 test("global project search requests historical names without replacing or breaking legacy search", async () => {
   const source = await readFile(new URL("../src/services/projectSearch.ts", import.meta.url), "utf8");
   assert.match(source, /search_project_records/);
-  assert.match(source, /search_project_person_names_v1/);
+  assert.match(source, /requestPersonNameSearch\(projectId, normalizedQuery, boundedLimit\)/);
+  const shared = await readFile(new URL("../src/services/personNameSearchRequest.ts", import.meta.url), "utf8");
+  assert.match(shared, /search_project_person_names_v1/);
   assert.match(source, /new Map<string, ProjectSearchResult>/);
   assert.match(source, /Historical-name search is additive/);
   assert.match(

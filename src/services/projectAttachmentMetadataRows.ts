@@ -13,6 +13,7 @@ export function projectAttachmentMetadataRows(
       .filter(
         (scan) =>
           scan.storage === "google-drive" &&
+          (!scan.referenceOwnerId || (scan.referenceOwnerType === ownerType && scan.referenceOwnerId === ownerId)) &&
           Boolean(scan.storagePath),
       )
       .map((scan) => ({

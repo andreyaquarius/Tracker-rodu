@@ -373,6 +373,7 @@ export function buildPersonTimeline(
     const duplicateIndex = CORE_EVENT_TYPES.has(event.type)
       ? staged.findIndex((candidate) => (
           candidate.source === "core"
+          && (!candidate.sourceFindingId || !event.sourceFindingId || candidate.sourceFindingId === event.sourceFindingId)
           && candidate.type === event.type
           && (event.id === event.type || eventSignature(candidate) === eventSignature(event))
         ))
@@ -390,6 +391,7 @@ export function buildPersonTimeline(
         address: previous.address || event.address,
         geo: previous.geo || event.geo,
         notes: previous.notes || event.notes,
+        scans: personTimelineAttachments(person, { ...event, scans: [...(previous.scans ?? []), ...(event.scans ?? [])], source: "event" }).slice(),
         deduplicatedEventIds: uniqueText([
           ...previous.deduplicatedEventIds,
           event.id,

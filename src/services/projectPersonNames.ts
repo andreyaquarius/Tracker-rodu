@@ -11,7 +11,7 @@ import {
   projectPersonNameSuggestionLimit,
   type ProjectPersonNameSuggestion,
 } from "../utils/projectPersonNameSuggestions.ts";
-import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest.ts";
+import { requestPersonNameSearch } from "./personNameSearchRequest.ts";
 import { getSupabaseClient } from "./supabaseAuth";
 
 export {
@@ -483,18 +483,10 @@ export async function searchProjectPersonNameSuggestions(input: {
   );
   // Ask for one spare person because the current card is excluded client-side.
   const rpcLimit = Math.min(50, limit + (input.excludePersonId ? 1 : 0));
-  const client = getSupabaseClient();
-  const { data, error } = await runAuthenticatedSupabaseRequest(client, async () => {
-    let request = client.rpc("search_project_person_names_v1", {
-      p_project_id: input.projectId,
-      p_query: query,
-      p_limit: rpcLimit,
-    });
-    if (input.signal) request = request.abortSignal(input.signal);
-    const result = await request;
-    return { data: result.data, error: result.error };
-  });
-  if (error) {
+  let data: unknown;
+  try {
+    data = await requestPersonNameSearch(input.projectId, query, rpcLimit, input.signal);
+  } catch (error) {
     // Keep existing person editing usable before the additive migration lands.
     if (isMissingHistoricalPersonNameSearchRpcError(error)) return [];
     throw error;

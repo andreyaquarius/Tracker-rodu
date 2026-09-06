@@ -103,11 +103,14 @@ test("the editor performs a debounced abortable read-only project lookup", () =>
   )?.[0] ?? "";
 
   assert.match(service, /export async function searchProjectPersonNameSuggestions/);
-  assert.match(service, /rpc\("search_project_person_names_v1"/);
-  assert.match(service, /p_project_id: input\.projectId/);
-  assert.match(service, /p_limit: rpcLimit/);
-  assert.match(service, /request = request\.abortSignal\(input\.signal\)/);
-  assert.match(service, /runAuthenticatedSupabaseRequest/);
+  const request = source("../src/services/personNameSearchRequest.ts");
+  assert.match(service, /requestPersonNameSearch\(input\.projectId, query, rpcLimit, input\.signal\)/);
+  assert.match(request, /rpc\("search_project_person_names_v1"/);
+  assert.match(request, /p_project_id: projectId/);
+  assert.match(request, /p_limit: limit/);
+  assert.match(request, /abortSignal\(requestSignal\)/);
+  assert.match(request, /runAuthenticatedSupabaseRequest/);
+  assert.match(request, /guardedSearch/);
   const searchFunction = service.match(
     /export async function searchProjectPersonNameSuggestions[\s\S]*?\n\}/,
   )?.[0] ?? "";

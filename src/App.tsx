@@ -51,6 +51,7 @@ import { GeneHelpRequestModal } from "./components/GeneHelpRequestModal";
 import { HelpChoiceModal } from "./components/HelpChoiceModal";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
+import { syncFindingPersonFacts } from "./services/findingPersonFacts.ts";
 import {
   DocumentWorkspaceViewer,
   type ActiveDocumentScanViewer,
@@ -3834,6 +3835,38 @@ export default function App() {
         refreshSubscriptionAfterCreate(previousEntity);
         recordEntityActivity("findings", previousEntity, saved);
         syncEntityAttachmentMetadata("findings", saved);
+        if (saved.participants.some((participant) => participant.personId)) {
+          // The finding is already saved: a projection failure must not roll it
+          // back in the UI or misreport the source as lost.
+          try {
+            const synced = await syncFindingPersonFacts(projectId, saved.id);
+            const byId = new Map(synced.persons.map((person) => [person.id, person]));
+            const mergePersons = (current: Person[]) => {
+              const ids = new Set(current.map((person) => person.id));
+              return [...current.map((person) => {
+                const fresh = byId.get(person.id);
+                return fresh && fresh.updatedAt >= person.updatedAt ? fresh : person;
+              }), ...synced.persons.filter((person) => !ids.has(person.id))];
+            };
+            if (activeWorkspaceIdRef.current === projectId) {
+              setProjectPersons((current) => {
+                const next = mergePersons(current);
+                saveProjectPeopleCache(projectId, next, projectPersonRelations);
+                return next;
+              });
+            } else {
+              const cached = loadProjectPeopleCache(projectId);
+              saveProjectPeopleCache(projectId, mergePersons(cached.persons), cached.relations);
+            }
+            if (synced.conflictCount && activeWorkspaceIdRef.current === projectId) {
+              notify("Події зі знахідки додано. Є розбіжності з картками або неоднозначні партнери: наявні дані збережено. Перевірте хронологію та записи шлюбів.", true);
+            }
+          } catch (error) {
+            if (activeWorkspaceIdRef.current === projectId) notify(
+              "Знахідку збережено, але події в картках не синхронізовано. Повторіть збереження знахідки. " +
+              describeError(error, "Перевірте доступність оновлення бази даних."), true);
+          }
+        }
         if (activeWorkspaceIdRef.current !== projectId) {
           const cached = loadProjectWorkRecordsCache(projectId);
           const findings = cached.findings.map((item) =>

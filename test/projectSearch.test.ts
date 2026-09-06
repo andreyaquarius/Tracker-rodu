@@ -91,8 +91,9 @@ test("project search service calls the bounded RPC and skips short queries", () 
   assert.match(service, /runAuthenticatedSupabaseRequest/);
   assert.equal(
     [...service.matchAll(/runAuthenticatedSupabaseRequest\(/g)].length,
-    2,
+    1,
   );
+  assert.match(service, /requestPersonNameSearch\(projectId, normalizedQuery, boundedLimit\)/);
 });
 
 test("project search response mapper keeps compact standard and custom hits", () => {

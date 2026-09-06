@@ -8,6 +8,7 @@ import {
 import type { ProjectSearchResult } from "../utils/projectSearchResults";
 import { mapHistoricalPersonNameSearchResults } from "../utils/historicalPersonNameSearch.ts";
 import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest.ts";
+import { requestPersonNameSearch } from "./personNameSearchRequest.ts";
 
 export {
   mapProjectSearchResults,
@@ -40,14 +41,9 @@ export async function searchProjectRecords(
       });
       return { data: result.data, error: result.error };
     }),
-    runAuthenticatedSupabaseRequest(client, async () => {
-      const result = await client.rpc("search_project_person_names_v1", {
-        p_project_id: projectId,
-        p_query: normalizedQuery,
-        p_limit: boundedLimit,
-      });
-      return { data: result.data, error: result.error };
-    }),
+    requestPersonNameSearch(projectId, normalizedQuery, boundedLimit)
+      .then((data) => ({ data, error: null as unknown }))
+      .catch((error: unknown) => ({ data: null, error })),
   ]);
   if (recordsResult.error) throw recordsResult.error;
 

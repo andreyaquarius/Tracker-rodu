@@ -5,6 +5,15 @@ import {
 } from "./familyTreeMutationService.ts";
 import { getSupabaseClient } from "./supabaseAuth.ts";
 
+const marriageInvalidationListeners = new Set<(projectId: string) => void>();
+export function invalidateProjectPersonMarriages(projectId: string): void {
+  for (const listener of marriageInvalidationListeners) listener(projectId);
+}
+export function subscribeProjectPersonMarriages(listener: (projectId: string) => void): () => void {
+  marriageInvalidationListeners.add(listener);
+  return () => { marriageInvalidationListeners.delete(listener); };
+}
+
 export interface ProjectPersonMarriage {
   id: string;
   projectId: string;
