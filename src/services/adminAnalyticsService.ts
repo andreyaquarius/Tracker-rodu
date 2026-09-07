@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabaseAuth.ts";
+import { parseAnalyticsOnline, parseAnalyticsTraffic } from "../utils/adminAnalyticsTraffic.ts";
 import type {
   ProductAnalyticsActionCode,
   ProductAnalyticsPageCode,
@@ -15,10 +16,11 @@ export interface AdminAnalyticsOverview {
 
 export interface AdminAnalyticsPageRow {
   pageCode: ProductAnalyticsPageCode;
-  users: number;
-  pageViews: number;
-  activeSeconds: number;
-  averageActiveSeconds: number;
+  suppressed: boolean;
+  users: number | null;
+  pageViews: number | null;
+  activeSeconds: number | null;
+  averageActiveSeconds: number | null;
 }
 
 export interface AdminAnalyticsActionRow {
@@ -118,12 +120,13 @@ export async function saveAdminAnalyticsPreferences(
 export async function loadAdminAnalytics(
   from: Date,
   to: Date,
+  includePages = true,
 ): Promise<{ overview: AdminAnalyticsOverview; pages: AdminAnalyticsPageRow[] }> {
   const params = { p_from: from.toISOString(), p_to: to.toISOString() };
   const client = getSupabaseClient();
   const [overviewResult, pagesResult] = await Promise.all([
     client.rpc("admin_get_product_analytics_overview", params),
-    client.rpc("admin_get_product_analytics_pages", params),
+    includePages ? client.rpc("admin_get_product_analytics_pages", params) : Promise.resolve({ data: [], error: null }),
   ]);
   if (overviewResult.error) throw overviewResult.error;
   if (pagesResult.error) throw pagesResult.error;
@@ -142,13 +145,32 @@ export async function loadAdminAnalytics(
     const row = record(value);
     return {
       pageCode: String(row.page_code ?? "unknown") as ProductAnalyticsPageCode,
-      users: Number(row.users ?? 0),
-      pageViews: Number(row.page_views ?? 0),
-      activeSeconds: Number(row.active_seconds ?? 0),
-      averageActiveSeconds: Number(row.average_active_seconds ?? 0),
+      suppressed: row.suppressed === true,
+      users: row.suppressed === true ? null : nullableNumber(row.users),
+      pageViews: row.suppressed === true ? null : nullableNumber(row.page_views),
+      activeSeconds: row.suppressed === true ? null : nullableNumber(row.active_seconds),
+      averageActiveSeconds: row.suppressed === true ? null : nullableNumber(row.average_active_seconds),
     };
   });
   return { overview, pages };
+}
+
+export async function loadAdminAnalyticsTraffic(from: Date, to: Date, signal?: AbortSignal) {
+  let request = getSupabaseClient().rpc("admin_get_product_analytics_traffic", {
+    p_from: from.toISOString(), p_to: to.toISOString(),
+  });
+  if (signal) request = request.abortSignal(signal);
+  const { data, error } = await request;
+  if (error) throw error;
+  return parseAnalyticsTraffic(data);
+}
+
+export async function loadAdminAnalyticsOnline(signal?: AbortSignal) {
+  let request = getSupabaseClient().rpc("admin_get_product_analytics_online");
+  if (signal) request = request.abortSignal(signal);
+  const { data, error } = await request;
+  if (error) throw error;
+  return parseAnalyticsOnline(data);
 }
 
 export async function loadAdminAnalyticsActions(

@@ -7,9 +7,18 @@ export const PRODUCT_ANALYTICS_PAGE_CODES = [
   "persons_list",
   "person_profile",
   "person_edit",
+  "person_social",
+  "person_ritual",
+  "person_documentary",
+  "person_research",
+  "places",
+  "place_profile",
+  "place_edit",
   "family_tree",
   "family_tree_pedigree",
   "ancestor_wheel",
+  "family_constellation",
+  "family_fan",
   "tree_statistics",
   "researches",
   "documents",
@@ -24,6 +33,7 @@ export const PRODUCT_ANALYTICS_PAGE_CODES = [
   "subscription",
   "feedback",
   "notes",
+  "zagulyaky_mine",
   "custom_section",
   "unknown",
 ] as const;
@@ -107,7 +117,6 @@ export const PRODUCT_ANALYTICS_PAGE_ACTIONS: Partial<
   family_tree: "tree_open",
   family_tree_pedigree: "tree_open",
   tree_statistics: "tree_statistics_open",
-  document_viewer: "document_viewer_open",
   subscription: "subscription_page_open",
 };
 
@@ -118,9 +127,18 @@ export const PRODUCT_ANALYTICS_PAGE_LABELS: Record<ProductAnalyticsPageCode, str
   persons_list: "Особи — список",
   person_profile: "Картка особи",
   person_edit: "Редагування особи",
+  person_social: "Соціальне коло особи",
+  person_ritual: "Ритуальні зв’язки особи",
+  person_documentary: "Документальні зв’язки особи",
+  person_research: "Дослідницький контекст особи",
+  places: "Місця — список",
+  place_profile: "Картка місця",
+  place_edit: "Редагування місця",
   family_tree: "Родове дерево",
   family_tree_pedigree: "Родовід прямих предків",
   ancestor_wheel: "Кругова діаграма предків",
+  family_constellation: "Сузір’я роду",
+  family_fan: "Віялова діаграма",
   tree_statistics: "Статистика дерева",
   researches: "Дослідження",
   documents: "Документи",
@@ -135,6 +153,7 @@ export const PRODUCT_ANALYTICS_PAGE_LABELS: Record<ProductAnalyticsPageCode, str
   subscription: "Тариф і підписка",
   feedback: "Підтримка Трекера Роду",
   notes: "Нотатки",
+  zagulyaky_mine: "Загуляки — мої матеріали",
   custom_section: "Власний розділ",
   unknown: "Інша сторінка",
 };
@@ -142,6 +161,7 @@ export const PRODUCT_ANALYTICS_PAGE_LABELS: Record<ProductAnalyticsPageCode, str
 export function productAnalyticsPageCode(route: AppRoute): ProductAnalyticsPageCode {
   if (route.kind === "projects") return "projects";
   if (route.kind === "notes") return "notes";
+  if (route.kind === "zagulyaky" && route.tab === "mine") return "zagulyaky_mine";
   if (route.kind === "settings") {
     if (route.page === "subscription") return "subscription";
     if (route.page === "feedback") return "feedback";
@@ -151,8 +171,13 @@ export function productAnalyticsPageCode(route: AppRoute): ProductAnalyticsPageC
   if (route.page.startsWith("custom:")) return "custom_section";
   if (route.page === "persons") {
     if (route.personMode === "edit" || route.personMode === "new") return "person_edit";
+    if (route.personMode === "context") return `person_${route.contextView ?? "social"}`;
     if (route.personId || route.personMode === "profile") return "person_profile";
     return "persons_list";
+  }
+  if (route.page === "places") {
+    if (route.placeMode === "edit" || route.placeMode === "new") return "place_edit";
+    return route.placeId ? "place_profile" : "places";
   }
   if (route.page === "familyTree") {
     return route.familyTreeView === "statistics" ? "tree_statistics" : "family_tree";

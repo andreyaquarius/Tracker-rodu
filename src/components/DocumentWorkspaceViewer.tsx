@@ -1,3 +1,4 @@
+import { useProductAnalyticsPage } from "../hooks/useProductAnalyticsPage.ts";
 import {
   useEffect,
   useId,
@@ -339,6 +340,7 @@ export function DocumentWorkspaceViewer({
   onOpenDocument,
   onCreateFinding,
 }: DocumentWorkspaceViewerProps) {
+  useProductAnalyticsPage(viewer ? "document_viewer" : null);
   const componentId = useId().replace(/[^a-zA-Z0-9_-]/gu, "");
   const imageToolsPanelId = `workspace-image-tools-${componentId}`;
   const sharpenFilterId = `workspace-document-sharpen-${componentId}`;

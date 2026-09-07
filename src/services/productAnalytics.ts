@@ -1,4 +1,5 @@
 import { invokeEdgeFunction } from "./edgeFunctions.ts";
+import { createProductAnalyticsPageScopes } from "../utils/productAnalyticsPageScopes.ts";
 import {
   PRODUCT_ANALYTICS_CONSENT_EVENT,
   PRODUCT_ANALYTICS_CONSENT_KEY,
@@ -261,7 +262,11 @@ export function setProductAnalyticsEnabled(nextEnabled: boolean): void {
   }
 }
 
-export function setProductAnalyticsPage(pageCode: ProductAnalyticsPageCode): void {
+const pageScopes = createProductAnalyticsPageScopes(changeProductAnalyticsPage);
+export const setProductAnalyticsPage = pageScopes.setBase;
+export const setProductAnalyticsPageScope = pageScopes.setScope;
+
+function changeProductAnalyticsPage(pageCode: ProductAnalyticsPageCode): void {
   if (!browserAvailable() || pageCode === currentPage) return;
   tick(true);
   enqueueActiveTime();

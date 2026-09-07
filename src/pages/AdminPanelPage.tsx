@@ -45,6 +45,8 @@ import {
 } from "./SubscriptionPage.tsx";
 import { FeedbackPage } from "./FeedbackPage.tsx";
 import { ZagulyakyModerationPanel } from "../components/admin/ZagulyakyModerationPanel.tsx";
+import { AdminAnalyticsOnline, AdminAnalyticsTraffic } from "../components/admin/AdminAnalyticsTraffic.tsx";
+import { analyticsDuration as formatDuration, analyticsLoadError } from "../utils/adminAnalyticsTraffic.ts";
 
 interface AdminPanelPageProps {
   page: AdminPage;
@@ -60,10 +62,10 @@ interface AdminPanelPageProps {
 const EMPTY_OVERVIEW: AdminAnalyticsOverview = {
   suppressed: false,
   minimumCohort: 5,
-  users: 0,
-  sessions: 0,
-  pageViews: 0,
-  activeSeconds: 0,
+  users: null,
+  sessions: null,
+  pageViews: null,
+  activeSeconds: null,
 };
 
 const ADMIN_PAGE_TITLES: Record<AdminPage, string> = {
@@ -115,16 +117,6 @@ const FUNNEL_STEP_LABELS: Record<string, string> = {
   ai_success: "Перевірку завершено",
 };
 
-function formatDuration(seconds: number | null): string {
-  if (seconds === null) return "—";
-  const rounded = Math.max(0, Math.round(seconds));
-  const hours = Math.floor(rounded / 3600);
-  const minutes = Math.floor((rounded % 3600) / 60);
-  if (hours > 0) return `${hours} год ${minutes} хв`;
-  if (minutes > 0) return `${minutes} хв`;
-  return `${rounded} с`;
-}
-
 function formatNumber(value: number | null): string {
   return value === null ? "—" : new Intl.NumberFormat("uk-UA").format(value);
 }
@@ -169,6 +161,8 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   const currentPage = props.page;
   const navigateAdmin = props.onNavigate;
   const [days, setDays] = useState<AdminAnalyticsPeriodDays>(30);
+  const [refreshRevision, setRefreshRevision] = useState(0);
+  const [pageSearch, setPageSearch] = useState("");
   const [funnelCode, setFunnelCode] = useState<AdminAnalyticsFunnelCode>("onboarding");
   const [overview, setOverview] = useState(EMPTY_OVERVIEW);
   const [previousOverview, setPreviousOverview] = useState(EMPTY_OVERVIEW);
@@ -192,7 +186,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
     const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1_000);
     const previousFrom = new Date(from.getTime() - days * 24 * 60 * 60 * 1_000);
     return { from, to, previousFrom };
-  }, [days]);
+  }, [days, refreshRevision]);
   const requiredPermission = ADMIN_NAVIGATION.find((item) => item.page === currentPage)?.permission;
   const canSee = (permission?: AdminPermissionCode) => !permission
     || capabilities?.permissions.includes(permission) === true;
@@ -266,27 +260,30 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
     let active = true;
     setLoading(true);
     setError("");
-    void Promise.all([
+    setOverview(EMPTY_OVERVIEW);
+    setPreviousOverview(EMPTY_OVERVIEW);
+    setPages([]); setActions([]); setRetention([]); setFunnel(null);
+    void Promise.allSettled([
       loadAdminAnalytics(range.from, range.to),
-      loadAdminAnalytics(range.previousFrom, range.from),
+      days === 90 ? Promise.resolve({ overview: EMPTY_OVERVIEW, pages: [] })
+        : loadAdminAnalytics(range.previousFrom, range.from, false),
       loadAdminAnalyticsActions(range.from, range.to),
       loadAdminAnalyticsRetention(range.from, range.to),
       loadAdminAnalyticsFunnel(range.from, range.to, funnelCode),
     ]).then(([current, previous, nextActions, nextRetention, nextFunnel]) => {
       if (!active) return;
-      setOverview(current.overview);
-      setPages(current.pages);
-      setPreviousOverview(previous.overview);
-      setActions(nextActions);
-      setRetention(nextRetention);
-      setFunnel(nextFunnel);
-    }).catch(() => {
-      if (active) setError("Не вдалося завантажити повний звіт. Застосуйте нову міграцію аналітики.");
+      if (current.status === "fulfilled") { setOverview(current.value.overview); setPages(current.value.pages); }
+      if (previous.status === "fulfilled") setPreviousOverview(previous.value.overview);
+      if (nextActions.status === "fulfilled") setActions(nextActions.value);
+      if (nextRetention.status === "fulfilled") setRetention(nextRetention.value);
+      if (nextFunnel.status === "fulfilled") setFunnel(nextFunnel.value);
+      const failure = [current, previous, nextActions, nextRetention, nextFunnel].find((result) => result.status === "rejected");
+      if (failure?.status === "rejected") setError(`Частина звітів недоступна. ${analyticsLoadError(failure.reason)}`);
     }).finally(() => {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [analyticsPreferencesResolved, funnelCode, hasAnalyticsPermission, props.allowed, props.page, range]);
+  }, [analyticsPreferencesResolved, days, funnelCode, hasAnalyticsPermission, props.allowed, props.page, range]);
 
   useEffect(() => {
     if (!props.allowed || !hasPagePermission || ["overview", "analytics", "zagulyaky"].includes(currentPage)) return;
@@ -341,13 +338,17 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
       </main>
     );
   }
+  const filteredPages = pages.filter((row) => (PRODUCT_ANALYTICS_PAGE_LABELS[row.pageCode] ?? row.pageCode)
+    .toLocaleLowerCase("uk-UA").includes(pageSearch.trim().toLocaleLowerCase("uk-UA")));
   const metricCards = (
-    <div className="admin-metric-grid">
+    <div className="admin-metric-grid admin-analytics-metrics">
       {([
         ["Користувачі", overview.users, previousOverview.users, false],
-        ["Сесії", overview.sessions, previousOverview.sessions, false],
+        ["Сесії з активністю", overview.sessions, previousOverview.sessions, false],
         ["Перегляди сторінок", overview.pageViews, previousOverview.pageViews, false],
         ["Активний час", overview.activeSeconds, previousOverview.activeSeconds, true],
+        ["Середній час на сесію", overview.activeSeconds !== null && overview.sessions ? overview.activeSeconds / overview.sessions : null, null, true],
+        ["Середній час на користувача", overview.activeSeconds !== null && overview.users ? overview.activeSeconds / overview.users : null, null, true],
       ] as const).map(([label, value, previous, duration]) => (
         <article key={label}>
           <span>{label}</span>
@@ -360,27 +361,29 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
 
   const analyticsReport = (
     <div className="admin-report-stack">
+      {hasAnalyticsPermission && analyticsPreferencesResolved ? <AdminAnalyticsTraffic from={range.from} to={range.to} /> : null}
       <section className="admin-panel-card">
         <div className="admin-card-heading">
-          <div><h2>Використання розділів</h2><p>Лише агреговані групи щонайменше з 5 користувачів.</p></div>
+          <div><h2>Використання розділів</h2><p>Усі розділи: 0 — немає подій, «&lt; 5» — вибірку приховано. Середній час — на користувача.</p></div>
           <button type="button" className="button button-secondary" onClick={() => downloadAggregateCsv(
             "tracker-pages.csv",
-            ["Розділ", "Користувачі", "Перегляди", "Активний час, с"],
-            pages.map((row) => [PRODUCT_ANALYTICS_PAGE_LABELS[row.pageCode] ?? row.pageCode, row.users, row.pageViews, row.activeSeconds]),
+            ["Розділ", "Користувачі", "Перегляди", "Активний час, с", "Приховано"],
+            pages.map((row) => [PRODUCT_ANALYTICS_PAGE_LABELS[row.pageCode] ?? row.pageCode, row.users, row.pageViews, row.activeSeconds, row.suppressed ? "Так" : "Ні"]),
           )}>CSV</button>
         </div>
+        <label className="admin-section-search">Пошук розділу<input type="search" value={pageSearch} onChange={(event) => setPageSearch(event.target.value)} placeholder="Наприклад, Сузір’я або Місця" /></label>
         <div className="admin-table-wrap">
           <table className="admin-analytics-table">
             <thead><tr><th>Розділ</th><th>Користувачі</th><th>Перегляди</th><th>Активний час</th><th>Середнє</th></tr></thead>
             <tbody>
-              {pages.map((row) => (
+              {filteredPages.map((row) => (
                 <tr key={row.pageCode}>
                   <td>{PRODUCT_ANALYTICS_PAGE_LABELS[row.pageCode] ?? row.pageCode}</td>
-                  <td>{formatNumber(row.users)}</td><td>{formatNumber(row.pageViews)}</td>
+                  <td>{row.suppressed ? "< 5" : formatNumber(row.users)}</td><td>{formatNumber(row.pageViews)}</td>
                   <td>{formatDuration(row.activeSeconds)}</td><td>{formatDuration(row.averageActiveSeconds)}</td>
                 </tr>
               ))}
-              {!loading && pages.length === 0 ? <tr><td colSpan={5}>Ще немає достатньої вибірки.</td></tr> : null}
+              {!loading && filteredPages.length === 0 ? <tr><td colSpan={5}>{pages.length ? "Розділів за цим запитом не знайдено." : "Дані розділів поки недоступні."}</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -564,10 +567,14 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
         <header className="admin-header">
           <div><span className="eyebrow">Приватна зона адміністратора</span><h1>{ADMIN_PAGE_TITLES[currentPage]}</h1><p>{props.account?.name ?? "Адміністратор"}</p></div>
           {showMetrics ? (
-            <label>Період<select value={days} onChange={(event) => setDays(Number(event.target.value) as AdminAnalyticsPeriodDays)}><option value={7}>7 днів</option><option value={30}>30 днів</option><option value={90}>90 днів</option></select></label>
+            <div className="admin-analytics-controls"><label>Період<select value={days} onChange={(event) => setDays(Number(event.target.value) as AdminAnalyticsPeriodDays)}><option value={7}>7 днів</option><option value={30}>30 днів</option><option value={90}>90 днів</option></select></label><button type="button" className="button button-secondary" disabled={loading} onClick={() => setRefreshRevision((n) => n + 1)}>Оновити звіти</button></div>
           ) : null}
         </header>
         {error ? <div className="admin-alert error">{error}</div> : null}
+        {showMetrics ? <>
+          <AdminAnalyticsOnline />
+          <p className="admin-privacy-note">Загальна аналітика всього застосунку серед користувачів, які дали згоду. Не враховує адміністраторів і анонімні відвідування публічних сторінок. Події зберігаються 90 днів; нові розділи почнуть накопичувати дані після оновлення. {days === 90 ? "Порівняння з попередніми 90 днями недоступне через строк зберігання." : "Порівняння — з попереднім періодом тієї самої тривалості."} Сесія — робота у вкладці; це не число входів в обліковий запис.</p>
+        </> : null}
         {showMetrics && overview.suppressed ? <div className="admin-alert">Дані приховано: за період менше {overview.minimumCohort} користувачів.</div> : null}
         {showMetrics && !overview.suppressed ? metricCards : null}
         {loading ? <div className="admin-loading">Завантажуємо дані…</div> : null}

@@ -12828,6 +12828,52 @@ button.persons-v2-timeline__attachments:focus-visible,
   color: var(--app-ink, #123c35);
 }
 
+.admin-analytics-controls { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
+.admin-metric-grid.admin-analytics-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.admin-online-card { display: flex; align-items: center; gap: 1.4rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.admin-online-count { display: flex; gap: 0.7rem; align-items: center; }
+.admin-online-count strong { display: block; font-size: 2.5rem; line-height: 1.2; }
+.admin-online-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--app-ink-muted, #667870); }
+.admin-online-dot.is-connected { background: #18ad86; box-shadow: 0 0 0 5px #18ad8622; }
+.admin-online-description { flex: 1; min-width: min(100%, 240px); }
+.admin-online-description p { margin: 0 0 0.35rem; }
+.admin-online-description small { display: block; color: var(--app-ink-muted, #667870); }
+.admin-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.4rem; }
+.admin-traffic-chart { min-width: 0; color: var(--app-ink, #173e37); --chart-accent: var(--app-link, #168278); }
+.admin-traffic-chart.is-duration { --chart-accent: var(--app-info, #276ace); }
+.admin-traffic-chart h3 { margin: 0.5rem 0; }
+.admin-chart-scale { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--app-ink-muted, #667870); }
+.admin-chart-dates { display: flex; justify-content: space-between; gap: 0.4rem; font-size: 0.75rem; }
+.admin-traffic-chart svg { width: 100%; overflow: visible; display: block; }
+.admin-traffic-chart text { fill: currentColor; font: 12px system-ui, sans-serif; }
+.admin-chart-gridline { stroke: var(--app-border, #d0d9d4); stroke-dasharray: 4 6; stroke-width: 0.6; }
+.admin-chart-line { fill: none; stroke: var(--chart-accent); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.admin-chart-point { fill: var(--chart-accent); }
+.admin-chart-redacted { fill: none; stroke: var(--app-ink-muted, #667870); stroke-width: 1.5; }
+.admin-chart-details summary { cursor: pointer; padding: 0.8rem 0; font-weight: 700; }
+.admin-panel-card .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.admin-section-search { display: grid; gap: 0.3rem; max-width: 26rem; margin-bottom: 1rem; }
+.admin-section-search input { width: 100%; }
+.admin-hourly-chart { display: flex; gap: 4px; height: 150px; margin-top: 1rem; }
+.admin-hourly-slot { flex: 1; min-width: 0; }
+.admin-hourly-slot small { font-size: 10px; }
+.admin-hourly-track { height: 125px; display: flex; align-items: end; border-bottom: 1px solid var(--app-border, #d0d9d4); }
+.admin-hourly-track > span { width: 100%; border-radius: 3px 3px 0 0; background: var(--app-link, #2563b1); }
+.admin-hourly-track > span.is-redacted { background: repeating-linear-gradient(45deg, transparent, transparent 2px, var(--app-ink-muted, #667870) 2px, var(--app-ink-muted, #667870) 3px); }
+.admin-device-list { display: grid; gap: 1rem; }
+.admin-device-list > div > div:first-child { display: flex; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; font-size: 0.88rem; }
+.admin-device-track { height: 7px; margin-top: 0.4rem; border-radius: 5px; background: var(--app-surface-soft, #e9eee9); overflow: hidden; }
+.admin-device-track > span { height: 100%; display: block; background: var(--app-link, #2563b1); border-radius: inherit; }
+@media (max-width: 1100px) {
+  .admin-chart-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-metric-grid.admin-analytics-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .admin-online-card { align-items: start; gap: 1rem; }
+  .admin-online-description { flex-basis: 100%; }
+  .admin-analytics-controls { width: 100%; }
+}
+
 .admin-sidebar {
   position: sticky;
   top: 0;
@@ -12916,7 +12962,7 @@ button.persons-v2-timeline__attachments:focus-visible,
 .admin-metric-grid article { display: grid; gap: 0.45rem; padding: 1.15rem; }
 .admin-metric-grid span { color: var(--app-ink-muted, #65736e); font-size: 0.86rem; }
 .admin-metric-grid strong { font-family: Georgia, serif; font-size: clamp(1.55rem, 3vw, 2.5rem); }
-.admin-panel-card { padding: 1.25rem; }
+.admin-panel-card { padding: 1.25rem; min-width: 0; }
 .admin-panel-card h2 { margin-top: 0; font-family: Georgia, serif; }
 .admin-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .admin-card-heading p { margin-top: 0.25rem; color: var(--app-ink-muted, #65736e); }
@@ -12928,7 +12974,7 @@ button.persons-v2-timeline__attachments:focus-visible,
   border-radius: 10px;
   background: var(--app-surface, #fff);
 }
-.admin-report-stack { display: grid; gap: 1rem; }
+.admin-report-stack { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 1rem; }
 .admin-shortcut-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

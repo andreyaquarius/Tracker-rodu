@@ -45,6 +45,7 @@ import { MAX_RENDERED_FAMILY_TREE_NODES } from "../features/family-tree-view/rea
 import { MAX_CIRCULAR_ANCESTOR_OCCURRENCES } from "../features/family-tree-view/circular/circularAncestorChartLayout.ts";
 import type { FanChartDirection } from "../features/family-tree-view/fan/fanChartLayout.ts";
 import { trackProductAnalyticsAction } from "../services/productAnalytics.ts";
+import { useProductAnalyticsPage } from "../hooks/useProductAnalyticsPage.ts";
 import {
   useFamilyTreeNeighborhood,
 } from "../features/family-tree-view/react/useFamilyTreeNeighborhood";
@@ -254,6 +255,13 @@ export function ProductionFamilyTreePage({
     focusPersonId: string;
   } | null>(null);
   const [treeToolsNotice, setTreeToolsNotice] = useState("");
+  useProductAnalyticsPage(
+    constellationFocusPersonId ? "family_constellation"
+      : circularChartFocusPersonId ? "ancestor_wheel"
+        : fanChart ? "family_fan"
+          : treeDisplayMode === "direct-ancestors" ? "family_tree_pedigree" : "family_tree",
+    "family_tree",
+  );
   const [exportingGedcom, setExportingGedcom] = useState(false);
   const [gedcomResearchId, setGedcomResearchId] = useState("");
   const [gedcomPhotoRecovery, setGedcomPhotoRecovery] =
