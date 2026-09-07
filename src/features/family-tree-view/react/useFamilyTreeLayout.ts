@@ -45,6 +45,25 @@ export function familyTreeLayoutAnchorPoint(
   return union ? { x: union.x, y: union.y } : undefined;
 }
 
+/** Keep a parent-set reflow on screen even when no branch button supplied an
+ * explicit anchor. A change of focus must still use the normal centering. */
+export function familyTreeLayoutAnchorShift(
+  previous: LayoutResult | undefined,
+  next: LayoutResult,
+  occurrenceId?: OccurrenceId,
+): { x: number; y: number } | undefined {
+  let oldAnchor = familyTreeLayoutAnchorPoint(previous, occurrenceId);
+  let newAnchor = familyTreeLayoutAnchorPoint(next, occurrenceId);
+  if (!oldAnchor || !newAnchor) {
+    const oldFocus = previous?.nodes.find(node => node.occurrenceId === previous.focusOccurrenceId);
+    const newFocus = next.nodes.find(node => node.occurrenceId === next.focusOccurrenceId);
+    if (!oldFocus?.personId || oldFocus.personId !== newFocus?.personId) return undefined;
+    oldAnchor = oldFocus;
+    newAnchor = newFocus;
+  }
+  return { x: newAnchor.x - oldAnchor.x, y: newAnchor.y - oldAnchor.y };
+}
+
 export function useFamilyTreeLayout({
   graph,
   options,
@@ -86,18 +105,11 @@ export function useFamilyTreeLayout({
 
     const accept = (layout: LayoutResult): void => {
       if (disposed || revision !== revisionRef.current) return;
-      const oldAnchor = familyTreeLayoutAnchorPoint(
+      const anchorShift = familyTreeLayoutAnchorShift(
         previous,
-        preserveAnchorOccurrenceId,
-      );
-      const newAnchor = familyTreeLayoutAnchorPoint(
         layout,
         preserveAnchorOccurrenceId,
       );
-      const anchorShift =
-        oldAnchor && newAnchor
-          ? { x: newAnchor.x - oldAnchor.x, y: newAnchor.y - oldAnchor.y }
-          : undefined;
       previousLayoutRef.current = layout;
       setState({
         layout,

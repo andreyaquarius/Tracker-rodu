@@ -2818,6 +2818,9 @@ function applyDirectAncestorGrid(
       contourByGeneration,
       ...(path.length > 0
         ? {
+            // Sector tokens encode role, set order and parent order. Keep the
+            // role for lineage colors, but pack complete sets before roles.
+            parentSetOrder: Math.floor((path[path.length - 1]! % 1_000_000) / 1_000),
             side:
               Math.floor(path[path.length - 1]! / 1_000_000) > 3
                 ? ("maternal" as const)

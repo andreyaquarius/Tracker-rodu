@@ -39,13 +39,13 @@ test("each parameter writes through the persistent updater and waits for scoped 
   assert.match(page, /ancestorDepth:\s*nonNegativeInteger\(event\.target\.value, 7\)/);
   assert.match(page, /descendantDepth:\s*nonNegativeInteger\(event\.target\.value, 0\)/);
   assert.match(page, /collateralDepth:\s*event\.target\.checked \? 1 : 0/);
-  assert.match(page, /showAllParentSets:\s*event\.target\.checked/);
+  assert.match(page, /const checked = event\.currentTarget\.checked;[\s\S]*?showAllParentSets:\s*checked/);
   assert.match(
     page,
     /activeParentSetByChild:\s*\{[\s\S]*?\.\.\.current\.activeParentSetByChild,[\s\S]*?\[focusPersonId\]: event\.target\.value/,
   );
   assert.ok(
-    page.match(/disabled=\{specialPerspectiveActive \|\| !viewPreferencesReady\}/g)?.length === 5,
+    page.match(/disabled=\{specialPerspectiveActive \|\| !viewPreferencesReady(?: \|\| showAllParentSets)?\}/g)?.length === 5,
     "all five controls must wait until the authenticated cache scope is ready",
   );
 });

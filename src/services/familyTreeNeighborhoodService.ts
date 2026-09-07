@@ -14,9 +14,11 @@ import {
 import { getSupabaseClient } from "./supabaseAuth.ts";
 import {
   databaseStatementTimeoutMessage,
-  isDatabaseStatementTimeout,
 } from "../utils/databaseErrors.ts";
-import { familyTreeNeighborhoodRpcCandidates } from "../utils/familyTreeNeighborhoodRpc.ts";
+import {
+  familyTreeNeighborhoodRpcCandidates,
+  shouldFallbackFamilyTreeNeighborhoodRpc,
+} from "../utils/familyTreeNeighborhoodRpc.ts";
 import { selectFamilyTreeEntryPointForPerson } from "../utils/familyTreePersonNavigation.ts";
 
 export interface FamilyTreeEntryPoint {
@@ -127,7 +129,7 @@ function createAbortableSupabaseRpcClient(): FamilyTreeNeighborhoodClient {
         if (
           response.ok ||
           !hasFallback ||
-          (!isMissingRpcFunction(payload) && !isDatabaseStatementTimeout(payload))
+          !shouldFallbackFamilyTreeNeighborhoodRpc(payload)
         ) break;
       }
       if (!response) throw new Error("Не вдалося розпочати завантаження родового дерева.");
@@ -349,14 +351,6 @@ function assertDescendantFrontierPageResponse(
     throw new Error("Сервер повернув некоректний пакет покоління нащадків.");
   }
   return { ...graph, ...candidate } as DescendantFrontierPageResponse;
-}
-
-function isMissingRpcFunction(payload: unknown): boolean {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return false;
-  }
-  const code = (payload as { code?: unknown }).code;
-  return code === "PGRST202" || code === "42883";
 }
 
 function readPostgrestError(payload: unknown): string | null {

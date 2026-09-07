@@ -16,6 +16,8 @@ export interface DirectAncestorGridItem {
   >;
   /** Side of this parent relative to the direct child at the previous path. */
   side?: "paternal" | "maternal";
+  /** Stable set order for this parent; keeps alternative couples together. */
+  parentSetOrder?: number;
   /** Stable semantic path: paternal token first, maternal token second. */
   path: readonly number[];
 }
@@ -148,7 +150,7 @@ function layoutTrie(
   node: TrieNode,
   sectorGap: number,
 ): RelativeLayout | undefined {
-  if (!node.item || node.children.size > 2) return undefined;
+  if (!node.item) return undefined;
   const leftExtent = node.item.leftExtent ?? node.item.width / 2;
   const rightExtent = node.item.rightExtent ?? node.item.width / 2;
   const contourByGeneration = new Map(
@@ -174,19 +176,33 @@ function layoutTrie(
     contourByGeneration,
   };
   const childLayouts = [...node.children]
-    .sort(([leftToken], [rightToken]) => leftToken - rightToken)
+    .sort(([leftToken, left], [rightToken, right]) =>
+      (node.children.size > 2
+        ? (left.item?.parentSetOrder ?? 0) - (right.item?.parentSetOrder ?? 0)
+        : 0) ||
+      leftToken - rightToken,
+    )
     .map(([token, child]) => ({
       token,
       side: child.item?.side,
+      parentSetOrder: child.item?.parentSetOrder ?? 0,
       layout: layoutTrie(child, sectorGap),
     }));
   if (childLayouts.some(entry => !entry.layout)) return undefined;
 
-  if (childLayouts.length === 1) {
+  // Preserve the established primary-family geometry even when additional
+  // parent sets exist at ANY depth. Previously a third parent aborted this
+  // whole recursive solver and silently sent every branch to dense packing.
+  const primaryOrder = childLayouts[0]?.parentSetOrder;
+  const primaryParents = childLayouts.length <= 2
+    ? childLayouts
+    : childLayouts.filter(entry => entry.parentSetOrder === primaryOrder).slice(0, 2);
+
+  if (primaryParents.length === 1) {
     // A missing parent never reserves an empty half-tree. The known ancestor
     // stays directly above the child unless one of its collateral cards uses
     // the child's row. In that case the whole parent branch moves outward.
-    const childEntry = childLayouts[0]!;
+    const childEntry = primaryParents[0]!;
     const child = childEntry.layout!;
     const inferredMaternal =
       childEntry.token === 1 ||
@@ -199,11 +215,10 @@ function layoutTrie(
         ? requiredLeftShift(result, child, sectorGap)
         : requiredLeftShift(child, result, sectorGap);
     mergeInto(result, translated(child, maternal ? shift : -shift));
-    return result;
   }
-  if (childLayouts.length === 2) {
-    const paternal = childLayouts[0]!.layout!;
-    const maternal = childLayouts[1]!.layout!;
+  if (primaryParents.length === 2) {
+    const paternal = primaryParents[0]!.layout!;
+    const maternal = primaryParents[1]!.layout!;
     const halfGap = sectorGap / 2;
     // Symmetric placement is the hard pedigree constraint: the current person
     // is exactly below the midpoint of both parents. Considering whole subtree
@@ -217,6 +232,15 @@ function layoutTrie(
     );
     mergeInto(result, translated(paternal, -halfDistance));
     mergeInto(result, translated(maternal, halfDistance));
+  }
+
+  // Append whole ancestor subtrees in parent-set order (couple, couple), not
+  // role order (all fathers, all mothers). Full extents, including collateral
+  // routes, reserve an exclusive sector at every generation. Sharing a parent
+  // between semantic sets still uses the one occurrence supplied by the scene.
+  for (const entry of childLayouts.slice(primaryParents.length)) {
+    const branch = entry.layout!;
+    mergeInto(result, translated(branch, result.right + sectorGap - branch.left));
   }
   return result;
 }

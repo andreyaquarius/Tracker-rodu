@@ -2108,14 +2108,6 @@ function LoadedFamilyTree({
   ) {
     return <FamilyTreeLoadingState />;
   }
-  if (
-    perspective.kind === "pedigree" &&
-    neighborhood.error &&
-    !graph.persons.length
-  ) {
-    return <FamilyTreeErrorState message={neighborhood.error.message} onRetry={reloadPedigreeView} />;
-  }
-
   return (
     <section
       ref={shellRef}
@@ -2376,10 +2368,13 @@ function LoadedFamilyTree({
                 type="checkbox"
                 checked={showAllParentSets}
                 disabled={specialPerspectiveActive || !viewPreferencesReady}
-                onChange={(event) => updateViewPreferences((current) => ({
-                  ...current,
-                  showAllParentSets: event.target.checked,
-                }))}
+                onChange={(event) => {
+                  const checked = event.currentTarget.checked;
+                  updateViewPreferences((current) => ({
+                    ...current,
+                    showAllParentSets: checked,
+                  }));
+                }}
               />
               <span>Усі набори батьків</span>
             </label>
@@ -2387,7 +2382,7 @@ function LoadedFamilyTree({
               <label>
                 <span>Активний набір батьків</span>
                 <select
-                  disabled={specialPerspectiveActive || !viewPreferencesReady}
+                  disabled={specialPerspectiveActive || !viewPreferencesReady || showAllParentSets}
                   value={effectiveActiveParentSetId}
                   onChange={(event) => updateViewPreferences((current) => ({
                     ...current,
@@ -2436,7 +2431,7 @@ function LoadedFamilyTree({
         </section>
       ) : specialPerspectiveActive && activeLoading && !graph.persons.length ? (
         <FamilyTreeLoadingState />
-      ) : specialPerspectiveActive && activeError && !graph.persons.length ? (
+      ) : activeError && !graph.persons.length ? (
         <FamilyTreeErrorState
           message={activeError.message}
           onRetry={activeReload}
