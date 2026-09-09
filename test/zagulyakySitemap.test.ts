@@ -15,8 +15,18 @@ test("static sitemap exposes only the two public Zagulyaky catalogue URLs", () =
   const robots = readFileSync(new URL("../public/robots.txt", import.meta.url), "utf8");
   const urls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
 
-  assert.ok(urls.includes("https://trekerrodu.com.ua/zahuliaky/"));
-  assert.ok(urls.includes("https://trekerrodu.com.ua/zahuliaky/documents/"));
+  assert.ok(
+    urls.some((url) => {
+      const parsed = new URL(url);
+      return parsed.hostname === "trekerrodu.com.ua" && parsed.pathname === "/zahuliaky/";
+    }),
+  );
+  assert.ok(
+    urls.some((url) => {
+      const parsed = new URL(url);
+      return parsed.hostname === "trekerrodu.com.ua" && parsed.pathname === "/zahuliaky/documents/";
+    }),
+  );
   assert.equal(
     urls.some((url) => {
       const parsed = new URL(url);
