@@ -5,7 +5,7 @@ import test from "node:test";
 const serviceSource = readFileSync(
   new URL("../src/services/projectPeople.ts", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 type MissingColumnsDetector = (error: unknown) => boolean;
 

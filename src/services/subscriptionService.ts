@@ -1,5 +1,11 @@
 import { getSupabaseClient } from "./supabaseAuth";
 import { runAuthenticatedRpc } from "../utils/authenticatedRpc";
+import {
+  adminSubscriptionsParams,
+  parseAdminSubscriptionsPage,
+  type AdminSubscriptionsPage,
+  type AdminSubscriptionsQuery,
+} from "../utils/adminSubscriptions.ts";
 import type {
   PlanCode,
   PlanLimit,
@@ -12,6 +18,8 @@ import type {
   SubscriptionUsage,
   UserSubscription,
 } from "../types/subscription";
+
+export type { AdminSubscriptionRow } from "../utils/adminSubscriptions.ts";
 
 const limitKeys: PlanLimitKey[] = [
   "projects",
@@ -175,17 +183,6 @@ function isSubscriptionContextAuthError(error: unknown): boolean {
     message.includes("jwt expired");
 }
 
-export interface AdminSubscriptionRow {
-  userId: string;
-  email: string;
-  displayName: string;
-  planCode: PlanCode;
-  status: SubscriptionStatus;
-  trialEndsAt: string | null;
-  currentPeriodEnd: string | null;
-  isAdmin: boolean;
-}
-
 export interface AppFeatureFlag {
   key: string;
   title: string;
@@ -241,19 +238,17 @@ export async function loadMyAppFeatureAccess(key: string): Promise<AppFeatureAcc
   };
 }
 
-export async function loadAdminSubscriptions(): Promise<AdminSubscriptionRow[]> {
-  const { data, error } = await getSupabaseClient().rpc("admin_list_subscriptions");
+export async function loadAdminSubscriptions(
+  input: AdminSubscriptionsQuery = {},
+  signal?: AbortSignal,
+): Promise<AdminSubscriptionsPage> {
+  const request = getSupabaseClient().rpc("admin_list_subscriptions_page_v1", adminSubscriptionsParams(input));
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
+  if (error?.code === "PGRST202") {
+    throw new Error("Пагінація підписок ще не налаштована в базі. Потрібно застосувати міграцію 202609100000_admin_subscriptions_pagination.sql.");
+  }
   if (error) throw error;
-  return (data ?? []).map((row: Record<string, unknown>) => ({
-    userId: String(row.user_id),
-    email: String(row.email),
-    displayName: String(row.display_name ?? ""),
-    planCode: String(row.plan_code) as PlanCode,
-    status: String(row.status) as SubscriptionStatus,
-    trialEndsAt: nullableString(row.trial_ends_at),
-    currentPeriodEnd: nullableString(row.current_period_end),
-    isAdmin: Boolean(row.is_admin),
-  }));
+  return parseAdminSubscriptionsPage(data);
 }
 
 export async function loadAdminFeatureFlags(): Promise<AppFeatureFlag[]> {
