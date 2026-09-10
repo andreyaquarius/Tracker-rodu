@@ -6,6 +6,7 @@ import type {
   PersonId,
   TreeContinuation,
 } from "../types.ts";
+import { createSharedAbortableRequest } from "../../../utils/sharedAbortableRequest.ts";
 
 export interface NeighborhoodBranchRequest {
   requestId: string;
@@ -433,8 +434,9 @@ function normalizedFamilyScope(scope: FamilyScope): Record<string, unknown> {
 }
 
 /**
- * Bounded resolved-response cache. It never shares an in-flight request, so
- * aborting one consumer cannot cancel or leak another consumer's result.
+ * Bounded resolved-response cache with scope-keyed in-flight deduplication.
+ * Each consumer retains its own abort; the transport is cancelled only when
+ * nobody needs it. Unfingerprinted reads are deliberately never shared.
  */
 export function createCachedNeighborhoodClient(
   inner: FamilyTreeNeighborhoodClient,
@@ -446,11 +448,13 @@ export function createCachedNeighborhoodClient(
   const entries = new Map<string, NeighborhoodCacheEntry>();
   const scopes = new Map<string, TreeCacheScope>();
   const treeRequestRevisions = new Map<string, number>();
+  const treeInvalidationRevisions = new Map<string, number>();
   const blockedScopeConflicts = new Map<
     string,
     Map<string, FamilyTreeScopeConflictCode>
   >();
   let cacheEpoch = 0;
+  const sharedLoads = createSharedAbortableRequest<NeighborhoodResponse>();
 
   const conflictScopeKey = (request: ConflictAwareRequest): string => [
     String(request.knownGraphVersion ?? ""),
@@ -499,6 +503,7 @@ export function createCachedNeighborhoodClient(
   };
 
   const invalidateTree = (treeId: string): void => {
+    treeInvalidationRevisions.set(treeId, (treeInvalidationRevisions.get(treeId) ?? 0) + 1);
     for (const [key, entry] of entries) {
       if (entry.treeId === treeId) entries.delete(key);
     }
@@ -567,7 +572,11 @@ export function createCachedNeighborhoodClient(
       if (!scopes.has(request.treeId)) scopes.set(request.treeId, requestedScope);
       let response: NeighborhoodResponse;
       try {
-        response = await inner.load(request, signal);
+        response = await sharedLoads.run(
+          JSON.stringify([cacheEpoch, treeInvalidationRevisions.get(request.treeId) ?? 0, key]),
+          (transportSignal) => inner.load(request, transportSignal),
+          signal,
+        );
       } catch (reason) {
         rememberScopeConflict(request, reason);
         throw reason;

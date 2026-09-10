@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "./supabaseAuth";
 import { runAuthenticatedRpc } from "../utils/authenticatedRpc";
+import { createSharedAbortableRequest } from "../utils/sharedAbortableRequest.ts";
 import type {
   PlanCode,
   PlanLimit,
@@ -84,37 +85,45 @@ const publishedHeadlineLimits: Record<
   },
 };
 
+const subscriptionRequests = createSharedAbortableRequest<SubscriptionContext>();
+
 export async function loadSubscriptionContext(projectId?: string): Promise<SubscriptionContext> {
   const client = getSupabaseClient();
-  const { data, error } = await runAuthenticatedRpc({
-    getSession: async () => {
-      const result = await client.auth.getSession();
-      return {
-        data: { session: result.data.session },
-        error: result.error,
-      };
-    },
-    refreshSession: async () => {
-      const result = await client.auth.refreshSession();
-      return {
-        data: { session: result.data.session },
-        error: result.error,
-      };
-    },
-    invoke: async () => {
-      const result = await client.rpc(
-        "get_my_subscription_context",
-        { target_project_id: projectId || null },
-      );
-      return { data: result.data, error: result.error };
-    },
-    shouldRetryAfterRefresh: isSubscriptionContextAuthError,
+  const session = await client.auth.getSession();
+  if (session.error) throw session.error;
+  // In-flight only: manual refresh after payment/mutations must remain fresh.
+  // The JWT isolates accounts and permission/token changes, not just projects.
+  return subscriptionRequests.run(JSON.stringify([session.data.session?.access_token ?? "", projectId ?? ""]), async () => {
+    const { data, error } = await runAuthenticatedRpc({
+      getSession: async () => {
+        const result = await client.auth.getSession();
+        return {
+          data: { session: result.data.session },
+          error: result.error,
+        };
+      },
+      refreshSession: async () => {
+        const result = await client.auth.refreshSession();
+        return {
+          data: { session: result.data.session },
+          error: result.error,
+        };
+      },
+      invoke: async () => {
+        const result = await client.rpc(
+          "get_my_subscription_context",
+          { target_project_id: projectId || null },
+        );
+        return { data: result.data, error: result.error };
+      },
+      shouldRetryAfterRefresh: isSubscriptionContextAuthError,
+    });
+    if (error) throw error;
+    if (!data || typeof data !== "object") {
+      throw new Error("Не вдалося завантажити тарифний план.");
+    }
+    return mapContext(data as Record<string, unknown>);
   });
-  if (error) throw error;
-  if (!data || typeof data !== "object") {
-    throw new Error("Не вдалося завантажити тарифний план.");
-  }
-  return mapContext(data as Record<string, unknown>);
 }
 
 export async function beginTableImport(projectId: string): Promise<number> {

@@ -37,10 +37,8 @@ import {
   type PersonLinkedRecords,
 } from "../../services/projectPersonLinkedRecords.ts";
 import { listProjectDocumentsByIds } from "../../services/projectDocuments";
-import {
-  loadProjectPersonSummaries,
-  type ProjectPersonSummary,
-} from "../../services/projectPersonSummaries.ts";
+import type { ProjectPersonSummary } from "../../services/projectPersonSummaries.ts";
+import { usePersonSummaries } from "../../hooks/usePersonSummaries.ts";
 import {
   loadProjectPersonPedigreeOrder,
   readCachedProjectPersonPedigreeOrder,
@@ -446,8 +444,25 @@ function PersonsModuleV2StandardRoutes({
     () => buildLocalPersonSummaries(persons, relations, findings, tasks, hypotheses, archiveRequests),
     [archiveRequests, findings, hypotheses, persons, relations, tasks],
   );
-  const [remoteSummaries, setRemoteSummaries] = useState<Map<string, ProjectPersonSummary> | null>(null);
-  const summaries = remoteSummaries ?? localSummaries;
+  const [visibleSummaryIds, setVisibleSummaryIds] = useState<string[]>([]);
+  const summaryRevisions = useMemo(() => {
+    const revisions = new Map<string, string[]>();
+    for (const id of [...visibleSummaryIds, detailPersonId].filter(Boolean)) revisions.set(id, []);
+    const add = (ids: readonly string[], key: string) => {
+      for (const id of new Set(ids)) revisions.get(id)?.push(key);
+    };
+    const stamp = (kind: string, item: { id: string; updatedAt: string }) => `${kind}:${item.id}:${item.updatedAt}`;
+    for (const person of persons) add([person.id], stamp("person", person));
+    for (const relation of relations) add([relation.personId, relation.relatedPersonId], stamp("relation", relation));
+    const documents = new Map(db.documents.map((document) => [document.id, stamp("document", document)]));
+    for (const finding of findings) add(findingLinkedPersonIds(finding), `${stamp("finding", finding)}:${documents.get(finding.documentId) ?? ""}`);
+    for (const task of tasks) add(task.personIds, `${stamp("task", task)}:${documents.get(task.documentId) ?? ""}`);
+    for (const hypothesis of hypotheses) add(hypothesis.personIds, `${stamp("hypothesis", hypothesis)}:${hypothesis.documentIds.map((id) => documents.get(id) ?? "").join("|")}`);
+    for (const request of archiveRequests) add(request.personIds, stamp("request", request));
+    return new Map([...revisions].map(([id, values]) => [id, JSON.stringify([marriageRevision, values.sort()])]));
+  }, [visibleSummaryIds, detailPersonId, persons, relations, findings, tasks, hypotheses, archiveRequests, db.documents, marriageRevision]);
+  const remoteSummaries = usePersonSummaries(projectId, pedigreeCacheScope, summaryRevisions);
+  const summaries = useMemo(() => new Map([...localSummaries, ...(remoteSummaries ?? [])]), [localSummaries, remoteSummaries]);
   const selectedPhotoUrl = usePersonPhotoUrl(detailPerson);
   const gedcomImportGroups = useMemo(
     () => buildGedcomImportGroups(persons, relations, findings, gedcomDatasetMarkers),
@@ -665,27 +680,6 @@ function PersonsModuleV2StandardRoutes({
     });
     return () => controller.abort();
   }, [pedigreeCacheScope, pedigreeRequestKey, pedigreeRootPersonId, pedigreeTreeId, projectId]);
-
-  useEffect(() => {
-    if (!projectId) {
-      setRemoteSummaries(null);
-      return;
-    }
-    let active = true;
-    setRemoteSummaries(null);
-    void loadProjectPersonSummaries(projectId)
-      .then((value) => {
-        if (active) setRemoteSummaries(value);
-      })
-      .catch(() => {
-        // The V2 UI remains usable while the summary migration is being rolled
-        // out; current in-memory records are the conservative fallback.
-        if (active) setRemoteSummaries(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [archiveRequests, findings, hypotheses, persons, projectId, relations, tasks]);
 
   useEffect(() => {
     if (!detailPersonId) {
@@ -1115,6 +1109,7 @@ function PersonsModuleV2StandardRoutes({
             familyOrderStatus={familyOrderStatus}
             selectedPersonId={previewPersonId}
             summaries={summaries}
+            onVisiblePersonIdsChange={setVisibleSummaryIds}
             headerActions={headerActions}
             photoUrlForPerson={safeExternalPhotoUrl}
             onOpenPerson={(person) => setPreviewPersonId(person.id)}
