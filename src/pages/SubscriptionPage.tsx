@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   adminSetMyFeaturePreview,
   adminSetFeatureFlag,
@@ -33,6 +33,12 @@ import type {
   SubscriptionStatus,
 } from "../types/subscription";
 import { formatDateForDisplay } from "../utils/dateHelpers";
+import { PaginationControls } from "../components/PaginationControls.tsx";
+import {
+  ADMIN_SUBSCRIPTIONS_PAGE_SIZE,
+  type AdminSubscriptionsPage,
+  type AdminSubscriptionsQuery,
+} from "../utils/adminSubscriptions.ts";
 
 interface SubscriptionPageProps {
   context: SubscriptionContext | null;
@@ -86,7 +92,6 @@ export function SubscriptionPage({
   onFeatureFlagsChanged,
 }: SubscriptionPageProps) {
   const [plans, setPlans] = useState<Array<{ plan: SubscriptionPlan; limits: PlanLimit[] }>>([]);
-  const [adminRows, setAdminRows] = useState<AdminSubscriptionRow[]>([]);
   const [featureFlags, setFeatureFlags] = useState<AppFeatureFlag[]>([]);
   const [adminAnnouncements, setAdminAnnouncements] = useState<AppAnnouncement[]>([]);
   const [announcementsError, setAnnouncementsError] = useState("");
@@ -103,8 +108,6 @@ export function SubscriptionPage({
       const nextPlans = await loadSubscriptionPlans();
       setPlans(nextPlans);
       if (context?.isAdmin) {
-        const nextAdminRows = await loadAdminSubscriptions();
-        setAdminRows(nextAdminRows);
         try {
           const nextAnnouncements = await loadAdminAnnouncements();
           setAdminAnnouncements(nextAnnouncements);
@@ -325,7 +328,7 @@ export function SubscriptionPage({
               onFeatureFlagsChanged?.();
             }}
           />
-          <AdminSubscriptions rows={adminRows} onChanged={refreshPage} />
+          <AdminSubscriptions onChanged={refreshPage} />
         </>
       ) : null}
     </>
@@ -690,36 +693,67 @@ export function AdminFeatureFlags({ flags, loadError, onChanged }: {
   );
 }
 
-export function AdminSubscriptions({ rows, onChanged }: {
-  rows: AdminSubscriptionRow[];
-  onChanged: () => Promise<void>;
+export function AdminSubscriptions({ onChanged }: {
+  onChanged?: () => Promise<void>;
 }) {
+  const sectionRef = useRef<HTMLElement>(null);
   const [busyId, setBusyId] = useState("");
   const [adminError, setAdminError] = useState("");
-  const [query, setQuery] = useState("");
-  const [planFilter, setPlanFilter] = useState<PlanCode | "admin" | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<SubscriptionStatus | "all">("all");
+  const [request, setRequest] = useState<Required<AdminSubscriptionsQuery>>({ page: 1, query: "", plan: "all", status: "all" });
+  const [revision, setRevision] = useState(0);
+  const [loadState, setLoadState] = useState<{
+    key: string;
+    loading: boolean;
+    data: AdminSubscriptionsPage | null;
+    error: string;
+  }>({ key: "", loading: true, data: null, error: "" });
+  const requestKey = JSON.stringify([request, revision]);
+  const pageData = loadState.key === requestKey ? loadState.data : null;
+  const listLoading = loadState.key !== requestKey || loadState.loading;
+  const loadError = loadState.key === requestKey ? loadState.error : "";
+  const rows = pageData?.rows ?? [];
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setLoadState({ key: requestKey, loading: true, data: null, error: "" });
+    // Debounce input and cancel superseded requests instead of loading the entire directory.
+    const timer = window.setTimeout(() => {
+      void loadAdminSubscriptions(request, controller.signal).then((data) => {
+        if (active) setLoadState({ key: requestKey, loading: false, data, error: "" });
+      }).catch((error: unknown) => {
+        if (!active) return;
+        const message = error && typeof error === "object" && "message" in error ? String(error.message) : "Не вдалося завантажити підписки.";
+        setLoadState({ key: requestKey, loading: false, data: null, error: message });
+      });
+    }, request.query.trim() ? 300 : 0);
+    return () => { active = false; window.clearTimeout(timer); controller.abort(); };
+  }, [request, requestKey, revision]);
+
+  const changeFilters = (patch: Omit<AdminSubscriptionsQuery, "page">) => {
+    setRequest((current) => ({ ...current, ...patch, page: 1 }));
+  };
+  const changePage = (page: number) => {
+    setRequest((current) => ({ ...current, page }));
+    sectionRef.current?.scrollIntoView({ block: "start" });
+  };
+  const pagination = pageData ? (
+    <PaginationControls
+      totalItems={pageData.filteredCount}
+      page={pageData.page}
+      pageCount={Math.max(1, Math.ceil(pageData.filteredCount / ADMIN_SUBSCRIPTIONS_PAGE_SIZE))}
+      pageSize={ADMIN_SUBSCRIPTIONS_PAGE_SIZE}
+      startIndex={(pageData.page - 1) * ADMIN_SUBSCRIPTIONS_PAGE_SIZE}
+      endIndex={(pageData.page - 1) * ADMIN_SUBSCRIPTIONS_PAGE_SIZE + rows.length}
+      onPageChange={changePage}
+      disabled={listLoading || Boolean(busyId)}
+    />
+  ) : null;
   const [drafts, setDrafts] = useState<Record<string, {
     planCode: PlanCode;
     status: SubscriptionStatus;
     periodEnd: string;
   }>>({});
-  const filteredRows = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase("uk");
-    return rows.filter((row) => {
-      const matchesQuery = !normalizedQuery || [
-        row.displayName,
-        row.email,
-        row.planCode,
-        row.status,
-        row.isAdmin ? "адміністратор admin" : "",
-      ].join(" ").toLocaleLowerCase("uk").includes(normalizedQuery);
-      const matchesPlan = planFilter === "all" ||
-        (planFilter === "admin" ? row.isAdmin : !row.isAdmin && row.planCode === planFilter);
-      const matchesStatus = statusFilter === "all" || row.status === statusFilter;
-      return matchesQuery && matchesPlan && matchesStatus;
-    });
-  }, [rows, query, planFilter, statusFilter]);
   const draftFor = (row: AdminSubscriptionRow) => drafts[row.userId] ?? {
     planCode: row.planCode,
     status: row.status,
@@ -745,7 +779,8 @@ export function AdminSubscriptions({ rows, onChanged }: {
         delete next[row.userId];
         return next;
       });
-      await onChanged();
+      setRevision((current) => current + 1);
+      await onChanged?.();
     } catch (changeError) {
       setAdminError(changeError instanceof Error ? changeError.message : "Не вдалося змінити підписку.");
     } finally {
@@ -753,21 +788,26 @@ export function AdminSubscriptions({ rows, onChanged }: {
     }
   };
   return (
-    <section className="subscription-admin-section">
-      <div className="section-heading"><h2>Адміністрування підписок</h2></div>
+    <section className="subscription-admin-section" ref={sectionRef}>
+      <div className="section-heading">
+        <h2>Адміністрування підписок</h2>
+        <button type="button" className="button button-secondary" disabled={listLoading || Boolean(busyId)} onClick={() => setRevision((current) => current + 1)}>Оновити список</button>
+      </div>
       {adminError ? <div className="alert alert-error">{adminError}</div> : null}
       <div className="subscription-admin-filters">
         <label className="search-field">
           <span>Пошук</span>
           <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            value={request.query}
+            maxLength={200}
+            disabled={Boolean(busyId)}
+            onChange={(event) => changeFilters({ query: event.target.value })}
             placeholder="Ім'я або email користувача"
           />
         </label>
         <label>
           <span>Тариф</span>
-          <select value={planFilter} onChange={(event) => setPlanFilter(event.target.value as PlanCode | "admin" | "all")}>
+          <select value={request.plan} disabled={Boolean(busyId)} onChange={(event) => changeFilters({ plan: event.target.value as Required<AdminSubscriptionsQuery>["plan"] })}>
             <option value="all">Усі тарифи</option>
             <option value="admin">Адміністратори</option>
             <option value="free">Старт</option>
@@ -777,7 +817,7 @@ export function AdminSubscriptions({ rows, onChanged }: {
         </label>
         <label>
           <span>Статус</span>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as SubscriptionStatus | "all")}>
+          <select value={request.status} disabled={Boolean(busyId)} onChange={(event) => changeFilters({ status: event.target.value as Required<AdminSubscriptionsQuery>["status"] })}>
             <option value="all">Усі статуси</option>
             <option value="active">Активна</option>
             <option value="trialing">Пробний період</option>
@@ -786,13 +826,22 @@ export function AdminSubscriptions({ rows, onChanged }: {
             <option value="expired">Завершена</option>
           </select>
         </label>
-        <div className="result-count">{filteredRows.length} з {rows.length}</div>
+        <div className="result-count" role="status">
+          {listLoading ? "Завантаження…" : pageData ? `Знайдено ${pageData.filteredCount} · Усього ${pageData.totalCount}` : ""}
+        </div>
       </div>
-      <div className="table-wrap">
+      {loadError ? (
+        <div className="alert alert-error" role="alert">
+          <p>{loadError}</p>
+          <button type="button" className="button button-secondary" onClick={() => setRevision((current) => current + 1)}>Спробувати ще раз</button>
+        </div>
+      ) : null}
+      {pagination}
+      <div className="table-wrap" aria-busy={listLoading}>
         <table>
           <thead><tr><th>Користувач</th><th>Тариф</th><th>Статус</th><th>Завершення</th><th>Дії</th></tr></thead>
           <tbody>
-            {filteredRows.map((row) => (
+            {rows.map((row) => (
               <tr key={row.userId}>
                 <td><strong>{row.displayName || row.email}</strong><small>{row.email}</small></td>
                 <td>{row.isAdmin ? <span className="status-pill">Адміністратор</span> : planDisplayName(row.planCode)}</td>
@@ -805,7 +854,7 @@ export function AdminSubscriptions({ rows, onChanged }: {
                     <>
                       <select
                         aria-label="Призначити тариф"
-                        disabled={busyId === row.userId}
+                        disabled={Boolean(busyId)}
                         value={draftFor(row).planCode}
                         onChange={(event) => updateDraft(row, { planCode: event.target.value as PlanCode })}
                       >
@@ -815,7 +864,7 @@ export function AdminSubscriptions({ rows, onChanged }: {
                       </select>
                       <select
                         aria-label="Статус підписки"
-                        disabled={busyId === row.userId}
+                        disabled={Boolean(busyId)}
                         value={draftFor(row).status}
                         onChange={(event) => updateDraft(row, { status: event.target.value as SubscriptionStatus })}
                       >
@@ -827,14 +876,14 @@ export function AdminSubscriptions({ rows, onChanged }: {
                       <input
                         type="date"
                         aria-label="Дата завершення підписки"
-                        disabled={busyId === row.userId}
+                        disabled={Boolean(busyId)}
                         value={draftFor(row).periodEnd}
                         onChange={(event) => updateDraft(row, { periodEnd: event.target.value })}
                       />
                       <button
                         type="button"
                         className="button button-primary"
-                        disabled={busyId === row.userId}
+                        disabled={Boolean(busyId)}
                         onClick={() => void change(row)}
                       >
                         Зберегти
@@ -842,7 +891,7 @@ export function AdminSubscriptions({ rows, onChanged }: {
                       <button
                         type="button"
                         className="button button-secondary"
-                        disabled={busyId === row.userId}
+                        disabled={Boolean(busyId)}
                         onClick={() => void change(row, true)}
                       >
                         +30 днів trial
@@ -852,16 +901,17 @@ export function AdminSubscriptions({ rows, onChanged }: {
                 </td>
               </tr>
             ))}
-            {!filteredRows.length ? (
+            {!rows.length ? (
               <tr>
                 <td colSpan={5}>
-                  <div className="empty-inline">Немає підписок за вибраними фільтрами.</div>
+                  <div className="empty-inline">{listLoading ? "Завантажуємо підписки…" : loadError ? "Список підписок недоступний." : "Немає підписок за вибраними фільтрами."}</div>
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
+      {pagination}
     </section>
   );
 }

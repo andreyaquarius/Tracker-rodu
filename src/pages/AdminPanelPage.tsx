@@ -26,8 +26,6 @@ import {
 } from "../services/adminConsoleService.ts";
 import {
   loadAdminFeatureFlags,
-  loadAdminSubscriptions,
-  type AdminSubscriptionRow,
   type AppFeatureFlag,
 } from "../services/subscriptionService.ts";
 import { loadAdminAnnouncements } from "../services/announcementService.ts";
@@ -173,7 +171,6 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   const [capabilities, setCapabilities] = useState<AdminCapabilities | null>(null);
   const [capabilitiesResolved, setCapabilitiesResolved] = useState(false);
   const [analyticsPreferencesResolved, setAnalyticsPreferencesResolved] = useState(false);
-  const [subscriptions, setSubscriptions] = useState<AdminSubscriptionRow[]>([]);
   const [featureFlags, setFeatureFlags] = useState<AppFeatureFlag[]>([]);
   const [announcements, setAnnouncements] = useState<AppAnnouncement[]>([]);
   const [systemHealth, setSystemHealth] = useState<AdminSystemHealth | null>(null);
@@ -193,9 +190,6 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   const hasPagePermission = canSee(requiredPermission);
   const hasAnalyticsPermission = canSee(ADMIN_PERMISSION_CODES.analyticsView);
 
-  const refreshSubscriptions = useCallback(async () => {
-    setSubscriptions(await loadAdminSubscriptions());
-  }, []);
   const refreshFeatures = useCallback(async () => {
     setFeatureFlags(await loadAdminFeatureFlags());
   }, []);
@@ -286,12 +280,11 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   }, [analyticsPreferencesResolved, days, funnelCode, hasAnalyticsPermission, props.allowed, props.page, range]);
 
   useEffect(() => {
-    if (!props.allowed || !hasPagePermission || ["overview", "analytics", "zagulyaky"].includes(currentPage)) return;
+    if (!props.allowed || !hasPagePermission || ["overview", "analytics", "zagulyaky", "subscriptions"].includes(currentPage)) return;
     let active = true;
     setLoading(true);
     setError("");
-    const request = props.page === "subscriptions" ? refreshSubscriptions()
-      : props.page === "features" ? refreshFeatures()
+    const request = props.page === "features" ? refreshFeatures()
       : props.page === "announcements" ? refreshAnnouncements()
       : props.page === "operations" ? refreshSystemHealth()
       : props.page === "security"
@@ -303,7 +296,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [currentPage, hasPagePermission, props.allowed, props.page, refreshAnnouncements, refreshFeatures, refreshSubscriptions, refreshSystemHealth]);
+  }, [currentPage, hasPagePermission, props.allowed, props.page, refreshAnnouncements, refreshFeatures, refreshSystemHealth]);
 
   if (props.accessLoading) {
     return <main className="admin-access-state"><strong>Перевіряємо права адміністратора…</strong></main>;
@@ -478,7 +471,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
       </section>
     );
   } else if (currentPage === "analytics") pageContent = analyticsReport;
-  else if (currentPage === "subscriptions") pageContent = <AdminSubscriptions rows={subscriptions} onChanged={refreshSubscriptions} />;
+  else if (currentPage === "subscriptions") pageContent = <AdminSubscriptions />;
   else if (currentPage === "features") pageContent = (
     <AdminFeatureFlags
       flags={featureFlags}
@@ -570,14 +563,14 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
             <div className="admin-analytics-controls"><label>Період<select value={days} onChange={(event) => setDays(Number(event.target.value) as AdminAnalyticsPeriodDays)}><option value={7}>7 днів</option><option value={30}>30 днів</option><option value={90}>90 днів</option></select></label><button type="button" className="button button-secondary" disabled={loading} onClick={() => setRefreshRevision((n) => n + 1)}>Оновити звіти</button></div>
           ) : null}
         </header>
-        {error ? <div className="admin-alert error">{error}</div> : null}
+        {currentPage !== "subscriptions" && error ? <div className="admin-alert error">{error}</div> : null}
         {showMetrics ? <>
           <AdminAnalyticsOnline />
           <p className="admin-privacy-note">Загальна аналітика всього застосунку серед користувачів, які дали згоду. Не враховує адміністраторів і анонімні відвідування публічних сторінок. Події зберігаються 90 днів; нові розділи почнуть накопичувати дані після оновлення. {days === 90 ? "Порівняння з попередніми 90 днями недоступне через строк зберігання." : "Порівняння — з попереднім періодом тієї самої тривалості."} Сесія — робота у вкладці; це не число входів в обліковий запис.</p>
         </> : null}
         {showMetrics && overview.suppressed ? <div className="admin-alert">Дані приховано: за період менше {overview.minimumCohort} користувачів.</div> : null}
         {showMetrics && !overview.suppressed ? metricCards : null}
-        {loading ? <div className="admin-loading">Завантажуємо дані…</div> : null}
+        {currentPage !== "subscriptions" && loading ? <div className="admin-loading">Завантажуємо дані…</div> : null}
         {pageContent}
         <footer className="admin-privacy-note">{currentPage === "zagulyaky"
           ? "Модерація охоплює лише записи публічного каталогу. Приватні родові дерева користувачів не відкриваються."

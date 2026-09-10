@@ -7427,6 +7427,13 @@ html.google-picker-open .picker-dialog {
 .subscription-admin-section .row-actions { display: flex; gap: 8px; align-items: center; }
 .subscription-admin-section .button { min-height: 36px; padding: 7px 10px; }
 .subscription-admin-note { color: var(--muted); font-size: 12px; font-weight: 700; }
+.subscription-admin-section { min-width: 0; scroll-margin-top: 24px; }
+@media (max-width: 1200px) {
+  .subscription-admin-section .subscription-admin-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .subscription-admin-section .subscription-admin-filters { grid-template-columns: minmax(0, 1fr); }
+}
 .feature-flags-section {
   padding: 20px;
   background: var(--app-surface, #fffdfa);

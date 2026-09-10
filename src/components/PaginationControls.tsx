@@ -8,7 +8,8 @@ interface PaginationControlsProps {
   startIndex: number;
   endIndex: number;
   onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
+  disabled?: boolean;
 }
 
 type PageToken = number | "ellipsis";
@@ -22,6 +23,7 @@ export function PaginationControls({
   endIndex,
   onPageChange,
   onPageSizeChange,
+  disabled = false,
 }: PaginationControlsProps) {
   if (!totalItems) return null;
   const pages = pageTokens(page, pageCount);
@@ -30,22 +32,23 @@ export function PaginationControls({
       <div className="pagination-summary">
         Показано {startIndex + 1}–{endIndex} з {totalItems}
       </div>
-      <label className="pagination-size">
+      {onPageSizeChange ? <label className="pagination-size">
         <span>На сторінці</span>
         <select
           value={pageSize}
+          disabled={disabled}
           onChange={(event) => onPageSizeChange(Number(event.target.value))}
         >
           {pageSizeOptions.map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
-      </label>
+      </label> : <span className="pagination-size">По {pageSize} на сторінці</span>}
       <div className="pagination-pages" aria-label={`Сторінка ${page} з ${pageCount}`}>
         <button
           type="button"
           className="pagination-arrow"
-          disabled={page <= 1}
+          disabled={disabled || page <= 1}
           onClick={() => onPageChange(page - 1)}
           aria-label="Попередня сторінка"
         >
@@ -58,6 +61,7 @@ export function PaginationControls({
             type="button"
             className={token === page ? "active" : ""}
             key={token}
+            disabled={disabled}
             onClick={() => onPageChange(token)}
             aria-current={token === page ? "page" : undefined}
             aria-label={`Сторінка ${token}`}
@@ -68,7 +72,7 @@ export function PaginationControls({
         <button
           type="button"
           className="pagination-arrow"
-          disabled={page >= pageCount}
+          disabled={disabled || page >= pageCount}
           onClick={() => onPageChange(page + 1)}
           aria-label="Наступна сторінка"
         >
