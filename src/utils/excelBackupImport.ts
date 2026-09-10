@@ -177,6 +177,9 @@ function cellText(cell: Element, sharedStrings: string[]): string {
 }
 
 function parseXml(xml: string, label: string): Document {
+  if (/<\!DOCTYPE/i.test(xml) || /<\!ENTITY/i.test(xml)) {
+    throw new Error(`Не вдалося прочитати ${label}.`);
+  }
   const doc = new DOMParser().parseFromString(xml, "application/xml");
   if (doc.getElementsByTagName("parsererror").length) {
     throw new Error(`Не вдалося прочитати ${label}.`);
