@@ -5,7 +5,7 @@ import test from "node:test";
 const service = readFileSync(
   new URL("../src/services/contextRelationsService.ts", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 const supabaseAuth = readFileSync(
   new URL("../src/services/supabaseAuth.ts", import.meta.url),
   "utf8",

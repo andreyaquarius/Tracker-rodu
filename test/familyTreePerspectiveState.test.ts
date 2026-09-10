@@ -202,7 +202,7 @@ test("production uses independent pedigree, corridor and progressive descendant 
   const page = readFileSync(
     new URL("../src/pages/ProductionFamilyTreePage.tsx", import.meta.url),
     "utf8",
-  );
+  ).replace(/\r\n/g, "\n");
   const hook = readFileSync(
     new URL(
       "../src/features/family-tree-view/react/useFamilyTreeNeighborhood.ts",

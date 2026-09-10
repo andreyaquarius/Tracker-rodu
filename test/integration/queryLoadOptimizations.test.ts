@@ -99,14 +99,36 @@ test("public statistics cache executes the exact SQL, invalidates all privacy de
     await db.exec(`insert into zagulyaky_records(id,kind,status,privacy_status,published_at)
       values ('${id(1)}','person','published','cleared',now()),('${id(2)}','document','published','cleared',now()),
         ('${id(3)}','person','draft','cleared',now());`);
+    const cacheState = async () => ({
+      cache: (await db.query("select * from security_private.zagulyaky_public_stats_cache")).rows,
+      invalidations: (await db.query("select transaction_id from security_private.zagulyaky_stats_invalidations order by transaction_id")).rows,
+    });
+    const functionContracts = async () => (await db.query(`
+      select oid, proname, prosecdef, provolatile, proconfig, proacl::text
+      from pg_proc where oid in (
+        'public.get_zagulyaky_public_stats_v1()'::regprocedure,
+        'security_private.get_zagulyaky_public_stats_v1()'::regprocedure,
+        'security_private.compute_zagulyaky_public_stats_v1()'::regprocedure
+      ) order by oid`)).rows;
+    const stateBeforeFix = await cacheState();
+    const contractsBeforeFix = await functionContracts();
+    await db.exec(migration("202609100004_zagulyaky_stats_safeupdate_compatibility"));
+    assert.deepEqual(await cacheState(), stateBeforeFix, "applying the fix must not delete markers or rewrite cached data");
+    assert.deepEqual(await functionContracts(), contractsBeforeFix, "function identity, privileges and execution settings stay unchanged");
+    const liveDefinition = (await db.query<{ definition: string }>(
+      "select pg_get_functiondef('security_private.get_zagulyaky_public_stats_v1()'::regprocedure) as definition")).rows[0].definition;
+    assert.match(liveDefinition, /delete from security_private\.zagulyaky_stats_invalidations\s+where transaction_id is not null;/i);
     const stats = async () => (await db.query<{ value: { people: number; documents: number; archives: number } }>(
       "select public.get_zagulyaky_public_stats_v1() as value")).rows[0].value;
+    const exact = (await db.query<{ value: unknown }>("select security_private.compute_zagulyaky_public_stats_v1() as value")).rows[0].value;
     await db.exec("set role anon");
+    assert.deepEqual(await stats(), exact, "the cold public response keeps every exact privacy-filtered counter");
     assert.equal((await stats()).people, 1);
     assert.equal((await stats()).documents, 1);
     await assert.rejects(db.query("select * from security_private.zagulyaky_public_stats_cache"), /permission denied/);
     await assert.rejects(db.query("select security_private.compute_zagulyaky_public_stats_v1()"), /permission denied/);
     await db.exec("reset role");
+    assert.deepEqual((await cacheState()).invalidations, [], "a successful refresh drains existing visible markers");
     const firstExpiry = (await db.query("select expires_at from security_private.zagulyaky_public_stats_cache")).rows;
     for (let n = 0; n < 10; n++) await stats();
     assert.deepEqual((await db.query("select expires_at from security_private.zagulyaky_public_stats_cache")).rows, firstExpiry, "warm requests must not refresh or write");
@@ -116,7 +138,7 @@ test("public statistics cache executes the exact SQL, invalidates all privacy de
     assert.equal((await stats()).people, 0);
     await db.exec(`insert into zagulyaky_privacy_clearances values('${id(1)}',true)`);
     assert.equal((await stats()).people, 1);
-    await db.exec(`delete from zagulyaky_privacy_clearances`);
+    await db.exec(`delete from zagulyaky_privacy_clearances where record_id='${id(1)}'`);
     assert.equal((await stats()).people, 0);
     await db.exec(`insert into zagulyaky_sources values('${id(9)}','Архів'); insert into zagulyaky_record_sources values('${id(2)}','${id(9)}')`);
     assert.equal((await stats()).archives, 1);
@@ -125,13 +147,53 @@ test("public statistics cache executes the exact SQL, invalidates all privacy de
       await db.exec(`delete from ${table} where false`);
       assert.equal((await db.query<{ dirty: boolean }>("select exists(select 1 from security_private.zagulyaky_stats_invalidations) as dirty")).rows[0].dirty, true, table);
     }
-    await db.exec("update security_private.zagulyaky_public_stats_cache set payload='{}',expires_at=now()-interval '1 minute'");
+    await db.exec("update security_private.zagulyaky_public_stats_cache set payload='{}',expires_at=now()-interval '1 minute' where singleton");
+    const beforeReadOnly = await cacheState();
     await db.exec("begin read only");
     assert.equal((await stats()).documents, 1, "read-only callers receive correct uncached data");
     await db.exec("commit");
+    assert.deepEqual(await cacheState(), beforeReadOnly, "read-only calls neither drain markers nor write the cache");
     assert.equal((await stats()).documents, 1, "expired result is recomputed");
-    await db.exec(migration("202609100002_zagulyaky_public_stats_cache"));
-    assert.equal((await stats()).documents, 1, "migration is repeatable");
+
+    for (const role of ["anon", "authenticated", "service_role"]) {
+      await db.exec("update security_private.zagulyaky_public_stats_cache set expires_at='-infinity' where singleton");
+      await db.exec(`set role ${role}`);
+      assert.equal((await stats()).documents, 1, `${role} can refresh a cold cache with an empty invalidation queue`);
+      await assert.rejects(db.query("select * from security_private.zagulyaky_stats_invalidations"), /permission denied/);
+      await db.exec("reset role");
+    }
+
+    // PGlite is single-session. Inject a marker inside the computation to test
+    // the after-drain boundary deterministically, not to claim MVCC concurrency.
+    const originalCompute = (await db.query<{ definition: string }>(
+      "select pg_get_functiondef('security_private.compute_zagulyaky_public_stats_v1()'::regprocedure) as definition")).rows[0].definition;
+    await db.exec(`create or replace function security_private.compute_zagulyaky_public_stats_v1()
+      returns jsonb language plpgsql volatile security definer as $$ begin
+        insert into security_private.zagulyaky_stats_invalidations values (-4004) on conflict do nothing;
+        return '{"people":99,"documents":1,"archives":1}'::jsonb;
+      end $$;
+      update security_private.zagulyaky_public_stats_cache set expires_at='-infinity' where singleton;`);
+    assert.equal((await stats()).people, 99);
+    assert.equal((await cacheState()).invalidations.length, 1, "a marker arriving after the drain survives the refresh");
+    await db.exec(originalCompute);
+    assert.equal((await stats()).people, 0, "the surviving marker forces another exact refresh despite a warm expiry");
+    assert.deepEqual((await cacheState()).invalidations, []);
+
+    await db.exec(`create or replace function security_private.compute_zagulyaky_public_stats_v1()
+      returns jsonb language plpgsql volatile security definer as $$ begin
+        raise exception 'synthetic statistics refresh failure';
+      end $$;
+      insert into security_private.zagulyaky_stats_invalidations values (-4005);`);
+    const beforeFailure = await cacheState();
+    await assert.rejects(stats(), /synthetic statistics refresh failure/);
+    assert.deepEqual(await cacheState(), beforeFailure, "a failed computation rolls back the marker drain and preserves the cache");
+    await db.exec(originalCompute);
+    assert.equal((await stats()).documents, 1, "a later refresh recovers without manual cache cleanup");
+
+    const beforeRepeat = await cacheState();
+    await db.exec(migration("202609100004_zagulyaky_stats_safeupdate_compatibility"));
+    assert.deepEqual(await cacheState(), beforeRepeat, "the corrective migration is repeatable without mutating data");
+    assert.equal((await stats()).documents, 1);
   } finally { await db.close(); }
 });
 

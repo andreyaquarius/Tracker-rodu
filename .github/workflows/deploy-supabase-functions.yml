@@ -22,7 +22,9 @@ on:
       - "test/googleDrive*.test.ts"
       - "test/geneHelp*.test.ts"
       - "test/zagulyakyPublicIndexingPerformance.test.ts"
+      - "test/zagulyakyPublicStatsSafeupdate.test.ts"
       - "test/zagulyakySecurityDefinerApiIsolation.test.ts"
+      - "test/integration/queryLoadOptimizations.test.ts"
       - "test/personContext*.test.ts"
       - "test/personSocialCircleGraphPresentation.test.ts"
       - "test/researchGraph*.test.ts"
@@ -109,6 +111,12 @@ jobs:
           node --test --test-concurrency=1 \
             "test/zagulyakyPublicIndexingPerformance.test.ts" \
             "test/zagulyakySecurityDefinerApiIsolation.test.ts"
+
+      - name: Verify public statistics cache contracts
+        run: |
+          node --test --test-concurrency=1 \
+            "test/zagulyakyPublicStatsSafeupdate.test.ts" \
+            "test/integration/queryLoadOptimizations.test.ts"
 
       - name: Verify PDF worker container
         run: docker build --tag tracker-rodu-pdf-worker:test services/pdf-export-worker
