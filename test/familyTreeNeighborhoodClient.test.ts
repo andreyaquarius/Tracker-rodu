@@ -702,6 +702,7 @@ test("aborted requests never reach or populate the resolved-response cache", asy
 
   const controller = new AbortController();
   const abortedLoad = cached.load(input, controller.signal);
+  await Promise.resolve();
   assert.equal(calls.length, 1);
   controller.abort();
   pending[0]!.deferred.resolve(responseFor(input, "aborted"));
@@ -711,6 +712,7 @@ test("aborted requests never reach or populate the resolved-response cache", asy
   );
 
   const retry = cached.load(input);
+  await Promise.resolve();
   assert.equal(calls.length, 2);
   pending[1]!.deferred.resolve(responseFor(input, "retry"));
   const retriedResponse = await retry;
@@ -737,6 +739,7 @@ test("a stale concurrent response is returned to its caller but is not cached", 
 
   const olderLoad = cached.load(older);
   const newerLoad = cached.load(newer);
+  await Promise.resolve();
   pending.get("newer")![0]!.resolve(responseFor(newer, "newer"));
   const newerResponse = await newerLoad;
   pending.get("older")![0]!.resolve(responseFor(older, "older-stale"));
@@ -747,9 +750,51 @@ test("a stale concurrent response is returned to its caller but is not cached", 
   assert.equal(calls.length, 2);
 
   const olderRetry = cached.load(older);
+  await Promise.resolve();
   assert.equal(calls.length, 3);
   pending.get("older")![1]!.resolve(responseFor(older, "older-fresh"));
   const freshResponse = await olderRetry;
   assert.strictEqual(await cached.load(older), freshResponse);
   assert.equal(calls.length, 3);
+});
+
+test("identical scoped tree reads share transport while retaining independent cancellation", async () => {
+  let calls = 0;
+  let signal!: AbortSignal;
+  const result = deferred<NeighborhoodResponse>();
+  const input = request({ treeId: "shared" });
+  const cached = createCachedNeighborhoodClient({
+    async load(_request, transportSignal) { calls++; signal = transportSignal!; return result.promise; },
+  } as FamilyTreeNeighborhoodClient);
+  const controller = new AbortController();
+  const first = cached.load(input, controller.signal);
+  const second = cached.load(input);
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  controller.abort();
+  await assert.rejects(first, { name: "AbortError" });
+  assert.equal(signal.aborted, false);
+  result.resolve(responseFor(input, "shared"));
+  const response = await second;
+  assert.strictEqual(await cached.load(input), response);
+  assert.equal(calls, 1);
+});
+
+test("explicit tree invalidation never reuses an older in-flight response", async () => {
+  const pending: Deferred<NeighborhoodResponse>[] = [];
+  const cached = createCachedNeighborhoodClient({
+    load() { const result = deferred<NeighborhoodResponse>(); pending.push(result); return result.promise; },
+  } as FamilyTreeNeighborhoodClient);
+  const input = request({ treeId: "invalidated" });
+  const first = cached.load(input);
+  await Promise.resolve();
+  cached.invalidateTree(input.treeId);
+  const second = cached.load(input);
+  await Promise.resolve();
+  assert.equal(pending.length, 2);
+  pending[0].resolve(responseFor(input, "old"));
+  pending[1].resolve(responseFor(input, "new"));
+  await first;
+  const fresh = await second;
+  assert.strictEqual(await cached.load(input), fresh);
 });

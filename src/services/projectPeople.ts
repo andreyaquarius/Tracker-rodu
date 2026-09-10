@@ -22,7 +22,8 @@ import {
 } from "../utils/projectCache.ts";
 import {
   selectRowsInParallel,
-  type PagedRangeRequest,
+  selectRowsByUpdatedCursor,
+  type UpdatedCursorPageRequest,
 } from "../utils/pagedRows.ts";
 import {
   chunkPersonImportRows,
@@ -591,15 +592,14 @@ function relationToLegacyRow(row: ReturnType<typeof relationToRow>) {
 
 async function listProjectRelationRows(projectId: string): Promise<RelationRow[]> {
   const client = getSupabaseClient();
-  const selectRows = (columns: string) => selectRowsInParallel<RelationRow>(
+  const selectRows = (columns: string) => selectRowsByUpdatedCursor<RelationRow>(
     () => client
       .from("person_relations")
       .select(columns)
       .eq("project_id", projectId)
       .order("updated_at", { ascending: false })
-      .order("id", { ascending: true }) as unknown as PagedRangeRequest<RelationRow>,
+      .order("id", { ascending: true }) as unknown as UpdatedCursorPageRequest<RelationRow>,
     SELECT_BATCH_SIZE,
-    SELECT_CONCURRENCY_PER_TABLE,
   );
 
   try {
@@ -617,7 +617,7 @@ async function listProjectRelationRowsBetween(
 ): Promise<RelationRow[]> {
   const client = getSupabaseClient();
   const personIds = [leftPersonId, rightPersonId];
-  const selectRows = (columns: string) => selectRowsInParallel<RelationRow>(
+  const selectRows = (columns: string) => selectRowsByUpdatedCursor<RelationRow>(
     () => client
       .from("person_relations")
       .select(columns)
@@ -625,9 +625,8 @@ async function listProjectRelationRowsBetween(
       .in("person_id", personIds)
       .in("related_person_id", personIds)
       .order("updated_at", { ascending: false })
-      .order("id", { ascending: true }) as unknown as PagedRangeRequest<RelationRow>,
+      .order("id", { ascending: true }) as unknown as UpdatedCursorPageRequest<RelationRow>,
     SELECT_BATCH_SIZE,
-    SELECT_CONCURRENCY_PER_TABLE,
   );
 
   try {
@@ -645,27 +644,25 @@ async function listProjectRelationRowsForPerson(
   const client = getSupabaseClient();
   const selectRows = async (columns: string): Promise<RelationRow[]> => {
     const [outgoing, incoming] = await Promise.all([
-      selectRowsInParallel<RelationRow>(
+      selectRowsByUpdatedCursor<RelationRow>(
         () => client
           .from("person_relations")
           .select(columns)
           .eq("project_id", projectId)
           .eq("person_id", personId)
           .order("updated_at", { ascending: false })
-          .order("id", { ascending: true }) as unknown as PagedRangeRequest<RelationRow>,
+          .order("id", { ascending: true }) as unknown as UpdatedCursorPageRequest<RelationRow>,
         SELECT_BATCH_SIZE,
-        SELECT_CONCURRENCY_PER_TABLE,
       ),
-      selectRowsInParallel<RelationRow>(
+      selectRowsByUpdatedCursor<RelationRow>(
         () => client
           .from("person_relations")
           .select(columns)
           .eq("project_id", projectId)
           .eq("related_person_id", personId)
           .order("updated_at", { ascending: false })
-          .order("id", { ascending: true }) as unknown as PagedRangeRequest<RelationRow>,
+          .order("id", { ascending: true }) as unknown as UpdatedCursorPageRequest<RelationRow>,
         SELECT_BATCH_SIZE,
-        SELECT_CONCURRENCY_PER_TABLE,
       ),
     ]);
     return [...new Map(

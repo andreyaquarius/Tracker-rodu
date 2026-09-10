@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabaseAuth";
+import { createSharedAbortableRequest } from "../utils/sharedAbortableRequest.ts";
 
 export interface ProjectPersonSummary {
   personId: string;
@@ -63,11 +64,29 @@ export function mapProjectPersonSummaries(value: unknown): Map<string, ProjectPe
 
 export async function loadProjectPersonSummaries(
   projectId: string,
+  personIds: readonly string[],
+  signal?: AbortSignal,
 ): Promise<Map<string, ProjectPersonSummary>> {
-  const { data, error } = await getSupabaseClient().rpc(
-    "list_person_summaries",
-    { target_project_id: projectId },
-  );
-  if (error) throw error;
-  return mapProjectPersonSummaries(data);
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const ids = [...new Set(personIds)].sort();
+  if (!ids.length) return new Map();
+  if (ids.length > 200) throw new RangeError("Person summaries are limited to 200 persons per request.");
+  const client = getSupabaseClient();
+  const session = await client.auth.getSession();
+  if (session.error) throw session.error;
+  // Never share a private read across accounts or JWT/permission changes.
+  const token = session.data.session?.access_token;
+  if (!token) throw new Error("Сесію завершено. Увійдіть до облікового запису ще раз.");
+  return summaryRequests.run(JSON.stringify([token, projectId, ids]), async (requestSignal) => {
+    const { data, error } = await client.rpc("list_person_summaries_v2", {
+      target_project_id: projectId,
+      target_person_ids: ids,
+    }).abortSignal(requestSignal);
+    // A missing migration falls back to the existing local counters in the UI,
+    // never to the expensive unbounded legacy RPC.
+    if (error) throw error;
+    return mapProjectPersonSummaries(data);
+  }, signal);
 }
+
+const summaryRequests = createSharedAbortableRequest<Map<string, ProjectPersonSummary>>();

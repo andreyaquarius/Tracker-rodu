@@ -36,6 +36,9 @@ import {
 } from "../utils/zagulyakyMutationCircuitBreaker";
 import { invokeEdgeFunction } from "./edgeFunctions";
 import { getSupabaseClient } from "./supabaseAuth";
+import { createSharedAbortableRequest } from "../utils/sharedAbortableRequest.ts";
+
+const publicStatsRequests = createSharedAbortableRequest<unknown>();
 
 const eventTypes = new Set<ZagulyakaEventType>([
   "birth", "baptism", "marriage", "death", "burial", "residence",
@@ -76,11 +79,12 @@ export interface LoadMyZagulyakyOptions {
 
 export async function loadZagulyakyStats(signal?: AbortSignal): Promise<ZagulyakyStats> {
   throwIfAborted(signal);
-  let request = getSupabaseClient().rpc("get_zagulyaky_public_stats_v1");
-  if (signal) request = request.abortSignal(signal);
-  const { data, error } = await request;
+  const data = await publicStatsRequests.run("public-stats", async (transportSignal) => {
+    const response = await getSupabaseClient().rpc("get_zagulyaky_public_stats_v1").abortSignal(transportSignal);
+    if (response.error) throw response.error;
+    return response.data;
+  }, signal);
   throwIfAborted(signal);
-  if (error) throw error;
   const row = firstRecord(data);
   return {
     peopleCount: naturalNumber(value(row, "people", "peopleCount", "people_count")),

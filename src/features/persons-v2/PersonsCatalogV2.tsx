@@ -60,6 +60,7 @@ export interface PersonsCatalogV2Props {
   onDeletePerson?: (person: Person) => void;
   onCreatePerson?: () => void;
   onSelectionChange?: (persons: readonly Person[]) => void;
+  onVisiblePersonIdsChange?: (personIds: string[]) => void;
   onBulkAction?: (
     action: PersonsCatalogBulkActionV2,
     persons: readonly Person[],
@@ -101,6 +102,7 @@ export function PersonsCatalogV2({
   onDeletePerson,
   onCreatePerson,
   onSelectionChange,
+  onVisiblePersonIdsChange,
   onBulkAction,
 }: PersonsCatalogV2Props) {
   const [segment, setSegment] = useState<PersonsCatalogSegmentV2>(initialSegment);
@@ -139,6 +141,10 @@ export function PersonsCatalogV2({
   const totalPages = Math.max(1, Math.ceil(result.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const visiblePersons = result.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const visiblePersonIdsKey = JSON.stringify(visiblePersons.map((person) => person.id));
+  useEffect(() => {
+    onVisiblePersonIdsChange?.(JSON.parse(visiblePersonIdsKey) as string[]);
+  }, [onVisiblePersonIdsChange, visiblePersonIdsKey]);
   const selectedPersons = useMemo(
     () => persons.filter((person) => selectedIds.has(person.id)),
     [persons, selectedIds],
