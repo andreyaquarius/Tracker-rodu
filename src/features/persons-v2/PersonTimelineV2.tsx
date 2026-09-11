@@ -18,6 +18,8 @@ export interface PersonTimelineV2Props {
   emptyMessage?: string;
   onSelectEvent?: (event: PersonTimelineItem) => void;
   onOpenFinding?: (findingId: string) => void;
+  onOpenRelative?: (personId: string) => void;
+  onEditRelative?: (personId: string) => void;
   onOpenAttachment?: (
     attachment: ScanAttachment,
     attachments: readonly ScanAttachment[],
@@ -30,6 +32,8 @@ export function PersonTimelineV2({
   emptyMessage = "Для цієї особи ще не додано життєвих подій.",
   onSelectEvent,
   onOpenFinding,
+  onOpenRelative,
+  onEditRelative,
   onOpenAttachment,
 }: PersonTimelineV2Props) {
   const timeline = items ?? buildPersonTimeline(person);
@@ -55,6 +59,8 @@ export function PersonTimelineV2({
                 attachments={attachments}
                 onSelectEvent={onSelectEvent}
                 onOpenFinding={onOpenFinding}
+                onOpenRelative={onOpenRelative}
+                onEditRelative={onEditRelative}
                 onOpenAttachment={onOpenAttachment}
               />
             </article>
@@ -70,18 +76,22 @@ function PersonTimelineContentV2({
   attachments,
   onSelectEvent,
   onOpenFinding,
+  onOpenRelative,
+  onEditRelative,
   onOpenAttachment,
 }: {
   event: PersonTimelineItem;
   attachments: readonly ScanAttachment[];
   onSelectEvent?: (event: PersonTimelineItem) => void;
   onOpenFinding?: (findingId: string) => void;
+  onOpenRelative?: (personId: string) => void;
+  onEditRelative?: (personId: string) => void;
   onOpenAttachment?: (
     attachment: ScanAttachment,
     attachments: readonly ScanAttachment[],
   ) => void;
 }) {
-  const details = [event.value, event.age ? `Вік: ${event.age}` : "", event.cause]
+  const details = [event.value, event.age ? `${event.relative ? "Вік родича" : "Вік"}: ${event.age}` : "", event.cause]
     .filter(Boolean)
     .join(" · ");
   const place = [event.placeName, event.address].filter(Boolean).join(", ");
@@ -107,6 +117,9 @@ function PersonTimelineContentV2({
         {displaySubtitle ? <span className="persons-v2-timeline__original-title">{displaySubtitle}</span> : null}
         {place ? <span>{place}</span> : null}
         {details ? <small>{details}</small> : null}
+        {event.relative && event.relative.relationStatus !== "доведено" ? (
+          <small>Спорідненість: {event.relative.relationStatus}</small>
+        ) : null}
         {event.notes ? event.sourceFindingId ? (
           <details className="persons-v2-timeline__source-details">
             <summary>Відомості зі знахідки</summary>
@@ -116,7 +129,7 @@ function PersonTimelineContentV2({
       </span>
       <span className="persons-v2-timeline__footer">
         <span className="persons-v2-timeline__meta">
-          {event.sourceFindingId ? "Зі знахідки" : event.source === "core" ? "Основний факт" : "Додаткова подія"}
+          {event.relative ? "Подія родича · автоматично" : event.sourceFindingId ? "Зі знахідки" : event.source === "core" ? "Основний факт" : "Додаткова подія"}
         </span>
         {attachments.length ? (
           onOpenAttachment ? (
@@ -139,7 +152,7 @@ function PersonTimelineContentV2({
             </span>
           )
         ) : null}
-        {onSelectEvent ? (
+        {onSelectEvent && !event.relative ? (
           <button
             type="button"
             className="persons-v2-timeline__open-event"
@@ -147,6 +160,14 @@ function PersonTimelineContentV2({
           >
             Відкрити подію
           </button>
+        ) : null}
+        {event.relative && onOpenRelative ? (
+          <button type="button" className="persons-v2-timeline__open-event"
+            onClick={() => onOpenRelative(event.relative!.personId)}>Відкрити картку родича</button>
+        ) : null}
+        {event.relative && onEditRelative ? (
+          <button type="button" className="persons-v2-timeline__open-event"
+            onClick={() => onEditRelative(event.relative!.personId)}>Редагувати в картці родича</button>
         ) : null}
         {event.sourceFindingId && onOpenFinding ? (
           <button type="button" className="persons-v2-timeline__open-event"

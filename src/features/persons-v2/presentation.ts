@@ -1,6 +1,7 @@
 import type { PersonEvent, PersonEventType } from "../../types";
 import { formatDateForDisplay } from "../../utils/dateHelpers.ts";
 import { PERSON_EVENT_TYPES, personEventLabel } from "../../utils/geo.ts";
+import type { PersonTimelineItem } from "./model.ts";
 
 const canonicalEventTypes = new Set<string>(PERSON_EVENT_TYPES);
 
@@ -52,18 +53,20 @@ export function personEventTypeDisplayLabel(rawType?: string | null): string {
 
 /** Uses the canonical Ukrainian title while preserving meaningful custom titles as a subtitle. */
 export function personTimelineEventDisplayTitle(
-  event: Pick<PersonEvent, "type" | "title" | "sourceFindingId">,
+  event: Pick<PersonEvent, "type" | "title" | "sourceFindingId"> & Pick<PersonTimelineItem, "relative">,
 ): string {
   const customTitle = event.title?.trim() ?? "";
+  if (event.relative && customTitle) return customTitle;
   if (event.sourceFindingId && event.type === "mention" && customTitle) return customTitle;
   if (event.type === "other" && customTitle) return customTitle;
   return personEventLabel(event.type);
 }
 
 export function personTimelineEventDisplaySubtitle(
-  event: Pick<PersonEvent, "type" | "title" | "sourceFindingId">,
+  event: Pick<PersonEvent, "type" | "title" | "sourceFindingId"> & Pick<PersonTimelineItem, "relative">,
 ): string {
   const customTitle = event.title?.trim() ?? "";
+  if (event.relative) return "";
   if (event.sourceFindingId && event.type === "mention") return "";
   if (!customTitle || event.type === "other") return "";
   const canonicalTitle = personEventLabel(event.type);

@@ -25,7 +25,6 @@ import { CustomFieldsView } from "../../components/CustomFields";
 import { normalizeCustomFieldValues } from "../../utils/customFields";
 import { findingLinksPerson } from "../../utils/findingParticipantLinks";
 import {
-  buildPersonTimeline,
   calculatePersonProfileCompleteness,
   personDeathCause,
   personDisplayName,
@@ -35,6 +34,7 @@ import {
   personRelationLabel,
   type PersonTimelineItem,
 } from "./model";
+import { buildPersonFamilyTimeline } from "./relativeTimeline.ts";
 import { PersonTimelineV2 } from "./PersonTimelineV2";
 import { PersonLifeMapV2 } from "./PersonLifeMapV2.tsx";
 import {
@@ -123,6 +123,7 @@ export interface PersonProfileV2Props {
   onOpenPerson?: (person: Person) => void;
   onOpenDocument?: (document: DocumentRecord) => void;
   onOpenFinding?: (finding: Finding) => void;
+  onOpenFindingById?: (findingId: string) => void;
   onOpenRelated?: (
     page: PersonProfileRelatedPageV2,
     record: PersonProfileRelatedRecordV2,
@@ -200,6 +201,7 @@ export function PersonProfileV2({
   onOpenPerson,
   onOpenDocument,
   onOpenFinding,
+  onOpenFindingById,
   onOpenRelated,
   onBrowseRelated,
   onCreateRelated,
@@ -249,25 +251,11 @@ export function PersonProfileV2({
   const personMarriages = useMemo(() => marriages.filter((marriage) => (
     marriage.personAId === person.id || marriage.personBId === person.id
   )), [marriages, person.id]);
-  const marriageTimelineFacts = useMemo(() => personMarriages.map((marriage) => {
-    const partnerId = marriage.personAId === person.id
-      ? marriage.personBId
-      : marriage.personAId;
-    const partner = personsById.get(partnerId);
-    return {
-      id: marriage.id,
-      partnerId,
-      partnerName: partner ? personDisplayName(partner) : "",
-      date: marriage.date,
-      place: marriage.place,
-      address: marriage.address,
-    };
-  }), [person.id, personMarriages, personsById]);
   const completeness = useMemo(() => calculatePersonProfileCompleteness(person), [person]);
   const places = useMemo(() => personMainPlaces(person), [person]);
   const timeline = useMemo(
-    () => buildPersonTimeline(person, { marriages: marriageTimelineFacts }),
-    [marriageTimelineFacts, person],
+    () => buildPersonFamilyTimeline(person, { persons, relations, marriages }),
+    [marriages, person, persons, relations],
   );
   const linkedRelations = useMemo<LinkedRelationV2[]>(() => relations
     .filter((relation) => relation.personId === person.id || relation.relatedPersonId === person.id)
@@ -522,6 +510,18 @@ export function PersonProfileV2({
               onOpenPerson={onOpenPerson}
               onOpenDocument={onOpenDocument}
               onOpenFinding={onOpenFinding}
+              onOpenTimelineFinding={onOpenFindingById ?? (onOpenFinding ? (id) => {
+                const finding = findings.find((item) => item.id === id);
+                if (finding) onOpenFinding(finding);
+              } : undefined)}
+              onOpenRelative={onOpenPerson ? (id) => {
+                const relative = personsById.get(id);
+                if (relative) onOpenPerson(relative);
+              } : undefined}
+              onEditRelative={onEdit ? (id) => {
+                const relative = personsById.get(id);
+                if (relative) onEdit(relative);
+              } : undefined}
               onOpenRelated={onOpenRelated}
               onBrowseRelated={onBrowseRelated}
               onCreateRelated={onCreateRelated}
@@ -566,6 +566,9 @@ interface PersonProfilePanelV2Props {
   onOpenPerson?: (person: Person) => void;
   onOpenDocument?: (document: DocumentRecord) => void;
   onOpenFinding?: (finding: Finding) => void;
+  onOpenTimelineFinding?: (findingId: string) => void;
+  onOpenRelative?: (personId: string) => void;
+  onEditRelative?: (personId: string) => void;
   onOpenRelated?: (
     page: PersonProfileRelatedPageV2,
     record: PersonProfileRelatedRecordV2,
@@ -729,10 +732,9 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
             person={person}
             items={timeline.slice(0, 5)}
             onOpenAttachment={onOpenPhoto}
-            onOpenFinding={onOpenFinding ? (id) => {
-              const finding = findings.find((item) => item.id === id);
-              if (finding) onOpenFinding(finding);
-            } : undefined}
+            onOpenFinding={props.onOpenTimelineFinding}
+            onOpenRelative={props.onOpenRelative}
+            onEditRelative={props.onEditRelative}
           />
         </ProfileSectionV2>
 
@@ -865,8 +867,9 @@ function TimelinePanelV2({
   onOpenMap,
   onSelectEvent,
   onOpenPhoto,
-  findings,
-  onOpenFinding,
+  onOpenTimelineFinding,
+  onOpenRelative,
+  onEditRelative,
 }: PersonProfilePanelV2Props) {
   return (
     <div className="persons-v2-profile__timeline-layout">
@@ -874,14 +877,19 @@ function TimelinePanelV2({
         title="Хронологія життя"
         action={onAddEvent ? <button type="button" className="button button-primary" onClick={() => onAddEvent(person)}>+ Додати подію</button> : null}
       >
+        {timeline.some((event) => event.relative) ? (
+          <p className="detail-text">
+            Події родичів додаються автоматично зі збережених карток і родинних зв’язків.
+            Зміни в картці родича оновлять цей запис; окрему копію зберігати не потрібно.
+          </p>
+        ) : null}
         <PersonTimelineV2
           person={person}
           items={timeline}
           onSelectEvent={onSelectEvent}
-          onOpenFinding={onOpenFinding ? (id) => {
-            const finding = findings.find((item) => item.id === id);
-            if (finding) onOpenFinding(finding);
-          } : undefined}
+          onOpenFinding={onOpenTimelineFinding}
+          onOpenRelative={onOpenRelative}
+          onEditRelative={onEditRelative}
           onOpenAttachment={onOpenPhoto}
         />
       </ProfileSectionV2>

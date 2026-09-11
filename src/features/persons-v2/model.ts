@@ -94,7 +94,15 @@ export type PersonTimelineDatePrecision =
   | "unknown";
 
 export interface PersonTimelineItem extends PersonEvent {
-  source: "core" | "event";
+  source: "core" | "event" | "relative";
+  /** Read-only projection; edits belong to this relative's original card. */
+  relative?: {
+    personId: string;
+    personName: string;
+    kind: "child" | "parent" | "sibling";
+    sourceEventId: string;
+    relationStatus: PersonRelation["status"];
+  };
   datePrecision: PersonTimelineDatePrecision;
   /** UTC timestamp used only for deterministic chronological ordering. */
   sortTimestamp: number | null;
@@ -417,7 +425,7 @@ export function personTimelineAttachments(
   person: Person,
   event: Pick<PersonTimelineItem, "type" | "scans"> & Partial<Pick<PersonTimelineItem, "source">>,
 ): readonly ScanAttachment[] {
-  const canonical = event.source === "event"
+  const canonical = event.source === "event" || event.source === "relative"
     ? []
     : event.type === "birth"
     ? person.birthScans ?? []
@@ -601,6 +609,12 @@ function withTimelineSort(
     deduplicatedEventIds: event.deduplicatedEventIds ?? [],
     sourceIndex,
   };
+}
+
+export function sortPersonTimelineItems(items: readonly PersonTimelineItem[]): PersonTimelineItem[] {
+  return items.map((event, sourceIndex) => ({ ...event, sourceIndex }))
+    .sort(compareTimelineItems)
+    .map(({ sourceIndex: _sourceIndex, ...event }) => event);
 }
 
 function compareTimelineItems(
