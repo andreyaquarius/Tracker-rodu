@@ -95,6 +95,8 @@ export type PersonTimelineDatePrecision =
 
 export interface PersonTimelineItem extends PersonEvent {
   source: "core" | "event" | "relative";
+  /** Display-only uncertainty; never persisted as part of the source fact. */
+  lifetimeNotice?: string;
   /** Read-only projection; edits belong to this relative's original card. */
   relative?: {
     personId: string;

@@ -26,10 +26,11 @@ const initialPeople = [
     id: "finding:birth-source", personId: "child", type: "birth", date: "1870-05-14", placeName: "Вербівка",
     sourceFindingId: "birth-source", notes: "Тестовий запис про народження.",
   }] }),
-  makePerson("sister", "Олена", { surname: "Тестова", fullName: "Тестова Олена", gender: "жінка", birthDate: "1872", deathDate: "1912" }),
+  makePerson("sister", "Олена", { surname: "Тестова", fullName: "Тестова Олена", gender: "жінка", birthDate: "1872", marriageDate: "1892", deathDate: "1912" }),
+  makePerson("brother", "Микола", { birthDate: "1860", deathDate: "1865" }),
   makePerson("partner", "Марія", { surname: "Тестова", fullName: "Тестова Марія", gender: "жінка" }),
 ];
-const initialRelations: PersonRelation[] = ["child", "sister"].map((id) => ({
+const initialRelations: PersonRelation[] = ["child", "sister", "brother"].map((id) => ({
   id: `parent:${id}`, personId: id, relatedPersonId: "father", relationType: "батько",
   status: "доведено", evidenceText: "", notes: "", createdAt: "", updatedAt: "",
 }));
@@ -53,6 +54,10 @@ function Fixture() {
     <nav aria-label="Тестові сценарії" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
       <button onClick={() => { setEditingId(""); setPersonId("father"); }}>Картка батька</button>
       <button onClick={() => { setEditingId(""); setPersonId("child"); }}>Картка сина</button>
+      <button onClick={() => setPeople((values) => values.map((value) => value.id === "child" ? {
+        ...value, deathDate: "", deathYearFrom: "", deathYearTo: "",
+        events: value.events.map((event) => event.type === "death" ? { ...event, date: null } : event),
+      } : value))}>Невідома дата смерті сина (тест)</button>
       <button onClick={() => setRelations((values) => values.some((value) => value.personId === "child") ? values.filter((value) => value.personId !== "child") : initialRelations)}>
         {relations.some((value) => value.personId === "child") ? "Від’єднати сина (тест)" : "Повернути зв’язок (тест)"}
       </button>
