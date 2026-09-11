@@ -883,6 +883,7 @@ function PersonsModuleV2StandardRoutes({
           onOpenPerson={(person) => onNavigate({ mode: "profile", personId: person.id })}
           onOpenDocument={(document) => onOpenRelated("documents", document.id, document)}
           onOpenFinding={(finding) => onOpenRelated("findings", finding.id, finding)}
+          onOpenFindingById={(findingId) => onOpenRelated("findings", findingId)}
           onOpenRelated={(page, record) => onOpenRelated(page, record.id, record)}
           onBrowseRelated={onNavigateRelated}
           onCreateRelated={!readOnly && onCreateRelated

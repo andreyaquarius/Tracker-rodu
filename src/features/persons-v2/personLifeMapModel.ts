@@ -30,7 +30,8 @@ export interface PersonLifeMapStopGroup {
 export function buildPersonLifeMapStops(
   timeline: readonly PersonTimelineItem[],
 ): PersonLifeMapStop[] {
-  const located = timeline.filter((event) => isValidCoordinate(
+  // A child's wedding place does not prove the parent's presence there.
+  const located = timeline.filter((event) => event.source !== "relative" && isValidCoordinate(
     event.geo?.latitude,
     event.geo?.longitude,
   ));
