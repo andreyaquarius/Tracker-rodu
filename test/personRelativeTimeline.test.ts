@@ -212,6 +212,172 @@ test("unknown dates with meaningful places stay at the end and blank editor even
   assert.deepEqual(result.map((item) => item.datePrecision), ["range", "unknown"]);
 });
 
+test("all close-relative kinds exclude events before birth and after death", () => {
+  const root = person("root", { birthDate: "1900", deathDate: "1950" });
+  const relative = person("relative", { birthDate: "1890", marriageDate: "1920", deathDate: "1960" });
+  const links = [relation("relative", "root"), relation("root", "relative"), relation("root", "relative", { relationType: "сестра" })];
+  for (const link of links) {
+    const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [link] }));
+    assert.deepEqual(items.map((item) => item.type), link.personId === "root" && link.relationType !== "сестра" ? [] : ["marriage"]);
+  }
+});
+
+test("siblings' births and marriages join deaths, without duplicate shared-parent links", () => {
+  const root = person("root", { birthDate: "1870", deathDate: "1950" });
+  const sister = person("sister", { gender: "жінка", birthDate: "1872", marriageDate: "1892", deathDate: "1930" });
+  const brother = person("brother", { gender: "чоловік", birthDate: "1860", deathDate: "1869" });
+  const options = { persons: [root, sister, brother, person("parent"), person("partner")], relations: [
+    relation("root", "parent"), relation("sister", "parent"),
+    relation("root", "sister", { relationType: "сестра" }), relation("brother", "root", { relationType: "брат" }),
+  ], marriages: [marriage("sister-marriage", "sister", "partner", "1892")] };
+  const items = familyOnly(buildPersonFamilyTimeline(root, options));
+  assert.deepEqual(items.map((item) => item.title), ["Народження сестри · sister", "Шлюб сестри · sister", "Смерть сестри · sister"]);
+  assert.equal(items[1].value, "Шлюб з partner");
+  assert.ok(items.every((item) => !item.lifetimeNotice));
+});
+
+test("birth/death days are inclusive, neighbouring days are excluded", () => {
+  const root = person("root", { birthDate: "14.05.1900", deathDate: "1950-06-20" });
+  const dates = ["1900-05-13", "14/05/1900", "1900-05-15", "19.06.1950", "1950-06-20", "21/06/1950"];
+  const relative = person("relative", { events: dates.map((date, index) => event(`day-${index}`, "marriage", date)) });
+  const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("root", "relative", { relationType: "брат" })] }));
+  assert.deepEqual(items.map((item) => item.date), dates.slice(1, -1));
+  assert.ok(items.every((item) => !item.lifetimeNotice));
+});
+
+test("year/month/range boundaries keep overlaps for review and exclude only definite outsiders", () => {
+  const root = person("root", { birthYearFrom: "1900", birthYearTo: "1902", deathDate: "1950-06" });
+  const dates = ["1899", "1900", "1901-02", "1902", "1903", "1949", "1950", "1950-06-30", "1950-07", "1951"];
+  const relative = person("relative", { events: dates.map((date, index) => event(`period-${index}`, "marriage", date)) });
+  const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("relative", "root")] }));
+  assert.deepEqual(new Set(items.map((item) => item.date)), new Set(dates.slice(1, -2)));
+  for (const date of ["1900", "1901-02", "1902"]) assert.match(items.find((item) => item.date === date)!.lifetimeNotice!, /передувати народженню/u);
+  for (const date of ["1950", "1950-06-30"]) assert.match(items.find((item) => item.date === date)!.lifetimeNotice!, /після смерті/u);
+  assert.ok(items.filter((item) => ["1903", "1949"].includes(item.date!)).every((item) => !item.lifetimeNotice));
+});
+
+test("alternative dated vital sources use the widest possible lifetime, not whichever sorts first", () => {
+  const root = person("root", { birthDate: "1900", deathDate: "1940", events: [
+    event("earlier-birth", "birth", "1890", { sourceFindingId: "birth-source" }),
+    event("later-death", "death", "1950", { sourceFindingId: "death-source" }),
+  ] });
+  const relative = person("relative", { birthDate: "1889", marriageDate: "1895", deathDate: "1945" });
+  const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("relative", "root")] }));
+  assert.deepEqual(items.map((item) => item.date), ["1895", "1945"]);
+  assert.ok(items.every((item) => item.lifetimeNotice));
+});
+
+test("undated vital observations do not cancel dated boundaries; approximate competing sources do", () => {
+  const root = person("root", { birthDate: "1900", deathDate: "1950", events: [
+    event("birth-location", "birth", "", { placeName: "Київ" }),
+    event("death-location", "death", "", { placeName: "Київ" }),
+  ] });
+  const relative = person("relative", { birthDate: "1899", deathDate: "1951" });
+  const options = { persons: [root, relative], relations: [relation("relative", "root")] };
+  assert.equal(familyOnly(buildPersonFamilyTimeline(root, options)).length, 0);
+  const uncertain = { ...root, events: [event("uncertain-birth", "birth", "ABT 1890"), event("uncertain-death", "death", "ABT 1960")] };
+  const items = familyOnly(buildPersonFamilyTimeline(uncertain, options));
+  assert.equal(items.length, 2);
+  assert.ok(items.every((item) => item.lifetimeNotice?.includes("не визначено")));
+});
+
+test("deceased/unknown without a death date is explicit uncertainty, never an invented age cutoff", () => {
+  const root = person("root", { birthDate: "1800", isLiving: false, customFields: { gedcom_vital_status: "deceased" } });
+  const relative = person("relative", { birthDate: "1799", marriageDate: "1850", deathDate: "2020" });
+  const options = { persons: [root, relative], relations: [relation("root", "relative", { relationType: "сестра" })] };
+  const items = familyOnly(buildPersonFamilyTimeline(root, options));
+  assert.deepEqual(items.map((item) => item.date), ["1850", "2020"]);
+  assert.ok(items.every((item) => item.lifetimeNotice?.includes("не визначено верхню межу смерті")));
+  const living = familyOnly(buildPersonFamilyTimeline({ ...root, isLiving: true }, options));
+  assert.ok(living.every((item) => !item.lifetimeNotice), "a living person does not need a death date");
+});
+
+test("unknown birth still allows a known death cutoff", () => {
+  const root = person("root", { deathDate: "1950" });
+  const relative = person("relative", { birthDate: "1870", deathDate: "1960" });
+  const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("relative", "root")] }));
+  assert.deepEqual(items.map((item) => item.date), ["1870"]);
+  assert.match(items[0].lifetimeNotice!, /не визначено нижню межу народження/u);
+});
+
+test("open-ended year fields preserve which lifetime boundary is actually known", () => {
+  const relative = person("relative", { birthDate: "1899", marriageDate: "1901", deathDate: "1951" });
+  const cases: [Partial<Person>, string[]][] = [
+    [{ birthYearFrom: "1900", deathYearTo: "1950" }, ["1901"]],
+    [{ birthYearTo: "1900", deathYearFrom: "1950" }, ["1899", "1901", "1951"]],
+  ];
+  for (const [patch, expected] of cases) {
+    const root = person("root", patch);
+    const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("relative", "root")] }));
+    assert.deepEqual(items.map((item) => item.date), expected);
+    assert.ok(items.every((item) => item.lifetimeNotice));
+  }
+});
+
+test("relative open-ended dates do not become false exact years when projected", () => {
+  const root = person("root", { birthDate: "1900", deathDate: "1950" });
+  const relative = person("relative", { birthYearFrom: "1890", deathYearTo: "1960" });
+  const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("relative", "root")] }));
+  assert.equal(items.length, 2, "both open periods might overlap the recipient's lifetime");
+  assert.ok(items.every((item) => item.lifetimeNotice));
+});
+
+test("unknown, invalid and approximate event dates stay visibly unverified", () => {
+  const root = person("root", { birthDate: "1900", deathDate: "1950" });
+  const dates = ["", "ABT 1850", "до 1900", "1901-02-29", "31.04.1950", "0000", "0000–1800", "1905–1900"];
+  const relative = person("relative", { events: dates.map((date, index) => event(`unknown-${index}`, "marriage", date, { placeName: "Київ" })) });
+  const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("relative", "root")] }));
+  assert.equal(items.length, dates.length);
+  assert.ok(items.every((item) => item.lifetimeNotice?.includes("невідома або приблизна дата події")));
+});
+
+test("valid leap days and exact range edges are handled without timezone conversion", () => {
+  const root = person("root", { birthDate: "29.02.1904", deathDate: "1905–1906" });
+  const dates = ["1904-02-28", "1904-02-29", "1906-12-31", "1907-01-01"];
+  const relative = person("relative", { events: dates.map((date, index) => event(`leap-${index}`, "marriage", date)) });
+  const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("relative", "root")] }));
+  assert.deepEqual(items.map((item) => item.date), dates.slice(1, -1));
+});
+
+test("impossible personal lifespan is flagged without hiding all relatives or overwriting evidence", () => {
+  const root = person("root", { birthDate: "1950", deathDate: "1900" });
+  const relative = person("relative", { marriageDate: "1920" });
+  const items = familyOnly(buildPersonFamilyTimeline(root, { persons: [root, relative], relations: [relation("relative", "root")] }));
+  assert.equal(items.length, 1);
+  assert.match(items[0].lifetimeNotice!, /дата смерті передує народженню/u);
+  assert.equal(root.deathDate, "1900");
+});
+
+test("finding participants obey lifetime checks without deleting the source or legitimate personal post-death facts", () => {
+  const root = person("root", { birthDate: "1900", deathDate: "1950", events: [
+    event("pre-birth-witness", "mention", "1899", { sourceFindingId: "early", title: "Свідок · Шлюб" }),
+    event("post-death-godparent", "mention", "1951", { sourceFindingId: "late", title: "Хрещена мати · Народження" }),
+    event("during-life", "mention", "1930", { sourceFindingId: "during", title: "Свідок · Шлюб" }),
+    event("probate", "probate", "1951"), event("burial", "burial", "1951"),
+  ] });
+  const original = structuredClone(root);
+  const items = buildPersonFamilyTimeline(root, { persons: [root], relations: [] });
+  assert.deepEqual(items.filter((item) => item.type === "mention").map((item) => item.id), ["during-life"]);
+  assert.ok(items.some((item) => item.type === "probate"));
+  assert.ok(items.some((item) => item.type === "burial"));
+  assert.deepEqual(root, original);
+});
+
+test("entering, editing and clearing lifetime dates recomputes both cutoffs immediately", () => {
+  const root = person("root");
+  const relative = person("relative", { birthDate: "1899", marriageDate: "1920", deathDate: "1951" });
+  const options = { persons: [root, relative], relations: [relation("relative", "root")] };
+  const first = familyOnly(buildPersonFamilyTimeline(root, options));
+  assert.equal(first.length, 3);
+  const dated = { ...root, birthDate: "1900", deathDate: "1950" };
+  const next = familyOnly(buildPersonFamilyTimeline(dated, options));
+  assert.deepEqual(next.map((item) => item.date), ["1920"]);
+  assert.equal(next[0].id, first[1].id);
+  assert.ok(!next[0].lifetimeNotice);
+  assert.equal(familyOnly(buildPersonFamilyTimeline({ ...dated, birthDate: "1890", deathDate: "1960" }, options)).length, 3);
+  assert.deepEqual(familyOnly(buildPersonFamilyTimeline(root, options)), first);
+});
+
 test("profile actions open/edit the relative and finding by id; family projection stays out of persistence", () => {
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
   const view = read("../src/features/persons-v2/PersonTimelineV2.tsx");
@@ -219,6 +385,7 @@ test("profile actions open/edit the relative and finding by id; family projectio
   assert.match(view, /onSelectEvent && !event\.relative/u);
   assert.match(view, /Вік родича/u);
   assert.match(view, /Спорідненість:/u);
+  assert.match(view, /event\.lifetimeNotice/u);
   const profile = read("../src/features/persons-v2/PersonProfileV2.tsx");
   assert.match(profile, /buildPersonFamilyTimeline\(person, \{ persons, relations, marriages \}\)/u);
   assert.match(profile, /onEditRelative=\{onEdit \?/u);

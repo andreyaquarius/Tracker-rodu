@@ -60,11 +60,15 @@ export function buildPersonFamilyTimeline(person: Person, options: {
   });
   const own = timelineFor(person);
   const relatives = closeRelatives(person.id, people, options.relations);
-  // Only exclude events definitely later than all known death facts. An
-  // uncertain/unknown date is not permission to invent a lifetime boundary.
-  const deaths = own.filter((event) => event.type === "death").map((event) => dateBounds(event.date));
-  const lastPossibleDeath = deaths.length && deaths.every((value) => value !== null)
-    ? Math.max(...deaths.map((value) => value!.to)) : null;
+  const checkLifetime = lifetimeChecker(person, own);
+  // Finding-backed witness/godparent/other participation must not bypass the
+  // same filter. Original facts stay in the editor and the finding unchanged.
+  // Do not censor personal facts (including burial/probate after death).
+  const visibleOwn = own.flatMap((event) => {
+    if (event.type !== "mention" || !event.sourceFindingId) return [event];
+    const check = checkLifetime(eventDateBounds(person, event));
+    return check.exclude ? [] : [{ ...event, lifetimeNotice: check.notice }];
+  });
   const projected: PersonTimelineItem[] = [];
   for (const link of relatives) {
     const relative = people.get(link.personId)!;
@@ -72,12 +76,12 @@ export function buildPersonFamilyTimeline(person: Person, options: {
       // Preserve the existing own-card view, but do not propagate a refuted
       // shared marriage to relatives or resurrect its legacy scalar fallback.
       if (disprovenMarriageFacts.has(event.id)) continue;
-      if (event.type !== "death" && !(link.kind === "child" && (event.type === "birth" || event.type === "marriage"))) continue;
-      const bounds = dateBounds(event.date);
-      if (lastPossibleDeath !== null && bounds && bounds.from > lastPossibleDeath) continue;
+      if (event.type !== "death" && !(link.kind !== "parent" && (event.type === "birth" || event.type === "marriage"))) continue;
+      const check = checkLifetime(eventDateBounds(relative, event));
+      if (check.exclude) continue;
       // A parent may already be a witness/participant in the very same saved
       // finding. Keep that explicit role and provenance instead of adding a copy.
-      if (event.sourceFindingId && own.some((value) => (
+      if (event.sourceFindingId && visibleOwn.some((value) => (
         value.type === "mention" && value.sourceFindingId === event.sourceFindingId
         && value.relatedPersonIds?.includes(relative.id)
       ))) continue;
@@ -87,6 +91,7 @@ export function buildPersonFamilyTimeline(person: Person, options: {
         id: `${person.id}:relative:${relative.id}:${event.id}`,
         personId: person.id,
         source: "relative",
+        lifetimeNotice: check.notice,
         title: `${title} · ${personDisplayName(relative)}`,
         value: [personTimelineEventDisplaySubtitle(event), event.value]
           .filter(Boolean).join(" · ") || null,
@@ -99,7 +104,64 @@ export function buildPersonFamilyTimeline(person: Person, options: {
       });
     }
   }
-  return sortPersonTimelineItems([...own, ...projected]);
+  return sortPersonTimelineItems([...visibleOwn, ...projected]);
+}
+
+interface DateBounds { from: number; to: number }
+
+/** Union of possible dates, not a guessed birthday/death day or life expectancy. */
+function lifeBoundary(person: Person, own: readonly PersonTimelineItem[], type: "birth" | "death"): DateBounds | null {
+  // An undated observation adds no competing date. A dated but unparseable
+  // assertion does: do not silently choose another source as the truth.
+  const dates = own.filter((event) => event.type === type && event.date?.trim())
+    .map((event) => eventDateBounds(person, event));
+  if (!dates.length || dates.some((date) => date === null)) return null;
+  const known = dates as DateBounds[];
+  return { from: Math.min(...known.map((date) => date.from)), to: Math.max(...known.map((date) => date.to)) };
+}
+
+function lifetimeChecker(person: Person, own: readonly PersonTimelineItem[]) {
+  const birth = lifeBoundary(person, own, "birth");
+  const death = lifeBoundary(person, own, "death");
+  const conflicting = birth && death && birth.from > death.to;
+  return (event: DateBounds | null): { exclude: boolean; notice?: string } => {
+    if (conflicting) return {
+      exclude: false,
+      notice: "Межі життя не перевірено: дата смерті передує народженню. Уточніть дати в цій картці.",
+    };
+    if (event && ((birth && event.to < birth.from) || (death && event.from > death.to))) return { exclude: true };
+
+    const reasons: string[] = [];
+    if (!event) reasons.push("невідома або приблизна дата події");
+    if (!birth || !Number.isFinite(birth.from)) reasons.push("не визначено нижню межу народження");
+    else if (event && event.from < birth.to) reasons.push("подія могла передувати народженню");
+    // false also means 'status unknown' in the editor, not a known death date.
+    if ((!death || !Number.isFinite(death.to)) && !person.isLiving) reasons.push("не визначено верхню межу смерті");
+    else if (event && death && event.to > death.from) reasons.push("подія могла бути після смерті");
+    return {
+      exclude: false,
+      ...(reasons.length ? { notice: `Межі життя не перевірено: ${reasons.join("; ")}.` } : {}),
+    };
+  };
+}
+
+function eventDateBounds(person: Person, event: PersonTimelineItem): DateBounds | null {
+  if ((event.type === "birth" || event.type === "death") && event.id === `${person.id}:core:${event.type}`) {
+    const exact = event.type === "birth" ? person.birthDate : person.deathDate;
+    const from = (event.type === "birth" ? person.birthYearFrom : person.deathYearFrom).trim();
+    const to = (event.type === "birth" ? person.birthYearTo : person.deathYearTo).trim();
+    // The display flattens a lone 'year from/to' to one year. Preserve its open
+    // end for filtering: 'died after 1900' is not 'died during 1900'.
+    if (!exact.trim() && (from || to)) {
+      const validYear = (value: string) => /^\d{1,4}$/u.test(value) && Number(value) > 0;
+      if ((from && !validYear(from)) || (to && !validYear(to)) || (from && to && Number(from) > Number(to))) return null;
+      return {
+        from: from ? Number(from) * 10000 + 101 : -Infinity,
+        to: to ? Number(to) * 10000 + 1231 : Infinity,
+      };
+    }
+  }
+  return dateBounds(event.date);
 }
 
 function closeRelatives(personId: string, people: ReadonlyMap<string, Person>, relations: readonly PersonRelation[]): RelativeLink[] {
@@ -160,10 +222,10 @@ function relativeEventTitle(type: PersonTimelineItem["type"], link: RelativeLink
 }
 
 /** Conservative bounds: approximate/GEDCOM wording stays visible for review. */
-function dateBounds(value?: string | null): { from: number; to: number } | null {
+function dateBounds(value?: string | null): DateBounds | null {
   const text = value?.trim() ?? "";
   const range = /^(\d{4})\s*[–—-]\s*(\d{4})$/u.exec(text);
-  if (range) return Number(range[1]) <= Number(range[2])
+  if (range) return Number(range[1]) > 0 && Number(range[1]) <= Number(range[2])
     ? { from: Number(range[1]) * 10000 + 101, to: Number(range[2]) * 10000 + 1231 } : null;
   const local = /^(\d{1,2})[./](\d{1,2})[./](\d{4})$/u.exec(text);
   const iso = local ? [local[0], local[3], local[2], local[1]] : /^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$/u.exec(text);

@@ -120,6 +120,7 @@ function PersonTimelineContentV2({
         {event.relative && event.relative.relationStatus !== "доведено" ? (
           <small>Спорідненість: {event.relative.relationStatus}</small>
         ) : null}
+        {event.lifetimeNotice ? <small className="persons-v2-timeline__lifetime-notice">{event.lifetimeNotice}</small> : null}
         {event.notes ? event.sourceFindingId ? (
           <details className="persons-v2-timeline__source-details">
             <summary>Відомості зі знахідки</summary>
