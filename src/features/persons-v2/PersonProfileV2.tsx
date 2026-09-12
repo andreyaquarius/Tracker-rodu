@@ -54,9 +54,10 @@ import { formatFlexibleDateForDisplay } from "../../utils/dateHelpers.ts";
 import { PersonNamesProfileSectionV2 } from "./PersonNamesProfileSectionV2.tsx";
 import {
   personNameDisplayOptionsFromSettings,
-  resolvePersonNameDisplay,
   type ResolvedPersonNameDisplay,
 } from "../../utils/personNameDisplay.ts";
+import { resolvePersonCardNameDisplay } from "../../utils/personCardNameDisplay.ts";
+import type { FamilyTreeNameDisplayPreferences } from "../family-tree-view/adapters/familyTreeNameDisplay.ts";
 
 export type PersonProfileTabV2 =
   | "overview"
@@ -93,6 +94,7 @@ export interface PersonProfileV2Props {
   personNames?: readonly PersonName[];
   personNamesLoading?: boolean;
   personNamesError?: string;
+  treeNamePreferences?: FamilyTreeNameDisplayPreferences;
   customFieldDefinitions?: CustomFieldDefinition[];
   research?: Research | null;
   persons?: readonly Person[];
@@ -171,6 +173,7 @@ export function PersonProfileV2({
   personNames = [],
   personNamesLoading = false,
   personNamesError = "",
+  treeNamePreferences,
   customFieldDefinitions = [],
   research,
   persons = [],
@@ -216,10 +219,13 @@ export function PersonProfileV2({
   const pendingKeyboardFocus = useRef<PersonProfileTabV2 | null>(null);
   const activeTab = controlledTab ?? internalTab;
   const nameDisplay = useMemo(
-    () => resolvePersonNameDisplay(
+    () => resolvePersonCardNameDisplay(
       person,
       personNames,
       personNameDisplayOptionsFromSettings(db.settings),
+      treeNamePreferences,
+      persons,
+      marriages,
     ),
     [
       db.settings.personNameDisplayDate,
@@ -227,6 +233,9 @@ export function PersonProfileV2({
       db.settings.personNameDisplayMode,
       person,
       personNames,
+      treeNamePreferences,
+      persons,
+      marriages,
     ],
   );
   const name = nameDisplay.label;
@@ -379,7 +388,7 @@ export function PersonProfileV2({
                   onError={() => setPhotoFailed(true)}
                 />
               ) : (
-                <span aria-hidden="true">{personInitials(person)}</span>
+                <span aria-hidden="true">{personInitials(person, name)}</span>
               )}
             </div>
           )}
@@ -643,7 +652,7 @@ function OverviewPanelV2(props: PersonProfilePanelV2Props) {
         <ProfileSectionV2 title="Основна інформація">
           <dl className="persons-v2-profile__facts-grid">
             <ProfileFactV2
-              label={personNameDisplay.mode === "current" ? "Ім’я при народженні" : "Відображуване ім’я"}
+              label="Відображуване ім’я"
               value={personNameDisplay.inlineLabel}
             />
             <ProfileFactV2 label="Дата народження" value={person.birthDate || yearRangeV2(person.birthYearFrom, person.birthYearTo)} />

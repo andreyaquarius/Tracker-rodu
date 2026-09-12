@@ -5,6 +5,8 @@ import {
 } from "../services/familyTreeAppearancePreferences.ts";
 import {
   DEFAULT_FAMILY_TREE_APPEARANCE,
+  FAMILY_TREE_APPEARANCE_CHANGED_EVENT,
+  familyTreeAppearanceStorageKey,
   normalizeFamilyTreeAppearance,
   readFamilyTreeAppearance,
   writeFamilyTreeAppearance,
@@ -36,12 +38,15 @@ function preferenceKey(projectId?: string, treeId?: string): string {
 export function useFamilyTreeAppearancePreferences(
   projectId?: string,
   treeId?: string,
+  options: { readOnly?: boolean; cacheScope?: string } = {},
 ): FamilyTreeAppearancePreferenceState {
-  const [appearance, setAppearance] = useState<FamilyTreeAppearancePreferences>({
-    ...DEFAULT_FAMILY_TREE_APPEARANCE,
-  });
+  const { readOnly = false, cacheScope = "" } = options;
+  const activeKey = `${preferenceKey(projectId, treeId)}:${cacheScope}`;
+  const [appearance, setAppearance] = useState<FamilyTreeAppearancePreferences>(() => (
+    readFamilyTreeAppearance(projectId ?? "", treeId ?? "")
+  ));
+  const [appearanceKey, setAppearanceKey] = useState(activeKey);
   const [syncState, setSyncState] = useState<FamilyTreeAppearanceSyncState>("idle");
-  const activeKey = preferenceKey(projectId, treeId);
   const activeKeyRef = useRef(activeKey);
   const mountedRef = useRef(true);
   const loadSequenceRef = useRef(0);
@@ -62,7 +67,7 @@ export function useFamilyTreeAppearancePreferences(
     targetTreeId: string,
     value: FamilyTreeAppearancePreferences,
   ) => {
-    const targetKey = preferenceKey(targetProjectId, targetTreeId);
+    const targetKey = `${preferenceKey(targetProjectId, targetTreeId)}:${cacheScope}`;
     const saveSequence = ++saveSequenceRef.current;
     if (mountedRef.current && activeKeyRef.current === targetKey) {
       setSyncState("saving");
@@ -96,11 +101,12 @@ export function useFamilyTreeAppearancePreferences(
         setSyncState("error");
       }
     });
-  }, []);
+  }, [cacheScope]);
 
   useEffect(() => {
     const loadSequence = ++loadSequenceRef.current;
     const startingEditSequence = editSequenceRef.current;
+    setAppearanceKey(activeKey);
 
     if (!projectId || !treeId) {
       setAppearance({ ...DEFAULT_FAMILY_TREE_APPEARANCE });
@@ -117,7 +123,7 @@ export function useFamilyTreeAppearancePreferences(
         if (
           !mountedRef.current ||
           loadSequenceRef.current !== loadSequence ||
-          activeKeyRef.current !== preferenceKey(projectId, treeId) ||
+          activeKeyRef.current !== activeKey ||
           editSequenceRef.current !== startingEditSequence
         ) {
           return;
@@ -132,23 +138,48 @@ export function useFamilyTreeAppearancePreferences(
 
         // First launch after the migration: promote the existing browser value
         // (including earlier colour choices) into the user's cloud preference.
-        queueRemoteSave(projectId, treeId, cached);
+        if (readOnly) setSyncState("idle");
+        else queueRemoteSave(projectId, treeId, cached);
       })
       .catch(() => {
         if (
           mountedRef.current &&
           loadSequenceRef.current === loadSequence &&
-          activeKeyRef.current === preferenceKey(projectId, treeId) &&
+          activeKeyRef.current === activeKey &&
           editSequenceRef.current === startingEditSequence
         ) {
           setSyncState("error");
         }
       });
-  }, [projectId, queueRemoteSave, treeId]);
+  }, [activeKey, projectId, queueRemoteSave, readOnly, treeId]);
+
+  useEffect(() => {
+    if (!readOnly || !projectId || !treeId || typeof window === "undefined") return;
+    const refreshCached = () => {
+      // A newer live tree choice must win over an older in-flight server load.
+      editSequenceRef.current += 1;
+      setAppearance(readFamilyTreeAppearance(projectId, treeId));
+      setAppearanceKey(activeKey);
+    };
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId: string; treeId: string }>).detail;
+      if (detail?.projectId === projectId && detail.treeId === treeId) refreshCached();
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === familyTreeAppearanceStorageKey(projectId, treeId) || event.key === null) refreshCached();
+    };
+    window.addEventListener(FAMILY_TREE_APPEARANCE_CHANGED_EVENT, onChanged);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(FAMILY_TREE_APPEARANCE_CHANGED_EVENT, onChanged);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [activeKey, projectId, readOnly, treeId]);
 
   const updateAppearance = useCallback((
     value: FamilyTreeAppearancePreferences,
   ) => {
+    if (readOnly) return;
     const normalized = normalizeFamilyTreeAppearance(value);
     editSequenceRef.current += 1;
     setAppearance(normalized);
@@ -161,7 +192,13 @@ export function useFamilyTreeAppearancePreferences(
     // Cache immediately for a responsive tree, then persist to the account.
     writeFamilyTreeAppearance(projectId, treeId, normalized);
     queueRemoteSave(projectId, treeId, normalized);
-  }, [projectId, queueRemoteSave, treeId]);
+  }, [projectId, queueRemoteSave, readOnly, treeId]);
 
-  return { appearance, syncState, updateAppearance };
+  return {
+    appearance: appearanceKey === activeKey
+      ? appearance
+      : readFamilyTreeAppearance(projectId ?? "", treeId ?? ""),
+    syncState,
+    updateAppearance,
+  };
 }

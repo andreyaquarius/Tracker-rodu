@@ -39,6 +39,10 @@ import {
 import { listProjectDocumentsByIds } from "../../services/projectDocuments";
 import type { ProjectPersonSummary } from "../../services/projectPersonSummaries.ts";
 import { usePersonSummaries } from "../../hooks/usePersonSummaries.ts";
+import { useFamilyTreeAppearancePreferences } from "../../hooks/useFamilyTreeAppearancePreferences.ts";
+import { personNameDisplayOptionsFromSettings } from "../../utils/personNameDisplay.ts";
+import { resolvePersonCatalogNameDisplays } from "../../utils/personCardNameDisplay.ts";
+import { usePersonCatalogNames } from "../../hooks/usePersonCatalogNames.ts";
 import {
   loadProjectPersonPedigreeOrder,
   readCachedProjectPersonPedigreeOrder,
@@ -536,6 +540,24 @@ function PersonsModuleV2StandardRoutes({
         error: "",
       };
 
+  // Reuse the selected tree, or the already-resolved default on a direct profile URL.
+  const namePreferenceTreeId = pedigreeTreeId || currentPedigree?.treeId || currentMarriageLoad.treeId;
+  const { appearance: nameAppearance } = useFamilyTreeAppearancePreferences(projectId, namePreferenceTreeId, {
+    readOnly: true,
+    cacheScope: pedigreeCacheScope,
+  });
+  const treeNamePreferences = namePreferenceTreeId ? nameAppearance : undefined;
+  const catalogNames = usePersonCatalogNames(projectId, pedigreeCacheScope, target.mode === "list");
+  const catalogNameDisplays = useMemo(() => resolvePersonCatalogNameDisplays(
+    persons,
+    projectId ? catalogNames.names : db.personNames ?? [],
+    personNameDisplayOptionsFromSettings(db.settings),
+    treeNamePreferences,
+    currentMarriageLoad.marriages,
+  ), [persons, projectId, catalogNames.names, db.personNames,
+    db.settings.personNameDisplayMode, db.settings.personNameDisplayLanguage, db.settings.personNameDisplayDate,
+    treeNamePreferences, currentMarriageLoad.marriages]);
+
   const loadGedcomDatasetMarkers = useCallback(async (): Promise<GedcomImportDatasetMarker[]> => {
     if (!projectId || !canUseGedcom) {
       return [];
@@ -796,7 +818,10 @@ function PersonsModuleV2StandardRoutes({
         personNamesError={detail.personNamesError}
         personNameDocuments={db.documents}
         personNameFindings={findings}
-        onPersonNamesChanged={(personNames) => setDetail((current) => ({ ...current, personNames }))}
+        onPersonNamesChanged={(personNames) => {
+          setDetail((current) => ({ ...current, personNames }));
+          if (detailPersonId) catalogNames.replacePersonNames(detailPersonId, personNames);
+        }}
         persons={routePersons}
         relations={relations}
         marriages={currentMarriageLoad.marriages}
@@ -853,6 +878,7 @@ function PersonsModuleV2StandardRoutes({
           personNames={detail.personNames}
           personNamesLoading={detail.loading}
           personNamesError={detail.personNamesError}
+          treeNamePreferences={treeNamePreferences}
           customFieldDefinitions={customFieldDefinitions}
           research={research}
           persons={routePersons}
@@ -1103,6 +1129,8 @@ function PersonsModuleV2StandardRoutes({
           <div className="persons-v2-catalog-main">
             <PersonsCatalogV2
             persons={persons}
+            nameDisplays={catalogNameDisplays}
+            nameDisplayNotice={catalogNames.error}
             initialQuery={initialSearch}
             directAncestorIds={effectiveDirectAncestorIds}
             kinshipLabels={kinshipLabels}
@@ -1140,6 +1168,10 @@ function PersonsModuleV2StandardRoutes({
           </div>
           <PersonPreviewDrawerV2
             person={detailPerson}
+            personNames={detail.personNames}
+            nameDisplayOptions={personNameDisplayOptionsFromSettings(db.settings)}
+            treeNamePreferences={treeNamePreferences}
+            marriages={currentMarriageLoad.marriages}
             persons={persons}
             relations={relations}
             research={researches.find((item) => item.id === detailPerson?.researchId) ?? null}

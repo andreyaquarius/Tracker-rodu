@@ -54,6 +54,8 @@ export interface PersonsCatalogV2Props {
   initialPageSize?: number;
   selectedPersonId?: string;
   summaries?: ReadonlyMap<string, ProjectPersonSummary>;
+  nameDisplays?: PersonCatalogOptions["nameDisplays"];
+  nameDisplayNotice?: string;
   headerActions?: ReactNode;
   enabledBulkActions?: readonly PersonsCatalogBulkActionV2[];
   photoUrlForPerson?: (person: Person) => string | undefined;
@@ -96,6 +98,8 @@ export function PersonsCatalogV2({
   initialPageSize = 25,
   selectedPersonId,
   summaries = new Map(),
+  nameDisplays,
+  nameDisplayNotice,
   headerActions,
   enabledBulkActions = [],
   photoUrlForPerson,
@@ -136,8 +140,9 @@ export function PersonsCatalogV2({
     segment,
     directPersonIds: directIds,
     familyOrder,
+    nameDisplays,
     ...catalogSortOptionsV2(sort),
-  }), [directIds, familyOrder, filters, persons, segment, sort]);
+  }), [directIds, familyOrder, filters, persons, segment, sort, nameDisplays]);
 
   const totalPages = Math.max(1, Math.ceil(result.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -235,6 +240,8 @@ export function PersonsCatalogV2({
           ) : null}
         </div>
       </header>
+
+      {nameDisplayNotice ? <p className="notice" role="status">{nameDisplayNotice}</p> : null}
 
       <nav className="persons-v2-segments" aria-label="Групи осіб">
         {(Object.keys(segmentLabels) as PersonsCatalogSegmentV2[])
@@ -400,6 +407,7 @@ export function PersonsCatalogV2({
         view === "list" ? (
           <PersonsListV2
             persons={visiblePersons}
+            nameDisplays={nameDisplays}
             kinshipLabels={kinshipLabels}
             selectedIds={selectedIds}
             activePersonId={selectedPersonId}
@@ -413,6 +421,7 @@ export function PersonsCatalogV2({
         ) : (
           <PersonsGridV2
             persons={visiblePersons}
+            nameDisplays={nameDisplays}
             kinshipLabels={kinshipLabels}
             selectedIds={selectedIds}
             activePersonId={selectedPersonId}
@@ -457,6 +466,7 @@ export function PersonsCatalogV2({
 
 interface PersonsCollectionViewPropsV2 {
   persons: readonly Person[];
+  nameDisplays?: PersonCatalogOptions["nameDisplays"];
   kinshipLabels: ReadonlyMap<string, string>;
   selectedIds: ReadonlySet<string>;
   activePersonId?: string;
@@ -470,6 +480,7 @@ interface PersonsCollectionViewPropsV2 {
 
 function PersonsListV2({
   persons,
+  nameDisplays,
   kinshipLabels,
   selectedIds,
   activePersonId,
@@ -510,14 +521,14 @@ function PersonsListV2({
                 <input
                   type="checkbox"
                   checked={selectedIds.has(person.id)}
-                  aria-label={`Вибрати ${personDisplayNameV2(person)}`}
+                  aria-label={`Вибрати ${nameDisplays?.get(person.id)?.label ?? personDisplayNameV2(person)}`}
                   onClick={stopPropagationV2}
                   onKeyDown={stopKeyboardPropagationV2}
                   onChange={() => onToggleSelected(person.id)}
                 />
               </td>
               <td>
-                <PersonIdentityV2 person={person} photoUrl={photoUrlForPerson?.(person)} />
+                <PersonIdentityV2 person={person} displayName={nameDisplays?.get(person.id)?.label} photoUrl={photoUrlForPerson?.(person)} />
               </td>
               <td>{personLifeYearsV2(person)}</td>
               <td><span className="status-pill">{person.status}</span></td>
@@ -530,7 +541,7 @@ function PersonsListV2({
                   <button
                     type="button"
                     className="button button-danger persons-v2-delete-person"
-                    aria-label={`Видалити ${personDisplayNameV2(person)}`}
+                    aria-label={`Видалити ${nameDisplays?.get(person.id)?.label ?? personDisplayNameV2(person)}`}
                     title="Видалити особу"
                     onClick={(event) => {
                       event.stopPropagation();
@@ -552,6 +563,7 @@ function PersonsListV2({
 
 function PersonsGridV2({
   persons,
+  nameDisplays,
   kinshipLabels,
   selectedIds,
   activePersonId,
@@ -577,7 +589,7 @@ function PersonsGridV2({
             <input
               type="checkbox"
               checked={selectedIds.has(person.id)}
-              aria-label={`Вибрати ${personDisplayNameV2(person)}`}
+              aria-label={`Вибрати ${nameDisplays?.get(person.id)?.label ?? personDisplayNameV2(person)}`}
               onClick={stopPropagationV2}
               onKeyDown={stopKeyboardPropagationV2}
               onChange={() => onToggleSelected(person.id)}
@@ -586,7 +598,7 @@ function PersonsGridV2({
               <button
                 type="button"
                 className="button button-danger persons-v2-grid-card__delete"
-                aria-label={`Видалити ${personDisplayNameV2(person)}`}
+                aria-label={`Видалити ${nameDisplays?.get(person.id)?.label ?? personDisplayNameV2(person)}`}
                 title="Видалити особу"
                 onClick={(event) => {
                   event.stopPropagation();
@@ -598,7 +610,7 @@ function PersonsGridV2({
               </button>
             ) : null}
           </div>
-          <PersonIdentityV2 person={person} photoUrl={photoUrlForPerson?.(person)} large />
+          <PersonIdentityV2 person={person} displayName={nameDisplays?.get(person.id)?.label} photoUrl={photoUrlForPerson?.(person)} large />
           <span className="status-pill">{person.status}</span>
           <dl>
             <div><dt>Роки життя</dt><dd>{personLifeYearsV2(person)}</dd></div>
@@ -615,8 +627,9 @@ function PersonsGridV2({
   );
 }
 
-function PersonIdentityV2({ person, photoUrl, large = false }: {
+function PersonIdentityV2({ person, displayName, photoUrl, large = false }: {
   person: Person;
+  displayName?: string;
   photoUrl?: string;
   large?: boolean;
 }) {
@@ -629,10 +642,10 @@ function PersonIdentityV2({ person, photoUrl, large = false }: {
             alt=""
             style={personAvatarImageStyle(primaryPersonPhoto(person.photos, person.primaryPhotoId))}
           />
-        ) : personInitialsV2(person)}
+        ) : personInitialsV2(person, displayName)}
       </span>
       <span>
-        <strong>{personDisplayNameV2(person)}</strong>
+        <strong>{displayName ?? personDisplayNameV2(person)}</strong>
         <small>ID: {person.id}</small>
       </span>
     </div>

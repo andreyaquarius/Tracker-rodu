@@ -106,6 +106,7 @@ const GROUPING_DEPTH: Readonly<Record<DirectLineageGrouping, 0 | 1 | 2 | 3>> = {
 
 type ReadableStorage = Pick<Storage, "getItem">;
 type WritableStorage = Pick<Storage, "setItem">;
+export const FAMILY_TREE_APPEARANCE_CHANGED_EVENT = "tracker-rodu:family-tree-appearance-changed";
 
 function validHexColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
@@ -204,6 +205,11 @@ export function writeFamilyTreeAppearance(
       familyTreeAppearanceStorageKey(projectId, treeId),
       JSON.stringify(normalizeFamilyTreeAppearance(value)),
     );
+    if (typeof window !== "undefined" && storage === browserLocalStorage()) {
+      window.dispatchEvent(new CustomEvent(FAMILY_TREE_APPEARANCE_CHANGED_EVENT, {
+        detail: { projectId, treeId },
+      }));
+    }
   } catch {
     // Private browsing or a full quota must not block the live preference.
   }
