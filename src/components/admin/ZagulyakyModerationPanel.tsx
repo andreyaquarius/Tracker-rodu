@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createAdminZagulyakaDuplicateCandidate,
   loadAdminZagulyakaPrivacyClearance,
@@ -29,6 +29,7 @@ import {
   type ZagulyakaVerificationStatus,
 } from "../../services/zagulyakyAdminService.ts";
 import { zagulyakaEventRoleLabel } from "../../utils/zagulyakyEventRoles";
+import { attachmentPublicationAction, isArchivalPublicationSource, publicationBlocker, publishZagulyakaWithAttachments } from "../../utils/zagulyakyPublication.ts";
 import { Modal } from "../Modal";
 import "./ZagulyakyModerationPanel.css";
 
@@ -134,7 +135,13 @@ function errorMessage(error: unknown): string {
     return "Перед публікацією встановіть статус приватності «Можна публікувати».";
   }
   if (message.includes("LIVING_PERSON_DOCUMENTED_CONSENT_REQUIRED")) {
-    return "Для потенційно живої особи спершу зафіксуйте дату та приватне посилання на підтверджену згоду.";
+    return "Для історичного запису підтвердьте архівну підставу без даних живих осіб. Якщо запис стосується живої особи — зафіксуйте документовану згоду.";
+  }
+  if (message.includes("ARCHIVAL_PUBLICATION_SOURCE_REQUIRED")) {
+    return "Оберіть прив’язане джерело з архівним посиланням, описом або URL. Джерело з обмеженим доступом не підходить для цієї дії.";
+  }
+  if (message.includes("ARCHIVAL_PUBLICATION_BLOCKED")) {
+    return "Публікацію заблоковано з міркувань приватності. Спершу розгляньте причину блокування; підтвердження фото не знімає її автоматично.";
   }
   if (message.includes("CONSENT_EVIDENCE_REFERENCE_REQUIRED")) {
     return "Додайте приватне посилання або номер доказу згоди (щонайменше 3 символи).";
@@ -174,6 +181,9 @@ function errorMessage(error: unknown): string {
   }
   if (message.includes("ATTACHMENT_OPERATION_FAILED")) {
     return "Не вдалося безпечно обробити вкладення. Спробуйте ще раз або перевірте журнал модерації.";
+  }
+  if (/Could not find the function.*admin_publish_archival_zagulyaka_v1/i.test(message)) {
+    return "Серверне підтвердження архівних записів ще не оновлено. Застосуйте нову міграцію Supabase для архівної публікації та повторіть дію.";
   }
   if (message.includes("PGRST202") || /Could not find the function.*zagulyaka_attachment/i.test(message)) {
     return "Серверні зміни для вкладень ще не застосовані. Застосуйте міграції Supabase та задеплойте Edge Functions.";
@@ -253,6 +263,9 @@ export function ZagulyakyModerationPanel() {
   const [consentObtainedAt, setConsentObtainedAt] = useState("");
   const [consentEvidenceReference, setConsentEvidenceReference] = useState("");
   const [consentPrivateNote, setConsentPrivateNote] = useState("");
+  const [archivalConfirmed, setArchivalConfirmed] = useState(false);
+  const [archivalSourceId, setArchivalSourceId] = useState("");
+  const reviewBusyRef = useRef(false);
   const [attachmentBusyId, setAttachmentBusyId] = useState("");
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null);
   const [claimStatus, setClaimStatus] = useState<ZagulyakaClaimStatus | "">("open");
@@ -282,7 +295,7 @@ export function ZagulyakyModerationPanel() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const refreshQueue = useCallback(async () => {
+  const refreshQueue = useCallback(async (keepSelected = false) => {
     setLoading(true);
     setError("");
     try {
@@ -291,7 +304,7 @@ export function ZagulyakyModerationPanel() {
       setTotal(page.total);
       setSelected((current) => {
         if (!current) return null;
-        return page.items.find((item) => item.id === current.id) ?? null;
+        return page.items.find((item) => item.id === current.id) ?? (keepSelected ? current : null);
       });
     } catch (requestError) {
       setError(errorMessage(requestError));
@@ -366,6 +379,8 @@ export function ZagulyakyModerationPanel() {
     setConsentObtainedAt("");
     setConsentEvidenceReference("");
     setConsentPrivateNote("");
+    setArchivalConfirmed(false);
+    setArchivalSourceId("");
     void Promise.all([
       loadAdminZagulyakaDetail(selected.id),
       loadAdminZagulyakaDuplicateCandidates(selected.id, null, 50, 0),
@@ -379,8 +394,14 @@ export function ZagulyakyModerationPanel() {
         const slug = value.record.public_slug;
         setPublicSlug(typeof slug === "string" ? slug : "");
         setConsentObtainedAt(clearance.consentObtainedAt ? clearance.consentObtainedAt.slice(0, 10) : "");
-        setConsentEvidenceReference(clearance.evidenceReference);
-        setConsentPrivateNote(clearance.privateNote);
+        const historical = clearance.publicationBasis === "historical_archive";
+        setConsentEvidenceReference(historical ? "" : clearance.evidenceReference);
+        setConsentPrivateNote(historical ? "" : clearance.privateNote);
+        setArchivalConfirmed(historical && clearance.clearanceCurrent);
+        const sources = value.sources.filter(isArchivalPublicationSource);
+        const reviewedSourceId = historical ? clearance.evidenceReference.replace(/^archival-source:/, "") : "";
+        setArchivalSourceId(sources.find((source) => source.id === reviewedSourceId)?.id as string
+          || (sources.length === 1 ? String(sources[0].id) : ""));
       })
       .catch((requestError) => {
         if (active) setError(errorMessage(requestError));
@@ -417,77 +438,89 @@ export function ZagulyakyModerationPanel() {
     setDuplicateSurvivorId(selectedDuplicate.record.id);
   }, [selectedDuplicate]);
 
-  const runReview = async (action: ZagulyakaModerationAction) => {
-    if (!selected || submitting) return;
+  const runReview = async (action: ZagulyakaModerationAction, onlyAttachmentIds?: string[]) => {
+    if (!selected || submitting || attachmentBusyId || reviewBusyRef.current || detailLoading) return;
     if (["request_changes", "reject"].includes(action) && moderationNote.trim().length < 3) {
       setError("Для повернення або відхилення додайте зрозумілий коментар модератора.");
       return;
     }
+    if (action === "publish" && publishBlocker) {
+      setError(errorMessage(new Error(publishBlocker)));
+      return;
+    }
     const pendingAttachmentIds = action === "publish"
-      ? (detail?.attachments ?? [])
+      ? onlyAttachmentIds ?? (detail?.attachments ?? [])
         .filter((attachment) => attachment.is_public_derivative !== true)
         .map((attachment) => detailText(attachment, "id"))
         .filter((attachmentId) => attachmentId !== "—")
       : [];
     const publishConfirmation = pendingAttachmentIds.length
-      ? `Опублікувати цей запис і створити публічні копії ${pendingAttachmentIds.length} вкладень?`
+      ? `Опублікувати цей запис і створити публічні копії вкладень: ${pendingAttachmentIds.length}?`
       : "Опублікувати цей запис?";
     if (["publish", "reject", "archive"].includes(action)
       && !window.confirm(action === "publish" ? publishConfirmation : "Підтвердити цю модераторську дію?")) return;
+    reviewBusyRef.current = true;
     setSubmitting(true);
     setError("");
     setSuccess("");
     try {
-      const reviewed = await reviewAdminZagulyaka({
+      const review = () => reviewAdminZagulyaka({
         recordId: selected.id,
-        expectedLockVersion: selected.lockVersion,
+        expectedLockVersion: typeof detail?.record.lock_version === "number" ? detail.record.lock_version : selected.lockVersion,
         action,
         note: moderationNote,
         verificationStatus,
-        privacyStatus,
+        // Publishing explicitly approves visibility; the server still enforces
+        // living-person clearance and its content-bound archival alternative.
+        privacyStatus: action === "publish" ? "cleared" : privacyStatus,
         publicSlug,
+        archivalSourceId: action === "publish" && archivalConfirmed ? archivalSourceId : null,
       });
-      if (action === "publish" && pendingAttachmentIds.length) {
-        // Copy one original at a time. A batch can contain several 25 MiB PDFs,
-        // and parallel browser requests would needlessly exhaust Edge/Storage
-        // memory while the moderator is waiting for a single confirmation.
-        const publicationErrors: unknown[] = [];
-        for (const attachmentId of pendingAttachmentIds) {
-          try {
-            await publishAdminZagulyakaAttachment(attachmentId);
-          } catch (publicationError) {
-            publicationErrors.push(publicationError);
-          }
-        }
-        if (publicationErrors.length) {
-          setError(`Запис опубліковано, але ${publicationErrors.length} із ${pendingAttachmentIds.length} вкладень не вдалося скопіювати. ${errorMessage(publicationErrors[0])}`);
+      if (action === "publish") {
+        const { record: reviewed, failures } = await publishZagulyakaWithAttachments({
+          publishRecord: review,
+          attachmentIds: pendingAttachmentIds,
+          publishAttachment: publishAdminZagulyakaAttachment,
+        });
+        if (failures.length) {
           setSuccess("Модераторське рішення збережено в журналі аудиту.");
           // Keep the newly published record open so the moderator can retry an
           // individual controlled copy without having to find it in the queue.
           setSelected(reviewed);
+          await refreshQueue(true);
           setReviewRefreshKey((value) => value + 1);
+          setError(`Запис опубліковано, але ${failures.length} із ${pendingAttachmentIds.length} вкладень не вдалося скопіювати. ${errorMessage(failures[0].error)}`);
         } else {
-          setSuccess(`Запис і ${pendingAttachmentIds.length} вкладень опубліковано. Публічні копії доступні з картки.`);
-          setSelected(null);
+          setSuccess(pendingAttachmentIds.length
+            ? `Запис опубліковано. Опублікованих вкладень: ${pendingAttachmentIds.length}. Публічні копії доступні з картки.`
+            : "Запис опубліковано. Модераторське рішення збережено в журналі аудиту.");
+          const hasOtherPrivateAttachments = onlyAttachmentIds && detail?.attachments.some((attachment) =>
+            attachment.is_public_derivative !== true && !onlyAttachmentIds.includes(detailText(attachment, "id")));
+          setSelected(hasOtherPrivateAttachments ? reviewed : null);
+          await refreshQueue(Boolean(hasOtherPrivateAttachments));
+          if (hasOtherPrivateAttachments) setReviewRefreshKey((value) => value + 1);
         }
       } else {
+        await review();
         setSuccess("Модераторське рішення збережено в журналі аудиту.");
         setSelected(null);
+        await refreshQueue();
       }
-      await refreshQueue();
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
       setSubmitting(false);
+      reviewBusyRef.current = false;
     }
   };
 
   const runRecordLivingConsent = async () => {
-    if (!selected || !selected.possibleLivingPerson || submitting) return;
+    if (!selected || !selected.possibleLivingPerson || submitting || attachmentBusyId || reviewBusyRef.current) return;
     if (!consentObtainedAt || consentEvidenceReference.trim().length < 3) {
       setError("Вкажіть дату та приватне посилання або номер доказу згоди.");
       return;
     }
+    reviewBusyRef.current = true;
     setSubmitting(true);
     setError("");
     setSuccess("");
@@ -512,11 +545,13 @@ export function ZagulyakyModerationPanel() {
       setError(errorMessage(requestError));
     } finally {
       setSubmitting(false);
+      reviewBusyRef.current = false;
     }
   };
 
   const runPreviewAttachment = async (attachmentId: string) => {
-    if (attachmentBusyId) return;
+    if (attachmentBusyId || submitting || reviewBusyRef.current) return;
+    reviewBusyRef.current = true;
     setAttachmentBusyId(attachmentId);
     setError("");
     setSuccess("");
@@ -535,40 +570,55 @@ export function ZagulyakyModerationPanel() {
       setError(errorMessage(requestError));
     } finally {
       setAttachmentBusyId("");
+      reviewBusyRef.current = false;
     }
   };
 
   const runPublishAttachment = async (attachmentId: string) => {
-    if (!selected || attachmentBusyId || !window.confirm("Створити контрольовану публічну копію цього вкладення? Вона стане доступною лише разом із публічним записом.")) return;
+    if (!selected || attachmentBusyId || submitting || reviewBusyRef.current || detailLoading) return;
+    const action = attachmentPublicationAction(selected);
+    if (action === "publish_record") {
+      await runReview("publish", [attachmentId]);
+      return;
+    }
+    if (action === "unavailable" || publishBlocker) {
+      setError(errorMessage(new Error(publishBlocker ?? "ATTACHMENT_RECORD_NOT_PUBLIC")));
+      return;
+    }
+    if (!window.confirm("Створити публічну копію цього вкладення для вже опублікованого запису?")) return;
+    reviewBusyRef.current = true;
     setAttachmentBusyId(attachmentId);
     setError("");
     setSuccess("");
     try {
       await publishAdminZagulyakaAttachment(attachmentId);
       setSuccess("Публічну копію вкладення створено. Доступ контролюється через короткочасні посилання.");
-      await refreshQueue();
+      await refreshQueue(true);
       setReviewRefreshKey((value) => value + 1);
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
       setAttachmentBusyId("");
+      reviewBusyRef.current = false;
     }
   };
 
   const runRevokeAttachment = async (attachmentId: string) => {
-    if (attachmentBusyId || !window.confirm("Відкликати публічну копію вкладення? Нові посилання на неї більше не видаватимуться.")) return;
+    if (attachmentBusyId || submitting || reviewBusyRef.current || !window.confirm("Відкликати публічну копію вкладення? Нові посилання на неї більше не видаватимуться.")) return;
+    reviewBusyRef.current = true;
     setAttachmentBusyId(attachmentId);
     setError("");
     setSuccess("");
     try {
       await revokeAdminZagulyakaAttachment(attachmentId);
       setSuccess("Публічну копію вкладення відкликано.");
-      await refreshQueue();
+      await refreshQueue(true);
       setReviewRefreshKey((value) => value + 1);
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
       setAttachmentBusyId("");
+      reviewBusyRef.current = false;
     }
   };
 
@@ -717,6 +767,16 @@ export function ZagulyakyModerationPanel() {
   };
   const hasCurrentLivingClearance = privacyClearance?.reviewStatus === "approved"
     && privacyClearance.clearanceCurrent;
+  const archivalSources = (detail?.sources ?? []).filter(isArchivalPublicationSource);
+  const publishBlocker = publicationBlocker({
+    privacyBlocked: selected?.privacyStatus === "blocked" || privacyStatus === "blocked",
+    possibleLivingPerson: selected?.possibleLivingPerson ?? false,
+    hasCurrentClearance: hasCurrentLivingClearance,
+    archivalConfirmed,
+    hasArchivalSource: archivalSources.some((source) => source.id === archivalSourceId),
+  });
+  const reviewBusy = submitting || Boolean(attachmentBusyId);
+  const attachmentAction = selected ? attachmentPublicationAction(selected) : "unavailable";
   // Imported and AI-materialized records begin as private drafts. They cannot
   // be published from this state, so show a living-person privacy review only
   // at the actual review/publication stages. The server remains authoritative.
@@ -775,7 +835,7 @@ export function ZagulyakyModerationPanel() {
                         <td><span className={`zagulyaky-status status-${item.status}`}>{STATUS_LABELS[item.status]}</span></td>
                         <td>{item.sourceCount}{item.duplicateCandidateCount ? <small>дублі: {item.duplicateCandidateCount}</small> : null}</td>
                         <td>{displayDate(item.submittedAt)}</td>
-                        <td><button type="button" className="button button-secondary" onClick={() => setSelected(item)}>Перевірити</button></td>
+                        <td><button type="button" className="button button-secondary" disabled={reviewBusy} onClick={() => setSelected(item)}>Перевірити</button></td>
                       </tr>
                     ))}
                     {!loading && !items.length ? <tr><td colSpan={5}>У цій черзі записів немає.</td></tr> : null}
@@ -789,7 +849,7 @@ export function ZagulyakyModerationPanel() {
               <section className="admin-panel-card zagulyaky-review-panel" aria-label="Перевірка загуляки">
                 <div className="admin-card-heading">
                   <div><span className="eyebrow">{selected.kind === "person" ? "Людина" : "Документ"}</span><h2>{selected.title}</h2></div>
-                  <button type="button" className="button button-secondary" onClick={() => setSelected(null)}>Закрити</button>
+                  <button type="button" className="button button-secondary" disabled={reviewBusy} onClick={() => setSelected(null)}>Закрити</button>
                 </div>
                 <dl className="zagulyaky-review-facts">
                   <div><dt>Подія / дата</dt><dd>{selected.eventType ?? "—"} · {selected.eventDateText ?? selected.eventYearFrom ?? "—"}</dd></div>
@@ -798,35 +858,51 @@ export function ZagulyakyModerationPanel() {
                   <div><dt>Підстава класифікації</dt><dd>{selected.classificationReason || "—"}</dd></div>
                 </dl>
                 {selected.summary ? <p className="zagulyaky-review-summary">{selected.summary}</p> : null}
-                {requiresLivingPrivacyReview && selected.possibleLivingPerson ? (
-                  <section className="zagulyaky-living-clearance" aria-label="Підтвердження згоди для живої особи">
+                {requiresLivingPrivacyReview ? (
+                  <section className="zagulyaky-living-clearance" aria-label="Підстава публікації">
                     <div>
-                      <h3>Можливо жива особа</h3>
-                      <p>Публікація технічно заблокована, доки модератор не зафіксує дату та приватне посилання на документовану згоду.</p>
+                      <h3>Підстава публікації</h3>
+                      <p>Опублікований архівний запис без даних живих осіб можна підтвердити без згоди. Для даних живих осіб потрібна документована згода.</p>
+                      {selected.possibleLivingPerson ? <p>Запис позначено як такий, що може стосуватися живої особи. Модератор має уточнити підставу перед публікацією.</p> : null}
                     </div>
                     <span className={`zagulyaky-status clearance-${privacyClearance?.reviewStatus ?? "missing"}`}>
                       {hasCurrentLivingClearance
-                        ? "Згоду зафіксовано"
+                        ? privacyClearance?.publicationBasis === "historical_archive" ? "Архівну підставу підтверджено" : "Згоду зафіксовано"
                         : privacyClearance?.reviewStatus === "approved"
-                          ? "Дані змінилися — оновіть згоду"
-                          : "Згоду не зафіксовано"}
+                          ? "Дані змінилися — потрібна повторна перевірка"
+                          : archivalConfirmed ? "Обрано архівну підставу" : "Оберіть підставу для публікації"}
                     </span>
-                    <label>Дата отримання згоди
-                      <input type="date" value={consentObtainedAt} onChange={(event) => setConsentObtainedAt(event.target.value)} disabled={submitting} />
-                    </label>
-                    <label>Приватне посилання / номер доказу
-                      <input value={consentEvidenceReference} onChange={(event) => setConsentEvidenceReference(event.target.value)} maxLength={500} disabled={submitting} placeholder="Напр. consent-2026-001 або private/consents/..." />
-                    </label>
-                    <label className="wide">Приватна примітка
-                      <textarea value={consentPrivateNote} onChange={(event) => setConsentPrivateNote(event.target.value)} rows={2} maxLength={3000} disabled={submitting} />
-                    </label>
-                    <button type="button" className="button button-secondary" disabled={submitting} onClick={() => void runRecordLivingConsent()}>
-                      {hasCurrentLivingClearance ? "Оновити згоду" : "Зафіксувати згоду"}
-                    </button>
+                    {selected.status === "pending_review" ? <>
+                      <label className="wide zagulyaky-archival-confirmation">
+                        <input type="checkbox" checked={archivalConfirmed} disabled={reviewBusy || detailLoading || selected.privacyStatus === "blocked"} onChange={(event) => { setArchivalConfirmed(event.target.checked); setPrivacyStatus(event.target.checked ? "cleared" : selected.privacyStatus); }} />
+                        <span>Підтверджую: це опубліковане архівне джерело, запис і вкладення не містять даних живих осіб.</span>
+                      </label>
+                      {archivalConfirmed ? <label className="wide">Архівне джерело
+                        <select value={archivalSourceId} onChange={(event) => setArchivalSourceId(event.target.value)} disabled={reviewBusy || detailLoading}>
+                          <option value="">Оберіть джерело</option>
+                          {archivalSources.map((source) => <option key={String(source.id)} value={String(source.id)}>{detailText(source, "title", "citation", "archive_name", "source_url")}</option>)}
+                        </select>
+                        <small>Підстава збережеться разом із публікацією. Дату або доказ згоди вводити не потрібно.</small>
+                      </label> : null}
+                    </> : null}
+                    {selected.possibleLivingPerson && !archivalConfirmed ? <>
+                      <label>Дата отримання згоди живої особи
+                        <input type="date" value={consentObtainedAt} onChange={(event) => setConsentObtainedAt(event.target.value)} disabled={reviewBusy} />
+                      </label>
+                      <label>Приватне посилання / номер доказу
+                        <input value={consentEvidenceReference} onChange={(event) => setConsentEvidenceReference(event.target.value)} maxLength={500} disabled={reviewBusy} placeholder="Напр. consent-2026-001 або private/consents/..." />
+                      </label>
+                      <label className="wide">Приватна примітка
+                        <textarea value={consentPrivateNote} onChange={(event) => setConsentPrivateNote(event.target.value)} rows={2} maxLength={3000} disabled={reviewBusy} />
+                      </label>
+                      <button type="button" className="button button-secondary" disabled={reviewBusy || detailLoading} onClick={() => void runRecordLivingConsent()}>
+                        {hasCurrentLivingClearance ? "Оновити згоду" : "Зафіксувати згоду"}
+                      </button>
+                    </> : null}
                   </section>
                 ) : null}
                 {detailLoading ? <div className="admin-loading">Завантажуємо джерела й учасників…</div> : null}
-                {detail ? <ReviewEvidence detail={detail} attachmentBusyId={attachmentBusyId} onPreview={(attachmentId) => void runPreviewAttachment(attachmentId)} onPublish={(attachmentId) => void runPublishAttachment(attachmentId)} onRevoke={(attachmentId) => void runRevokeAttachment(attachmentId)} /> : null}
+                {detail ? <ReviewEvidence detail={detail} attachmentBusyId={attachmentBusyId} busy={reviewBusy} publicationAllowed={attachmentAction !== "unavailable" && !publishBlocker} publicationLabel={attachmentAction === "publish_record" ? "Опублікувати запис і фото / файл" : "Створити публічну копію"} onPreview={(attachmentId) => void runPreviewAttachment(attachmentId)} onPublish={(attachmentId) => void runPublishAttachment(attachmentId)} onRevoke={(attachmentId) => void runRevokeAttachment(attachmentId)} /> : null}
                 {detail ? <ReviewHistory detail={detail} /> : null}
                 <RecordDuplicateSummary
                   recordId={selected.id}
@@ -840,25 +916,26 @@ export function ZagulyakyModerationPanel() {
 
                 <div className="zagulyaky-review-form">
                   <label>Достовірність
-                    <select value={verificationStatus} onChange={(event) => setVerificationStatus(event.target.value as ZagulyakaVerificationStatus)}>
+                    <select value={verificationStatus} disabled={reviewBusy} onChange={(event) => setVerificationStatus(event.target.value as ZagulyakaVerificationStatus)}>
                       {Object.entries(VERIFICATION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>
                   </label>
                   <label>Приватність
-                    <select value={privacyStatus} onChange={(event) => setPrivacyStatus(event.target.value as ZagulyakaPrivacyStatus)}>
+                    <select value={privacyStatus} disabled={reviewBusy} onChange={(event) => setPrivacyStatus(event.target.value as ZagulyakaPrivacyStatus)}>
                       {Object.entries(PRIVACY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>
                   </label>
                   <label className="wide">Публічна адреса
-                    <input value={publicSlug} onChange={(event) => setPublicSlug(event.target.value)} placeholder="Автоматично, якщо лишити порожнім" maxLength={180} />
+                    <input value={publicSlug} disabled={reviewBusy} onChange={(event) => setPublicSlug(event.target.value)} placeholder="Автоматично, якщо лишити порожнім" maxLength={180} />
                   </label>
                   <label className="wide">Коментар модератора
-                    <textarea value={moderationNote} onChange={(event) => setModerationNote(event.target.value)} rows={3} maxLength={8000} placeholder="Обов’язково для повернення на уточнення або відхилення" />
+                    <textarea value={moderationNote} disabled={reviewBusy} onChange={(event) => setModerationNote(event.target.value)} rows={3} maxLength={8000} placeholder="Обов’язково для повернення на уточнення або відхилення" />
                   </label>
                 </div>
+                {selected.status === "pending_review" && publishBlocker ? <p className="zagulyaky-publication-hint" role="status">{errorMessage(new Error(publishBlocker))}</p> : null}
                 <div className="zagulyaky-review-actions">
                   {reviewActions.map((action) => (
-                    <button key={action} type="button" disabled={submitting || detailLoading} className={`button ${action === "publish" ? "button-primary" : "button-secondary"}`} onClick={() => void runReview(action)}>{actionLabels[action]}</button>
+                    <button key={action} type="button" disabled={reviewBusy || detailLoading || (action === "publish" && Boolean(publishBlocker))} className={`button ${action === "publish" ? "button-primary" : "button-secondary"}`} onClick={() => void runReview(action)}>{submitting && action === "publish" ? "Публікуємо…" : actionLabels[action]}</button>
                   ))}
                   {!reviewActions.length ? <span>Для цього статусу немає доступних переходів.</span> : null}
                 </div>
@@ -920,12 +997,18 @@ export function ZagulyakyModerationPanel() {
 function ReviewEvidence({
   detail,
   attachmentBusyId,
+  busy,
+  publicationAllowed,
+  publicationLabel,
   onPreview,
   onPublish,
   onRevoke,
 }: {
   detail: AdminZagulyakaDetail;
   attachmentBusyId: string;
+  busy: boolean;
+  publicationAllowed: boolean;
+  publicationLabel: string;
   onPreview: (attachmentId: string) => void;
   onPublish: (attachmentId: string) => void;
   onRevoke: (attachmentId: string) => void;
@@ -957,18 +1040,19 @@ function ReviewEvidence({
       {detail.privateSourceLinks.length ? <PrivateSourceLinks origins={detail.privateSourceLinks} /> : null}
       {detail.documentDiscoveries.length ? <section><h3>Знахідка документа</h3>{detail.documentDiscoveries.map((discovery, index) => <p key={index}><strong>{detailText(discovery, "official_location_text")}</strong><span>Знайдено: {detailText(discovery, "discovered_location_text")}</span></p>)}</section> : null}
       <section className="zagulyaky-attachment-review"><h3>Приватні вкладення ({detail.attachments.length})</h3>
-        <p>Оригінал доступний модератору лише за коротким приватним посиланням. Публічна копія створюється окремою контрольованою дією після публікації запису.</p>
+        <p>Оригінал доступний модератору лише за коротким приватним посиланням. Якщо запис ще очікує перевірки, підтвердження спершу опублікує запис, а потім вибране фото або файл.</p>
+        {!publicationAllowed ? <p>Публікація вкладень доступна після перевірки підстави публікації запису. Для чернетки спочатку надішліть запис на перевірку.</p> : null}
         {detail.attachments.map((attachment, index) => {
           const id = detailText(attachment, "id");
           const isPublished = attachment.is_public_derivative === true;
-          const busy = attachmentBusyId === id;
+          const attachmentBusy = attachmentBusyId === id;
           return <article key={id === "—" ? String(index) : id}>
             <div><strong>{detailText(attachment, "file_name")}</strong><span>{detailText(attachment, "mime_type")} · {formatBytes(attachment.byte_size)}</span></div>
             <div className="zagulyaky-attachment-actions">
-              <button type="button" className="button button-secondary" disabled={busy || id === "—"} onClick={() => onPreview(id)}>{busy ? "Готуємо…" : "Переглянути приватно"}</button>
+              <button type="button" className="button button-secondary" disabled={busy || id === "—"} onClick={() => onPreview(id)}>{attachmentBusy ? "Готуємо…" : "Переглянути приватно"}</button>
               {isPublished
-                ? <button type="button" className="button button-ghost" disabled={busy || id === "—"} onClick={() => onRevoke(id)}>{busy ? "Відкликаємо…" : "Відкликати публічну копію"}</button>
-                : <button type="button" className="button button-primary" disabled={busy || id === "—"} onClick={() => onPublish(id)}>{busy ? "Створюємо…" : "Створити публічну копію"}</button>}
+                ? <button type="button" className="button button-ghost" disabled={busy || id === "—"} onClick={() => onRevoke(id)}>{attachmentBusy ? "Відкликаємо…" : "Відкликати публічну копію"}</button>
+                : <button type="button" className="button button-primary" disabled={busy || !publicationAllowed || id === "—"} onClick={() => onPublish(id)}>{attachmentBusy ? "Створюємо…" : publicationLabel}</button>}
             </div>
           </article>;
         })}

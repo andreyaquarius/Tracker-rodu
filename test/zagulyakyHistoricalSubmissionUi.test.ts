@@ -28,7 +28,9 @@ test("editing a legacy draft preserves its already-recorded rights flag without 
 
 test("moderators retain the separate living-person clearance control but no rights warning", () => {
   assert.match(moderationPanel, /const requiresLivingPrivacyReview = Boolean\(/);
-  assert.match(moderationPanel, /\{requiresLivingPrivacyReview && selected\.possibleLivingPerson \?/);
+  assert.match(moderationPanel, /\{requiresLivingPrivacyReview \?/);
+  assert.match(moderationPanel, /selected\.possibleLivingPerson && !archivalConfirmed/);
+  assert.match(moderationPanel, /runRecordLivingConsent/);
   assert.doesNotMatch(moderationPanel, /Автор не підтвердив права на публікацію матеріалу/);
   assert.doesNotMatch(moderationPanel, /requiresPublicationEvidence/);
 });

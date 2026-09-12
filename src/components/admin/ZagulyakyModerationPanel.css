@@ -333,6 +333,7 @@
   font-weight: 700;
 }
 .zagulyaky-living-clearance input,
+.zagulyaky-living-clearance select,
 .zagulyaky-living-clearance textarea {
   width: 100%;
   min-height: 2.5rem;
@@ -345,6 +346,34 @@
 }
 .zagulyaky-living-clearance .wide { grid-column: 1 / -1; }
 .zagulyaky-living-clearance > button { justify-self: start; }
+.zagulyaky-living-clearance > div:first-child,
+.zagulyaky-living-clearance > .zagulyaky-status { grid-column: 1 / -1; }
+.zagulyaky-living-clearance > .zagulyaky-status { justify-self: start; }
+
+.zagulyaky-living-clearance .zagulyaky-archival-confirmation {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  text-transform: none;
+}
+
+.zagulyaky-archival-confirmation input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  min-height: 1.1rem;
+  padding: 0;
+  flex: 0 0 1.1rem;
+  margin-top: 0.15rem;
+}
+
+.zagulyaky-living-clearance .zagulyaky-archival-confirmation span {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.zagulyaky-living-clearance select { min-width: 0; max-width: 100%; }
+.zagulyaky-living-clearance small { text-transform: none; letter-spacing: normal; }
+.zagulyaky-publication-hint { color: var(--app-text-muted); font-size: 0.88rem; }
 .zagulyaky-status.clearance-approved { color: var(--app-ink, #176045); background: var(--app-success-surface, #dbf1e5); }
 .zagulyaky-status.clearance-missing,
 .zagulyaky-status.clearance-pending { color: var(--app-ink, #74500b); background: var(--app-warning-surface, #fff0c6); }
