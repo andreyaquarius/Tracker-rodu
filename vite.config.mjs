@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
+import { sentryIngestOrigin } from "./src/utils/browserMonitoringPrivacy.ts";
 
 const HOMEPAGE_JSON_LD = JSON.stringify({
   "@context": "https://schema.org",
@@ -100,14 +102,18 @@ const CONTENT_SECURITY_POLICY = [
   "frame-src blob: https://accounts.google.com https://content.googleapis.com https://drive.google.com https://docs.google.com https:",
 ].join("; ");
 
-function injectSecurityMeta() {
+function injectSecurityMeta(monitoringOrigin) {
+  // Only the configured ingestion origin, not a wildcard or a third-party script.
+  const policy = monitoringOrigin
+    ? CONTENT_SECURITY_POLICY.replace("connect-src 'self'", `connect-src 'self' ${monitoringOrigin}`)
+    : CONTENT_SECURITY_POLICY;
   return {
     name: "inject-security-meta",
     apply: "build",
     transformIndexHtml(html) {
       const tags = [
         `<script type="application/ld+json">${HOMEPAGE_JSON_LD}</script>`,
-        `<meta http-equiv="Content-Security-Policy" content="${CONTENT_SECURITY_POLICY}" />`,
+        `<meta http-equiv="Content-Security-Policy" content="${policy}" />`,
         `<meta name="referrer" content="strict-origin-when-cross-origin" />`,
       ].join("\n    ");
       return html.replace("</head>", `    ${tags}\n  </head>`);
@@ -143,7 +149,32 @@ function warnLegalConfigGaps() {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), pdfJsWasmAssets(), injectSecurityMeta(), warnLegalConfigGaps()],
-  base: "/",
+export default defineConfig(({ mode, command }) => {
+  const env = loadEnv(mode, process.cwd(), "VITE_");
+  const dsn = env.VITE_SENTRY_DSN?.trim() || "";
+  const monitoringOrigin = env.VITE_SENTRY_ENABLED !== "false" && dsn ? sentryIngestOrigin(dsn) : null;
+  if (dsn && env.VITE_SENTRY_ENABLED !== "false" && !monitoringOrigin) {
+    throw new Error("VITE_SENTRY_DSN must be a valid hosted Sentry public DSN.");
+  }
+  const release = env.VITE_SENTRY_RELEASE || process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || "";
+  // Build secrets must come from the CI environment, never from VITE_ variables.
+  const { SENTRY_AUTH_TOKEN: authToken, SENTRY_ORG: org, SENTRY_PROJECT: project } = process.env;
+  const uploadMaps = command === "build" && Boolean(monitoringOrigin && authToken && org && project);
+  if (command === "build" && monitoringOrigin && authToken && (!org || !project)) {
+    throw new Error("Source-map upload requires both SENTRY_ORG and SENTRY_PROJECT.");
+  }
+  return {
+    plugins: [
+      react(), pdfJsWasmAssets(), injectSecurityMeta(monitoringOrigin), warnLegalConfigGaps(),
+      ...(uploadMaps ? [sentryVitePlugin({
+        authToken, org, project, telemetry: false,
+        release: { name: release || undefined, inject: false },
+        sourcemaps: { filesToDeleteAfterUpload: ["./dist/**/*.map"] },
+      })] : []),
+    ],
+    define: { "import.meta.env.VITE_SENTRY_RELEASE": JSON.stringify(release) },
+    // Without upload credentials, do not generate publicly downloadable maps.
+    build: { sourcemap: uploadMaps ? "hidden" : false },
+    base: "/",
+  };
 });

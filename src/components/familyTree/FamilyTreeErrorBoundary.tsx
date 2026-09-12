@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { FamilyTreeErrorState } from "./FamilyTreeStates";
+import { reportBrowserError } from "../../services/browserMonitoring.ts";
 
 interface FamilyTreeErrorBoundaryProps {
   children: ReactNode;
@@ -24,6 +25,7 @@ export class FamilyTreeErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
+    reportBrowserError(error, "family-tree");
     if (import.meta.env.DEV) {
       console.error("Family tree viewer crashed", error, info);
     }

@@ -77,9 +77,19 @@ jobs:
       - name: Typecheck
         run: npm run lint
 
+      - name: Verify browser monitoring privacy
+        run: node --test test/browserMonitoring.test.ts test/monitoredSupabaseFetch.test.ts
+
       - name: Build application and static public pages
         env:
           CUSTOM_DOMAIN: trekerrodu.com.ua
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENABLED: ${{ vars.VITE_SENTRY_ENABLED || 'true' }}
+          VITE_SENTRY_ENVIRONMENT: production
+          VITE_SENTRY_RELEASE: ${{ github.sha }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
@@ -100,7 +110,14 @@ jobs:
           VITE_PDF_VIEWER_MAX_CONCURRENT_RENDERS: ${{ vars.VITE_PDF_VIEWER_MAX_CONCURRENT_RENDERS || '1' }}
           VITE_PDF_VIEWER_MAX_CANVAS_PIXELS: ${{ vars.VITE_PDF_VIEWER_MAX_CANVAS_PIXELS || '16777216' }}
           VITE_PDF_VIEWER_MAX_CANVAS_SIDE: ${{ vars.VITE_PDF_VIEWER_MAX_CANVAS_SIDE || '8192' }}
-        run: npm run build
+        run: |
+          # An unset repository variable becomes an empty environment value.
+          # Let Vite use the public .env.production DSN unless it is overridden.
+          # Use VITE_SENTRY_ENABLED=false to disable reporting explicitly.
+          if [ -z "${VITE_SENTRY_DSN:-}" ]; then
+            unset VITE_SENTRY_DSN
+          fi
+          npm run build
 
       # GitHub Pages cannot serve SPA deep links as indexable documents.  Build
       # a privacy-safe static public projection from anonymous catalogue RPCs
