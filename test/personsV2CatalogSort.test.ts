@@ -30,7 +30,7 @@ test("persons V2 catalogue names the real fallback when pedigree data is unavail
 
 test("persons V2 catalogue forwards family rank data and reacts when it changes", () => {
   assert.match(catalog, /familyOrder\?: ReadonlyMap<string, number>/);
-  assert.match(catalog, /familyOrder,\s*\.\.\.catalogSortOptionsV2\(sort\)/s);
-  assert.match(catalog, /\[directIds, familyOrder, filters, persons, segment, sort\]/);
+  assert.match(catalog, /familyOrder,\s*nameDisplays,\s*\.\.\.catalogSortOptionsV2\(sort\)/s);
+  assert.match(catalog, /\[directIds, familyOrder, filters, persons, segment, sort, nameDisplays\]/);
   assert.match(catalog, /\[familyOrder, filters, pageSize, segment, sort\]/);
 });

@@ -17,6 +17,7 @@ import type {
   TreeUnion,
 } from "../types.ts";
 import { formatDateForDisplay } from "../../../utils/dateHelpers.ts";
+import { personTreeNameFields } from "../../../utils/personTreeName.ts";
 import { createTrackerFamilyTreeAdapter } from "./createTrackerAdapter.ts";
 import {
   isPhotoReferenceAvailable,
@@ -93,9 +94,7 @@ const concreteAdapter = createTrackerFamilyTreeAdapter<
     const familyGroup = relationship.familyGroupId
       ? familyGroups.get(relationship.familyGroupId)
       : undefined;
-    const displayOrder =
-      metadataDisplayOrder(relationship.metadata) ??
-      (relationship.isPrimaryForDisplay ? numericOrderKey(-1) : undefined);
+    const displayOrder = partnershipNameDisplayOrder(relationship.metadata, relationship.isPrimaryForDisplay);
     const union: TreeUnion = {
       id: partnershipUnionId(relationship.id),
       kind: "partnership",
@@ -247,43 +246,13 @@ export function adaptTrackerFamilyTreeSnapshot(
 export const trackerFamilyTreeAdapter = adaptTrackerFamilyTreeSnapshot;
 
 function mapPerson(input: PersonAdapterInput): TreePerson {
-  const preferredName =
-    input.names.find(name => name.isPrimary) ??
-    input.names.find(name => name.isPreferred) ??
-    input.names[0];
-  const givenName = preferredName?.givenName || input.profile.givenName;
-  const surname = preferredName?.surname || input.profile.surname;
-  const patronymic = preferredName?.patronymic || input.profile.patronymic;
-  const birthName = input.names.find(name => name.nameType === "birth");
-  const marriedName = input.names.find(name => name.nameType === "married");
-  const maidenSurname =
-    birthName?.surname || input.profile.maidenSurname;
-  const marriedSurname = marriedName?.surname || (
-    maidenSurname && input.profile.surname !== maidenSurname
-      ? input.profile.surname
-      : ""
-  );
-  const displayName =
-    preferredName?.fullName ||
-    preferredName?.originalText ||
-    [input.profile.surname, input.profile.givenName, input.profile.patronymic]
-      .map(part => part.trim())
-      .filter(Boolean)
-      .join(" ") ||
-    input.profile.fullName ||
-    input.profile.id;
   const birth = lifeDate(input.events, ["birth", "baptism", "christening"]);
   const death = lifeDate(input.events, ["death", "burial", "cremation"]);
   const photo = primaryPersonPhotoFromCustomFields(input.profile.customFields);
 
   return {
     id: input.profile.id,
-    displayName,
-    ...(givenName ? { givenName } : {}),
-    ...(surname ? { surname } : {}),
-    ...(patronymic ? { patronymic } : {}),
-    ...(maidenSurname ? { maidenSurname } : {}),
-    ...(marriedSurname ? { marriedSurname } : {}),
+    ...personTreeNameFields(input.profile, input.names),
     sex: normalizeSex(input.profile.gender),
     ...(birth ? { birth } : {}),
     ...(death ? { death } : {}),
@@ -440,6 +409,14 @@ function numericOrderKey(value: number): string {
   if (!Number.isSafeInteger(value)) return `number:${String(value)}`;
   const shifted = BigInt(value) + ORDER_OFFSET;
   return `number:${shifted.toString().padStart(17, "0")}`;
+}
+
+/** Stable spouse ordering shared with the person-card surname projection. */
+export function partnershipNameDisplayOrder(
+  metadata: Readonly<Record<string, unknown>>,
+  isPrimaryForDisplay: boolean,
+): string | undefined {
+  return metadataDisplayOrder(metadata) ?? (isPrimaryForDisplay ? numericOrderKey(-1) : undefined);
 }
 
 function metadataDisplayOrder(

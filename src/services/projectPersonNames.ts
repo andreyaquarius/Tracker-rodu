@@ -225,6 +225,29 @@ export async function listProjectPersonNames(
   return ((legacyResult.data ?? []) as unknown as PersonNameRow[]).map(personNameFromRow);
 }
 
+/** Read-only name projection for catalogue labels/search; never use it for backup or editing. */
+export async function listProjectPersonCatalogNames(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<PersonName[]> {
+  const omitted = new Set([
+    "notes", "created_by", "lock_version", "orthography", "script_code", "date_precision",
+  ]);
+  const columns = (select: string) => select.split(", ").filter(column => !omitted.has(column)).join(", ");
+  const current = await listAllProjectPersonNameRows(projectId, columns(PERSON_NAME_V2_SELECT), signal);
+  if (!current.error) return current.rows.map(personNameFromRow);
+  if (!isMissingPersonNamesV2ColumnsError(current.error)) {
+    if (isMissingPersonNamesSchemaError(current.error)) return [];
+    throw current.error;
+  }
+  const legacy = await listAllProjectPersonNameRows(projectId, columns(PERSON_NAME_SELECT), signal);
+  if (legacy.error) {
+    if (isMissingPersonNamesSchemaError(legacy.error)) return [];
+    throw legacy.error;
+  }
+  return legacy.rows.map(personNameFromRow);
+}
+
 /**
  * Reads a complete, project-scoped snapshot for backup. Person detail screens
  * deliberately load names lazily, so `AppDatabase` alone is not authoritative.
@@ -778,16 +801,21 @@ function personNamesQuery(projectId: string, personId: string, columns: string) 
 async function listAllProjectPersonNameRows(
   projectId: string,
   columns: string,
+  signal?: AbortSignal,
 ): Promise<{ rows: PersonNameRow[]; error: unknown | null }> {
   const rows: PersonNameRow[] = [];
   for (let from = 0; ; from += PERSON_NAME_BACKUP_PAGE_SIZE) {
-    const { data, error } = await getSupabaseClient()
+    signal?.throwIfAborted();
+    let query = getSupabaseClient()
       .from("person_names")
       .select(columns)
       .eq("project_id", projectId)
       .order("person_id", { ascending: true })
       .order("id", { ascending: true })
       .range(from, from + PERSON_NAME_BACKUP_PAGE_SIZE - 1);
+    if (signal) query = query.abortSignal(signal);
+    const { data, error } = await query;
+    signal?.throwIfAborted();
     if (error) return { rows: [], error };
     const batch = (data ?? []) as unknown as PersonNameRow[];
     rows.push(...batch);

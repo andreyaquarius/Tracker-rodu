@@ -9,6 +9,7 @@ import type {
   Finding,
   Hypothesis,
   Person,
+  PersonName,
   PersonRelation,
   Research,
   ScanAttachment,
@@ -28,9 +29,17 @@ import {
   primaryPersonPhoto,
 } from "../../utils/personPhotos.ts";
 import { findingLinksPerson } from "../../utils/findingParticipantLinks";
+import { resolvePersonCardNameDisplay } from "../../utils/personCardNameDisplay.ts";
+import type { PersonNameDisplayOptions } from "../../utils/personNameDisplay.ts";
+import type { ProjectPersonMarriage } from "../../services/projectPersonMarriages.ts";
+import type { FamilyTreeNameDisplayPreferences } from "../family-tree-view/adapters/familyTreeNameDisplay.ts";
 
 export interface PersonPreviewDrawerV2Props {
   person: Person | null;
+  personNames?: readonly PersonName[];
+  nameDisplayOptions?: PersonNameDisplayOptions;
+  treeNamePreferences?: FamilyTreeNameDisplayPreferences;
+  marriages?: readonly ProjectPersonMarriage[];
   persons?: readonly Person[];
   relations?: readonly PersonRelation[];
   research?: Research | null;
@@ -53,6 +62,10 @@ export interface PersonPreviewDrawerV2Props {
 
 export function PersonPreviewDrawerV2({
   person,
+  personNames = [],
+  nameDisplayOptions,
+  treeNamePreferences,
+  marriages = [],
   persons = [],
   relations = [],
   research,
@@ -151,7 +164,7 @@ export function PersonPreviewDrawerV2({
     }
   };
 
-  const name = previewPersonNameV2(person);
+  const name = resolvePersonCardNameDisplay(person, personNames, nameDisplayOptions, treeNamePreferences, persons, marriages).label;
   const photos = person.photos ?? [];
   const availablePhotos = photos.filter(isPhotoReferenceAvailable);
   const primaryPhoto = primaryPersonPhoto(photos, person.primaryPhotoId);
@@ -237,7 +250,7 @@ export function PersonPreviewDrawerV2({
                 onError={() => setPhotoFailed(true)}
               />
             ) : (
-              <span aria-hidden="true">{previewInitialsV2(person)}</span>
+              <span aria-hidden="true">{previewInitialsV2(person, name)}</span>
             )}
           </div>
         )}

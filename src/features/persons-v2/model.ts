@@ -36,6 +36,8 @@ export interface PersonCatalogOptions {
   sortDirection?: PersonCatalogSortDirection;
   /** Zero-based pedigree rank, starting with the central person. */
   familyOrder?: ReadonlyMap<string, number>;
+  /** Presentation-only labels; filtering and actions still return original records. */
+  nameDisplays?: ReadonlyMap<string, { label: string; searchText?: string }>;
 }
 
 export interface PersonMainPlaces {
@@ -271,7 +273,12 @@ export function personRelationLabel(
 }
 
 /** Uses structured surname/given-name initials when available, matching genealogy card labels. */
-export function personInitials(person: Person): string {
+export function personInitials(person: Person, displayLabel?: string): string {
+  if (displayLabel && displayLabel !== personDisplayName(person)) {
+    const parts = displayLabel.replace(/\([^)]*\)/gu, " ").trim().split(/\s+/u);
+    return [firstLetter(parts[0] ?? ""), firstLetter(person.givenName || parts[1] || "")]
+      .filter(Boolean).join("").toLocaleUpperCase("uk-UA") || "?";
+  }
   const structured = [person.surname || person.maidenSurname, person.givenName]
     .map(firstLetter)
     .filter(Boolean)
@@ -533,11 +540,12 @@ export function filterAndSortPersons(
       if (lifeStatus === "deceased" && person.isLiving) return false;
       if (!matchesSegment(person, normalizedStatus, segment, options.directPersonIds)) return false;
       if (!queryTokens.length) return true;
-      const haystack = personSearchText(person);
+      const nameDisplay = options.nameDisplays?.get(person.id);
+      const haystack = personSearchText(person, [nameDisplay?.label, nameDisplay?.searchText].filter(Boolean).join(" "));
       return queryTokens.every((token) => haystack.includes(token));
     })
     .sort((first, second) => (
-      compareCatalogPersons(first.person, second.person, sortBy, direction, options.familyOrder)
+      compareCatalogPersons(first.person, second.person, sortBy, direction, options.familyOrder, options.nameDisplays)
       || first.sourceIndex - second.sourceIndex
     ))
     .map(({ person }) => person);
@@ -730,6 +738,7 @@ function compareCatalogPersons(
   sortBy: PersonCatalogSortBy,
   direction: PersonCatalogSortDirection,
   familyOrder?: ReadonlyMap<string, number>,
+  nameDisplays?: PersonCatalogOptions["nameDisplays"],
 ): number {
   if (sortBy === "family") {
     const firstRank = finiteFamilyRank(familyOrder?.get(first.id));
@@ -739,10 +748,16 @@ function compareCatalogPersons(
     if (firstRank !== null && secondRank !== null && firstRank !== secondRank) {
       return firstRank - secondRank;
     }
-    return comparePersonNamesAndIds(first, second, first.id, second.id);
+    return UKRAINIAN_COLLATOR.compare(
+      nameDisplays?.get(first.id)?.label ?? personDisplayName(first),
+      nameDisplays?.get(second.id)?.label ?? personDisplayName(second),
+    ) || first.id.localeCompare(second.id, "uk-UA");
   }
   if (sortBy === "name") {
-    const order = UKRAINIAN_COLLATOR.compare(personDisplayName(first), personDisplayName(second));
+    const order = UKRAINIAN_COLLATOR.compare(
+      nameDisplays?.get(first.id)?.label ?? personDisplayName(first),
+      nameDisplays?.get(second.id)?.label ?? personDisplayName(second),
+    );
     return direction === "desc" ? -order : order;
   }
   if (sortBy === "updated") {
@@ -801,10 +816,11 @@ function catalogLifeTimestamp(person: Person, kind: "birth" | "death"): number |
   return parseTimelineDate(collapseWhitespace(exact) || yearRange(from, to)).timestamp;
 }
 
-function personSearchText(person: Person): string {
+function personSearchText(person: Person, displaySearchText = ""): string {
   const places = personMainPlaces(person);
   return normalizeSearchText([
     personDisplayName(person),
+    displaySearchText,
     person.fullName,
     person.surname,
     person.maidenSurname,

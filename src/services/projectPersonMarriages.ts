@@ -1,4 +1,5 @@
-import type { EvidenceStatus } from "../types/familyTree.ts";
+import type { EvidenceStatus, PartnerRelationshipStatus } from "../types/familyTree.ts";
+import { partnershipNameDisplayOrder } from "../features/family-tree-view/adapters/trackerFamilyTreeAdapter.ts";
 import {
   deletePersonMarriage,
   savePersonMarriage,
@@ -26,6 +27,9 @@ export interface ProjectPersonMarriage {
   evidenceStatus: EvidenceStatus;
   createdAt: string;
   updatedAt: string;
+  /** Read-only tree display context; never inferred or written to person fields. */
+  status?: PartnerRelationshipStatus;
+  nameDisplayOrder?: string;
 }
 
 export interface ProjectPersonMarriageDraft {
@@ -51,12 +55,14 @@ interface MarriageRow {
   start_place: string;
   evidence_status: string;
   metadata: unknown;
+  status?: string;
+  is_primary_for_display?: boolean;
   created_at: string;
   updated_at: string;
 }
 
 const MARRIAGE_SELECT =
-  "id, project_id, tree_id, person_a_id, person_b_id, start_date, start_place, evidence_status, metadata, created_at, updated_at";
+  "id, project_id, tree_id, person_a_id, person_b_id, start_date, start_place, evidence_status, metadata, created_at, updated_at, status, is_primary_for_display";
 const PAGE_SIZE = 1000;
 
 export async function listProjectPersonMarriages(
@@ -141,6 +147,8 @@ function marriageFromRow(row: MarriageRow): ProjectPersonMarriage {
     evidenceStatus: evidenceStatus(row.evidence_status),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    status: row.status === "active" || row.status === "ended" ? row.status : "unknown",
+    nameDisplayOrder: partnershipNameDisplayOrder(metadata, row.is_primary_for_display === true),
   };
 }
 

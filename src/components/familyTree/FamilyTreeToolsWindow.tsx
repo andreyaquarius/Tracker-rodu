@@ -473,7 +473,8 @@ export function FamilyTreeToolsWindow({
               <legend>Відображення імен</legend>
               <p>
                 Виберіть, як показувати прізвища жінок, для яких відомі
-                дівоче прізвище та прізвище у шлюбі.
+                дівоче прізвище та прізвище у шлюбі. Цей формат діє також
+                у списку, плитках, картках осіб і короткому перегляді цього дерева.
               </p>
               <div className="family-tree-name-display-options">
                 {MARRIED_SURNAME_OPTIONS.map(option => (
