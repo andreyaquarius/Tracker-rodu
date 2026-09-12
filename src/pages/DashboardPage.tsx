@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { CommunityResources } from "../components/CommunityResources.tsx";
 import type { AppDatabase } from "../types";
 import type { PageKey } from "../components/Sidebar";
 import type {
@@ -134,6 +135,8 @@ export function DashboardPage({
         </div>
         <button className="button button-primary" onClick={() => onNavigate("tasks")}>Перейти до завдань</button>
       </div>
+
+      <CommunityResources />
 
       <section className="panel global-search-panel">
         <div className="global-search-heading">
