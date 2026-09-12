@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { CommunityResources } from "../components/CommunityResources.tsx";
 
 type LoginMode = "signIn" | "signUp" | "forgotPassword" | "resetPassword";
 
@@ -152,6 +153,7 @@ export function LoginPage({
         <span className="eyebrow">Робочий простір для генеалогічного дослідження</span>
         <h1>Не губи сліди свого роду</h1>
         <p>Керуйте родовим дослідженням: від першої зачіпки до підтвердженого факту</p>
+        <CommunityResources variant="home" />
       </section>
       <section className="login-card">
         <span className="eyebrow">Початок роботи</span>

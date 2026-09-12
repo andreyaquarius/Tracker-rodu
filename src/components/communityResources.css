@@ -1,0 +1,66 @@
+.community-resources {
+  --community-text: var(--app-ink, var(--green-950));
+  --community-muted: var(--app-ink-muted, var(--muted));
+  --community-surface: var(--app-surface, var(--paper));
+  --community-hover: var(--app-surface-soft, var(--green-100));
+  --community-border: var(--app-border, var(--line));
+  --community-accent: var(--app-link, var(--green-800));
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.community-resources--home {
+  --community-text: #f6efe1;
+  --community-muted: #d2e0dc;
+  --community-surface: rgba(255, 255, 255, .06);
+  --community-hover: rgba(255, 255, 255, .13);
+  --community-border: rgba(255, 255, 255, .28);
+  --community-accent: #e6c187;
+  display: grid;
+  width: 100%;
+  max-width: 560px;
+  margin: 12px 0 0;
+}
+
+.community-social-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.community-social-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 18px;
+  color: var(--community-text);
+  background: var(--community-surface);
+  border: 1px solid var(--community-border);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.community-video-resource {
+  display: flex;
+  flex: 1 1 320px;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  padding: 16px 20px;
+  color: var(--community-text);
+  background: var(--community-surface);
+  border: 1px solid var(--community-border);
+  border-radius: 14px;
+  text-decoration: none;
+}
+.community-resources--home .community-video-resource { border-color: rgba(210, 167, 95, .55); }
+.community-video-resource-copy { display: grid; min-width: 0; gap: 6px; }
+.community-video-resource-copy strong { font-family: "Source Serif 4", Georgia, serif; font-size: 22px; line-height: 1.2; }
+.community-video-resource-copy > span { color: var(--community-muted); font-size: 14px; line-height: 1.55; }
+.community-resource-arrow { margin-left: auto; flex: 0 0 auto; color: var(--community-accent); font-size: 24px; }
+.community-social-links a:hover,
+.community-video-resource:hover { background: var(--community-hover); border-color: var(--community-accent); }
+.community-social-links a:focus-visible,
+.community-video-resource:focus-visible { outline: 2px solid var(--community-accent); outline-offset: 4px; }
