@@ -1,6 +1,8 @@
 import type { PageKey } from "../components/Sidebar";
+import { extraHelpGuides, guideAdditions, type ExtraHelpGuideKey } from "./helpManualContent.ts";
 
 export type HelpGuideKey =
+  | ExtraHelpGuideKey
   | "workspace-intro"
   | "dashboard"
   | "map"
@@ -54,9 +56,11 @@ export const fullHelpTourKeys: HelpGuideKey[] = [
   "settings",
   "subscription",
   "custom",
+  ...Object.keys(extraHelpGuides) as ExtraHelpGuideKey[],
 ];
 
 export const helpGuides: Record<HelpGuideKey, HelpGuide> = {
+  ...extraHelpGuides,
   "workspace-intro": {
     key: "workspace-intro",
     section: "Перші кроки",
@@ -343,10 +347,14 @@ export const helpGuides: Record<HelpGuideKey, HelpGuide> = {
   },
 };
 
-export function helpGuideKeyForPage(page: PageKey | null): HelpGuideKey {
+for (const [key, steps] of Object.entries(guideAdditions)) {
+  helpGuides[key as HelpGuideKey].steps.push(...steps);
+}
+
+export function helpGuideKeyForPage(page: string | null): HelpGuideKey {
   if (!page) return "workspace-intro";
   if (page.startsWith("custom:")) return "custom";
-  return page as HelpGuideKey;
+  return Object.hasOwn(helpGuides, page) ? page as HelpGuideKey : "workspace-intro";
 }
 
 export function helpGuideForPage(page: PageKey | null): HelpGuide {

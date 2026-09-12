@@ -1,3 +1,4 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   deleteAiAgentKey,
@@ -108,7 +109,7 @@ export function AiAgentSettings() {
       <div className="section-heading">
         <div>
           <span className="eyebrow">Особисті налаштування</span>
-          <h2>ШІ-агент</h2>
+          <h2>ШІ-агент <SectionHelp guideKey="settings" topic="ai" automatic={false} /></h2>
           <p>Безпечна перевірка дослідницьких гіпотез через ваш API-ключ.</p>
         </div>
       </div>

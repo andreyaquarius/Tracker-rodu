@@ -49,6 +49,7 @@ import { CustomSectionPage } from "./pages/CustomSectionPage";
 import { ProjectTeamModal } from "./components/ProjectTeamModal";
 import { GeneHelpRequestModal } from "./components/GeneHelpRequestModal";
 import { HelpChoiceModal } from "./components/HelpChoiceModal";
+import { HelpProvider } from "./help/ContextHelp.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
 import { syncFindingPersonFacts } from "./services/findingPersonFacts.ts";
@@ -3202,6 +3203,7 @@ export default function App() {
 
   if (route.kind === "zagulyaky") {
     return (
+      <HelpProvider accountId={account?.id ?? "anonymous"}>
       <ZagulyakyPage
         account={account}
         initialTab={route.tab}
@@ -3210,6 +3212,7 @@ export default function App() {
         onNavigate={(path) => routerNavigate(path)}
         onRequestSignIn={() => routerNavigate("/")}
       />
+      </HelpProvider>
     );
   }
 
@@ -6432,10 +6435,11 @@ export default function App() {
   );
 
   return (
-    <>
+    <HelpProvider accountId={account.id}>
     <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
         page={route.kind === "projects" || route.kind === "notes" ? null : page}
+        helpGuideKey={route.kind === "projects" ? "projects" : route.kind === "notes" ? "notes" : undefined}
         focusedPersonContext={isFocusedPersonContext}
         familyTreeView={
           route.kind === "project" && route.page === "familyTree"
@@ -6625,6 +6629,6 @@ export default function App() {
         && !subscriptionAccess.loading
         && !subscriptionAccess.isAdmin}
     />
-    </>
+    </HelpProvider>
   );
 }

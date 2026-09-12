@@ -1,3 +1,4 @@
+import { SectionHelp } from "../../help/ContextHelp.tsx";
 import {
   useEffect,
   useMemo,
@@ -225,6 +226,7 @@ export function PersonsCatalogV2({
           <p>Люди проєкту, життєві факти, джерела та родинні зв’язки.</p>
         </div>
         <div className="page-heading-actions">
+          <SectionHelp guideKey="persons" />
           {headerActions}
           {onCreatePerson ? (
             <button type="button" className="button button-primary" onClick={onCreatePerson}>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseAccount } from "../../services/supabaseAuth";
+import { SectionHelp } from "../../help/ContextHelp.tsx";
 import {
   createTelegramLink,
   loadTelegramLinkStatus,
@@ -120,7 +121,7 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
     return (
       <section className="panel telegram-bot-settings telegram-bot-settings--signed-out" aria-labelledby="telegram-bot-settings-title">
         <span className="eyebrow">Підключення</span>
-        <h2 id="telegram-bot-settings-title">Telegram-бот</h2>
+        <h2 id="telegram-bot-settings-title">Telegram-бот <SectionHelp guideKey="settings" topic="telegram" automatic={false} /></h2>
         <p>Увійдіть в акаунт, щоб підключити Telegram-бота до приватних нотаток.</p>
       </section>
     );
@@ -147,6 +148,7 @@ export function TelegramBotSettings({ account }: TelegramBotSettingsProps) {
           </p>
         </div>
         <div className="telegram-bot-settings__actions">
+          <SectionHelp guideKey="settings" topic="telegram" automatic={false} />
           <a className="button button-secondary" href="/notes">Відкрити нотатки</a>
           <button type="button" className="button button-secondary" onClick={() => void refreshLinkStatus()} disabled={loading || linking || unlinking}>
             {loading ? "Оновлюємо…" : "Оновити"}

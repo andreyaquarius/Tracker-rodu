@@ -1,3 +1,5 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
+import { helpGuideKeyForPage } from "../help/helpGuides.ts";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   AppEntity,
@@ -978,6 +980,7 @@ export function EntityDetailsModal({
   return (
     <Modal
       title={getEntityTitle(config, record)}
+      headerActions={<SectionHelp guideKey={helpGuideKeyForPage(config.collection)} topic={config.collection === "findings" ? "view" : undefined} />}
       onClose={onClose}
       mode="window"
       stackIndex={stackIndex}
@@ -1796,6 +1799,7 @@ export function EntityModal({
   return (
     <Modal
       title={`${entity ? "Редагувати" : "Додати"} ${config.singular}`}
+      headerActions={<SectionHelp guideKey={helpGuideKeyForPage(config.collection)} topic={config.collection === "findings" ? "edit" : undefined} />}
       onClose={closeEditor}
       className={config.collection === "findings" ? "finding-editor-modal" : ""}
       mode="window"

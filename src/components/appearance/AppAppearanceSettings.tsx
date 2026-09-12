@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { SectionHelp } from "../../help/ContextHelp.tsx";
 import { useSkyMotionEnvironment } from "../../features/family-tree-view/appearance/useSkyMotionEnvironment.ts";
 import { useAppAppearance } from "./AppAppearanceProvider.tsx";
 
@@ -8,7 +9,7 @@ export function AppAppearanceSettings({ compact = false }: { compact?: boolean }
   const groupId = useId();
   return <section className={compact ? "app-appearance-compact" : "panel app-appearance-settings"} aria-label="Тема застосунку">
     {compact ? <strong>Тема застосунку</strong> : <div className="section-heading"><div>
-      <h2>Тема застосунку</h2>
+      <h2>Тема застосунку <SectionHelp guideKey="settings" topic="appearance" automatic={false} /></h2>
       <p>Особисте оформлення всіх розділів. Зберігається для вашого облікового запису в цьому браузері й не змінює налаштувань інших учасників.</p>
     </div></div>}
     <div className="app-theme-options" role="group" aria-label="Оформлення застосунку">
