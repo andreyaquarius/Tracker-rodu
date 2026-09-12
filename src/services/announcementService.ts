@@ -22,6 +22,17 @@ export async function loadMyAnnouncements(expectedUserId?: string): Promise<AppA
   return ((data ?? []) as Array<Record<string, unknown>>).map(mapAnnouncement);
 }
 
+export async function loadMyAnnouncement(id: string, expectedUserId: string): Promise<AppAnnouncement | null> {
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(client, async () => {
+    // Filter the existing published-only, account-scoped RPC before pagination.
+    const result = await client.rpc("list_my_app_announcements").eq("id", id).maybeSingle();
+    return { data: result.data, error: result.error };
+  }, expectedUserId);
+  if (error) throw error;
+  return data ? mapAnnouncement(data as Record<string, unknown>) : null;
+}
+
 export async function markAnnouncementRead(id: string, expectedUserId?: string): Promise<void> {
   const client = getSupabaseClient();
   const { error } = await runAuthenticatedSupabaseRequest(

@@ -39,6 +39,8 @@ import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { FaqPage, FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
 import { ZagulyakyPage } from "./pages/ZagulyakyPage";
 import { NotesPage } from "./pages/NotesPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
+import { NotificationInboxProvider } from "./components/NotificationInboxProvider";
 import { MapPage } from "./pages/MapPage";
 import { HistoricalPlacesPage } from "./pages/HistoricalPlacesPage";
 import { SharedResearchGraphPage } from "./features/context-graph/SharedResearchGraphPage.tsx";
@@ -527,7 +529,7 @@ function consumePrivatePostAuthReturn(): string | null {
   try {
     const path = window.sessionStorage.getItem(POST_AUTH_RETURN_KEY)?.trim() ?? "";
     window.sessionStorage.removeItem(POST_AUTH_RETURN_KEY);
-    return /^(?:\/notes(?:[?#]|$)|\/zahuliaky\/(?:my|notes)(?:[/?#]|$))/.test(path)
+    return /^(?:\/notifications(?:[/?#]|$)|\/notes(?:[?#]|$)|\/zahuliaky\/(?:my|notes)(?:[/?#]|$))/.test(path)
       ? path
       : null;
   } catch {
@@ -871,11 +873,11 @@ export default function App() {
     isZagulyakyRoute && !isPrivateZagulyakyRoute
   );
   const isSensitiveSharedGraphRoute = route.kind === "graph-share";
-  // Zagulyaky and the account-level Notes inbox are standalone from a
-  // workspace perspective, so neither may trigger project dashboard loads.
+  // Account-level inboxes and Zagulyaky do not need project dashboard data.
   const skipsWorkspaceState = route.kind === "public"
     || isZagulyakyRoute
     || route.kind === "notes"
+    || route.kind === "notifications"
     || isSensitiveSharedGraphRoute;
   const familyTreeRouteFocus = useMemo(
     () => parseFamilyTreeRouteFocus(location.search),
@@ -1158,6 +1160,9 @@ export default function App() {
       return;
     }
 
+    if (route.kind === "notifications") {
+      document.title = "Повідомлення — Трекер Роду";
+    }
     upsertMetaName(
       "robots",
       "noindex, nofollow, noarchive, nosnippet, noimageindex",
@@ -1401,7 +1406,7 @@ export default function App() {
 
   useEffect(() => {
     if (!authReady || account || passwordRecovery) return;
-    if (route.kind === "notes" || (route.kind === "zagulyaky" && route.tab === "mine")) {
+    if (route.kind === "notes" || route.kind === "notifications" || (route.kind === "zagulyaky" && route.tab === "mine")) {
       const returnPath = route.kind === "notes"
         ? `/notes${location.search}${location.hash}`
         : `${location.pathname}${location.search}${location.hash}`;
@@ -6408,6 +6413,8 @@ export default function App() {
 
   const displayedContent = route.kind === "notes" ? (
     <NotesPage account={account} />
+  ) : route.kind === "notifications" ? (
+    <NotificationsPage notificationKind={route.notificationKind} notificationId={route.notificationId} />
   ) : route.kind === "projects" ? (
     <ProjectsPage
       workspaces={workspaces}
@@ -6436,10 +6443,11 @@ export default function App() {
 
   return (
     <HelpProvider accountId={account.id}>
+    <NotificationInboxProvider accountId={account.id}>
     <div className={activeDb.settings.compactTables ? "compact-tables" : ""}>
       <Layout
-        page={route.kind === "projects" || route.kind === "notes" ? null : page}
-        helpGuideKey={route.kind === "projects" ? "projects" : route.kind === "notes" ? "notes" : undefined}
+        page={route.kind === "projects" || route.kind === "notes" || route.kind === "notifications" ? null : page}
+        helpGuideKey={route.kind === "projects" ? "projects" : route.kind === "notes" ? "notes" : route.kind === "notifications" ? "notifications" : undefined}
         focusedPersonContext={isFocusedPersonContext}
         familyTreeView={
           route.kind === "project" && route.page === "familyTree"
@@ -6629,6 +6637,7 @@ export default function App() {
         && !subscriptionAccess.loading
         && !subscriptionAccess.isAdmin}
     />
+    </NotificationInboxProvider>
     </HelpProvider>
   );
 }

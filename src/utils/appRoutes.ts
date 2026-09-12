@@ -5,6 +5,7 @@ import type {
   SectionParentKey,
 } from "../types";
 import { customSectionKey } from "./sectionHierarchy.ts";
+import { isNotificationId, isNotificationKind, type NotificationKind } from "./notificationInbox.ts";
 
 const pageSegments: Partial<Record<PageKey, string>> = {
   dashboard: "dashboard",
@@ -64,6 +65,7 @@ export type AppRoute =
       recordSlug?: string;
     }
   | { kind: "notes" }
+  | { kind: "notifications"; notificationKind?: NotificationKind; notificationId?: string }
   | { kind: "projects" }
   | { kind: "admin"; page: AdminPage }
   | { kind: "settings"; page: "settings" | "subscription" | "feedback" }
@@ -166,6 +168,13 @@ export function parseAppRoute(
   const pathOnly = pathname.split(/[?#]/, 1)[0] ?? pathname;
   const parts = pathOnly.split("/").filter(Boolean).map(decodeURIComponent);
   if (!parts.length) return { kind: "root" };
+  if (parts[0] === "notifications") {
+    if (parts.length === 1) return { kind: "notifications" };
+    if (parts.length === 3 && isNotificationKind(parts[1]) && isNotificationId(parts[2])) {
+      return { kind: "notifications", notificationKind: parts[1], notificationId: parts[2] };
+    }
+    return { kind: "unknown" };
+  }
   if (parts.length === 1 && parts[0] === "shared-graph") {
     return { kind: "graph-share" };
   }
