@@ -12,7 +12,9 @@ import {
 import {
   deleteFileFromGoogleDrive,
   downloadFileFromGoogleDrive,
+  ensureGoogleDriveProjectShortcut,
   getGoogleDriveFileMetadata,
+  getGoogleDriveSessionVersion,
   googleDriveViewUrl,
   listGoogleDriveFolderFiles,
   uploadFileToGoogleDrive,
@@ -113,6 +115,10 @@ export type DriveAttachmentPreview = {
 
 let activeProject: { projectId: string; projectName: string } | null = null;
 let activeProjectCanUpload = true;
+let attachmentContextKey = "";
+let attachmentContextVersion = 0;
+// Reuse the metadata just read by Picker/link attachment, without fetching it again.
+const driveReferenceMetadata = new WeakMap<ScanAttachment, GoogleDriveFileMetadata>();
 
 export function setProjectAttachmentTarget(
   projectId: string | null,
@@ -120,6 +126,9 @@ export function setProjectAttachmentTarget(
   canUpload = true,
   userId: string | null = null,
 ): void {
+  const contextKey = JSON.stringify([projectId, userId, canUpload]);
+  if (attachmentContextKey !== contextKey) attachmentContextVersion += 1;
+  attachmentContextKey = contextKey;
   activeProjectCanUpload = canUpload;
   activeProject = projectId
     ? { projectId, projectName: projectName.trim() || "Трекер Роду" }
@@ -129,6 +138,62 @@ export function setProjectAttachmentTarget(
     // attachment that this authenticated user can read in the active project.
     allowLegacyMigration: true,
   });
+}
+
+/** Capture the project before opening Picker. Shortcut failure must never cause a file copy. */
+export function createProjectDriveAttachmentOrganizer(
+  driveFolderPath: string[] = [],
+  dependencies: {
+    getFileMetadata?: typeof getGoogleDriveFileMetadata;
+    ensureShortcut?: typeof ensureGoogleDriveProjectShortcut;
+  } = {},
+) {
+  const target = activeProject;
+  const canUpload = activeProjectCanUpload;
+  const contextVersion = attachmentContextVersion;
+  const driveSession = getGoogleDriveSessionVersion();
+  const folderPath = [...driveFolderPath];
+  const assertContext = () => {
+    if (contextVersion !== attachmentContextVersion || driveSession !== getGoogleDriveSessionVersion()) {
+      throw new Error("Проєкт або обліковий запис сховища змінився. Оберіть файл повторно.");
+    }
+  };
+
+  return async (attachments: ScanAttachment[]): Promise<{ attachments: ScanAttachment[]; warnings: string[] }> => {
+    assertContext();
+    const result: ScanAttachment[] = [];
+    const warnings: string[] = [];
+    for (const scan of attachments) {
+      if (scan.storage !== "google-drive" || scan.deleteOnRemove !== false) {
+        result.push(scan);
+        continue;
+      }
+      if (!target) throw new Error("Спочатку виберіть проєкт.");
+      if (!canUpload) throw new Error("Додавання файлів у цьому проєкті недоступне.");
+      assertContext();
+      try {
+        const file = driveReferenceMetadata.get(scan)
+          ?? await (dependencies.getFileMetadata ?? getGoogleDriveFileMetadata)(scan.storagePath, scan.driveResourceKey);
+        assertContext();
+        const shortcut = await (dependencies.ensureShortcut ?? ensureGoogleDriveProjectShortcut)(target, file, folderPath);
+        assertContext();
+        result.push({
+          ...scan,
+          // Read-only reference even when a project-folder shortcut was created.
+          deleteOnRemove: false,
+          ...(shortcut.shortcutId ? {
+            driveShortcutId: shortcut.shortcutId,
+            driveShortcutFolderId: shortcut.folderId,
+          } : {}),
+        });
+      } catch {
+        assertContext();
+        result.push(scan);
+        warnings.push(`Файл «${scan.name}» прикріплено без копіювання, але ярлик у папці проєкту створити не вдалося. Перевірте доступ до Google Drive. Оригінал залишився на місці.`);
+      }
+    }
+    return { attachments: result, warnings };
+  };
 }
 
 export async function saveScan(
@@ -310,7 +375,7 @@ export async function attachPickedGoogleDriveFiles(
       mimeType: metadata.mimeType || selectedFile.mimeType,
       size: metadata.size || selectedFile.size,
       webViewLink: metadata.webViewLink || selectedFile.webViewLink,
-      resourceKey: metadata.resourceKey || selectedFile.resourceKey,
+      resourceKey: metadata.resourceKey || (metadata.id === selectedFile.id ? selectedFile.resourceKey : undefined),
     };
     ensureAttachableDriveFile(file, policy);
     attached.push(driveFileToAttachment(file));
@@ -333,7 +398,7 @@ function ensureAttachableDriveFile(file: GoogleDriveFileMetadata, policy: Attach
 
 function driveFileToAttachment(file: GoogleDriveFileMetadata): ScanAttachment {
   const canonicalSourceUrl = `https://drive.google.com/file/d/${encodeURIComponent(file.id)}/view`;
-  return {
+  const attachment: ScanAttachment = {
     id: createId(),
     name: file.name,
     mimeType: file.mimeType,
@@ -356,6 +421,8 @@ function driveFileToAttachment(file: GoogleDriveFileMetadata): ScanAttachment {
       ...(file.size > 0 ? { contentLength: file.size } : {}),
     },
   };
+  driveReferenceMetadata.set(attachment, file);
+  return attachment;
 }
 
 async function inspectExternalUrlAttachment(
@@ -755,6 +822,7 @@ export async function deleteScanFile(
   // A file explicitly selected through Google Picker belongs to the user.
   // Removing its link from Tracker Rodu must never delete the Drive original.
   if (scan.deleteOnRemove === false) return;
+  if (scan.driveShortcutId) return;
   const storage = String(scan.storage ?? "");
 
   // Legacy attachments may still point to the former storage provider.

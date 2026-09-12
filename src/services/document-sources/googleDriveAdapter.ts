@@ -105,13 +105,16 @@ export class GoogleDrivePdfSourceAdapter implements DocumentSourceAdapter {
     }
 
     const fileSizeBytes = safeFileSize(metadata.size);
+    if (!isGoogleDriveFileId(metadata.id)) throw new DocumentSourceError("INVALID_URL");
+    // Metadata may resolve a Drive shortcut. Access and persisted identity must use its target.
+    const canonicalUrl = `https://drive.google.com/file/d/${encodeURIComponent(metadata.id)}/view`;
     return {
       provider: this.provider,
       originalUrl: normalized.url,
-      canonicalUrl: reference.canonicalUrl,
-      sourcePageUrl: reference.canonicalUrl,
+      canonicalUrl,
+      sourcePageUrl: canonicalUrl,
       providerHost: "drive.google.com",
-      providerFileId: reference.fileId,
+      providerFileId: metadata.id,
       displayName: metadata.name.trim() || "Google Drive PDF",
       mimeType: GOOGLE_DRIVE_PDF_MIME_TYPE,
       ...(fileSizeBytes !== undefined ? { fileSizeBytes } : {}),

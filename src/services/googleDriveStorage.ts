@@ -1,3 +1,11 @@
+import {
+  createGoogleDriveShortcutStore,
+  GOOGLE_DRIVE_SHORTCUT_MIME_TYPE,
+  resolveGoogleDriveShortcut,
+  type DriveReferenceFile as DriveFile,
+  type DriveShortcutResult,
+} from "./googleDriveShortcuts.ts";
+
 const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_DRIVE_API = "https://www.googleapis.com/drive/v3";
 const GOOGLE_DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
@@ -117,19 +125,6 @@ type GoogleWindow = Window & {
   gapi?: GoogleApiLoader;
 };
 
-type DriveFile = {
-  id: string;
-  name?: string;
-  mimeType?: string;
-  size?: string;
-  webViewLink?: string;
-  md5Checksum?: string;
-  modifiedTime?: string;
-  headRevisionId?: string;
-  resourceKey?: string;
-  trashed?: boolean;
-};
-
 let googleScriptPromise: Promise<void> | null = null;
 let googlePickerScriptPromise: Promise<void> | null = null;
 let googlePickerApiPromise: Promise<void> | null = null;
@@ -142,6 +137,7 @@ let keepAliveSessionAuthorized = false;
 let nextKeepAliveAttemptAt = 0;
 const folderPromises = new Map<string, Promise<string>>();
 const deduplicatedUploadPromises = new Map<string, Promise<GoogleDriveUploadedFile>>();
+let shortcutStore: { generation: number; store: ReturnType<typeof createGoogleDriveShortcutStore> } | null = null;
 const GOOGLE_DRIVE_CONNECTION_KEY = "tracker-rodu-google-drive-connected";
 const GOOGLE_DRIVE_TOKEN_RENEWAL_WINDOW_MS = 5 * 60 * 1000;
 const GOOGLE_DRIVE_KEEP_ALIVE_RETRY_MS = 60 * 1000;
@@ -214,6 +210,7 @@ export interface GoogleDriveFileMetadata {
   modifiedTime?: string;
   headRevisionId?: string;
   resourceKey?: string;
+  parents?: string[];
 }
 
 /**
@@ -678,6 +675,7 @@ function refreshGoogleDriveTokenFromUserGesture(event: Event): void {
 
 function invalidateGoogleDriveTokenRequest(): void {
   tokenRequestGeneration += 1;
+  shortcutStore = null;
   tokenRequestPromise = null;
 }
 
@@ -894,20 +892,22 @@ export async function getGoogleDriveFileMetadata(
   fileId: string,
   resourceKey?: string,
 ): Promise<GoogleDriveFileMetadata> {
+  const resolved = await resolveGoogleDriveShortcut(readGoogleDriveFile, fileId, resourceKey);
+  return googleDriveFileMetadata(resolved.file, resolved.resourceKey);
+}
+
+async function readGoogleDriveFile(fileId: string, resourceKey?: string): Promise<DriveFile> {
   const response = await driveFetch(
-    `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,md5Checksum,modifiedTime,headRevisionId,resourceKey,trashed`,
+    `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,md5Checksum,modifiedTime,headRevisionId,resourceKey,trashed,parents,shortcutDetails(targetId,targetMimeType,targetResourceKey)`,
     { headers: googleDriveResourceKeyHeaders(fileId, resourceKey) },
   );
-  const file = await response.json() as DriveFile & { trashed?: boolean };
-  if (!file.id || file.trashed) {
-    throw new Error("Файл Google Drive не знайдено або він у кошику.");
-  }
-  if (!file.name) {
-    throw new Error("Google Drive не повернув назву файлу.");
-  }
+  return await response.json() as DriveFile;
+}
+
+function googleDriveFileMetadata(file: DriveFile, resourceKey?: string): GoogleDriveFileMetadata {
   return {
     id: file.id,
-    name: file.name,
+    name: file.name || "Файл Google Drive",
     mimeType: file.mimeType || "application/octet-stream",
     size: Number(file.size ?? 0),
     webViewLink: file.webViewLink || googleDriveViewUrl(file.id, file.resourceKey || resourceKey),
@@ -915,7 +915,47 @@ export async function getGoogleDriveFileMetadata(
     modifiedTime: file.modifiedTime,
     headRevisionId: file.headRevisionId,
     resourceKey: file.resourceKey || resourceKey,
+    parents: file.parents,
   };
+}
+
+/** Changes on disconnect/reconnect, not ordinary access-token renewal. */
+export function getGoogleDriveSessionVersion(): number {
+  return tokenRequestGeneration;
+}
+
+/** Organize an existing file with a shortcut; keep the original's ID and parents intact. */
+export async function ensureGoogleDriveProjectShortcut(
+  target: GoogleDriveProjectTarget,
+  file: GoogleDriveFileMetadata,
+  folderPath: string[] = [],
+): Promise<DriveShortcutResult> {
+  const generation = tokenRequestGeneration;
+  const assertSession = () => {
+    if (generation !== tokenRequestGeneration) throw googleDriveAuthorizationRequiredError();
+  };
+  const rootFolderId = await ensureProjectFolder(target);
+  assertSession();
+  const folderId = await ensureNestedFolderPath(target, rootFolderId, folderPath);
+  assertSession();
+  if (!shortcutStore || shortcutStore.generation !== generation) {
+    shortcutStore = {
+      generation,
+      store: createGoogleDriveShortcutStore(async (url, init, maxAttempts) => {
+        assertSession();
+        const response = await driveFetch(url, init, maxAttempts);
+        assertSession();
+        return response;
+      }, (key, action) => (
+        typeof navigator !== "undefined" && navigator.locks
+          ? navigator.locks.request(`tracker-rodu-drive-shortcut:${key}`, action)
+          : action()
+      )),
+    };
+  }
+  const result = await shortcutStore.store.ensure({ projectId: target.projectId, folderId, file });
+  assertSession();
+  return result;
 }
 
 export async function listGoogleDriveFolderFiles(
@@ -923,6 +963,7 @@ export async function listGoogleDriveFolderFiles(
   resourceKey?: string,
 ): Promise<GoogleDriveFileMetadata[]> {
   const files: GoogleDriveFileMetadata[] = [];
+  const seenFileIds = new Set<string>();
   let pageToken = "";
   const escapedFolderId = escapeDriveQueryValue(folderId);
 
@@ -933,7 +974,7 @@ export async function listGoogleDriveFolderFiles(
       spaces: "drive",
       includeItemsFromAllDrives: "true",
       supportsAllDrives: "true",
-      fields: "nextPageToken,files(id,name,mimeType,size,webViewLink,md5Checksum,modifiedTime,headRevisionId,resourceKey,trashed)",
+      fields: "nextPageToken,files(id,name,mimeType,size,webViewLink,md5Checksum,modifiedTime,headRevisionId,resourceKey,trashed,parents,shortcutDetails(targetId,targetMimeType,targetResourceKey))",
       pageSize: "1000",
       orderBy: "name_natural",
     });
@@ -946,17 +987,14 @@ export async function listGoogleDriveFolderFiles(
     const result = await response.json() as { nextPageToken?: string; files?: DriveFile[] };
     for (const file of result.files ?? []) {
       if (!file.id || !file.name || file.trashed) continue;
-      files.push({
-        id: file.id,
-        name: file.name,
-        mimeType: file.mimeType || "application/octet-stream",
-        size: Number(file.size ?? 0),
-        webViewLink: file.webViewLink || googleDriveViewUrl(file.id, file.resourceKey),
-        md5Checksum: file.md5Checksum,
-        modifiedTime: file.modifiedTime,
-        headRevisionId: file.headRevisionId,
-        resourceKey: file.resourceKey,
-      });
+      const metadata = file.mimeType === GOOGLE_DRIVE_SHORTCUT_MIME_TYPE
+        ? await getGoogleDriveFileMetadata(file.shortcutDetails?.targetId || file.id, file.shortcutDetails?.targetResourceKey)
+        : googleDriveFileMetadata(file);
+      if (metadata.mimeType === GOOGLE_FOLDER_MIME_TYPE) continue;
+      if (!seenFileIds.has(metadata.id)) {
+        seenFileIds.add(metadata.id);
+        files.push(metadata);
+      }
     }
     pageToken = result.nextPageToken ?? "";
   } while (pageToken);
@@ -1201,13 +1239,13 @@ function pickerNumberField(
   return 0;
 }
 
-async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
+async function driveFetch(url: string, init: RequestInit = {}, maxAttempts = 4): Promise<Response> {
   throwIfGoogleDriveAborted(init.signal);
   const token = await getGoogleDriveAccessToken();
   throwIfGoogleDriveAborted(init.signal);
   const response = await retryGoogleDriveRequest(
     () => fetchWithToken(url, init, token),
-    4,
+    maxAttempts,
     init.signal,
   );
   if (response.status === 401) {

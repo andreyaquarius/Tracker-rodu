@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from "react";
 import { createPortal } from "react-dom";
 import { consumeClipboardImagePaste, readClipboardImageFiles } from "../utils/clipboardImages.ts";
+import { uniqueNewAttachmentReferences } from "../utils/attachmentReferences.ts";
 import type { ScanAttachment } from "../types";
 import type { ResolvedPdfSource } from "../services/document-sources/contracts.ts";
 import {
@@ -12,6 +13,7 @@ import {
 import {
   attachAttachmentReference,
   attachPickedGoogleDriveFiles,
+  createProjectDriveAttachmentOrganizer,
   deleteScanFile,
   type DriveAttachmentPreview,
   type DriveAttachRange,
@@ -50,7 +52,7 @@ export type ExternalPdfSourceAddContext = DocumentSourceAddContext & {
 
 export function ScanAttachmentsEditor({
   title = "Файли та вкладення",
-  description = `Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB. Максимальний розмір одного файлу — ${MAX_ATTACHMENT_SIZE_MB} МБ. Файли зберігаються у папці активного проєкту в хмарному сховищі.`,
+  description = `Зображення, аудіо, PDF, DJVU, XPS, документи Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TXT, Markdown, XML, HTML або EPUB. Максимальний розмір одного файлу — ${MAX_ATTACHMENT_SIZE_MB} МБ. Нові файли з комп’ютера зберігаються у папці активного проєкту в хмарному сховищі.`,
   accept = "image/*,audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.wma,.webm,.pdf,.djvu,.djv,.xps,.doc,.docx,.rtf,.odt,.xls,.xlsx,.ods,.csv,.ppt,.pptx,.odp,.txt,.md,.xml,.html,.htm,.epub",
   maxFiles,
   limitMessage,
@@ -84,6 +86,7 @@ export function ScanAttachmentsEditor({
   const [uploading, setUploading] = useState(false);
   const [readingClipboard, setReadingClipboard] = useState(false);
   const [clipboardNotice, setClipboardNotice] = useState("");
+  const [driveAttachNotice, setDriveAttachNotice] = useState("");
   const editorRef = useRef<HTMLFieldSetElement>(null);
   const uploadPendingRef = useRef(false);
   const clipboardPendingRef = useRef(false);
@@ -259,24 +262,39 @@ export function ScanAttachmentsEditor({
   const inspectDriveReference = (fileReference: string) =>
     inspectAttachmentReference(fileReference, policy);
 
+  const commitReferencedAttachments = async (
+    attached: ScanAttachment[],
+    organize: ReturnType<typeof createProjectDriveAttachmentOrganizer>,
+  ) => {
+    if (!editorRef.current?.isConnected) return;
+    const unique = uniqueNewAttachmentReferences(scansRef.current, attached);
+    if (!unique.length) throw new Error("Усі вибрані файли вже прикріплено.");
+    if (maxFiles && scansRef.current.length + unique.length > maxFiles) {
+      throw new Error(limitMessage || "Вибрано більше файлів, ніж дозволено для цього поля.");
+    }
+    // Validate duplicates/limits before creating anything in Drive.
+    const organized = await organize(unique);
+    if (!editorRef.current?.isConnected) return;
+    const additions = uniqueNewAttachmentReferences(scansRef.current, organized.attachments);
+    if (maxFiles && scansRef.current.length + additions.length > maxFiles) {
+      throw new Error(limitMessage || "Вибрано більше файлів, ніж дозволено для цього поля.");
+    }
+    onChange([...scansRef.current, ...additions]);
+    setDriveAttachNotice(organized.warnings.join(" ") || (
+      additions.some((scan) => scan.driveShortcutId)
+        ? "Прикріплено оригінали без копіювання. У папці проєкту доступні ярлики. Збережіть запис, щоб зберегти вкладення."
+        : "Посилання прикріплено без копіювання файлів. Збережіть запис, щоб зберегти вкладення."
+    ));
+  };
+
   const attachFromDrive = async (fileReference: string, range: DriveAttachRange) => {
+    const organize = createProjectDriveAttachmentOrganizer(driveFolderPath);
     setAttachingDriveFile(true);
     setError("");
+    setDriveAttachNotice("");
     try {
       const attached = await attachAttachmentReference(fileReference, policy, range);
-      const existingIdentities = new Set(scans.map(attachmentStorageIdentity));
-      const unique = attached.filter((scan, index) => {
-        const identity = attachmentStorageIdentity(scan);
-        return !existingIdentities.has(identity)
-          && attached.findIndex((candidate) => attachmentStorageIdentity(candidate) === identity) === index;
-      });
-      if (!unique.length) {
-        throw new Error("Усі вибрані файли вже прикріплено.");
-      }
-      if (maxFiles && scans.length + unique.length > maxFiles) {
-        throw new Error(limitMessage || "Вибрано більше файлів, ніж дозволено для цього поля.");
-      }
-      onChange([...scans, ...unique]);
+      await commitReferencedAttachments(attached, organize);
       setDriveAttachOpen(false);
     } catch (attachError) {
       setError(attachError instanceof Error ? attachError.message : "Не вдалося прикріпити джерело.");
@@ -342,6 +360,7 @@ export function ScanAttachmentsEditor({
   };
 
   const attachResolvedSource = async (source: ResolvedPdfSource) => {
+    const organize = createProjectDriveAttachmentOrganizer(driveFolderPath);
     const attached = attachmentFromResolvedDocumentSource(source);
     if (maxFiles && scans.length + 1 > maxFiles) {
       throw new Error(limitMessage || "Вибрано більше файлів, ніж дозволено для цього поля.");
@@ -352,8 +371,14 @@ export function ScanAttachmentsEditor({
         === (attached.canonicalSourceUrl || attached.storagePath)
     ));
     if (duplicate) throw new Error("Цей PDF уже прикріплено до документа.");
-    onChange([...scans, attached]);
-    setDriveAttachOpen(false);
+    setAttachingDriveFile(true);
+    setDriveAttachNotice("");
+    try {
+      await commitReferencedAttachments([attached], organize);
+      setDriveAttachOpen(false);
+    } finally {
+      setAttachingDriveFile(false);
+    }
   };
 
   const pickFromDrive = async () => {
@@ -361,8 +386,10 @@ export function ScanAttachmentsEditor({
       setError(uploadBlockedMessage);
       return;
     }
+    const organize = createProjectDriveAttachmentOrganizer(driveFolderPath);
     setAttachingDriveFile(true);
     setError("");
+    setDriveAttachNotice("");
     try {
       const remaining = maxFiles ? Math.max(0, maxFiles - scans.length) : undefined;
       const selected = await pickGoogleDriveFiles({
@@ -373,10 +400,10 @@ export function ScanAttachmentsEditor({
           : "Оберіть документи з Google Drive",
       });
       setPickerReady(true);
-      if (!selected.length) return;
+      if (!selected.length || !editorRef.current?.isConnected) return;
 
       const existingDriveIds = new Set(
-        scans
+        scansRef.current
           .filter((scan) => scan.storage === "google-drive")
           .map((scan) => scan.storagePath),
       );
@@ -388,11 +415,8 @@ export function ScanAttachmentsEditor({
         setError("Усі вибрані файли вже прикріплено.");
         return;
       }
-      if (maxFiles && scans.length + unique.length > maxFiles) {
-        throw new Error(limitMessage || "Вибрано більше файлів, ніж дозволено для цього поля.");
-      }
       const attached = await attachPickedGoogleDriveFiles(unique, policy);
-      onChange([...scans, ...attached]);
+      await commitReferencedAttachments(attached, organize);
     } catch (pickError) {
       setDriveConnectionState(getGoogleDriveConnectionState());
       setError(pickError instanceof Error
@@ -405,7 +429,11 @@ export function ScanAttachmentsEditor({
   };
 
   const remove = async (scan: ScanAttachment) => {
-    if (!window.confirm(`Видалити файл «${scan.name}»?`)) return;
+    const referenceOnly = scan.deleteOnRemove === false || Boolean(scan.driveShortcutId);
+    const confirmation = referenceOnly
+      ? `Від’єднати файл «${scan.name}» від запису? Оригінал і ярлик у Google Drive (якщо є) залишаться на місці.`
+      : `Видалити файл «${scan.name}»?`;
+    if (!window.confirm(confirmation)) return;
     setError("");
     try {
       await deleteScanFile(scan, {
@@ -567,6 +595,10 @@ export function ScanAttachmentsEditor({
           }}
         />
       </div>
+      <p className="scan-drive-hint">
+        Google Drive — посилання на оригінал і ярлик у папці проєкту, без копії.
+        «Додати файл» — нове завантаження з комп’ютера.
+      </p>
       {allowClipboardImages ? (
         <p className="scan-clipboard-hint">
           Виділіть область екрана: <kbd>Win+Shift+S</kbd>. Поверніться до форми знахідки,
@@ -575,6 +607,7 @@ export function ScanAttachmentsEditor({
         </p>
       ) : null}
       {clipboardNotice ? <p className="scan-clipboard-notice" role="status">{clipboardNotice}</p> : null}
+      {driveAttachNotice ? <p className="scan-clipboard-notice" role="status">{driveAttachNotice}</p> : null}
       {error ? <div className="alert alert-error" role="alert">{error}</div> : null}
       {uploadProgress ? <ScanUploadProgress progress={uploadProgress} /> : null}
       {scans.length ? (
@@ -655,10 +688,6 @@ function uploadedReplacement(
     availability: "available",
     ...(preserveAvatarCrop && scan.avatarCrop ? { avatarCrop: scan.avatarCrop } : {}),
   };
-}
-
-function attachmentStorageIdentity(scan: ScanAttachment): string {
-  return `${scan.storage}:${scan.storagePath || scan.id}`;
 }
 
 function ScanUploadProgress({ progress }: { progress: UploadProgressState }) {
@@ -1232,6 +1261,9 @@ function ScanRow({
                 ? "Google Drive · файл Google Workspace"
               : `${formatFileSize(scan.size)} · ${storageLabel(scan)}`}
           </small>
+          {scan.storage === "google-drive" && scan.deleteOnRemove === false ? (
+            <small>{scan.driveShortcutId ? "Оригінал без копії · ярлик у папці проєкту" : "Посилання на оригінал · без копії"}</small>
+          ) : null}
           {unavailable && scan.statusMessage ? <em>{scan.statusMessage}</em> : null}
           {error ? <em>{error}</em> : null}
         </div>
@@ -1273,8 +1305,8 @@ function ScanRow({
             <button
               type="button"
               className="icon-button danger scan-delete-button"
-              title="Видалити файл"
-              aria-label={`Видалити файл ${scan.name}`}
+              title={scan.deleteOnRemove === false || scan.driveShortcutId ? "Від’єднати файл" : "Видалити файл"}
+              aria-label={`${scan.deleteOnRemove === false || scan.driveShortcutId ? "Від’єднати файл" : "Видалити файл"} ${scan.name}`}
               onClick={onDelete}
             >
               ×
