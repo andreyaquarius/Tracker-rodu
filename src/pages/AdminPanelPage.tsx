@@ -43,6 +43,7 @@ import {
 } from "./SubscriptionPage.tsx";
 import { FeedbackPage } from "./FeedbackPage.tsx";
 import { ZagulyakyModerationPanel } from "../components/admin/ZagulyakyModerationPanel.tsx";
+import { BrowserMonitoringPanel } from "../components/admin/BrowserMonitoringPanel.tsx";
 import { AdminAnalyticsOnline, AdminAnalyticsTraffic } from "../components/admin/AdminAnalyticsTraffic.tsx";
 import { analyticsDuration as formatDuration, analyticsLoadError } from "../utils/adminAnalyticsTraffic.ts";
 
@@ -519,6 +520,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
   } else {
     pageContent = (
       <div className="admin-report-stack">
+        <BrowserMonitoringPanel />
         <section className="admin-panel-card">
           <h2>Ваші адміністративні дозволи</h2>
           <p>Ролі: {capabilities?.roles.join(", ") || "не завантажено"}</p>

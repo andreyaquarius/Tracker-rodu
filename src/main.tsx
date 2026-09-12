@@ -3,6 +3,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
 import { ApplicationRouteError } from "./components/ApplicationRouteError.tsx";
 import { installChunkLoadRecovery } from "./utils/chunkLoadRecovery.ts";
+import { initializeBrowserMonitoring, reportBrowserError } from "./services/browserMonitoring.ts";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
 import { AppAppearanceProvider } from "./components/appearance/AppAppearanceProvider.tsx";
@@ -124,6 +125,8 @@ if (
 ) {
   restoreSpaRedirect();
 }
+// Initialize only after bearer URL sanitization and before mounting React.
+initializeBrowserMonitoring();
 installChunkLoadRecovery();
 
 // A data router gives form screens a real navigation blocker.  The app still
@@ -137,6 +140,9 @@ const router = createBrowserRouter([
   },
 ]);
 
-createRoot(document.getElementById("root")!).render(
+createRoot(document.getElementById("root")!, {
+  onUncaughtError: error => reportBrowserError(error, "react-root"),
+  onRecoverableError: error => reportBrowserError(error, "react-recovery"),
+}).render(
   <AppAppearanceProvider><RouterProvider router={router} /></AppAppearanceProvider>,
 );

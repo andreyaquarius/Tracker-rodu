@@ -17,6 +17,8 @@ import {
   type ProjectDeletionOptions,
   type ProjectDeletionStatus,
 } from "./projectDeletion.ts";
+import { isBrowserMonitoringEnabled, reportBrowserError } from "./browserMonitoring.ts";
+import { createMonitoredSupabaseFetch } from "../utils/monitoredSupabaseFetch.ts";
 
 export interface SupabaseAccount {
   id: string;
@@ -81,6 +83,20 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && publishableKey);
 // Keep route-level reads from exhausting PostgREST when a page needs several
 // related tables at once. The realtime websocket does not use this fetch queue.
 const MAX_CONCURRENT_REQUESTS = 4;
+const monitoredFetch = createMonitoredSupabaseFetch(
+  (input, init) => fetch(input, init),
+  supabaseUrl,
+  failure => {
+    const error = new Error(`Supabase ${failure.method} failed: ${failure.status ? `HTTP ${failure.status}` : "network"}${failure.code ? ` (${failure.code})` : ""}`);
+    error.name = "SupabaseRequestError";
+    reportBrowserError(error, "supabase", {
+      operation: failure.operation,
+      http_status: String(failure.status),
+      ...(failure.code ? { error_code: failure.code } : {}),
+    });
+  },
+  isBrowserMonitoringEnabled,
+);
 
 function createConcurrencyLimitedFetch(maxConcurrent: number): typeof fetch {
   let active = 0;
@@ -93,7 +109,7 @@ function createConcurrencyLimitedFetch(maxConcurrent: number): typeof fetch {
     new Promise<Response>((resolve, reject) => {
       const run = () => {
         active += 1;
-        fetch(input, init).then(resolve, reject).finally(releaseNext);
+        monitoredFetch(input, init).then(resolve, reject).finally(releaseNext);
       };
       if (active < maxConcurrent) run();
       else queue.push(run);

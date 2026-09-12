@@ -1,12 +1,14 @@
 import { useEffect } from "react";
 import { useRouteError } from "react-router-dom";
 import { isChunkLoadFailure } from "../utils/chunkLoadRecovery.ts";
+import { reportBrowserError } from "../services/browserMonitoring.ts";
 
 export function ApplicationRouteError() {
   const error = useRouteError();
   const outdatedBuild = isChunkLoadFailure(error);
 
   useEffect(() => {
+    reportBrowserError(error, "route");
     if (import.meta.env.DEV) console.error("Application route failed", error);
   }, [error]);
 

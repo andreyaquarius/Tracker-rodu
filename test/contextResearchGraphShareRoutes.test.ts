@@ -350,7 +350,7 @@ function executeMainEntryGuard(pathname: string, hash: string, search = ""): {
   const prebootSource = sourceBlock(
     main,
     "function parseSharedGraphBearerFragment",
-    "installChunkLoadRecovery();",
+    "initializeBrowserMonitoring();",
   );
   const executable = transpileModule(prebootSource, {
     compilerOptions: {
