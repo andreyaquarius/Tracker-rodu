@@ -26,6 +26,9 @@ export interface ScanAttachment {
   driveRevisionId?: string;
   /** Resource key required by Google Drive for some link-shared files. */
   driveResourceKey?: string;
+  /** Optional project-folder shortcut. storagePath always identifies the original. */
+  driveShortcutId?: string;
+  driveShortcutFolderId?: string;
   deleteOnRemove?: boolean;
   /** Read-only file reference; attachment metadata stays with its source. */
   referenceOwnerType?: "findings";

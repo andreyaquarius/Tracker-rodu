@@ -72,6 +72,28 @@ test("Google Drive adapter resolves PDF metadata without exposing OAuth credenti
   assert.equal(JSON.stringify(source).includes("oauth-token"), false);
 });
 
+test("Drive PDF selected through a shortcut persists and downloads the original ID", async () => {
+  const targetId = "original_pdf_file_123456789";
+  const adapter = new GoogleDrivePdfSourceAdapter({
+    getFileMetadata: async () => ({ ...pdfMetadata(), id: targetId }),
+    createDownloadAccess: async (fileId) => {
+      assert.equal(fileId, targetId);
+      return {
+        url: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+        httpHeaders: { Authorization: "Bearer test-token" },
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      };
+    },
+  });
+  const input = `https://drive.google.com/file/d/${FILE_ID}/view`;
+  const resolved = await adapter.resolve(input, context());
+  assert.equal(resolved.originalUrl, input);
+  assert.equal(resolved.providerFileId, targetId);
+  assert.equal(resolved.canonicalUrl, `https://drive.google.com/file/d/${targetId}/view`);
+  const access = await adapter.createAccessDescriptor(storedSource(resolved), context());
+  assert.match(access.url, new RegExp(targetId));
+});
+
 test("public Google Drive PDF opens through the gateway without requesting OAuth", async () => {
   let metadataCalls = 0;
   let downloadAccessCalls = 0;
