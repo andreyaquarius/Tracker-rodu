@@ -183,12 +183,10 @@ test("unavailable storage never blocks help UI", () => {
 });
 
 test("help button manually replays the current module instead of the full tour", () => {
-  const buttonSource = helpCenterSource.slice(
-    helpCenterSource.indexOf('className="help-topbar-button"'),
-    helpCenterSource.indexOf('aria-label="Відкрити підказки"'),
-  );
-  assert.match(buttonSource, /setActiveKey\(currentGuide\.key\)/);
-  assert.match(buttonSource, /openSourceRef\.current = "manual"/);
-  assert.doesNotMatch(buttonSource, /setActiveKey\("full-tour"\)/);
-  assert.match(helpCenterSource, /Не показувати підказки автоматично/);
+  assert.match(helpCenterSource, /SectionHelp guideKey=\{guideKey \?\? helpGuideKeyForPage\(page\)\}/);
+  assert.doesNotMatch(helpCenterSource, /full-tour|setTimeout|showModal/);
+  const contextSource = readFileSync(new URL("../src/help/ContextHelp.tsx", import.meta.url), "utf8");
+  assert.match(contextSource, /useState\(false\)/);
+  assert.match(contextSource, /onClick=\{openManual\}/);
+  assert.match(contextSource, /Не показувати підказки автоматично/);
 });

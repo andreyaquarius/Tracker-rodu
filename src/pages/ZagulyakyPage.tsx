@@ -1,3 +1,4 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ZagulyakaDetailDialog } from "../components/zagulyaky/ZagulyakaDetailDialog";
 import { ZagulyakaDraftDialog } from "../components/zagulyaky/ZagulyakaDraftDialog";
@@ -568,8 +569,8 @@ export function ZagulyakyPage({
               {myRecordsOverallTotal !== null ? <span>{myRecordsOverallTotal.toLocaleString("uk-UA")}</span> : null}
             </button>
           ) : null}
+          <SectionHelp guideKey="zagulyaky" topic={activeTab} />
         </nav>
-
         {isCatalogTab ? (
           <div className="zagulyaky-search-row">
             <label>

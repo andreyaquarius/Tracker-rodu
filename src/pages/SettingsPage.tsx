@@ -1,3 +1,4 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import type { AppDatabase, SectionParentKey } from "../types";
 import { CustomSectionBuilder } from "../components/CustomSectionBuilder";
 import { AiAgentSettings } from "../components/AiAgentSettings";
@@ -58,7 +59,7 @@ export function SettingsPage({
       <section className="panel settings-panel">
         <div className="section-heading">
           <div>
-            <h2>Загальні налаштування</h2>
+            <h2>Загальні налаштування <SectionHelp guideKey="settings" topic="general" automatic={false} /></h2>
             <p>
               {readOnly
                 ? "Перегляд налаштувань проєкту. Змінювати їх може власник."
@@ -197,7 +198,7 @@ export function SettingsPage({
       <section className="panel privacy-panel">
         <span className="card-icon">✓</span>
         <div>
-          <h2>Приватність і аналітика</h2>
+          <h2>Приватність і аналітика <SectionHelp guideKey="settings" topic="privacy" automatic={false} /></h2>
           <p>
             Налаштування спільного проєкту зберігаються у захищеній базі та
             доступні на всіх пристроях. Змінювати їх може власник проєкту.

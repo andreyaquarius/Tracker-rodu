@@ -4,6 +4,7 @@ import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAut
 import { Sidebar, type PageKey } from "./Sidebar";
 import { AnnouncementBell } from "./AnnouncementBell";
 import { HelpCenter } from "./HelpCenter";
+import type { HelpGuideKey } from "../help/helpGuides.ts";
 import { GoogleDriveConnectionButton } from "./GoogleDriveConnectionButton";
 import { TopBar } from "./TopBar";
 import { WorkspaceWindowsProvider } from "./WorkspaceWindows";
@@ -17,6 +18,7 @@ import {
 
 interface LayoutProps {
   page: PageKey | null;
+  helpGuideKey?: HelpGuideKey;
   familyTreeView?: "tree" | "statistics";
   focusedPersonContext?: boolean;
   onNavigate: (page: PageKey) => void;
@@ -141,12 +143,15 @@ export function Layout(props: LayoutProps) {
                 <HelpCenter
                   key={`help:${props.account?.id ?? "anonymous"}`}
                   page={props.page}
+                  guideKey={isFamilyTreeStatistics ? "tree-statistics" : props.helpGuideKey}
                   accountId={props.account?.id ?? "anonymous"}
                 />
               </>
             )}
           />
-          <main className={pageClassName}>{props.children}</main>
+          <main className={pageClassName}>
+            {props.children}
+          </main>
         </div>
       </div>
     </WorkspaceWindowsProvider>

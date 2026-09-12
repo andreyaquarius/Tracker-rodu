@@ -29,7 +29,7 @@ export function createScopedHelpStorage(
       // The old preference was browser-global. Move an explicit opt-out to the
       // first signed-in account that opens the upgraded help center, then remove
       // the global value so it cannot leak to another account on this browser.
-      if (key === HELP_STORAGE_KEYS.autoTipsDisabled) {
+      if (key === HELP_STORAGE_KEYS.autoTipsDisabled && normalizedScope !== "anonymous") {
         const legacyValue = storage.getItem(key);
         if (legacyValue !== null) {
           storage.setItem(scopedKey, legacyValue);
@@ -160,6 +160,5 @@ function saveHelpGuideProgress(
 }
 
 function browserStorage(): HelpProgressStorage | null {
-  if (typeof localStorage === "undefined") return null;
-  return localStorage;
+  try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
 }

@@ -1,5 +1,6 @@
 ﻿import { useId, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { AppEntity, DocumentRecord, Finding, Person, PersonRelation } from "../types";
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import type { FamilyTreeGraphIssue, GedcomPreservedRecord } from "../types/familyTree";
 import { buildGedcomAppImport } from "../utils/gedcomAppImport";
 import { decodeGedcomBytes } from "../utils/gedcomEncoding";
@@ -394,6 +395,7 @@ export function GedcomImportButton({
       {preview ? (
         <Modal
           title="Імпорт GEDCOM"
+          headerActions={<SectionHelp guideKey="gedcom" />}
           className="gedcom-import-modal"
           onClose={() => {
             if (!busy) {

@@ -1,3 +1,4 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import L from "leaflet";
 import type { GeoJsonObject } from "geojson";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -310,6 +311,7 @@ function PlacesCatalogue(props: HistoricalPlacesPageProps) {
           </p>
         </div>
         <div className="page-heading-actions">
+          <SectionHelp guideKey="places" />
           <button
             type="button"
             className="button button-primary"
@@ -752,7 +754,7 @@ function NewPlaceForm(props: HistoricalPlacesPageProps) {
           <h1>Нове історичне місце</h1>
           <p>Місце буде приватним для проєкту «{props.projectName}».</p>
         </div>
-        <button type="button" className="button button-secondary" onClick={props.onBackToList}>До каталогу</button>
+        <div className="page-heading-actions"><SectionHelp guideKey="places" /><button type="button" className="button button-secondary" onClick={props.onBackToList}>До каталогу</button></div>
       </header>
       <form className="panel historical-place-form" onSubmit={submit}>
         <div className="form-grid">
@@ -1181,6 +1183,7 @@ function PlaceProfile(props: HistoricalPlacesPageProps & { placeId: string }) {
         </div>
         <div className="page-heading-actions">
           <button type="button" className="button button-secondary" onClick={props.onBackToList}>До каталогу</button>
+          <SectionHelp guideKey="places" topic={activeTab} />
           {canOfferMerge ? (
             <button type="button" className="button button-secondary" onClick={() => setMergeOpen((current) => !current)}>
               {mergeOpen ? "Закрити об’єднання" : "Об’єднати дубль"}

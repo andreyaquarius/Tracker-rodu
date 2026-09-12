@@ -1,3 +1,4 @@
+import { SectionHelp } from "../../help/ContextHelp.tsx";
 import { useEffect, useRef } from "react";
 import { Modal } from "../Modal";
 import { StarryAnimationToggle, StarryBackgroundToggle } from "./StarryBackgroundToggle";
@@ -56,7 +57,7 @@ export function FamilyTreeDisplayWindow({
   }, []);
 
   return (
-    <Modal title="Відображення дерева" mode="window" minimizable={false} onClose={onClose}>
+    <Modal title="Відображення дерева" mode="window" minimizable={false} onClose={onClose} headerActions={<SectionHelp guideKey="familyTree" topic={displayMode} />}>
       <div ref={bodyRef} className="family-tree-tools-window">
         <div className="family-tree-tools-summary">
           <span className="eyebrow">Активне дерево</span>

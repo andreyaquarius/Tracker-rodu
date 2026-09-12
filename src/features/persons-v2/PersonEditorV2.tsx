@@ -1,3 +1,4 @@
+import { SectionHelp } from "../../help/ContextHelp.tsx";
 import {
   useEffect,
   useId,
@@ -497,11 +498,15 @@ function PersonDateInput({
 function EditorSection({
   id,
   title,
+  helpTopic,
+  helpActive,
   description,
   children,
 }: {
   id: string;
   title: string;
+  helpTopic: EditorSectionKey;
+  helpActive: boolean;
   description?: string;
   children: ReactNode;
 }) {
@@ -513,6 +518,7 @@ function EditorSection({
           <h2 id={headingId}>{title}</h2>
           {description ? <p>{description}</p> : null}
         </div>
+        <SectionHelp guideKey="persons" topic={`edit-${helpTopic}`} automatic={helpActive} />
       </div>
       <div className="person-editor-v2-fields">{children}</div>
     </section>
@@ -1267,6 +1273,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-main`}
+              helpTopic="main"
+              helpActive={activeSection === "main"}
               title="Основне"
               description="Дослідження, статус картки, стать і життєвий статус особи."
             >
@@ -1328,6 +1336,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-photos`}
+              helpTopic="photos"
+              helpActive={activeSection === "photos"}
               title="Фото"
               description="Фотографії особи, вибір головного зображення та кадрування аватара."
             >
@@ -1367,6 +1377,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-names`}
+              helpTopic="names"
+              helpActive={activeSection === "names"}
               title="Імена та варіанти"
               description="Канонічне ім’я картки та написання, знайдені в інших джерелах."
             >
@@ -1440,7 +1452,7 @@ export function PersonEditorV2({
               ) : null}
             </EditorSection>
 
-            <EditorSection id={`${editorPrefix}-birth`} title="Народження">
+            <EditorSection id={`${editorPrefix}-birth`} title="Народження" helpTopic="birth" helpActive={activeSection === "birth"}>
               <PersonDateInput
                 label="Дата народження"
                 value={dateDrafts.birthDate}
@@ -1498,6 +1510,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-marriage`}
+              helpTopic="marriage"
+              helpActive={activeSection === "marriage"}
               title="Шлюби"
               description="Кожен запис є спільним для двох партнерів і відображається в обох картках. Можна додати кілька шлюбів."
             >
@@ -1651,7 +1665,7 @@ export function PersonEditorV2({
               />
             </EditorSection>
 
-            <EditorSection id={`${editorPrefix}-death`} title="Смерть">
+            <EditorSection id={`${editorPrefix}-death`} title="Смерть" helpTopic="death" helpActive={activeSection === "death"}>
               {form.isLiving ? (
                 <p className="person-editor-v2-section-notice field-wide">
                   Особу позначено живою. Поля смерті приховані й не будуть збережені.
@@ -1729,6 +1743,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-status`}
+              helpTopic="status"
+              helpActive={activeSection === "status"}
               title="Статус і приватність"
               description="Приватність живих людей потрібно перевіряти особливо уважно."
             >
@@ -1778,6 +1794,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-places`}
+              helpTopic="places"
+              helpActive={activeSection === "places"}
               title="Місця"
               description="Текстові назви зберігаються разом із позначками для карти."
             >
@@ -1926,6 +1944,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-notes`}
+              helpTopic="notes"
+              helpActive={activeSection === "notes"}
               title="Біографія і нотатки"
               description="Поточна модель зберігає біографічний опис у спільному полі нотаток."
             >
@@ -1943,6 +1963,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-events`}
+              helpTopic="events"
+              helpActive={activeSection === "events"}
               title="Події"
               description="Додаткові життєві події та факти, крім основних дат вище."
             >
@@ -1957,6 +1979,8 @@ export function PersonEditorV2({
 
             <EditorSection
               id={`${editorPrefix}-custom`}
+              helpTopic="custom"
+              helpActive={activeSection === "custom"}
               title="Власні поля"
               description="Додаткові поля, налаштовані для модуля осіб цього проєкту."
             >

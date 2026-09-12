@@ -1,3 +1,4 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import L from "leaflet";
 import {
   useCallback,
@@ -276,6 +277,7 @@ export function FamilyTreeStatisticsPage({
                 {appliedFilterChips(filters).map((chip) => <span key={chip}>{chip}</span>)}
               </div>
             </div>
+            <SectionHelp guideKey="tree-statistics" topic={activeTab} />
             <button type="button" className="button button-secondary" disabled={loading} onClick={refresh}>{loading ? "Рахуємо…" : "Оновити статистику"}</button>
             <div className="family-tree-statistics-export-wrap">
               <button type="button" className="button" disabled={!payload || exporting} onClick={() => setExportOpen((value) => !value)}>{exporting ? "Формуємо…" : "Експорт звіту"}</button>

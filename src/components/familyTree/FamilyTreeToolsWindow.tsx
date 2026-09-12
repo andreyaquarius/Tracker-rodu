@@ -1,3 +1,4 @@
+import { SectionHelp } from "../../help/ContextHelp.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { Modal } from "../Modal";
 import type { FamilyTreeAppearanceSyncState } from "../../hooks/useFamilyTreeAppearancePreferences.ts";
@@ -253,6 +254,7 @@ export function FamilyTreeToolsWindow({
   return (
     <Modal
       title="Адміністрування"
+      headerActions={<SectionHelp guideKey="familyTree" topic="tools" />}
       mode="window"
       minimizable={false}
       onClose={onClose}

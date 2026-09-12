@@ -1,3 +1,4 @@
+import { SectionHelp } from "../../help/ContextHelp.tsx";
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
 import {
@@ -77,6 +78,7 @@ export function GedcomImportManagerV2({
       {open ? (
         <Modal
           title="Імпортовані GEDCOM"
+          headerActions={<SectionHelp guideKey="gedcom" />}
           className="persons-v2-gedcom-manager-modal"
           onClose={() => {
             if (!deletionInFlightRef.current) setOpen(false);

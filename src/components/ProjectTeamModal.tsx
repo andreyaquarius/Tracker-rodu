@@ -1,3 +1,4 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { SupabaseAccount, SupabaseWorkspace } from "../services/supabaseAuth";
 import {
@@ -268,7 +269,7 @@ export function ProjectTeamModal({
   };
 
   return (
-    <Modal title="Учасники та запрошення" onClose={onClose}>
+    <Modal title="Учасники та запрошення" onClose={onClose} headerActions={<SectionHelp guideKey="team" />}>
       <div className="team-modal">
         <div className="team-account-note">
           Запрошення для вашого облікового запису: <strong>{account.email}</strong>

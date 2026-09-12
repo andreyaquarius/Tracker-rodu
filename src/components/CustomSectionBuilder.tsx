@@ -1,3 +1,4 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import { useEffect, useState, type FormEvent } from "react";
 import type {
   AppDatabase,
@@ -140,7 +141,7 @@ export function CustomSectionBuilder({
     <section className="panel settings-panel custom-fields-settings">
       <div className="section-heading">
         <div>
-          <h2>Конструктор розділів</h2>
+          <h2>Конструктор розділів <SectionHelp guideKey="settings" topic="custom" automatic={false} /></h2>
           <p>Створюйте власні розділи, визначайте їхні поля або використовуйте готові шаблони.</p>
         </div>
         <button

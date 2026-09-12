@@ -1,3 +1,4 @@
+import { SectionHelp } from "../../help/ContextHelp.tsx";
 import {
   useEffect,
   useId,
@@ -449,6 +450,7 @@ export function PersonProfileV2({
         </dl>
       </header>
 
+      <div className="context-help-tabs">
       <nav className="persons-v2-profile__tabs" role="tablist" aria-label="Розділи картки особи">
         {profileTabsV2.map((tab, index) => (
           <button
@@ -470,6 +472,8 @@ export function PersonProfileV2({
         ))}
       </nav>
 
+      <SectionHelp guideKey="persons" topic={activeTab} />
+      </div>
       {profileTabsV2.map((tab) => (
         <section
           key={tab}

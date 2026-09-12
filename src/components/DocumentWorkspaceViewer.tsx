@@ -1,3 +1,4 @@
+import { SectionHelp } from "../help/ContextHelp.tsx";
 import { useProductAnalyticsPage } from "../hooks/useProductAnalyticsPage.ts";
 import {
   useEffect,
@@ -2614,6 +2615,7 @@ export function DocumentWorkspaceViewer({
           <button type="button" className="button button-secondary" onClick={() => setMode("minimized")}>
             Сховати
           </button>
+          <SectionHelp guideKey="viewer" topic={showPhotoTags ? "photos" : undefined} />
           <button type="button" className="icon-button" onClick={onClose} aria-label="Закрити перегляд">
             ×
           </button>
