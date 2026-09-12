@@ -4,6 +4,7 @@ import { extraHelpGuides, guideAdditions, type ExtraHelpGuideKey } from "./helpM
 export type HelpGuideKey =
   | ExtraHelpGuideKey
   | "workspace-intro"
+  | "notifications"
   | "dashboard"
   | "map"
   | "familyTree"
@@ -41,6 +42,7 @@ export const HELP_STORAGE_KEYS = {
 
 export const fullHelpTourKeys: HelpGuideKey[] = [
   "workspace-intro",
+  "notifications",
   "dashboard",
   "researches",
   "persons",
@@ -61,6 +63,18 @@ export const fullHelpTourKeys: HelpGuideKey[] = [
 
 export const helpGuides: Record<HelpGuideKey, HelpGuide> = {
   ...extraHelpGuides,
+  notifications: {
+    key: "notifications",
+    section: "Повідомлення",
+    title: "Повідомлення",
+    intro: "Читайте оголошення й нагадування на окремій сторінці, не перериваючи роботу з проєктом.",
+    steps: [
+      { title: "Перевіряйте дзвіночок", text: "Цифра на дзвіночку показує непрочитані повідомлення в завантаженому списку. Натисніть дзвіночок для короткого перегляду або «Усі повідомлення» для окремої сторінки." },
+      { title: "Відкрийте повний текст", text: "Натисніть назву повідомлення. Воно відкриється на окремій сторінці й буде позначене прочитаним. Саме відкриття дзвіночка нічого не позначає." },
+      { title: "Переходьте до матеріалів", text: "Під повним текстом є посилання на додаткові матеріали, завдання проєкту або запит GeneHelp, якщо вони додані до повідомлення." },
+      { title: "Знаходьте непрочитане", text: "Використовуйте фільтр «Непрочитані», сторінки списку й кнопку оновлення. Нагадування та GeneHelp показують останні 50 сповіщень кожного типу." },
+    ],
+  },
   "workspace-intro": {
     key: "workspace-intro",
     section: "Перші кроки",

@@ -7,6 +7,10 @@ const layout = source("../src/components/Layout.tsx");
 const geneHelp = source("../src/services/geneHelp.ts");
 const service = source("../src/services/geneHelpNotificationService.ts");
 const types = source("../src/types/notifications.ts");
+const inbox = source("../src/services/notificationInboxService.ts");
+const provider = source("../src/components/NotificationInboxProvider.tsx");
+const helpers = source("../src/utils/notificationInbox.ts");
+const reader = source("../src/pages/NotificationsPage.tsx");
 
 test("GeneHelp notification service uses the authenticated RPC contract", () => {
   assert.match(service, /rpc\("list_my_genehelp_notifications",\s*\{\s*p_limit:/s);
@@ -55,40 +59,40 @@ test("GeneHelp notification list triggers throttled provider sync without hiding
 
 test("notification bell combines GeneHelp with announcements and task reminders", () => {
   assert.match(
-    bell,
+    inbox,
     /Promise\.allSettled\(\[\s*loadMyAnnouncements\(expectedUserId\),\s*loadMyGeneHelpNotifications\(50, expectedUserId\),\s*loadMyTaskNotifications\(50, expectedUserId\)/s,
   );
-  assert.match(bell, /geneHelpNotifications\.filter\(\(item\) => !item\.isRead\)/);
-  assert.match(bell, /markGeneHelpNotificationRead\(notification\.id, account\?\.id\)/);
-  assert.match(bell, /markAllGeneHelpNotificationsRead\(account\?\.id\)/);
+  assert.match(provider, /unreadCount: items\.filter\(\(item\) => !item\.isRead\)\.length/);
+  assert.match(inbox, /markGeneHelpNotificationRead\(item\.id, userId\)/);
+  assert.match(inbox, /markAllGeneHelpNotificationsRead\(userId\)/);
   assert.ok(
-    bell.indexOf("geneHelpNotifications.map") < bell.indexOf("taskNotifications.map"),
+    inbox.indexOf("notifications.map(geneHelpInboxItem)") < inbox.indexOf("map(taskInboxItem)"),
     "GeneHelp notifications should appear before task reminders",
   );
-  assert.match(bell, /GeneHelp · Нова відповідь/);
-  assert.match(bell, /GeneHelp · Статус змінено/);
-  assert.match(bell, /setGeneHelpNotifications\(geneHelpResult\.value\.notifications\)/);
+  assert.match(helpers, /GeneHelp · Нова відповідь/);
+  assert.match(helpers, /GeneHelp · Статус змінено/);
+  assert.match(inbox, /geneHelpResult\.value\.notifications\.map\(geneHelpInboxItem\)/);
   assert.match(
-    bell,
+    inbox,
     /geneHelpResult\.status === "fulfilled" &&\s*geneHelpResult\.value\.syncWarning/s,
   );
-  assert.match(bell, /Не вдалося оновити сповіщення GeneHelp\. Показуємо раніше отримані дані\./);
+  assert.match(inbox, /Не вдалося оновити сповіщення GeneHelp\. Показуємо раніше отримані дані\./);
 });
 
 test("GeneHelp notification links are derived locally and never trust webhook links", () => {
-  assert.match(bell, /authenticatedGeneHelpViewUrl\(canonicalRequestUrl, undefined, requestId\)/);
-  assert.match(bell, /\^\[a-z0-9_-\]\{4,64\}\$/i);
+  assert.match(helpers, /authenticatedGeneHelpViewUrl\(canonicalRequestUrl, undefined, requestId\)/);
+  assert.match(helpers, /\^\[a-z0-9_-\]\{4,64\}\$/i);
   assert.doesNotMatch(service, /\b(?:links|view_url|edit_url)\b/);
   assert.doesNotMatch(bell, /notification\.(?:links|viewUrl|editUrl)/);
-  assert.match(bell, /window\.open\(targetUrl, "_blank", "noopener,noreferrer"\)/);
-  assert.match(bell, /void markGeneHelpRead\(notification\)/);
+  assert.match(bell, /to=\{notificationPath\(item.kind, item.id\)\}/);
+  assert.match(reader, /href=\{item.action.url\} target="_blank" rel="noopener noreferrer"/);
   assert.doesNotMatch(bell, /markGeneHelpRead\(notification\)\.finally/);
   assert.doesNotMatch(bell, /window\.location\.assign\(targetUrl\)/);
 });
 
 test("existing refresh on open, focus and every minute remains intact", () => {
-  assert.match(bell, /window\.setInterval\(\(\) => void refresh\(\), 60 \* 1000\)/);
-  assert.match(bell, /window\.addEventListener\("focus", onFocus\)/);
+  assert.match(provider, /window\.setInterval\(\(\) => void refresh\(\), 60 \* 1000\)/);
+  assert.match(provider, /window\.addEventListener\("focus", onFocus\)/);
   assert.match(bell, /event\.currentTarget\.open\) void refresh\(\)/);
 });
 

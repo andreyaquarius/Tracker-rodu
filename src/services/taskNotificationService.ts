@@ -40,6 +40,16 @@ export async function loadMyTaskNotifications(
   return ((data ?? []) as TaskNotificationRow[]).map(taskNotificationFromRow);
 }
 
+export async function loadMyTaskNotification(id: string, expectedUserId: string): Promise<TaskReminderNotification | null> {
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(client, async () => {
+    const result = await client.from("task_notifications").select(TASK_NOTIFICATION_SELECT).eq("id", id).maybeSingle();
+    return { data: result.data as TaskNotificationRow | null, error: result.error };
+  }, expectedUserId);
+  if (error) throw error;
+  return data ? taskNotificationFromRow(data) : null;
+}
+
 export async function markTaskNotificationRead(
   id: string,
   expectedUserId?: string,

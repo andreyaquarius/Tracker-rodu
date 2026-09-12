@@ -5,6 +5,7 @@ Disallow: /projects
 Disallow: /settings
 Disallow: /admin
 Disallow: /account
+Disallow: /notifications
 Disallow: /subscription
 Disallow: /auth
 

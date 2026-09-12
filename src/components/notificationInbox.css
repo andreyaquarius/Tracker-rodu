@@ -1,0 +1,44 @@
+.notification-center { width: 100%; max-width: 980px; margin: 0 auto; min-width: 0; padding-bottom: 32px; }
+.notification-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.notification-page-header h1 { margin: 6px 0 12px; }
+.notification-page-header p { margin: 0; color: var(--muted); max-width: 65ch; line-height: 1.6; }
+.notification-page-header > button { flex: 0 0 auto; }
+.notification-toolbar, .notification-filters, .notification-pagination, .notification-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.notification-toolbar { justify-content: space-between; margin-bottom: 20px; }
+.notification-filters [aria-pressed="true"] { border-color: var(--app-link, var(--green-800)); box-shadow: inset 0 -2px var(--app-link, var(--green-800)); }
+.notification-page-list { display: grid; gap: 14px; }
+.notification-card { min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.notification-card.unread { border-color: var(--app-border-strong, #d2a75f); box-shadow: inset 4px 0 #d2a75f; }
+.notification-card > a { display: block; padding: 24px; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+.notification-card > a:hover { background: var(--app-surface, #f7faf7); }
+.notification-card > a:focus-visible { outline: 3px solid var(--app-link, var(--green-800)); outline-offset: -4px; }
+.notification-card h2 { font-size: 21px; margin: 12px 0; line-height: 1.4; }
+.notification-excerpt, .announcement-item .notification-preview-link p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notification-excerpt { color: var(--muted); line-height: 1.6; font-size: 15px; }
+.notification-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 20px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.notification-project { color: var(--muted); font-size: 13px; }
+.notification-pagination { justify-content: center; margin-top: 24px; }
+.notification-list-note { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 24px; }
+.notification-back { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: 16px; color: var(--app-link, var(--green-800)); }
+.notification-reader { width: 100%; max-width: 860px; margin: 0 auto; padding: clamp(20px, 4vw, 48px); border: 1px solid var(--line); border-radius: 16px; background: var(--paper); color: var(--app-ink, var(--green-950)); overflow-wrap: anywhere; }
+.notification-reader h1 { font-size: clamp(26px, 3vw, 36px); line-height: 1.25; margin: 20px 0 12px; }
+.notification-reader header { border-bottom: 1px solid var(--line); padding-bottom: 16px; margin-bottom: 28px; }
+.notification-read-status { color: var(--muted); font-size: 12px; margin: 0; }
+.notification-full-text { font-size: 17px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notification-task-details { display: flex; flex-wrap: wrap; gap: 16px 40px; margin-bottom: 28px; }
+.notification-task-details dt { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.notification-task-details dd { margin: 0; }
+.notification-actions { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 24px; }
+.notification-actions .button { white-space: normal; text-align: center; }
+.notification-center h1:focus { outline: none; }
+.notification-inbox-link { display: flex; justify-content: center; margin-bottom: 14px; text-decoration: none; }
+.announcement-item a.notification-preview-link { display: block; margin: 0; width: 100%; color: inherit; font-weight: 400; text-decoration: none; overflow-wrap: anywhere; }
+.notification-preview-link:focus-visible { outline: 2px solid var(--app-link, var(--green-800)); outline-offset: 5px; border-radius: 3px; }
+@media (max-width: 600px) {
+  .notification-page-header { flex-wrap: wrap; }
+  .notification-toolbar { align-items: flex-start; }
+  .notification-card > a { padding: 18px; }
+  .notification-reader { padding: 20px 16px; border-radius: 12px; }
+  .notification-full-text { font-size: 16px; line-height: 1.75; }
+  .notification-actions { flex-direction: column; align-items: stretch; }
+}

@@ -99,17 +99,20 @@ test("successful Edge Function deployment immediately exercises and logs reminde
 });
 
 test("notification bell combines announcements and task reminders", () => {
-  assert.match(bell, /loadMyTaskNotifications/);
-  assert.match(bell, /markTaskNotificationRead/);
-  assert.match(bell, /taskNotifications\.filter\(\(item\) => !item\.isRead\)/);
-  assert.match(bell, /Нагадування про завдання/);
+  const inbox = readFileSync(new URL("../src/services/notificationInboxService.ts", import.meta.url), "utf8");
+  const provider = readFileSync(new URL("../src/components/NotificationInboxProvider.tsx", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("../src/utils/notificationInbox.ts", import.meta.url), "utf8");
+  assert.match(inbox, /loadMyTaskNotifications/);
+  assert.match(inbox, /markTaskNotificationRead/);
+  assert.match(provider, /items\.filter\(\(item\) => !item\.isRead\)/);
+  assert.match(helpers, /Нагадування про завдання/);
   assert.match(service, /\.from\("task_notifications"\)/);
   assert.match(service, /Math\.min\(100, Math\.max\(1/);
 });
 
 test("notification bell refreshes within a minute and whenever the panel opens", () => {
   assert.match(
-    bell,
+    readFileSync(new URL("../src/components/NotificationInboxProvider.tsx", import.meta.url), "utf8"),
     /window\.setInterval\(\(\)\s*=>\s*void refresh\(\),\s*60\s*\*\s*1000\s*\)/,
   );
   assert.match(bell, /<details[\s\S]*?onToggle=/);
@@ -121,9 +124,11 @@ test("notification bell refreshes within a minute and whenever the panel opens",
 });
 
 test("notification bell never queries protected records without the matching session", () => {
-  assert.match(bell, /loadMyAnnouncements\(expectedUserId\)/);
-  assert.match(bell, /loadMyTaskNotifications\(50, expectedUserId\)/);
-  assert.match(bell, /refreshGenerationRef/);
+  const inbox = readFileSync(new URL("../src/services/notificationInboxService.ts", import.meta.url), "utf8");
+  const provider = readFileSync(new URL("../src/components/NotificationInboxProvider.tsx", import.meta.url), "utf8");
+  assert.match(inbox, /loadMyAnnouncements\(expectedUserId\)/);
+  assert.match(inbox, /loadMyTaskNotifications\(50, expectedUserId\)/);
+  assert.match(provider, /generation.current === currentGeneration/);
   assert.match(service, /runAuthenticatedSupabaseRequest/);
   assert.match(announcementService, /runAuthenticatedSupabaseRequest/);
 });

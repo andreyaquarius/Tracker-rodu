@@ -120,7 +120,7 @@ test("private Zaguliaky drafts and standalone Notes are auth-only without worksp
   );
   assert.match(
     appSource,
-    /if \(route\.kind === "notes" \|\| \(route\.kind === "zagulyaky" && route\.tab === "mine"\)\) \{/,
+    /if \(route\.kind === "notes" \|\| route\.kind === "notifications" \|\| \(route\.kind === "zagulyaky" && route\.tab === "mine"\)\) \{/,
     "a guest opening private Notes or Zaguliaky drafts must retain its return path before sign-in",
   );
   assert.match(
