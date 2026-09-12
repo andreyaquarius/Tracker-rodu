@@ -211,12 +211,13 @@ export interface ReviewZagulyakaInput {
   verificationStatus?: ZagulyakaVerificationStatus | null;
   privacyStatus?: ZagulyakaPrivacyStatus | null;
   publicSlug?: string | null;
+  archivalSourceId?: string | null;
 }
 
 export interface AdminZagulyakaPrivacyClearance {
   recordId: string;
   reviewStatus: "missing" | "pending" | "approved" | "revoked" | "rejected";
-  publicationBasis: "documented_consent" | null;
+  publicationBasis: "documented_consent" | "historical_archive" | null;
   consentObtainedAt: string | null;
   evidenceReference: string;
   privateNote: string;
@@ -418,7 +419,8 @@ function privacyClearance(value: unknown): AdminZagulyakaPrivacyClearance {
     reviewStatus: ["missing", "pending", "approved", "revoked", "rejected"].includes(reviewStatus)
       ? reviewStatus as AdminZagulyakaPrivacyClearance["reviewStatus"]
       : "missing",
-    publicationBasis: text(row.publicationBasis) === "documented_consent" ? "documented_consent" : null,
+    publicationBasis: row.publicationBasis === "documented_consent" || row.publicationBasis === "historical_archive"
+      ? row.publicationBasis : null,
     consentObtainedAt: nullableText(row.consentObtainedAt),
     evidenceReference: text(row.evidenceReference),
     privateNote: text(row.privateNote),
@@ -562,6 +564,18 @@ export async function reviewAdminZagulyaka(input: ReviewZagulyakaInput): Promise
     recordIds: [input.recordId],
     action: "review_record",
   }, async () => {
+    if (input.action === "publish" && input.archivalSourceId) {
+      const { data, error } = await getSupabaseClient().rpc("admin_publish_archival_zagulyaka_v1", {
+        p_record_id: input.recordId,
+        p_expected_lock_version: input.expectedLockVersion,
+        p_source_id: input.archivalSourceId,
+        p_note: input.note?.trim() ?? "",
+        p_verification_status: input.verificationStatus ?? null,
+        p_public_slug: input.publicSlug?.trim() || null,
+      });
+      if (error) throw error;
+      return queueItem(data);
+    }
     const { data, error } = await getSupabaseClient().rpc("admin_review_zagulyaka_v1", {
       p_record_id: input.recordId,
       p_expected_lock_version: input.expectedLockVersion,

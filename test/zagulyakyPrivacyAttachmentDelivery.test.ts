@@ -26,7 +26,7 @@ const moderationStyles = readFileSync(
   "utf8",
 );
 
-test("a possible living person cannot be cleared or published without recorded consent", () => {
+test("the living-person consent path remains available alongside historical archive review", () => {
   assert.match(migration, /create table if not exists public\.zagulyaky_privacy_clearances/);
   assert.match(migration, /review_status = 'approved'/);
   assert.match(migration, /consent_obtained_at is not null/);
@@ -34,7 +34,7 @@ test("a possible living person cannot be cleared or published without recorded c
   assert.match(migration, /create trigger zagulyaky_records_living_person_privacy/);
   assert.match(migration, /LIVING_PERSON_DOCUMENTED_CONSENT_REQUIRED/);
   assert.match(migration, /admin_record_zagulyaka_living_consent_v1/);
-  assert.match(moderationPanel, /Можливо жива особа/);
+  assert.match(moderationPanel, /може стосуватися живої особи/);
   assert.match(moderationPanel, /runRecordLivingConsent/);
 });
 
@@ -43,7 +43,8 @@ test("initial private drafts only show living-person clearance controls during r
     moderationPanel,
     /const requiresLivingPrivacyReview = Boolean\(\s*selected && \(selected\.status === "pending_review" \|\| selected\.status === "published"\),\s*\);/s,
   );
-  assert.match(moderationPanel, /\{requiresLivingPrivacyReview && selected\.possibleLivingPerson \?/);
+  assert.match(moderationPanel, /\{requiresLivingPrivacyReview \?/);
+  assert.match(moderationPanel, /selected\.possibleLivingPerson && !archivalConfirmed/);
   assert.doesNotMatch(moderationPanel, /rightsConfirmedAt \?/);
 });
 
@@ -77,7 +78,10 @@ test("private evidence is reviewed and published only through controlled server 
   assert.match(moderationPanel, /Переглянути приватно/);
   assert.match(moderationPanel, /Створити публічну копію/);
   assert.match(moderationPanel, /Опублікувати цей запис і створити публічні копії/);
-  assert.match(moderationPanel, /for \(const attachmentId of pendingAttachmentIds\)/);
+  assert.match(moderationPanel, /publishZagulyakaWithAttachments\(\{/);
+  assert.match(moderationPanel, /publishRecord: review/);
+  assert.match(moderationPanel, /publishAttachment: publishAdminZagulyakaAttachment/);
+  assert.match(moderationPanel, /await runReview\("publish", \[attachmentId\]\)/);
   assert.doesNotMatch(
     migration,
     /select a, r into attachment, target_record/i,
