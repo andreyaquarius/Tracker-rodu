@@ -1,4 +1,5 @@
 import type { SupabaseWorkspace } from "../services/supabaseAuth";
+import { CommunityResources } from "../components/CommunityResources.tsx";
 
 interface ProjectsPageProps {
   workspaces: SupabaseWorkspace[];
@@ -38,6 +39,7 @@ export function ProjectsPage({
           {creating ? "Створення…" : "+ Новий проєкт"}
         </button>
       </div>
+      <CommunityResources />
       <div className="project-route-grid">
         {workspaces.map((workspace) => workspace.deletionPending ? (
           <article
