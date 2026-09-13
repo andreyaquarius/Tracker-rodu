@@ -327,6 +327,7 @@ ${limitText(JSON.stringify(context), mode === "detailed" ? 50000 : 22000)}`;
       model,
       prompt,
       responseSchema,
+      "review-hypothesis",
     ) as Record<string, unknown>;
     const inputSummary = {
       hypothesisId,

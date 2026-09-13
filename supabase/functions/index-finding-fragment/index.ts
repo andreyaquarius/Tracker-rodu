@@ -736,6 +736,7 @@ Deno.serve(async (request) => {
       buildPrompt(context),
       { mimeType, data: base64 },
       responseSchema,
+      "index-finding-fragment",
     ));
 
     return jsonWithCors(request, {

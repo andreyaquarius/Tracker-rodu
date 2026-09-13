@@ -21,6 +21,7 @@ on:
       - "test/findingLegacyRelationIsolation.test.ts"
       - "test/googleDrive*.test.ts"
       - "test/geneHelp*.test.ts"
+      - "test/aiMonitoring*.ts"
       - "test/zagulyakyPublicIndexingPerformance.test.ts"
       - "test/zagulyakyPublicStatsSafeupdate.test.ts"
       - "test/zagulyakySecurityDefinerApiIsolation.test.ts"
@@ -59,6 +60,12 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
       TELEGRAM_WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
+      # Public DSN for the existing tracker-rodu-web project. Metadata-only AI
+      # tracing was approved; set repository variable SENTRY_AI_ENABLED=false to stop it.
+      SENTRY_AI_DSN: ${{ vars.SENTRY_AI_DSN || 'https://8e3abe90ffc73072358626ddf11a6116@o4512075083939840.ingest.de.sentry.io/4512075160420432' }}
+      SENTRY_AI_ENABLED: ${{ vars.SENTRY_AI_ENABLED || 'true' }}
+      SENTRY_AI_ENVIRONMENT: production
+      SENTRY_AI_RELEASE: ${{ github.sha }}
 
     steps:
       - name: Checkout repository
@@ -99,6 +106,14 @@ jobs:
 
       - name: Verify GeneHelp notification sync contracts
         run: node --test --test-concurrency=1 "test/geneHelp*.test.ts"
+
+      - name: Verify metadata-only AI monitoring
+        run: |
+          node --test test/aiMonitoring.test.ts
+          # Pinned runtime; synthetic provider/transport only, no --allow-net.
+          npx --yes --package=deno@2.5.0 deno test \
+            --no-lock --node-modules-dir=none --allow-env \
+            test/aiMonitoring.deno.ts test/aiMonitoringOptIn.deno.ts
 
       - name: Verify GEDCOM deletion and rollback contracts
         run: |
@@ -275,6 +290,10 @@ jobs:
             TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
             TELEGRAM_WEBHOOK_SECRET="$TELEGRAM_WEBHOOK_SECRET" \
             TELEGRAM_WORKER_SECRET="$TELEGRAM_WORKER_SECRET" \
+            SENTRY_AI_DSN="$SENTRY_AI_DSN" \
+            SENTRY_AI_ENABLED="$SENTRY_AI_ENABLED" \
+            SENTRY_AI_ENVIRONMENT="$SENTRY_AI_ENVIRONMENT" \
+            SENTRY_AI_RELEASE="$SENTRY_AI_RELEASE" \
             --project-ref "$SUPABASE_PROJECT_REF"
 
           for function_dir in supabase/functions/*; do

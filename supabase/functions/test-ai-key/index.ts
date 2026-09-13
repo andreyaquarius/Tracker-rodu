@@ -15,7 +15,7 @@ Deno.serve(async (request) => {
     const { user, admin, encryptionKey } = await authenticatedContext(request);
     const settings = await readAiSettings(admin, user.id);
     const apiKey = await decryptApiKey(settings.encrypted_api_key, encryptionKey);
-    await callGemini(apiKey, settings.model, "Відповідай лише словом: працює");
+    await callGemini(apiKey, settings.model, "Відповідай лише словом: працює", undefined, "test-ai-key");
     return json({ success: true, model: settings.model });
   } catch (error) {
     return json({ error: errorMessage(error, "Не вдалося перевірити API-ключ.") }, 400);

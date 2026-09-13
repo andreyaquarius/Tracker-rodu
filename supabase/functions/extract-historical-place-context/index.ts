@@ -130,6 +130,7 @@ Deno.serve(async (request) => {
         model,
         buildHistoricalPlaceAiPrompt(promptContext),
         historicalPlaceAiResponseSchema,
+        "extract-historical-place-context",
       ),
       sourceText,
     );
