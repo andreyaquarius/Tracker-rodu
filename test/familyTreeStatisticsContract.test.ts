@@ -22,16 +22,6 @@ const layout = readFileSync(new URL("../src/components/Layout.tsx", import.meta.
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
-test("screen and exports share chart geometry and missing progress stays neutral", () => {
-  assert.match(page, /createFamilyTreeStatisticsBarChartModel\(chart\)/);
-  assert.match(page, /createFamilyTreeStatisticsDonutChartModel\(chart\.rows\)/);
-  assert.match(exporter, /createFamilyTreeStatisticsBarChartModel\(displayChart\)/);
-  assert.doesNotMatch(page, /Math\.max\(row\.(value|secondary|tertiary) \? 1/);
-  assert.doesNotMatch(exporter, /Math\.max\(2, 760 \* row/);
-  assert.match(styles, /\.family-tree-statistics-bars \.track > span\s*\{[^}]*flex:\s*0 0 auto;/);
-  assert.match(styles, /\.family-tree-statistics-series-legend\.stacked-progress i\.series-1\s*\{[^}]*background:\s*var\(--app-surface-soft/);
-});
-
 test("statistics UI exposes every report, global filters, lazy detail and accessible charts", () => {
   for (const tab of ["overview", "ancestry", "demography", "families", "names", "geography", "research", "quality"]) {
     assert.match(page, new RegExp(`id: "${tab}"`));

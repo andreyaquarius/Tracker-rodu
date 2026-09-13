@@ -79,11 +79,6 @@ export function analyticsDuration(seconds: number | null): string {
 }
 export const analyticsCount = (value: number | null) => value === null ? "—" : value.toLocaleString("uk-UA");
 
-/** Exact bounded percentage for chart fills, including an actually empty 0%. */
-export function analyticsPercent(value: number): number {
-  return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
-}
-
 /** Separate SVG subpaths for redacted buckets: a missing value is not zero. */
 export function analyticsLinePath(values: Array<number | null>, width: number, height: number): string {
   const max = Math.max(1, ...values.filter((value): value is number => value !== null));

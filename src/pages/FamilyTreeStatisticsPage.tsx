@@ -35,8 +35,6 @@ import {
   exportStatisticsTableCsv,
 } from "../utils/familyTreeStatisticsExport.ts";
 import {
-  createFamilyTreeStatisticsBarChartModel,
-  createFamilyTreeStatisticsDonutChartModel,
   createFamilyTreeStatisticsLineChartModel,
   familyTreeStatisticsChartForPresentation,
   familyTreeStatisticsRowBreakdown,
@@ -400,14 +398,14 @@ function StatisticsDashboard({ payload, onOpenDetail }: { payload: FamilyTreeSta
   );
 }
 
-export function StatisticsChartCard({ chart, onOpenDetail }: { chart: FamilyTreeStatisticsChart; onOpenDetail: (key: string | undefined, title: string) => void }) {
+function StatisticsChartCard({ chart, onOpenDetail }: { chart: FamilyTreeStatisticsChart; onOpenDetail: (key: string | undefined, title: string) => void }) {
   const [tableOpen, setTableOpen] = useState(false);
   const displayChart = familyTreeStatisticsChartForPresentation(chart);
   return (
     <article className="family-tree-statistics-chart-card panel">
       <header><h2>{displayChart.title}</h2><div><button type="button" title="Зберегти CSV" onClick={() => exportStatisticsChartCsv(displayChart)}>CSV</button><button type="button" title="Зберегти SVG" onClick={() => exportStatisticsChartSvg(displayChart)}>SVG</button><button type="button" title="Зберегти PNG" onClick={() => void exportStatisticsChartPng(displayChart)}>PNG</button><button type="button" onClick={() => setTableOpen((value) => !value)}>{tableOpen ? "Сховати таблицю" : "Таблиця"}</button></div></header>
       <StatisticsChartView chart={displayChart} onOpenDetail={onOpenDetail} />
-      {displayChart.seriesLabels?.length ? <div className={`family-tree-statistics-series-legend ${displayChart.type}`} aria-label="Позначення рядів">{displayChart.seriesLabels.map((label, index) => <span key={label}><i className={`series-${index}`} />{label}</span>)}</div> : null}
+      {displayChart.seriesLabels?.length ? <div className="family-tree-statistics-series-legend" aria-label="Позначення рядів">{displayChart.seriesLabels.map((label, index) => <span key={label}><i className={`series-${index}`} />{label}</span>)}</div> : null}
       {tableOpen ? <ChartAccessibleTable chart={displayChart} onOpenDetail={onOpenDetail} /> : null}
     </article>
   );
@@ -417,10 +415,10 @@ function StatisticsChartView({ chart, onOpenDetail }: { chart: FamilyTreeStatist
   if (!chart.rows.length) return <div className="family-tree-statistics-no-data">Недостатньо даних для діаграми.</div>;
   if (chart.type === "donut") return <DonutChart chart={chart} onOpenDetail={onOpenDetail} />;
   if (chart.type === "line") return <LineChart chart={chart} onOpenDetail={onOpenDetail} />;
-  const bars = createFamilyTreeStatisticsBarChartModel(chart);
+  const max = Math.max(1, ...chart.rows.map((row) => Number(row.total ?? row.value + (row.secondary ?? 0) + (row.tertiary ?? 0))));
   return (
     <div className={`family-tree-statistics-bars ${chart.type}`} role="img" aria-label={chart.title}>
-      {bars.map(({ row, primaryPercent, secondaryPercent, tertiaryPercent }, index) => (
+      {chart.rows.map((row, index) => (
         <button
           key={`${row.label}-${index}`}
           type="button"
@@ -430,9 +428,9 @@ function StatisticsChartView({ chart, onOpenDetail }: { chart: FamilyTreeStatist
         >
           <span className="label">{row.label}</span>
           <span className="track">
-            <span className="primary" style={{ width: `${primaryPercent}%` }} />
-            {secondaryPercent > 0 ? <span className="secondary" style={{ width: `${secondaryPercent}%` }} /> : null}
-            {tertiaryPercent > 0 ? <span className="tertiary" style={{ width: `${tertiaryPercent}%` }} /> : null}
+            <span className="primary" style={{ width: `${Math.max(row.value ? 1 : 0, row.value / max * 100)}%` }} />
+            {row.secondary !== undefined ? <span className="secondary" style={{ width: `${Math.max(row.secondary ? 1 : 0, row.secondary / max * 100)}%` }} /> : null}
+            {row.tertiary !== undefined ? <span className="tertiary" style={{ width: `${Math.max(row.tertiary ? 1 : 0, row.tertiary / max * 100)}%` }} /> : null}
           </span>
           <strong>{familyTreeStatisticsRowDisplayValue(chart, row)}</strong>
         </button>
@@ -442,13 +440,19 @@ function StatisticsChartView({ chart, onOpenDetail }: { chart: FamilyTreeStatist
 }
 
 function DonutChart({ chart, onOpenDetail }: { chart: FamilyTreeStatisticsChart; onOpenDetail: (key: string | undefined, title: string) => void }) {
-  const { total, segments: modelSegments } = createFamilyTreeStatisticsDonutChartModel(chart.rows);
-  const segments = modelSegments.map((segment, index) => ({ ...segment, color: CHART_COLORS[index % CHART_COLORS.length] }));
+  const total = Math.max(1, chart.rows.reduce((sum, row) => sum + row.value, 0));
+  let offset = 0;
+  const segments = chart.rows.map((row, index) => {
+    const length = row.value / total * 100;
+    const segment = { row, color: CHART_COLORS[index % CHART_COLORS.length], offset, length };
+    offset += length;
+    return segment;
+  });
   return (
     <div className="family-tree-statistics-donut-wrap">
       <svg viewBox="0 0 180 180" role="img" aria-label={chart.title}>
         <circle cx="90" cy="90" r="62" fill="none" stroke="#e3e7e2" strokeWidth="28" />
-        {segments.filter((segment) => segment.length > 0).map(({ row, color, offset: segmentOffset, length }) => <circle key={row.label} cx="90" cy="90" r="62" fill="none" stroke={color} strokeWidth="28" pathLength="100" strokeDasharray={`${length} ${100 - length}`} strokeDashoffset={-segmentOffset} transform="rotate(-90 90 90)" />)}
+        {segments.map(({ row, color, offset: segmentOffset, length }) => <circle key={row.label} cx="90" cy="90" r="62" fill="none" stroke={color} strokeWidth="28" pathLength="100" strokeDasharray={`${length} ${100 - length}`} strokeDashoffset={-segmentOffset} transform="rotate(-90 90 90)" />)}
         <text x="90" y="85" textAnchor="middle">Усього</text><text x="90" y="108" textAnchor="middle" className="total">{total.toLocaleString("uk-UA")}</text>
       </svg>
       <div className="family-tree-statistics-legend">{segments.map(({ row, color }) => <button type="button" key={row.label} disabled={!row.detailKey} onClick={() => onOpenDetail(row.detailKey, `${chart.title}: ${row.label}`)}><i style={{ background: color }} /><span>{row.label}</span><strong>{row.value.toLocaleString("uk-UA")}</strong></button>)}</div>

@@ -1,22 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { analyticsDuration, analyticsLinePath, analyticsNumber, analyticsPercent, parseAnalyticsOnline, parseAnalyticsTraffic } from "../src/utils/adminAnalyticsTraffic.ts";
+import { analyticsDuration, analyticsLinePath, analyticsNumber, parseAnalyticsOnline, parseAnalyticsTraffic } from "../src/utils/adminAnalyticsTraffic.ts";
 import { PRODUCT_ANALYTICS_PAGE_CODES, PRODUCT_ANALYTICS_PAGE_LABELS, productAnalyticsPageCode } from "../src/utils/productAnalyticsRegistry.ts";
 import { PRODUCT_ANALYTICS_PAGE_CODES as collectorCodes } from "../supabase/functions/collect-product-analytics/payload.ts";
 import { createProductAnalyticsPageScopes } from "../src/utils/productAnalyticsPageScopes.ts";
 import { startAnalyticsVisiblePoller } from "../src/utils/analyticsVisiblePoller.ts";
-
-test("funnel fills show exact bounded percentages without a fake minimum", () => {
-  for (const value of [0, 0.2, 25, 50, 100]) assert.equal(analyticsPercent(value), value);
-  assert.equal(analyticsPercent(-5), 0);
-  assert.equal(analyticsPercent(120), 100);
-  assert.equal(analyticsPercent(Number.NaN), 0);
-  assert.equal(analyticsPercent(Number.POSITIVE_INFINITY), 0);
-  const page = readFileSync("src/pages/AdminPanelPage.tsx", "utf8");
-  assert.match(page, /analyticsPercent\(step\.conversionPercent\)/);
-  assert.doesNotMatch(page, /Math\.max\(2, step\.conversionPercent\)/);
-});
 
 test("frontend, Edge and database share the complete closed section catalogue", () => {
   assert.deepEqual(collectorCodes, PRODUCT_ANALYTICS_PAGE_CODES);

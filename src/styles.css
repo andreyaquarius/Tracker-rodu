@@ -8237,7 +8237,7 @@ html.google-picker-open .picker-dialog {
 .family-tree-statistics-bars > button:not(:disabled):hover { background: var(--app-surface-soft, #edf4f1); }
 .family-tree-statistics-bars .label { overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .family-tree-statistics-bars .track { display: flex; height: 16px; overflow: hidden; border-radius: 5px; background: var(--app-surface-soft, #e7e8e2); }
-.family-tree-statistics-bars .track > span { display: block; flex: 0 0 auto; height: 100%; }
+.family-tree-statistics-bars .track > span { display: block; height: 100%; }
 .family-tree-statistics-bars .primary { background: #17695f; }
 .family-tree-statistics-bars .secondary { background: #d5a144; }
 .family-tree-statistics-bars .tertiary { background: #9b638c; }
@@ -8247,7 +8247,6 @@ html.google-picker-open .picker-dialog {
 .family-tree-statistics-series-legend i { width: 11px; height: 11px; border-radius: 3px; background: #17695f; }
 .family-tree-statistics-series-legend i.series-1 { background: #d5a144; }
 .family-tree-statistics-series-legend i.series-2 { background: #9b638c; }
-.family-tree-statistics-series-legend.stacked-progress i.series-1 { background: var(--app-surface-soft, #e7e8e2); border: 1px solid var(--app-border, #c4cec9); }
 .family-tree-statistics-donut-wrap { display: grid; grid-template-columns: minmax(150px, 240px) 1fr; align-items: center; gap: 20px; }
 .family-tree-statistics-donut-wrap svg { width: 100%; max-height: 250px; }
 .family-tree-statistics-donut-wrap svg text { fill: var(--app-ink-muted, #59716c); font-size: 12px; }

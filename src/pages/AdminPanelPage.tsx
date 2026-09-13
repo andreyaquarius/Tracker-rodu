@@ -45,7 +45,7 @@ import { FeedbackPage } from "./FeedbackPage.tsx";
 import { ZagulyakyModerationPanel } from "../components/admin/ZagulyakyModerationPanel.tsx";
 import { BrowserMonitoringPanel } from "../components/admin/BrowserMonitoringPanel.tsx";
 import { AdminAnalyticsOnline, AdminAnalyticsTraffic } from "../components/admin/AdminAnalyticsTraffic.tsx";
-import { analyticsDuration as formatDuration, analyticsLoadError, analyticsPercent } from "../utils/adminAnalyticsTraffic.ts";
+import { analyticsDuration as formatDuration, analyticsLoadError } from "../utils/adminAnalyticsTraffic.ts";
 
 interface AdminPanelPageProps {
   page: AdminPage;
@@ -422,7 +422,7 @@ export function AdminPanelPage(props: AdminPanelPageProps) {
             {(funnel?.steps ?? []).map((step) => (
               <article key={step.stepCode}>
                 <div><strong>{FUNNEL_STEP_LABELS[step.stepCode] ?? step.stepCode}</strong><span>{formatNumber(step.actors)} · {formatPercent(step.conversionPercent)}</span></div>
-                <div className="admin-funnel-track"><span style={{ width: `${analyticsPercent(step.conversionPercent)}%` }} /></div>
+                <div className="admin-funnel-track"><span style={{ width: `${Math.max(2, step.conversionPercent)}%` }} /></div>
               </article>
             ))}
           </div>

@@ -5,78 +5,6 @@ import type {
 
 const DEFAULT_SERIES_LABELS = ["Значення", "Додатково", "Третій ряд"] as const;
 
-function nonNegativeChartValue(value: number | undefined): number {
-  return value !== undefined && Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
-function chartPercent(value: number, total: number): number {
-  return total > 0 ? Math.min(100, Math.max(0, value / total * 100)) : 0;
-}
-
-export interface FamilyTreeStatisticsBarChartRow {
-  row: FamilyTreeStatisticsChartRow;
-  primaryPercent: number;
-  secondaryPercent: number;
-  tertiaryPercent: number;
-}
-
-/**
- * Progress is relative to each row's own capacity, not the largest generation.
- * Its secondary value describes missing data and stays in the neutral track.
- * Count charts keep a shared scale; donut exports show shares of the whole.
- * Never impose a minimum fill: zero is empty and small values stay proportional.
- */
-export function createFamilyTreeStatisticsBarChartModel(
-  chart: FamilyTreeStatisticsChart,
-): FamilyTreeStatisticsBarChartRow[] {
-  const isProgress = chart.type === "stacked-progress";
-  const isShare = chart.type === "donut";
-  const values = chart.rows.map((row) => ({
-    primary: nonNegativeChartValue(row.value),
-    secondary: nonNegativeChartValue(row.secondary),
-    tertiary: nonNegativeChartValue(row.tertiary),
-  }));
-  const maximum = isShare
-    ? values.reduce((sum, value) => sum + value.primary, 0)
-    : Math.max(0, ...values.map((value, index) => Math.max(
-      nonNegativeChartValue(chart.rows[index].total),
-      value.primary + value.secondary + value.tertiary,
-    )));
-
-  return chart.rows.map((row, index) => {
-    const value = values[index];
-    let primaryPercent = chartPercent(value.primary, maximum);
-    if (isProgress) {
-      if (row.total !== undefined) {
-        primaryPercent = chartPercent(value.primary, nonNegativeChartValue(row.total));
-      } else if (row.percent !== undefined && Number.isFinite(row.percent)) {
-        primaryPercent = Math.min(100, Math.max(0, row.percent));
-      } else {
-        primaryPercent = chartPercent(value.primary, value.primary + value.secondary + value.tertiary);
-      }
-    }
-    return {
-      row,
-      primaryPercent,
-      secondaryPercent: isProgress || isShare ? 0 : chartPercent(value.secondary, maximum),
-      tertiaryPercent: isProgress || isShare ? 0 : chartPercent(value.tertiary, maximum),
-    };
-  });
-}
-
-export function createFamilyTreeStatisticsDonutChartModel(rows: readonly FamilyTreeStatisticsChartRow[]) {
-  const values = rows.map((row) => nonNegativeChartValue(row.value));
-  const total = values.reduce((sum, value) => sum + value, 0);
-  let offset = 0;
-  const segments = rows.map((row, index) => {
-    const length = chartPercent(values[index], total);
-    const segment = { row, offset, length };
-    offset += length;
-    return segment;
-  });
-  return { total, segments };
-}
-
 function localized(value: number): string {
   return value.toLocaleString("uk-UA");
 }
@@ -285,14 +213,6 @@ export function createFamilyTreeStatisticsLineChartModel(
 export function familyTreeStatisticsChartForPresentation(
   chart: FamilyTreeStatisticsChart,
 ): FamilyTreeStatisticsChart {
-  if (chart.type === "stacked-progress" && !chart.seriesLabels?.length) {
-    const seriesLabels = chart.id === "generation-completeness"
-      ? ["Відомі предки", "Невідомі предки"]
-      : chart.id === "evidence-generations"
-        ? ["З доказами", "Без доказів"]
-        : ["Заповнено", "Не заповнено"];
-    return { ...chart, seriesLabels };
-  }
   if (chart.id === "name-decades" && chart.type === "line") {
     return { ...chart, type: "horizontal-bar" };
   }
