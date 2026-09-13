@@ -132,6 +132,52 @@ test("rate limits suppress duplicates for a minute and bound total events per pa
   assert.equal(accept({ type: undefined, message: "over-budget" }), false);
 });
 
+test("Supabase diagnostics accept only fixed tags and a bounded numeric duration", () => {
+  const input = fixtureEvent();
+  input.tags = {
+    area: "supabase", operation: "table:tasks", http_status: "0",
+    failure_kind: "transport", original_error_type: "TypeError",
+    network_start: "online", network_end: "offline",
+    visibility_start: "visible", visibility_end: "hidden", pagehide_observed: "yes",
+    request_duration: "1s_5s", private_tag: "private",
+  };
+  input.contexts = { supabase_request: { duration_ms: 2_100, url: "private", error: "private" }, private: { message: "private" } };
+  const result = sanitizeBrowserEvent(input, "/");
+  assert.equal(result?.tags?.network_end, "offline");
+  assert.equal(result?.tags?.original_error_type, "TypeError");
+  assert.deepEqual(result?.contexts?.supabase_request, { duration_ms: 2_100 });
+  assert.doesNotMatch(JSON.stringify(result), /private/);
+
+  for (const key of ["failure_kind", "original_error_type", "network_start", "network_end", "visibility_start", "visibility_end", "pagehide_observed", "request_duration"]) {
+    const unsafe = sanitizeBrowserEvent({ ...input, tags: { ...input.tags, [key]: "private" } }, "/");
+    assert.equal(unsafe?.tags?.[key], undefined);
+  }
+  for (const duration_ms of [-1, 1.5, NaN, Infinity, 86_400_001, "private", "2100", { private: true }]) {
+    const unsafe = sanitizeBrowserEvent({ ...input, contexts: { supabase_request: { duration_ms } } }, "/");
+    assert.equal(unsafe?.contexts?.supabase_request, undefined);
+  }
+  const unrelated = sanitizeBrowserEvent({ ...input, tags: { ...input.tags, area: "route" } }, "/");
+  assert.equal(unrelated?.tags?.network_end, undefined);
+  assert.equal(unrelated?.contexts?.supabase_request, undefined);
+  assert.equal(sanitizeBrowserEvent(input, "/shared-graph/private-token"), null);
+});
+
+test("changing request diagnostics neither splits issues nor bypasses duplicate throttling", () => {
+  let now = 0;
+  const accept = createMonitoringRateLimit(() => now);
+  const event = (network: string, duration: string) => sanitizeBrowserEvent({
+    type: undefined, message: "Supabase GET failed: network",
+    tags: { area: "supabase", operation: "table:tasks", http_status: "0", network_end: network, request_duration: duration },
+  }, "/")!;
+  const first = event("online", "lt_100ms");
+  const next = event("offline", "gte_30s");
+  assert.deepEqual(first.fingerprint, next.fingerprint);
+  assert.ok(accept(first));
+  assert.equal(accept(next), false);
+  now = 60_001;
+  assert.ok(accept(next));
+});
+
 test("monitoring initializes after share URL cleanup and before React renders", () => {
   const source = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
   assert.ok(source.indexOf("initializeBrowserMonitoring();") > source.indexOf("restoreSpaRedirect();"));

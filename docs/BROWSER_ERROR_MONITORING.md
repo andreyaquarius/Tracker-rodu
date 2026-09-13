@@ -10,6 +10,41 @@
 
 Production-збірки вже налаштовані на наданий власником DSN у `.env.production` (проєкт `4512075160420432`, регіон `de`). Це публічна конфігурація, не секрет. Для вимкнення задайте `VITE_SENTRY_ENABLED=false` і перебудуйте сайт. `npm run dev` не надсилає звіти. Код сам не створює Sentry-акаунт, проєкт чи платну підписку.
 
+## Діагностика невдалих Supabase-запитів
+
+Нові поля додає клієнтський код до події Sentry автоматично. Налаштовувати їх вручну в Sentry чи змінювати базу Supabase не потрібно. Вони з'являться в **нових подіях після розгортання цієї версії сайту й оновлення вкладки**; старі події не доповнюються.
+
+У Sentry відкрийте issue → конкретну подію → **Tags**:
+
+| Поле | Значення та призначення |
+| --- | --- |
+| `failure_kind` | `transport` — `fetch` відхилив запит; `http` — отримана відповідь з HTTP-помилкою |
+| `original_error_type` | Фіксований тип первинного винятку, наприклад `TypeError`, `TimeoutError`; невідомі назви стають `unknown`. Лише для `transport` |
+| `network_start`, `network_end` | `online`, `offline`, `unknown` за `navigator.onLine` на початку та при завершенні запиту |
+| `visibility_start`, `visibility_end` | `visible`, `hidden`, `unknown` на початку та при завершенні запиту |
+| `pagehide_observed` | `yes`, якщо запит почався після `pagehide` або ця подія сталася під час нього; `no` — не спостерігалась; `unknown` — спостерігач недоступний |
+| `request_duration` | Інтервал: `lt_100ms`, `100ms_1s`, `1s_5s`, `5s_30s`, `gte_30s`, `unknown` |
+
+У **Contexts → supabase_request → duration_ms** міститься час від початку фактичного `fetch` до HTTP-відповіді або винятку, округлений до мілісекунд, з верхньою межею 24 години. Очікування в черзі та читання тіла відповіді сюди не входять; якщо годинник недоступний, поле відсутнє. Стан фіксується одразу при завершенні `fetch`, до асинхронного читання коду HTTP-помилки.
+
+Приклади фільтрів у Sentry:
+
+- `project:tracker-rodu-web failure_kind:transport network_end:offline`
+- `project:tracker-rodu-web pagehide_observed:yes`
+- `project:tracker-rodu-web original_error_type:TypeError visibility_end:visible`
+- `project:tracker-rodu-web request_duration:gte_30s`
+
+`online` не гарантує доступності Supabase, а `pagehide_observed:yes` не доводить, що саме закриття сторінки спричинило збій. Ці ознаки допомагають зіставити сценарії; вони не підмінюють мережевий діагноз. Після повернення сторінки з BFCache нові запити не успадковують старий прапорець `pagehide`, але запит, що пережив приховування та повернення, зберігає цю ознаку.
+
+Де реалізовано:
+
+1. `src/utils/supabaseRequestDiagnostics.ts` — знімки стану, тривалість і спостерігачі `pagehide`/`pageshow` у пам'яті. Вони ініціалізуються разом з моніторингом до відмальовування React. Обробник `pagehide` працює у capture-фазі, перед відправленням аналітики.
+2. `src/utils/monitoredSupabaseFetch.ts` — додає діагностику до невдалого REST/RPC/Edge-запиту.
+3. `src/services/supabaseAuth.ts` та `src/services/browserMonitoring.ts` — передають теги й контекст у Sentry.
+4. `src/utils/browserMonitoringPrivacy.ts` — пропускає лише дозволені значення та числову тривалість. Діагностичні поля не змінюють fingerprint чи хвилинний ліміт однакових помилок.
+
+Первинний текст винятку, URL, заголовки, токени, тіла запитів, ідентифікатори користувача та історія його дій не додаються. Звичайні `AbortError`, анонімний клієнт і приватні сторінки залишаються виключеними. Діагностика не повторює запити й не змінює їхній результат; це також не виправлення переривання аналітики при закритті вкладки.
+
 ## 1. Створити проєкт
 
 1. Увійдіть у [Sentry](https://sentry.io/) та створіть проєкт для **React** у своїй організації.
@@ -75,7 +110,7 @@ Vercel також використовує DSN із `.env.production`. За по
 ## Технічна перевірка
 
 ```powershell
-node --test test/browserMonitoring.test.ts test/monitoredSupabaseFetch.test.ts
+node --test test/browserMonitoring.test.ts test/monitoredSupabaseFetch.test.ts test/supabaseRequestDiagnostics.test.ts
 npm.cmd run typecheck
 npm.cmd run build
 ```
