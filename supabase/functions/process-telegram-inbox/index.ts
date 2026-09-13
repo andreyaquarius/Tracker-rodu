@@ -45,7 +45,7 @@ const CANDIDATE_RESPONSE_SCHEMA: Record<string, unknown> = {
 type JsonObject = Record<string, unknown>;
 type Intent = "note" | "zagulyaka";
 type StoredImage = {
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   mimeType: "image/jpeg" | "image/png" | "image/webp";
   sha256: string;
   fileName: string;
@@ -411,7 +411,7 @@ function imageExtension(mimeType: StoredImage["mimeType"]): string {
   return "jpg";
 }
 
-async function readBoundedBytes(response: Response, maximum: number): Promise<Uint8Array> {
+async function readBoundedBytes(response: Response, maximum: number): Promise<Uint8Array<ArrayBuffer>> {
   const declared = response.headers.get("Content-Length")?.trim() ?? "";
   if (declared && (!/^\d{1,9}$/u.test(declared) || Number(declared) > maximum)) {
     await response.body?.cancel("telegram-file-too-large").catch(() => undefined);
@@ -577,7 +577,7 @@ async function removeReservedPrivatePhoto(storagePath: string): Promise<void> {
   }
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
+async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return [...hash].map((part) => part.toString(16).padStart(2, "0")).join("");
 }
@@ -605,7 +605,7 @@ async function downloadAndValidatePhoto(task: IntakeClaim): Promise<StoredImage 
   const filePath = safeTelegramFilePath(file.file_path);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TELEGRAM_TIMEOUT_MS);
-  let bytes: Uint8Array;
+  let bytes: Uint8Array<ArrayBuffer>;
   try {
     const response = await fetch(`${TELEGRAM_API_ORIGIN}/file/bot${token}/${filePath}`, {
       method: "GET",
@@ -944,8 +944,8 @@ async function prepareCandidates(task: IntakeClaim, image: StoredImage | null): 
       ? await callGeminiWithInlineImage(apiKey, platformGeminiModel(), prompt, {
           mimeType: image.mimeType,
           data: toBase64(image.bytes),
-        }, CANDIDATE_RESPONSE_SCHEMA)
-      : await callGemini(apiKey, platformGeminiModel(), prompt, CANDIDATE_RESPONSE_SCHEMA);
+        }, CANDIDATE_RESPONSE_SCHEMA, "process-telegram-inbox")
+      : await callGemini(apiKey, platformGeminiModel(), prompt, CANDIDATE_RESPONSE_SCHEMA, "process-telegram-inbox");
   } catch (error) {
     if (error instanceof GeminiHttpError) {
       throw new WorkerProblem(error.status === 429 || error.status >= 500 ? "TELEGRAM_AI_RETRY" : "TELEGRAM_AI_REJECTED", error.status === 429 || error.status >= 500);

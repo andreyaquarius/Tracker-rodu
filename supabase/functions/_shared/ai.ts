@@ -1,4 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { withAiMonitoring } from "./aiMonitoring.ts";
+import type { AiOperation } from "./aiTelemetry.ts";
 
 // Bind CORS to the deployed app origin instead of "*". Computed once from the
 // stable per-deployment env (APP_URL / ALLOWED_ORIGIN). Falls back to "*" only
@@ -42,6 +44,8 @@ export type AiSettingsRow = {
 type GeminiSafeProviderReason = "API_KEY_INVALID" | "FAILED_PRECONDITION";
 
 type GeminiResponseBody = {
+  usageMetadata?: unknown;
+  modelVersion?: unknown;
   error?: {
     message?: string;
     status?: string;
@@ -174,7 +178,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToBytes(value: string): Uint8Array {
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
@@ -220,7 +224,7 @@ export function normalizeMode(value: unknown): AiMode {
 }
 
 export async function readAiSettings(
-  admin: ReturnType<typeof createClient>,
+  admin: Awaited<ReturnType<typeof authenticatedContext>>["admin"],
   userId: string,
 ): Promise<AiSettingsRow> {
   const { data, error } = await admin
@@ -352,75 +356,82 @@ export async function callGeminiWithInlineImage(
   prompt: string,
   image: GeminiInlineImageInput,
   responseJsonSchema?: Record<string, unknown>,
+  operation: AiOperation = "gemini",
 ): Promise<unknown> {
-  if (!image.data?.trim()) {
-    throw new Error("Фрагмент зображення не передано до Gemini.");
-  }
+  return withAiMonitoring(operation, model, async (recording) => {
+    if (!image.data?.trim()) {
+      recording.failure("invalid_input");
+      throw new Error("Фрагмент зображення не передано до Gemini.");
+    }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: image.mimeType, data: image.data } },
+            ],
+          }],
+          generationConfig: responseJsonSchema
+            ? {
+                responseMimeType: "application/json",
+                responseSchema: toGeminiResponseSchema(responseJsonSchema),
+                maxOutputTokens: 8192,
+                temperature: 0.1,
+              }
+            : {
+                responseMimeType: "application/json",
+                maxOutputTokens: 8192,
+                temperature: 0.1,
+              },
+        }),
       },
-      body: JSON.stringify({
-        contents: [{
-          role: "user",
-          parts: [
-            { text: prompt },
-            { inlineData: { mimeType: image.mimeType, data: image.data } },
-          ],
-        }],
-        generationConfig: responseJsonSchema
-          ? {
-              responseMimeType: "application/json",
-              responseSchema: toGeminiResponseSchema(responseJsonSchema),
-              maxOutputTokens: 8192,
-              temperature: 0.1,
-            }
-          : {
-              responseMimeType: "application/json",
-              maxOutputTokens: 8192,
-              temperature: 0.1,
-            },
-      }),
-    },
-  );
-  const rawBody = await response.text();
-  let body: GeminiResponseBody = {};
-  try {
-    body = rawBody ? JSON.parse(rawBody) as GeminiResponseBody : {};
-  } catch {
-    body = {};
-  }
-  if (!response.ok) {
-    throw geminiHttpError(response.status, body, rawBody);
-  }
-  const candidate = body.candidates?.[0];
-  const text = candidate?.content?.parts
-    ?.map((part: { text?: string }) => part.text ?? "")
-    .join("")
-    .trim();
-  if (!text) {
-    const details = [
-      body.promptFeedback?.blockReason && `blockReason: ${body.promptFeedback.blockReason}`,
-      body.promptFeedback?.blockReasonMessage && `blockReasonMessage: ${body.promptFeedback.blockReasonMessage}`,
-      candidate?.finishReason && `finishReason: ${candidate.finishReason}`,
-      candidate?.finishMessage && `finishMessage: ${candidate.finishMessage}`,
-    ].filter(Boolean).join("; ");
-    throw new Error(
-      details
-        ? `Google Gemini не повернув текст відповіді. ${details}`
-        : "Google Gemini повернув порожню відповідь.",
     );
-  }
-  try {
-    return parseGeminiJsonText(text);
-  } catch {
-    throw new Error("Google Gemini повернув відповідь у неправильному форматі.");
-  }
+    const rawBody = await response.text();
+    let body: GeminiResponseBody = {};
+    try {
+      body = rawBody ? JSON.parse(rawBody) as GeminiResponseBody : {};
+    } catch {
+      body = {};
+    }
+    recording.response(response.status, body?.usageMetadata, body?.modelVersion);
+    if (!response.ok) {
+      throw geminiHttpError(response.status, body, rawBody);
+    }
+    const candidate = body.candidates?.[0];
+    const text = candidate?.content?.parts
+      ?.map((part: { text?: string }) => part.text ?? "")
+      .join("")
+      .trim();
+    if (!text) {
+      recording.failure("empty_response");
+      const details = [
+        body.promptFeedback?.blockReason && `blockReason: ${body.promptFeedback.blockReason}`,
+        body.promptFeedback?.blockReasonMessage && `blockReasonMessage: ${body.promptFeedback.blockReasonMessage}`,
+        candidate?.finishReason && `finishReason: ${candidate.finishReason}`,
+        candidate?.finishMessage && `finishMessage: ${candidate.finishMessage}`,
+      ].filter(Boolean).join("; ");
+      throw new Error(
+        details
+          ? `Google Gemini не повернув текст відповіді. ${details}`
+          : "Google Gemini повернув порожню відповідь.",
+      );
+    }
+    try {
+      return parseGeminiJsonText(text);
+    } catch {
+      recording.failure("invalid_response");
+      throw new Error("Google Gemini повернув відповідь у неправильному форматі.");
+    }
+  });
 }
 
 export async function callGemini(
@@ -428,51 +439,59 @@ export async function callGemini(
   model: string,
   prompt: string,
   responseJsonSchema?: Record<string, unknown>,
+  operation: AiOperation = "gemini",
 ): Promise<unknown> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
+  return withAiMonitoring(operation, model, async (recording) => {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: responseJsonSchema
+            ? {
+                responseMimeType: "application/json",
+                responseSchema: toGeminiResponseSchema(responseJsonSchema),
+                temperature: 0.15,
+              }
+            : {
+                maxOutputTokens: 32,
+                temperature: 0,
+              },
+        }),
       },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: responseJsonSchema
-          ? {
-              responseMimeType: "application/json",
-              responseSchema: toGeminiResponseSchema(responseJsonSchema),
-              temperature: 0.15,
-            }
-          : {
-              maxOutputTokens: 32,
-              temperature: 0,
-            },
-      }),
-    },
-  );
-  const rawBody = await response.text();
-  let body: GeminiResponseBody = {};
-  try {
-    body = rawBody ? JSON.parse(rawBody) as GeminiResponseBody : {};
-  } catch {
-    body = {};
-  }
-  if (!response.ok) {
-    throw geminiHttpError(response.status, body, rawBody);
-  }
-  const text = body.candidates?.[0]?.content?.parts
-    ?.map((part: { text?: string }) => part.text ?? "")
-    .join("")
-    .trim();
-  if (!text) throw new Error("Google Gemini повернув порожню відповідь.");
-  if (!responseJsonSchema) return text;
-  try {
-    return parseGeminiJsonText(text);
-  } catch {
-    throw new Error("Google Gemini повернув відповідь у неправильному форматі.");
-  }
+    );
+    const rawBody = await response.text();
+    let body: GeminiResponseBody = {};
+    try {
+      body = rawBody ? JSON.parse(rawBody) as GeminiResponseBody : {};
+    } catch {
+      body = {};
+    }
+    recording.response(response.status, body?.usageMetadata, body?.modelVersion);
+    if (!response.ok) {
+      throw geminiHttpError(response.status, body, rawBody);
+    }
+    const text = body.candidates?.[0]?.content?.parts
+      ?.map((part: { text?: string }) => part.text ?? "")
+      .join("")
+      .trim();
+    if (!text) {
+      recording.failure("empty_response");
+      throw new Error("Google Gemini повернув порожню відповідь.");
+    }
+    if (!responseJsonSchema) return text;
+    try {
+      return parseGeminiJsonText(text);
+    } catch {
+      recording.failure("invalid_response");
+      throw new Error("Google Gemini повернув відповідь у неправильному форматі.");
+    }
+  });
 }
 
 function parseGeminiJsonText(text: string): unknown {
