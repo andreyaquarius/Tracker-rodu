@@ -8,10 +8,12 @@ import type {
   FamilyTreeStatisticsTable,
 } from "../services/familyTreeStatisticsService.ts";
 import {
+  createFamilyTreeStatisticsBarChartModel,
   createFamilyTreeStatisticsLineChartModel,
   familyTreeStatisticsChartForPresentation,
   familyTreeStatisticsRowDisplayValue,
   familyTreeStatisticsRowTotal,
+  type FamilyTreeStatisticsBarChartRow,
 } from "./familyTreeStatisticsChart.ts";
 
 const TAB_LABELS: Record<FamilyTreeStatisticsTabId, string> = {
@@ -138,6 +140,13 @@ export async function exportStatisticsExcel(
   download(blob, `${safeFileName(title)} — статистика.xlsx`);
 }
 
+function statisticsBarSvg(bar: FamilyTreeStatisticsBarChartRow, x: number, y: number, width: number, height: number): string {
+  const primaryWidth = width * bar.primaryPercent / 100;
+  const secondaryWidth = width * bar.secondaryPercent / 100;
+  const tertiaryWidth = width * bar.tertiaryPercent / 100;
+  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="5" fill="#e7e8e2"/><rect x="${x}" y="${y}" width="${primaryWidth}" height="${height}" rx="5" fill="#17695f"/>${secondaryWidth > 0 ? `<rect x="${x + primaryWidth}" y="${y}" width="${secondaryWidth}" height="${height}" fill="#d5a144"/>` : ""}${tertiaryWidth > 0 ? `<rect x="${x + primaryWidth + secondaryWidth}" y="${y}" width="${tertiaryWidth}" height="${height}" fill="#9b638c"/>` : ""}`;
+}
+
 function statisticsLineChartSvg(chart: FamilyTreeStatisticsChart): string {
   const model = createFamilyTreeStatisticsLineChartModel(chart.rows);
   const headerHeight = 76;
@@ -173,15 +182,15 @@ export function statisticsChartSvg(chart: FamilyTreeStatisticsChart): string {
   const width = 1200;
   const rowHeight = 48;
   const height = Math.max(360, 120 + displayChart.rows.length * rowHeight);
-  const max = Math.max(1, ...displayChart.rows.map(familyTreeStatisticsRowTotal));
-  const body = displayChart.rows.map((row, index) => {
+  const bars = createFamilyTreeStatisticsBarChartModel(displayChart);
+  const body = bars.map((bar, index) => {
+    const { row } = bar;
     const y = 95 + index * rowHeight;
-    const primaryWidth = row.value ? Math.max(2, 760 * row.value / max) : 0;
-    const secondaryWidth = row.secondary ? Math.max(2, 760 * row.secondary / max) : 0;
-    const tertiaryWidth = row.tertiary ? Math.max(2, 760 * row.tertiary / max) : 0;
-    return `<text x="28" y="${y + 20}" font-family="Arial,sans-serif" font-size="18" fill="#183a34">${escapeXml(row.label)}</text><rect x="330" y="${y}" width="760" height="28" rx="7" fill="#e7e8e2"/><rect x="330" y="${y}" width="${primaryWidth}" height="28" rx="7" fill="#17695f"/>${secondaryWidth ? `<rect x="${330 + primaryWidth}" y="${y}" width="${secondaryWidth}" height="28" fill="#d5a144"/>` : ""}${tertiaryWidth ? `<rect x="${330 + primaryWidth + secondaryWidth}" y="${y}" width="${tertiaryWidth}" height="28" fill="#9b638c"/>` : ""}<text x="1165" y="${y + 20}" text-anchor="end" font-family="Arial,sans-serif" font-size="17" fill="#183a34">${escapeXml(familyTreeStatisticsRowDisplayValue(displayChart, row))}</text>`;
+    return `<text x="28" y="${y + 20}" font-family="Arial,sans-serif" font-size="18" fill="#183a34">${escapeXml(row.label)}</text>${statisticsBarSvg(bar, 330, y, 600, 28)}<text x="1165" y="${y + 20}" text-anchor="end" font-family="Arial,sans-serif" font-size="17" fill="#183a34">${escapeXml(familyTreeStatisticsRowDisplayValue(displayChart, row))}</text>`;
   }).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#fbfaf5"/><text x="28" y="48" font-family="Georgia,serif" font-size="32" font-weight="700" fill="#0d3d36">${escapeXml(displayChart.title)}</text>${body}</svg>`;
+  const colors = ["#17695f", displayChart.type === "stacked-progress" ? "#e7e8e2" : "#d5a144", "#9b638c"];
+  const legend = (displayChart.seriesLabels ?? []).map((label, index) => `<rect x="${28 + index * 320}" y="66" width="11" height="11" rx="2" fill="${colors[index % colors.length]}"/><text x="${46 + index * 320}" y="76" font-family="Arial,sans-serif" font-size="14" fill="#526b66">${escapeXml(label)}</text>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#fbfaf5"/><text x="28" y="48" font-family="Georgia,serif" font-size="32" font-weight="700" fill="#0d3d36">${escapeXml(displayChart.title)}</text>${legend}${body}</svg>`;
 }
 
 export function exportStatisticsChartSvg(chart: FamilyTreeStatisticsChart): void {
@@ -231,21 +240,21 @@ function filterSummary(filters: FamilyTreeStatisticsFilters): string {
   return labels.join("; ");
 }
 
-function reportSvg(payload: FamilyTreeStatisticsPayload, filters: FamilyTreeStatisticsFilters): string {
+export function statisticsReportSvg(payload: FamilyTreeStatisticsPayload, filters: FamilyTreeStatisticsFilters): string {
   const width = 1600;
   const height = Math.max(1800, 560 + payload.metrics.length * 54 + payload.charts.length * 310);
   const metrics = payload.metrics.map((metric, index) => `<text x="90" y="${360 + index * 54}" font-family="Arial,sans-serif" font-size="25" fill="#24443f">${escapeXml(metric.label)}: <tspan font-weight="700">${escapeXml(metric.value)}${escapeXml(metric.suffix ?? "")}</tspan></text>`).join("");
   const charts = payload.charts.map((chart, chartIndex) => {
+    const displayChart = familyTreeStatisticsChartForPresentation(chart);
     const y = 430 + payload.metrics.length * 54 + chartIndex * 310;
-    const max = Math.max(1, ...chart.rows.map((row) => row.value));
-    const rows = chart.rows.slice(0, 8).map((row, index) => `<text x="100" y="${y + 64 + index * 28}" font-family="Arial,sans-serif" font-size="18" fill="#24443f">${escapeXml(row.label)}</text><rect x="530" y="${y + 46 + index * 28}" width="${700 * row.value / max}" height="19" rx="5" fill="#17695f"/><text x="1260" y="${y + 63 + index * 28}" font-family="Arial,sans-serif" font-size="18" fill="#24443f">${row.value}</text>`).join("");
-    return `<text x="90" y="${y + 24}" font-family="Georgia,serif" font-size="28" font-weight="700" fill="#0d3d36">${escapeXml(chart.title)}</text>${rows}`;
+    const rows = createFamilyTreeStatisticsBarChartModel(displayChart).slice(0, 8).map((bar, index) => `<text x="100" y="${y + 64 + index * 28}" font-family="Arial,sans-serif" font-size="18" fill="#24443f">${escapeXml(bar.row.label)}</text>${statisticsBarSvg(bar, 530, y + 46 + index * 28, 700, 19)}<text x="1260" y="${y + 63 + index * 28}" font-family="Arial,sans-serif" font-size="18" fill="#24443f">${escapeXml(familyTreeStatisticsRowDisplayValue(displayChart, bar.row))}</text>`).join("");
+    return `<text x="90" y="${y + 24}" font-family="Georgia,serif" font-size="28" font-weight="700" fill="#0d3d36">${escapeXml(displayChart.title)}</text>${rows}`;
   }).join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#fbfaf5"/><text x="80" y="95" font-family="Georgia,serif" font-size="54" font-weight="700" fill="#0d3d36">Статистика родового дерева</text><text x="80" y="150" font-family="Arial,sans-serif" font-size="28" fill="#24443f">${escapeXml(payload.meta.title)}</text><text x="80" y="198" font-family="Arial,sans-serif" font-size="23" fill="#48645f">Коренева особа: ${escapeXml(payload.meta.rootPersonName)}</text><text x="80" y="238" font-family="Arial,sans-serif" font-size="20" fill="#48645f">Сформовано: ${escapeXml(new Date(payload.meta.calculatedAt).toLocaleString("uk-UA"))}</text><text x="80" y="274" font-family="Arial,sans-serif" font-size="18" fill="#48645f">Фільтри: ${escapeXml(filterSummary(filters))}</text>${metrics}${charts}<text x="80" y="${height - 90}" font-family="Arial,sans-serif" font-size="17" fill="#48645f">Методика: ${escapeXml(payload.meta.methodology)}</text></svg>`;
 }
 
 export async function exportStatisticsPdf(payload: FamilyTreeStatisticsPayload, filters: FamilyTreeStatisticsFilters): Promise<void> {
-  const svg = reportSvg(payload, filters);
+  const svg = statisticsReportSvg(payload, filters);
   const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
   try {
     const image = new Image();
