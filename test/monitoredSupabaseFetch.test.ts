@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createMonitoredSupabaseFetch, type SupabaseFailure } from "../src/utils/monitoredSupabaseFetch.ts";
+import { createSupabaseRequestDiagnostics } from "../src/utils/supabaseRequestDiagnostics.ts";
+import { sanitizeBrowserEvent } from "../src/utils/browserMonitoringPrivacy.ts";
 
 const base = "https://project.supabase.co";
 const settle = async (until: () => boolean) => {
@@ -19,7 +21,10 @@ test("RLS failure is reported by code only and the original response is still re
   assert.equal(await wrapped(input, init), response);
   assert.equal((await response.json()).code, "42501");
   await settle(() => reports.length === 1);
-  assert.deepEqual(reports, [{ operation: "table:projects", method: "POST", status: 403, code: "42501" }]);
+  assert.equal(reports.length, 1);
+  const { diagnostics, ...failure } = reports[0];
+  assert.deepEqual(failure, { operation: "table:projects", method: "POST", status: 403, code: "42501" });
+  assert.equal(diagnostics?.tags.failure_kind, "http");
   assert.doesNotMatch(JSON.stringify(reports), /private/i);
 });
 
@@ -74,4 +79,86 @@ test("oversized or malformed error bodies never leak text or consume the caller'
     await settle(() => reports.length === 1);
     assert.equal(reports[0].code, undefined);
   }
+});
+
+test("transport diagnostics survive the Sentry privacy boundary without changing the rejection", async () => {
+  const target = new EventTarget();
+  let now = 0;
+  let offline = false;
+  const collector = createSupabaseRequestDiagnostics({
+    target, now: () => now,
+    readState: () => ({ network: offline ? "offline" : "online", visibility: offline ? "hidden" : "visible" }),
+  });
+  collector.initialize();
+  const reports: SupabaseFailure[] = [];
+  const original = new TypeError("Failed to fetch https://private.test?token=secret");
+  const wrapped = createMonitoredSupabaseFetch(async () => {
+    now = 3_250;
+    offline = true;
+    target.dispatchEvent(new Event("pagehide"));
+    throw original;
+  }, base, failure => reports.push(failure), () => true, collector.begin);
+  await assert.rejects(wrapped(`${base}/rest/v1/rpc/get_dashboard_stats`, { method: "POST" }), error => error === original);
+  assert.equal(reports.length, 1);
+  const failure = reports[0];
+  const event = sanitizeBrowserEvent({
+    type: undefined,
+    tags: { area: "supabase", operation: failure.operation, http_status: String(failure.status), ...failure.diagnostics?.tags },
+    contexts: { supabase_request: { duration_ms: failure.diagnostics?.durationMs } },
+  }, "/projects/private-project");
+  assert.equal(event?.tags?.original_error_type, "TypeError");
+  assert.equal(event?.tags?.network_start, "online");
+  assert.equal(event?.tags?.network_end, "offline");
+  assert.equal(event?.tags?.visibility_end, "hidden");
+  assert.equal(event?.tags?.pagehide_observed, "yes");
+  assert.equal(event?.tags?.request_duration, "1s_5s");
+  assert.equal(event?.contexts?.supabase_request?.duration_ms, 3_250);
+  assert.deepEqual(event?.fingerprint, ["supabase", "rpc:get_dashboard_stats", "0", "unknown"]);
+  assert.doesNotMatch(JSON.stringify(event), /private|secret|Failed to fetch/);
+});
+
+test("HTTP diagnostics stop at response arrival rather than after reading its error body", async () => {
+  let now = 0;
+  let hidden = false;
+  let body!: ReadableStreamDefaultController<Uint8Array>;
+  const collector = createSupabaseRequestDiagnostics({
+    now: () => now,
+    readState: () => ({ network: "online", visibility: hidden ? "hidden" : "visible" }),
+  });
+  const reports: SupabaseFailure[] = [];
+  const response = new Response(new ReadableStream<Uint8Array>({ start(controller) { body = controller; } }), { status: 500 });
+  const wrapped = createMonitoredSupabaseFetch(async () => { now = 80; return response; }, base,
+    failure => reports.push(failure), () => true, collector.begin);
+  assert.equal(await wrapped(`${base}/rest/v1/tasks`), response);
+  assert.equal(reports.length, 0);
+  now = 1_200;
+  hidden = true;
+  body.enqueue(new TextEncoder().encode('{"code":"57014"}'));
+  body.close();
+  await settle(() => reports.length === 1);
+  assert.equal(reports[0].diagnostics?.durationMs, 80);
+  assert.equal(reports[0].diagnostics?.tags.visibility_end, "visible");
+  assert.equal(reports[0].code, "57014");
+  assert.equal((await response.json()).code, "57014");
+});
+
+test("diagnostic failures never change requests, and disabled/excluded requests do not collect", async () => {
+  let begins = 0;
+  const broken = () => { begins += 1; throw new Error("diagnostics failed"); };
+  const original = new TypeError("network");
+  const reports: SupabaseFailure[] = [];
+  const fetcher: typeof fetch = async () => { throw original; };
+  const wrapped = createMonitoredSupabaseFetch(fetcher, base, failure => reports.push(failure), () => true, broken);
+  await assert.rejects(wrapped(`${base}/rest/v1/tasks`), error => error === original);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].diagnostics, undefined);
+  const failingFinish = createMonitoredSupabaseFetch(fetcher, base, failure => reports.push(failure), () => true,
+    () => () => { throw new Error("finish failed"); });
+  await assert.rejects(failingFinish(`${base}/rest/v1/tasks`), error => error === original);
+  assert.equal(reports.length, 2);
+  const disabled = createMonitoredSupabaseFetch(fetcher, base, failure => reports.push(failure), () => false, broken);
+  await assert.rejects(disabled(`${base}/rest/v1/tasks`), error => error === original);
+  await assert.rejects(wrapped(`${base}/auth/v1/token`), error => error === original);
+  assert.equal(begins, 1);
+  assert.equal(reports.length, 2);
 });

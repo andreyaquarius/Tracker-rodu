@@ -1,8 +1,14 @@
+import {
+  requestErrorType, supabaseRequestDiagnostics,
+  type FinishSupabaseRequestDiagnostics, type SupabaseRequestDiagnostics,
+} from "./supabaseRequestDiagnostics.ts";
+
 export interface SupabaseFailure {
   operation: string;
   status: number;
   code?: string;
   method: string;
+  diagnostics?: SupabaseRequestDiagnostics;
 }
 
 async function errorCode(response: Response): Promise<string | undefined> {
@@ -36,6 +42,7 @@ export function createMonitoredSupabaseFetch(
   supabaseUrl: string,
   report: (failure: SupabaseFailure) => void,
   enabled: () => boolean,
+  beginDiagnostics: () => FinishSupabaseRequestDiagnostics = supabaseRequestDiagnostics.begin,
 ): typeof fetch {
   const shouldObserve = () => { try { return enabled(); } catch { return false; } };
   return async (input, init) => {
@@ -56,21 +63,28 @@ export function createMonitoredSupabaseFetch(
     const emit = (failure: SupabaseFailure) => {
       try { if (shouldObserve()) report(failure); } catch { /* Fail open. */ }
     };
+    let finishDiagnostics: FinishSupabaseRequestDiagnostics | undefined;
+    try { if (operation) finishDiagnostics = beginDiagnostics(); } catch { /* Fail open. */ }
+    const diagnostics = (kind: "transport" | "http", error?: unknown) => {
+      try { return finishDiagnostics?.(kind, error); } catch { return undefined; }
+    };
     let response: Response;
     try {
       response = await fetcher(input, init);
     } catch (error) {
-      if (operation && !(error && typeof error === "object" && "name" in error && error.name === "AbortError")) {
-        emit({ operation, method, status: 0 });
+      if (operation && requestErrorType(error) !== "AbortError") {
+        emit({ operation, method, status: 0, diagnostics: diagnostics("transport", error) });
       }
       throw error;
     }
     if (operation && shouldObserve() && response.status >= 400) {
+      // Snapshot at response arrival, before the asynchronous error-body reader.
+      const capturedDiagnostics = diagnostics("http");
       // Only an allowlisted code escapes the bounded clone reader. The caller
       // receives the original Response immediately and can still consume it.
       void errorCode(response).then(
-        code => emit({ operation, method, status: response.status, code }),
-        () => emit({ operation, method, status: response.status }),
+        code => emit({ operation, method, status: response.status, code, diagnostics: capturedDiagnostics }),
+        () => emit({ operation, method, status: response.status, diagnostics: capturedDiagnostics }),
       );
     }
     return response;

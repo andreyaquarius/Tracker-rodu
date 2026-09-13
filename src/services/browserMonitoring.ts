@@ -7,6 +7,7 @@ import {
   createMonitoringRateLimit, isExpectedBrowserError, isPrivateShareRoute,
   sanitizeBrowserEvent, sentryIngestOrigin,
 } from "../utils/browserMonitoringPrivacy.ts";
+import { supabaseRequestDiagnostics } from "../utils/supabaseRequestDiagnostics.ts";
 
 let enabled = false;
 
@@ -53,6 +54,7 @@ export function initializeBrowserMonitoring(): void {
         return sanitized;
       },
     });
+    supabaseRequestDiagnostics.initialize();
     enabled = true;
   } catch {
     // Monitoring must never prevent the application from opening.
@@ -68,10 +70,11 @@ export function reportBrowserError(
   error: unknown,
   area: "react-root" | "react-recovery" | "route" | "family-tree" | "supabase" | "monitoring-test",
   tags: ErrorEvent["tags"] = {},
+  contexts: ErrorEvent["contexts"] = {},
 ): string | undefined {
   if (!enabled || isExpectedBrowserError(error)) return undefined;
   try {
-    return captureException(error, { tags: { ...tags, area } });
+    return captureException(error, { tags: { ...tags, area }, contexts });
   } catch {
     // A failed reporter must not replace the original error or trigger a retry.
   }

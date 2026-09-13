@@ -93,6 +93,11 @@ const monitoredFetch = createMonitoredSupabaseFetch(
       operation: failure.operation,
       http_status: String(failure.status),
       ...(failure.code ? { error_code: failure.code } : {}),
+      ...failure.diagnostics?.tags,
+    }, {
+      ...(failure.diagnostics?.durationMs === undefined ? {} : {
+        supabase_request: { duration_ms: failure.diagnostics.durationMs },
+      }),
     });
   },
   isBrowserMonitoringEnabled,

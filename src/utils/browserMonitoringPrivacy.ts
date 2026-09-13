@@ -1,4 +1,5 @@
 import type { ErrorEvent, StackFrame } from "@sentry/react";
+import { MAX_REQUEST_DURATION_MS, SUPABASE_DIAGNOSTIC_TAG_PATTERNS } from "./supabaseRequestDiagnostics.ts";
 
 const ROUTE_PARTS = new Set([
   "projects", "persons", "findings", "documents", "family-tree", "tree", "research",
@@ -103,6 +104,18 @@ export function sanitizeBrowserEvent(event: ErrorEvent, pathname: string, userAg
     const value = event.tags?.[key];
     if (typeof value === "string" && pattern.test(value)) tags[key] = value;
   }
+  let requestContext: { duration_ms: number } | undefined;
+  if (tags.area === "supabase" && tags.operation) {
+    for (const [key, pattern] of Object.entries(SUPABASE_DIAGNOSTIC_TAG_PATTERNS)) {
+      const value = event.tags?.[key];
+      if (typeof value === "string" && pattern.test(value)) tags[key] = value;
+    }
+    const duration = event.contexts?.supabase_request?.duration_ms;
+    if (typeof duration === "number" && Number.isSafeInteger(duration)
+      && duration >= 0 && duration <= MAX_REQUEST_DURATION_MS) {
+      requestContext = { duration_ms: duration };
+    }
+  }
   const browser = /\b(Edg)\/(\d+(?:\.\d+){0,3})/.exec(userAgent)
     ?? /\b(Firefox|Chrome|Version)\/(\d+(?:\.\d+){0,3})/.exec(userAgent);
   const browserName = browser ? { Edg: "Edge", Firefox: "Firefox", Chrome: "Chrome", Version: "Safari" }[browser[1]] : undefined;
@@ -120,6 +133,7 @@ export function sanitizeBrowserEvent(event: ErrorEvent, pathname: string, userAg
     contexts: {
       ...(browserName ? { browser: { name: browserName, version: browser![2] } } : {}),
       ...(os ? { os: { name: os } } : {}),
+      ...(requestContext ? { supabase_request: requestContext } : {}),
     },
     message: event.message ? safeErrorMessage(event.message) : undefined,
     exception: event.exception ? {
@@ -155,7 +169,11 @@ export function createMonitoringRateLimit(now: () => number = Date.now) {
   return (event: ErrorEvent): boolean => {
     const value = event.exception?.values?.[0];
     const frames = value?.stacktrace?.frames;
-    const key = JSON.stringify([event.message, value?.type, value?.value, frames?.slice(-3), event.tags]);
+    // Changing timing/lifecycle diagnostics must not bypass the duplicate limit.
+    const stableTags = event.tags?.area === "supabase"
+      ? Object.fromEntries(Object.entries(event.tags).filter(([key]) => !(key in SUPABASE_DIAGNOSTIC_TAG_PATTERNS)))
+      : event.tags;
+    const key = JSON.stringify([event.message, value?.type, value?.value, frames?.slice(-3), stableTags]);
     const time = now();
     if (total >= 30 || (recent.has(key) && time - recent.get(key)! < 60_000)) return false;
     recent.set(key, time);
