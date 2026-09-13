@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabaseAuth";
+import { invokeAuthenticatedEdgeFunction } from "../utils/authenticatedEdgeFunction.ts";
 
 export interface GeneHelpStatus {
   code?: string;
@@ -66,6 +67,9 @@ export async function createGeneHelpSimpleRequest(input: {
   description: string;
   registrationConsent?: boolean;
 }): Promise<GeneHelpSimpleRequestResponse> {
+  if (input.description.trim().length < 12) {
+    throw new Error("Опишіть запит GeneHelp трохи детальніше — щонайменше 12 символів.");
+  }
   return invokeGeneHelp<GeneHelpSimpleRequestResponse>("create-simple-request", input);
 }
 
@@ -85,23 +89,22 @@ async function invokeGeneHelp<T = unknown>(
   action: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const { data, error } = await getSupabaseClient().functions.invoke("genehelp", {
-    body: { action, ...body },
-  });
+  const { data, error } = await invokeAuthenticatedEdgeFunction<T>(
+    getSupabaseClient(), "genehelp", { action, ...body },
+  );
   if (error) {
-    const context = "context" in error ? error.context : null;
+    const context = typeof error === "object" && "context" in error ? error.context : null;
     if (context instanceof Response) {
+      let payload: unknown = null;
       try {
-        const payload = await context.clone().json() as { error?: string };
-        if (payload.error) throw new Error(readableGeneHelpError(payload.error));
-      } catch (contextError) {
-        if (contextError instanceof Error && contextError.message !== "Unexpected end of JSON input") {
-          throw contextError;
-        }
+        payload = await context.clone().json();
+      } catch { /* A gateway may return HTML instead of JSON. Keep the original error. */ }
+      if (hasErrorPayload(payload) && typeof payload.error === "string") {
+        throw new Error(readableGeneHelpError(payload.error));
       }
     }
     if (error instanceof Error && error.message.includes("Failed to send a request to the Edge Function")) {
-      throw new Error("Не вдалося підключитися до серверної функції GeneHelp. Перевірте, що Edge Function genehelp передеплоєна.");
+      throw new Error("Не вдалося підключитися до GeneHelp. Перевірте з’єднання й спробуйте ще раз трохи пізніше.");
     }
     throw error;
   }

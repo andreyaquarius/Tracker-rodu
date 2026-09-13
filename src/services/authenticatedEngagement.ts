@@ -1,4 +1,5 @@
 import { invokeEdgeFunction } from "./edgeFunctions";
+import { AuthenticatedSessionRequiredError } from "../utils/authenticatedRpc.ts";
 import {
   ANALYTICS_CONSENT_EVENT,
   ANALYTICS_CONSENT_KEY,
@@ -36,6 +37,9 @@ let identifiers: AnonymousEngagementIdentifiers | null = null;
 let accumulator: ActiveTimeAccumulator = createActiveTimeAccumulator();
 let queuedActiveSeconds = 0;
 let inFlightFlush: Promise<void> | null = null;
+let consecutiveFailures = 0;
+let nextRetryAt = 0;
+let queueGeneration = 0;
 
 function clockMs(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -91,8 +95,11 @@ function enqueueAccumulatedSeconds(): void {
 }
 
 function discardPendingEngagement(): void {
+  queueGeneration += 1;
   accumulator = discardAccumulatedActiveTime(accumulator);
   queuedActiveSeconds = 0;
+  consecutiveFailures = 0;
+  nextRetryAt = 0;
 }
 
 function handlePresenceChange(): void {
@@ -126,7 +133,8 @@ function attachListeners(): void {
   window.addEventListener(ANALYTICS_CONSENT_EVENT, handleConsentChange);
   window.addEventListener("storage", handleStorageChange);
   window.addEventListener("pagehide", handlePageHide);
-  heartbeatTimer = window.setInterval(handlePresenceChange, HEARTBEAT_INTERVAL_MS);
+  // A hidden tab must not retry a failed flush on every one-second heartbeat.
+  heartbeatTimer = window.setInterval(() => observeCurrentState(), HEARTBEAT_INTERVAL_MS);
   flushTimer = window.setInterval(() => {
     void flushAuthenticatedEngagement().catch(() => undefined);
   }, FLUSH_INTERVAL_MS);
@@ -148,7 +156,11 @@ function detachListeners(): void {
 }
 
 async function transmitQueuedEngagement(): Promise<void> {
+  if (Date.now() < nextRetryAt) return;
+  const sendingIdentifiers = identifiers;
+  const sendingGeneration = queueGeneration;
   while (queuedActiveSeconds > 0 && identifiers) {
+    if (identifiers !== sendingIdentifiers) return;
     if (!analyticsConsentGranted()) {
       discardPendingEngagement();
       return;
@@ -168,10 +180,21 @@ async function transmitQueuedEngagement(): Promise<void> {
       await invokeEdgeFunction<{ accepted: true }>(
         AUTHENTICATED_ENGAGEMENT_FUNCTION_NAME,
         payload,
+        { authenticated: true },
       );
+      if (identifiers !== sendingIdentifiers || queueGeneration !== sendingGeneration) return;
       queuedActiveSeconds -= activeSeconds;
-    } catch {
+      consecutiveFailures = 0;
+      nextRetryAt = 0;
+    } catch (error) {
       // Analytics is best-effort and must never interrupt authenticated work.
+      if (identifiers !== sendingIdentifiers || queueGeneration !== sendingGeneration) return;
+      if (error instanceof AuthenticatedSessionRequiredError) {
+        discardPendingEngagement();
+      } else {
+        nextRetryAt = Date.now() + Math.min(30 * 60_000, 60_000 * 2 ** Math.min(consecutiveFailures, 5));
+        consecutiveFailures += 1;
+      }
       return;
     }
   }
@@ -202,7 +225,9 @@ export function setAuthenticatedEngagementEnabled(nextEnabled: boolean): void {
   observeCurrentState(true);
   enabled = false;
   detachListeners();
-  void flushAuthenticatedEngagement().catch(() => undefined);
+  // Explicit sign-out flushes before auth is removed. Losing auth must not send anonymously.
+  discardPendingEngagement();
+  identifiers = null;
 }
 
 export async function flushAuthenticatedEngagement(): Promise<void> {
@@ -238,6 +263,8 @@ export async function flushAndStopAuthenticatedEngagement(): Promise<void> {
 
   // Never carry anonymous timing from one authorization session into another.
   queuedActiveSeconds = 0;
+  consecutiveFailures = 0;
+  nextRetryAt = 0;
   identifiers = null;
   accumulator = createActiveTimeAccumulator(clockMs(), false);
 }

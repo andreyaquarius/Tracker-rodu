@@ -100,8 +100,8 @@ export function GeneHelpRequestModal({ onClose, initialRequest = null }: GeneHel
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
-    if (!description.trim()) {
-      setMessage({ text: "Опишіть, яка саме допомога потрібна в GeneHelp.", error: true });
+    if (description.trim().length < 12) {
+      setMessage({ text: "Опишіть запит GeneHelp трохи детальніше — щонайменше 12 символів.", error: true });
       return;
     }
     if (!accountStatus?.connected) {
@@ -262,6 +262,8 @@ export function GeneHelpRequestModal({ onClose, initialRequest = null }: GeneHel
           <span>Опис запиту *</span>
           <textarea
             rows={7}
+            required
+            minLength={12}
             value={description}
             disabled={Boolean(busy)}
             placeholder="Опишіть, кого або який документ потрібно знайти, місце, період, відомі дані та сумніви."

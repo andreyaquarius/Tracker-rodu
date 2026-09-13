@@ -1,7 +1,9 @@
 import { getSupabaseClient } from "./supabaseAuth.ts";
+import { invokeAuthenticatedEdgeFunction } from "../utils/authenticatedEdgeFunction.ts";
 
 type EdgeFunctionOptions = {
   connectionErrorMessage?: string;
+  authenticated?: boolean;
 };
 
 export async function invokeEdgeFunction<T>(
@@ -14,7 +16,10 @@ export async function invokeEdgeFunction<T>(
     return invokeLocalEdgeFunction<T>(localFunctionsUrl, name, body, options);
   }
 
-  const { data, error } = await getSupabaseClient().functions.invoke(name, { body });
+  const client = getSupabaseClient();
+  const { data, error } = options.authenticated
+    ? await invokeAuthenticatedEdgeFunction<T>(client, name, body)
+    : await client.functions.invoke<T>(name, { body });
   if (error) {
     const contextMessage = await readSupabaseFunctionError(error);
     if (contextMessage) throw new Error(contextMessage);
