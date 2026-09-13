@@ -19,6 +19,7 @@ import {
 } from "./projectDeletion.ts";
 import { isBrowserMonitoringEnabled, reportBrowserError } from "./browserMonitoring.ts";
 import { createMonitoredSupabaseFetch } from "../utils/monitoredSupabaseFetch.ts";
+import { createRetryingSupabaseReadFetch } from "../utils/retryingSupabaseReadFetch.ts";
 
 export interface SupabaseAccount {
   id: string;
@@ -84,7 +85,7 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && publishableKey);
 // related tables at once. The realtime websocket does not use this fetch queue.
 const MAX_CONCURRENT_REQUESTS = 4;
 const monitoredFetch = createMonitoredSupabaseFetch(
-  (input, init) => fetch(input, init),
+  createRetryingSupabaseReadFetch((input, init) => fetch(input, init), supabaseUrl),
   supabaseUrl,
   failure => {
     const error = new Error(`Supabase ${failure.method} failed: ${failure.status ? `HTTP ${failure.status}` : "network"}${failure.code ? ` (${failure.code})` : ""}`);

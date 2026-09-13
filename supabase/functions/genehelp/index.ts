@@ -6,6 +6,7 @@ import {
   errorMessage,
   json,
 } from "../_shared/ai.ts";
+import { geneHelpProviderOperationCode, readableProviderError } from "./providerError.ts";
 
 type GeneHelpAction =
   | "account-status"
@@ -130,7 +131,10 @@ Deno.serve(async (request) => {
     const status = error instanceof GeneHelpProviderError
       ? ([429, 504].includes(error.status) ? error.status : error.status >= 500 ? 502 : error.status)
       : 400;
-    return json({ error: errorMessage(error, "Не вдалося виконати запит GeneHelp.") }, status);
+    return json({
+      error: errorMessage(error, "Не вдалося виконати запит GeneHelp."),
+      ...(error instanceof GeneHelpProviderError && error.code ? { code: error.code } : {}),
+    }, status);
   }
 });
 
@@ -1039,7 +1043,7 @@ async function callGeneHelp(
   }
 
   if (!response.ok) {
-    const providerMessage = readableProviderError(parsed) || rawBody;
+    const providerMessage = readableProviderError(parsed);
     const retryAfter = response.headers.get("Retry-After");
     if (response.status === 401 || response.status === 403) {
       throw new GeneHelpProviderError(
@@ -1060,6 +1064,7 @@ async function callGeneHelp(
     throw new GeneHelpProviderError(
       response.status,
       providerMessage || "GeneHelp не зміг виконати запит.",
+      geneHelpProviderOperationCode(path),
     );
   }
 
@@ -1070,6 +1075,7 @@ class GeneHelpProviderError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = "GeneHelpProviderError";
@@ -1154,21 +1160,6 @@ function normalizeGeneHelpId(value: unknown): string {
     throw new Error("Некоректний ідентифікатор запиту GeneHelp.");
   }
   return id;
-}
-
-function readableProviderError(value: unknown): string {
-  if (!value || typeof value !== "object") return "";
-  const record = value as Record<string, unknown>;
-  if (record.error && typeof record.error === "object") {
-    const nested = readableProviderError(record.error);
-    if (nested) return nested;
-  }
-  for (const key of ["message", "error", "detail"]) {
-    if (typeof record[key] === "string" && String(record[key]).trim()) {
-      return String(record[key]);
-    }
-  }
-  return "";
 }
 
 function decorateSupabaseError(error: unknown): Error {

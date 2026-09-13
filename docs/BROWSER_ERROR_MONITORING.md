@@ -109,6 +109,24 @@ Vercel також використовує DSN із `.env.production`. За по
 
 ## Технічна перевірка
 
+Відновлення запитів після мережевого збою:
+
+- `get_dashboard_stats`, `get_my_subscription_context`, `get_feedback_unread_count`
+  та `list_my_genehelp_notifications` мають до двох повторів POST після
+  транспортного збою з паузами 300 і 900 мс. Моніторинг цих RPC отримує лише
+  остаточну відмову. Параметри залишаються в тілі POST; dashboard RPC також
+  оновлює ідемпотентний кеш, тому переводити його на GET не можна.
+- POST-запити запису, інші RPC та Edge Functions не повторюються через мережеву
+  помилку. HTTP-відмови й скасовані запити ця обгортка теж не повторює.
+- GET-запити таблиць уже повторює Supabase SDK. Їхні проміжні невдалі спроби
+  можуть залишатися у Sentry; подія не доводить, що читання остаточно зірвалося.
+- Для GeneHelp і authenticated engagement перевіряється сесія; JWT, що скоро
+  спливе, оновлюється перед викликом. Після HTTP 401 дозволений один refresh і
+  один повтор, лише якщо refresh ще не виконувався. Зміна акаунта зупиняє повтор.
+- Збір активності не надсилає накопичені секунди після втрати авторизації.
+  Невдале надсилання має паузу від хвилини до 30 хвилин. Явний вихід з акаунта
+  зберігає спробу flush перед signOut.
+
 ```powershell
 node --test test/browserMonitoring.test.ts test/monitoredSupabaseFetch.test.ts test/supabaseRequestDiagnostics.test.ts
 npm.cmd run typecheck
