@@ -44,7 +44,7 @@ test("Vercel applies conservative security, privacy, and immutable asset headers
     {
       source: "/(.*)",
       headers: [
-        { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'" },
         { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
         {
           key: "Permissions-Policy",
@@ -53,6 +53,7 @@ test("Vercel applies conservative security, privacy, and immutable asset headers
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         { key: "X-Content-Type-Options", value: "nosniff" },
         { key: "X-Frame-Options", value: "DENY" },
+        { key: "Strict-Transport-Security", value: "max-age=86400" },
       ],
     },
     {
@@ -75,7 +76,7 @@ test("Vercel applies conservative security, privacy, and immutable asset headers
   ]);
 
   const serializedHeaders = JSON.stringify(vercel.headers);
-  assert.doesNotMatch(serializedHeaders, /Strict-Transport-Security/u);
+  assert.doesNotMatch(serializedHeaders, /includeSubDomains|preload/u);
 });
 
 test("the Vercel build generates and verifies public pages after Vite", () => {

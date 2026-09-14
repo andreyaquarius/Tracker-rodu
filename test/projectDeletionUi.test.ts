@@ -33,6 +33,7 @@ const deletionPhases = [
   "custom_section_fields",
   "attachments",
   "activity_log",
+  "project_change_events",
   "year_matrix",
   "tasks",
   "findings",

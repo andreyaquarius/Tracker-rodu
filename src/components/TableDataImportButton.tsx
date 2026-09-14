@@ -29,6 +29,8 @@ export function TableDataImportButton({
 }: TableDataImportButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const selectFile = () => {
     if (!busy) inputRef.current?.click();
@@ -40,8 +42,13 @@ export function TableDataImportButton({
     if (!file) return;
 
     setBusy(true);
+    setReading(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const parsed = await parseImportTableFile(file);
+      const parsed = await parseImportTableFile(file, controller.signal);
+      abortRef.current = null;
+      setReading(false);
       const { records, warnings, addedCount, updatedCount, unchangedCount } = buildImportedRecords({
         db,
         collection,
@@ -67,9 +74,11 @@ export function TableDataImportButton({
 
       await onImport(records);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Не вдалося імпортувати таблицю.");
+      if (!controller.signal.aborted) window.alert(error instanceof Error ? error.message : "Не вдалося імпортувати таблицю.");
     } finally {
+      abortRef.current = null;
       setBusy(false);
+      setReading(false);
     }
   };
 
@@ -90,6 +99,7 @@ export function TableDataImportButton({
       >
         {busy ? "Імпортуємо..." : "Імпорт даних"}
       </button>
+      {reading ? <button type="button" className="button button-secondary" onClick={() => abortRef.current?.abort()}>Скасувати читання файлу</button> : null}
     </>
   );
 }

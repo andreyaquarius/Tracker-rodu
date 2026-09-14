@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { spreadsheetCsvCell } from "./spreadsheetSafe.ts";
 import { PDFDocument } from "pdf-lib";
 import type {
   FamilyTreeStatisticsChart,
@@ -43,8 +44,7 @@ function download(blob: Blob, fileName: string): void {
 }
 
 function csvCell(value: unknown): string {
-  const text = String(value ?? "").replace(/^([=+\-@])/, "'$1");
-  return `"${text.replaceAll('"', '""')}"`;
+  return spreadsheetCsvCell(value);
 }
 
 export function exportStatisticsTableCsv(table: FamilyTreeStatisticsTable): void {

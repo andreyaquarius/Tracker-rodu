@@ -38,11 +38,11 @@
     "pdfjs-dist": "^6.2.108",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.18.0"
+    "react-router-dom": "7.18.2"
   },
   "devDependencies": {
-    "@sentry/vite-plugin": "5.4.0",
     "@electric-sql/pglite": "^0.5.8",
+    "@sentry/vite-plugin": "5.4.0",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.5",
     "@vitejs/plugin-react": "^4.4.1",

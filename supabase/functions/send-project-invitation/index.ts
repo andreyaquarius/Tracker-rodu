@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.108.0";
 
 const localDevOrigins = new Set([
   "http://localhost:5173",
@@ -87,10 +87,11 @@ Deno.serve(async (request) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     const emailFrom = Deno.env.get("INVITATION_EMAIL_FROM");
     const appUrl = Deno.env.get("APP_URL");
-    if (!supabaseUrl || !supabaseAnonKey) {
+    if (!supabaseUrl || !supabaseAnonKey || !serviceKey) {
       return json(request, { error: "Supabase function environment is incomplete" }, 500);
     }
     if (!resendApiKey || !emailFrom || !appUrl) {
@@ -105,7 +106,7 @@ Deno.serve(async (request) => {
     }
 
     const { invitationId } = await request.json() as { invitationId?: string };
-    if (!invitationId) return json(request, { error: "Invitation ID is required" }, 400);
+    if (typeof invitationId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitationId)) return json(request, { error: "Valid invitation ID is required" }, 400);
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authorization } },
@@ -133,27 +134,36 @@ Deno.serve(async (request) => {
       return json(request, { error: "Invitation cannot be sent" }, 403);
     }
 
-    const inviterName = String(
-      userResult.user.user_metadata?.full_name ||
-        userResult.user.user_metadata?.name ||
-        userResult.user.email ||
-        "Користувач",
-    );
-    const name = projectName(invitation.projects);
+    // Only the server can claim delivery. Authorization/status are checked
+    // again under a DB lock immediately before the external provider call.
+    const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data: claim, error: claimError } = await admin.rpc("claim_invitation_email_v1", {
+      target_invitation_id: invitationId, target_actor_id: userResult.user.id,
+    });
+    if (claimError) return json(request, { error: "Invitation cannot be sent" }, claimError.code === "42501" ? 403 : 503);
+    if (!claim || claim.status !== "claimed") {
+      return json(request, { error: "Зачекайте перед повторним надсиланням запрошення.", retryAfter: claim?.retry_after ?? 60 }, 429);
+    }
+    // A failed/uncertain attempt retains both the idempotency key and payload.
+    const snapshot = claim.snapshot;
+    const inviterName = String(snapshot.inviter_name || "Користувач");
+    const name = String(snapshot.project_name || "Спільний проєкт");
     const roleLabel =
-      invitation.role === "editor" ? "може редагувати" : "лише перегляд";
+      snapshot.role === "editor" ? "може редагувати" : "лише перегляд";
     const invitationUrl = new URL(appUrl);
     invitationUrl.searchParams.set("openTeam", "1");
 
     const emailResponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
+      signal: AbortSignal.timeout(30_000),
       headers: {
         Authorization: `Bearer ${resendApiKey}`,
         "Content-Type": "application/json",
+        "Idempotency-Key": `project-invitation/${claim.id}`,
       },
       body: JSON.stringify({
         from: emailFrom,
-        to: [invitation.email],
+        to: [snapshot.email],
         subject: `Запрошення до проєкту «${name}»`,
         html: `
           <div style="font-family:Arial,sans-serif;max-width:620px;margin:0 auto;color:#153d37">
@@ -168,14 +178,18 @@ Deno.serve(async (request) => {
               </a>
             </p>
             <p>Увійдіть або зареєструйтеся з адресою
-              <strong>${escapeHtml(invitation.email)}</strong>, щоб прийняти запрошення.</p>
+              <strong>${escapeHtml(snapshot.email)}</strong>, щоб прийняти запрошення.</p>
             <p style="color:#667a76;font-size:13px">Запрошення діє до
-              ${new Date(invitation.expires_at).toLocaleDateString("uk-UA")}.</p>
+              ${new Date(snapshot.expires_at).toLocaleDateString("uk-UA")}.</p>
           </div>
         `,
       }),
     });
     const emailResult = await emailResponse.json();
+    const { error: finishError } = await admin.rpc("finish_invitation_email_v1", {
+      delivery_id: claim.id, claim_token: claim.lease_token, delivered: emailResponse.ok,
+    });
+    if (finishError) return json(request, { error: "Не вдалося підтвердити стан доставки. Не надсилайте запрошення повторно одразу." }, 503);
     if (!emailResponse.ok) {
       return json(
         request,

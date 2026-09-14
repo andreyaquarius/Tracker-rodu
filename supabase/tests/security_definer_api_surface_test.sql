@@ -315,7 +315,9 @@ select is(
 );
 
 select ok(
-  bool_and(function_record.proconfig @> array['search_path=pg_catalog']::text[]),
+  -- An empty path with schema-qualified calls is also trusted; compare the
+  -- security property, not a single spelling used by older migrations.
+  bool_and(function_record.proconfig && array['search_path=pg_catalog', 'search_path=""', 'search_path=']::text[]),
   'every exposed facade has a fixed trusted search_path'
 )
 from expected_security_advisor_functions expected

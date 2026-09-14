@@ -2976,7 +2976,7 @@ export function DocumentWorkspaceViewer({
             </div>
           </div>
         ) : kind === "web" && blobUrl ? (
-          <iframe title={activeScan.name} src={blobUrl} />
+          <iframe title={activeScan.name} src={blobUrl} sandbox="" referrerPolicy="no-referrer" />
         ) : null}
         {(loading || pdfRendering) && blobUrl ? (
           <div className="workspace-page-loading">

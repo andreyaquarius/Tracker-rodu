@@ -18,7 +18,6 @@ import {
   projectBackupRecords,
   PROJECT_EXCEL_BACKUP_SHEET_NAME,
 } from "./excelBackupFormat";
-import { neutralizeSpreadsheetValue } from "./spreadsheetSafe";
 
 interface WorkbookColumn {
   key: string;
@@ -811,9 +810,9 @@ function isWebUrl(value: unknown): value is string {
 }
 
 function inlineCell(reference: string, value: string, style: number): string {
-  const safe = neutralizeSpreadsheetValue(value);
-  const preserved = /^\s|\s$|\n/.test(safe) ? ' xml:space="preserve"' : "";
-  return `<c r="${reference}" t="inlineStr" s="${style}"><is><t${preserved}>${escapeXml(safe)}</t></is></c>`;
+  // inlineStr is text, never an Excel formula. Do not alter historical sources.
+  const preserved = /^\s|\s$|\n/.test(value) ? ' xml:space="preserve"' : "";
+  return `<c r="${reference}" t="inlineStr" s="${style}"><is><t${preserved}>${escapeXml(value)}</t></is></c>`;
 }
 
 function cellReference(columnIndex: number, row: number): string {
@@ -867,7 +866,8 @@ function escapeXml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+    .replace(/'/g, "&apos;")
+    .replace(/\r/g, "&#13;");
 }
 
 function createZip(files: Array<{ name: string; data: Uint8Array }>): Uint8Array {

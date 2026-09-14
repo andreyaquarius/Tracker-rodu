@@ -7,6 +7,13 @@ on:
       - "supabase/functions/**"
       - "supabase/migrations/**"
       - "supabase/config.toml"
+      - "supabase/tests/security_remediation_test.sql"
+      - "test/securityRemediation.test.ts"
+      - "test/boundedXlsx.test.ts"
+      - "test/spreadsheetSafe.test.ts"
+      - "scripts/verify-edge-locks.mjs"
+      - "package.json"
+      - "package-lock.json"
       - "scripts/verify-external-pdf-rollout.mjs"
       - "services/pdf-export-worker/**"
       # process-gedcom-exports reuses Edge-safe GEDCOM modules from the app
@@ -44,35 +51,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-edge-functions:
+  verify:
     runs-on: ubuntu-latest
-
-    env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-      TASK_REMINDER_CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
-      GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
-      GA4_MEASUREMENT_ID: G-SF2725LS4P
-      APP_URL: ${{ vars.APP_URL }}
-      ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
-      PDF_EXPORT_WORKER_URL: ${{ secrets.PDF_EXPORT_WORKER_URL }}
-      PDF_EXPORT_WORKER_SECRET: ${{ secrets.PDF_EXPORT_WORKER_SECRET }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
-      TELEGRAM_WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
-      # Public DSN for the existing tracker-rodu-web project. Metadata-only AI
-      # tracing was approved; set repository variable SENTRY_AI_ENABLED=false to stop it.
-      SENTRY_AI_DSN: ${{ vars.SENTRY_AI_DSN || 'https://8e3abe90ffc73072358626ddf11a6116@o4512075083939840.ingest.de.sentry.io/4512075160420432' }}
-      SENTRY_AI_ENABLED: ${{ vars.SENTRY_AI_ENABLED || 'true' }}
-      SENTRY_AI_ENVIRONMENT: production
-      SENTRY_AI_RELEASE: ${{ github.sha }}
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -136,7 +124,64 @@ jobs:
       - name: Verify PDF worker container
         run: docker build --tag tracker-rodu-pdf-worker:test services/pdf-export-worker
 
+      - name: Reject fixable high-risk container dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/pdf-security-scan"
+          docker save --output "$RUNNER_TEMP/pdf-security-scan/image.tar" tracker-rodu-pdf-worker:test
+          # No Docker socket or production credentials are exposed to the scanner.
+          # Unfixed distribution advisories still need review; this is not a zero-CVE claim.
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges \
+            --memory 2g --cpus 2 \
+            --mount "type=bind,source=$RUNNER_TEMP/pdf-security-scan,target=/scan,readonly" \
+            aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            image --input /scan/image.tar --scanners vuln --severity HIGH,CRITICAL \
+            --ignore-unfixed --exit-code 1
+
+      - name: Verify security fixes
+        run: |
+          npm audit --audit-level=high
+          node --test test/securityRemediation.test.ts test/boundedXlsx.test.ts test/spreadsheetSafe.test.ts
+          npx --yes --package=deno@2.5.0 -- node scripts/verify-edge-locks.mjs
+
+      - name: Set up local test CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf # v2
+        with:
+          version: 2.108.0
+
+      - name: Verify database security fixes locally
+        run: |
+          supabase db start
+          supabase test db supabase/tests/security_remediation_test.sql --local
+
+  deploy-edge-functions:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
       - name: Verify Supabase deployment configuration
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          TASK_REMINDER_CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
+          APP_URL: ${{ vars.APP_URL }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
+          PDF_EXPORT_WORKER_URL: ${{ secrets.PDF_EXPORT_WORKER_URL }}
+          PDF_EXPORT_WORKER_SECRET: ${{ secrets.PDF_EXPORT_WORKER_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          TELEGRAM_WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
         run: |
           if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
             echo "::error::Repository secret SUPABASE_ACCESS_TOKEN is missing."
@@ -192,11 +237,14 @@ jobs:
           node scripts/verify-external-pdf-rollout.mjs --deployment
 
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v2
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf # v2
         with:
           version: 2.108.0
 
       - name: Verify Supabase account and project access
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: |
           if ! status="$(curl --silent --show-error --retry 2 \
               --output "$RUNNER_TEMP/supabase-project.json" \
@@ -230,9 +278,15 @@ jobs:
           esac
 
       - name: Link Supabase project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --yes
 
       - name: Verify Edge Function server secrets
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: |
           if ! supabase secrets list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])ENCRYPTION_KEY([[:space:]]|$)'; then
             echo "::error::Supabase Edge Function secret ENCRYPTION_KEY is required for private Google Drive PDF sessions."
@@ -244,10 +298,14 @@ jobs:
           fi
 
       - name: Preview database migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase db push --linked --dry-run
 
       - name: Apply database migrations
         shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           max_attempts=3
           attempt=1
@@ -278,6 +336,23 @@ jobs:
           done
 
       - name: Deploy Edge Functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          TASK_REMINDER_CRON_SECRET: ${{ secrets.TASK_REMINDER_CRON_SECRET }}
+          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
+          GA4_MEASUREMENT_ID: G-SF2725LS4P
+          APP_URL: ${{ vars.APP_URL }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
+          PDF_EXPORT_WORKER_URL: ${{ secrets.PDF_EXPORT_WORKER_URL }}
+          PDF_EXPORT_WORKER_SECRET: ${{ secrets.PDF_EXPORT_WORKER_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          TELEGRAM_WORKER_SECRET: ${{ secrets.TELEGRAM_WORKER_SECRET }}
+          SENTRY_AI_DSN: ${{ vars.SENTRY_AI_DSN || 'https://8e3abe90ffc73072358626ddf11a6116@o4512075083939840.ingest.de.sentry.io/4512075160420432' }}
+          SENTRY_AI_ENABLED: ${{ vars.SENTRY_AI_ENABLED || 'true' }}
+          SENTRY_AI_ENVIRONMENT: production
+          SENTRY_AI_RELEASE: ${{ github.sha }}
         run: |
           supabase secrets set \
             TASK_REMINDER_CRON_SECRET="$TASK_REMINDER_CRON_SECRET" \
@@ -297,7 +372,7 @@ jobs:
             --project-ref "$SUPABASE_PROJECT_REF"
 
           for function_dir in supabase/functions/*; do
-            if [ ! -d "$function_dir" ]; then
+            if [ ! -d "$function_dir" ] || [ ! -f "$function_dir/index.ts" ]; then
               continue
             fi
 
@@ -311,6 +386,10 @@ jobs:
           done
 
       - name: Register Telegram webhook
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         run: |
           webhook_url="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/telegram-webhook"
           if ! response="$(curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 30 \
@@ -339,6 +418,9 @@ jobs:
           fi
 
       - name: Verify PDF gateway deployment
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: |
           if ! supabase functions list --project-ref "$SUPABASE_PROJECT_REF" | grep -Eq '(^|[[:space:]])pdf-gateway([[:space:]]|$)'; then
             echo "::error::pdf-gateway is missing after Edge Function deployment."

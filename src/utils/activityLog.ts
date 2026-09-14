@@ -4,7 +4,6 @@ import type {
   AppEntity,
   CollectionKey,
   DocumentRecord,
-  Person,
   Research,
   TaskRecord,
   YearMatrixRecord,
@@ -115,11 +114,9 @@ export function createActivityEntries(
   }
 
   if (collection === "persons") {
-    const person = next as Person;
-    const name = person.fullName || [person.surname, person.givenName, person.patronymic].filter(Boolean).join(" ");
     add(
       previous ? "person_updated" : "person_created",
-      previous ? `Змінено картку особи «${name}»` : `Створено картку особи «${name}»`,
+      previous ? "Змінено картку особи" : "Створено картку особи",
     );
   }
 

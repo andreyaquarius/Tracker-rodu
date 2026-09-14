@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.108.0";
 import { corsHeaders, errorMessage, json } from "../_shared/ai.ts";
 
 const STORAGE_BUCKETS = ["project-backups", "project-attachments", "gedcom-exports"] as const;
