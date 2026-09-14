@@ -128,6 +128,12 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/pdf-security-scan"
           docker save --output "$RUNNER_TEMP/pdf-security-scan/image.tar" tracker-rodu-pdf-worker:test
+          # docker save creates an owner-only archive on Linux. The scanner
+          # drops all capabilities, including DAC_OVERRIDE, and has a different
+          # UID from the runner. Grant read/traverse only on this disposable,
+          # secret-free build artifact; keep the mount read-only.
+          chmod 0755 "$RUNNER_TEMP/pdf-security-scan"
+          chmod 0444 "$RUNNER_TEMP/pdf-security-scan/image.tar"
           # No Docker socket or production credentials are exposed to the scanner.
           # Unfixed distribution advisories still need review; this is not a zero-CVE claim.
           docker run --rm --cap-drop ALL --security-opt no-new-privileges \

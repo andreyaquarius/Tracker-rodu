@@ -57,3 +57,17 @@ test("deployment secrets are separate from dependency/test jobs and actions are 
     for (const [, ref] of source(".github/workflows/" + file).matchAll(/uses: ([^\s]+)/g)) assert.match(ref, /@[0-9a-f]{40}$/);
   }
 });
+
+test("capability-free scanner can read the runner-owned Linux archive without broader privileges", () => {
+  const workflow = source(".github/workflows/deploy-supabase-functions.yml");
+  const step = workflow.split("- name: Reject fixable high-risk container dependencies")[1].split("- name: Verify security fixes")[0];
+  const save = step.indexOf("docker save --output");
+  const directoryMode = step.indexOf('chmod 0755 "$RUNNER_TEMP/pdf-security-scan"');
+  const archiveMode = step.indexOf('chmod 0444 "$RUNNER_TEMP/pdf-security-scan/image.tar"');
+  const scan = step.indexOf("docker run");
+  assert.ok(save >= 0 && directoryMode > save && archiveMode > directoryMode && scan > archiveMode);
+  assert.match(step, /--cap-drop ALL --security-opt no-new-privileges/);
+  assert.match(step, /target=\/scan,readonly/);
+  assert.match(step, /--ignore-unfixed --exit-code 1/);
+  assert.doesNotMatch(step, /--privileged|--cap-add|chmod\s+(?:-R|0?777)|continue-on-error/);
+});
