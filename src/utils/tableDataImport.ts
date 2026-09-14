@@ -20,6 +20,7 @@ import {
 } from "./taskReminders";
 import { PERSON_STATUSES } from "./personStatus.ts";
 import { parseFindingParticipantTableCell } from "./findingParticipantTableCell";
+import { checkImportFileSize, TABLE_IMPORT_LIMITS, unzipBoundedXlsx } from "./boundedXlsx.ts";
 
 export interface ImportTableRow {
   sourceRowNumber: number;
@@ -57,13 +58,17 @@ export function supportedImportAccept(): string {
   return ".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 }
 
-export async function parseImportTableFile(file: File): Promise<ImportParseResult> {
+export async function parseImportTableFile(file: File, signal?: AbortSignal): Promise<ImportParseResult> {
+  checkImportFileSize(file.size);
+  signal?.throwIfAborted();
   const lowerName = file.name.toLocaleLowerCase("uk");
   if (lowerName.endsWith(".csv")) {
-    return parseCsvTable(await file.text(), file.name);
+    const text = await file.text();
+    signal?.throwIfAborted();
+    return parseCsvTable(text, file.name);
   }
   if (lowerName.endsWith(".xlsx")) {
-    return parseXlsxTable(new Uint8Array(await file.arrayBuffer()));
+    return parseXlsxTable(new Uint8Array(await file.arrayBuffer()), signal);
   }
   throw new Error("Підтримуються лише файли .xlsx або .csv, створені з таблиць Трекера Роду.");
 }
@@ -427,8 +432,8 @@ function buildRecordFromRow({
   let hasMeaningfulValue = false;
 
   for (const [label, rawValue] of Object.entries(row.values)) {
-    const value = rawValue.trim();
-    if (!value || ignoredLabels.has(normalizeLabel(label))) continue;
+    const value = rawValue;
+    if (!value.trim() || ignoredLabels.has(normalizeLabel(label))) continue;
     const participantIndex = participantColumnIndex(label);
     if (collection === "findings" && participantIndex !== null) {
       participantInputs[participantIndex] = value;
@@ -695,7 +700,7 @@ function parseCsvTable(text: string, fileName: string): ImportParseResult {
     sourceRowNumber: index + 2,
     values: Object.fromEntries(headers.map((header, columnIndex) => [
       header,
-      cells[columnIndex]?.trim() ?? "",
+      cells[columnIndex] ?? "",
     ])),
   }));
   return {
@@ -710,8 +715,16 @@ function splitDelimitedRows(text: string, delimiter: string): string[][] {
   let row: string[] = [];
   let cell = "";
   let quoted = false;
+  let cellCount = 0;
+  const started = Date.now();
+  const checkCell = () => {
+    if (++cellCount > TABLE_IMPORT_LIMITS.cells || row.length > TABLE_IMPORT_LIMITS.columns || rows.length > TABLE_IMPORT_LIMITS.rows) {
+      throw new Error("Таблиця завелика. Розділіть її на частини (до 100 000 рядків, 512 колонок, 1 000 000 комірок).");
+    }
+  };
 
   for (let index = 0; index < text.length; index += 1) {
+    if (index % 65536 === 0 && Date.now() - started > TABLE_IMPORT_LIMITS.milliseconds) throw new Error("Перевищено час імпорту таблиці.");
     const character = text[index];
     if (character === "\"") {
       if (quoted && text[index + 1] === "\"") {
@@ -722,10 +735,12 @@ function splitDelimitedRows(text: string, delimiter: string): string[][] {
       }
     } else if (character === delimiter && !quoted) {
       row.push(cell);
+      checkCell();
       cell = "";
     } else if ((character === "\n" || character === "\r") && !quoted) {
       if (character === "\r" && text[index + 1] === "\n") index += 1;
       row.push(cell);
+      checkCell();
       rows.push(row);
       row = [];
       cell = "";
@@ -734,6 +749,7 @@ function splitDelimitedRows(text: string, delimiter: string): string[][] {
     }
   }
   row.push(cell);
+  checkCell();
   rows.push(row);
   return rows;
 }
@@ -770,8 +786,9 @@ function splitDelimitedLine(line: string, delimiter: string): string[] {
   return result;
 }
 
-async function parseXlsxTable(bytes: Uint8Array): Promise<ImportParseResult> {
-  const files = await unzipXlsx(bytes);
+async function parseXlsxTable(bytes: Uint8Array, signal?: AbortSignal): Promise<ImportParseResult> {
+  const files = await unzipBoundedXlsx(bytes, signal);
+  signal?.throwIfAborted();
   const workbook = xmlDocument(textFile(files, "xl/workbook.xml"));
   const rels = workbookRelationships(textFile(files, "xl/_rels/workbook.xml.rels"));
   const sheet = Array.from(workbook.getElementsByTagName("sheet"))[0];
@@ -792,13 +809,14 @@ async function parseXlsxTable(bytes: Uint8Array): Promise<ImportParseResult> {
     rows: rows.slice(1)
       .map((cells, index) => ({
         sourceRowNumber: index + 2,
-        values: Object.fromEntries(headers.map((header, columnIndex) => [header, cells[columnIndex]?.trim() ?? ""])),
+        values: Object.fromEntries(headers.map((header, columnIndex) => [header, cells[columnIndex] ?? ""])),
       }))
       .filter((row) => !isEmptyValues(row.values)),
   };
 }
 
 function xmlDocument(text: string): Document {
+  if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new Error("XML із DTD/ENTITY не підтримується для табличного імпорту.");
   const parser = new DOMParser();
   const document = parser.parseFromString(text, "application/xml");
   if (document.getElementsByTagName("parsererror").length) {
@@ -824,11 +842,20 @@ function sharedStringValues(text: string): string[] {
 
 function worksheetRows(text: string, sharedStrings: string[]): string[][] {
   const document = xmlDocument(text);
+  if (document.getElementsByTagName("row").length > TABLE_IMPORT_LIMITS.rows || document.getElementsByTagName("c").length > TABLE_IMPORT_LIMITS.cells) {
+    throw new Error("Забагато рядків або комірок. Розділіть таблицю на частини.");
+  }
+  const started = Date.now();
   return Array.from(document.getElementsByTagName("row")).map((row) => {
+    if (row.parentElement?.localName !== "sheetData" || row.parentElement.parentElement?.localName !== "worksheet") throw new Error("Некоректна вкладеність рядків Excel.");
+    if (Date.now() - started > TABLE_IMPORT_LIMITS.milliseconds) throw new Error("Перевищено час імпорту таблиці.");
     const cells: string[] = [];
-    for (const cell of Array.from(row.getElementsByTagName("c"))) {
+    for (const cell of Array.from(row.children)) {
+      if (cell.localName !== "c") continue;
+      if (cell.getElementsByTagName("c").length || cell.getElementsByTagName("row").length) throw new Error("Некоректна вкладеність комірок Excel.");
       const reference = cell.getAttribute("r") ?? "";
       const columnIndex = columnIndexFromReference(reference);
+      if (!Number.isSafeInteger(columnIndex) || columnIndex < 0 || columnIndex >= TABLE_IMPORT_LIMITS.columns) throw new Error("Забагато колонок у таблиці (максимум 512).");
       cells[columnIndex] = cellText(cell, sharedStrings);
     }
     return cells;
@@ -849,49 +876,6 @@ function cellText(cell: Element, sharedStrings: string[]): string {
 function columnIndexFromReference(reference: string): number {
   const letters = reference.match(/[A-Z]+/i)?.[0]?.toUpperCase() ?? "A";
   return letters.split("").reduce((sum, letter) => sum * 26 + letter.charCodeAt(0) - 64, 0) - 1;
-}
-
-async function unzipXlsx(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const eocdOffset = findEndOfCentralDirectory(view);
-  const centralDirectoryOffset = view.getUint32(eocdOffset + 16, true);
-  const entries = view.getUint16(eocdOffset + 10, true);
-  const files = new Map<string, Uint8Array>();
-  let offset = centralDirectoryOffset;
-  for (let index = 0; index < entries; index += 1) {
-    if (view.getUint32(offset, true) !== 0x02014b50) throw new Error("Excel-файл має пошкоджену ZIP-структуру.");
-    const method = view.getUint16(offset + 10, true);
-    const compressedSize = view.getUint32(offset + 20, true);
-    const nameLength = view.getUint16(offset + 28, true);
-    const extraLength = view.getUint16(offset + 30, true);
-    const commentLength = view.getUint16(offset + 32, true);
-    const localOffset = view.getUint32(offset + 42, true);
-    const name = decodeBytes(bytes.slice(offset + 46, offset + 46 + nameLength));
-    const localNameLength = view.getUint16(localOffset + 26, true);
-    const localExtraLength = view.getUint16(localOffset + 28, true);
-    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
-    const compressed = bytes.slice(dataStart, dataStart + compressedSize);
-    files.set(name, await decompressZipEntry(compressed, method));
-    offset += 46 + nameLength + extraLength + commentLength;
-  }
-  return files;
-}
-
-async function decompressZipEntry(bytes: Uint8Array, method: number): Promise<Uint8Array> {
-  if (method === 0) return bytes;
-  if (method !== 8) throw new Error("Excel-файл використовує непідтримуваний метод стиснення.");
-  if (typeof DecompressionStream === "undefined") {
-    throw new Error("Браузер не підтримує розпакування Excel-файлів. Збережіть таблицю як CSV і імпортуйте CSV.");
-  }
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-function findEndOfCentralDirectory(view: DataView): number {
-  for (let offset = view.byteLength - 22; offset >= 0; offset -= 1) {
-    if (view.getUint32(offset, true) === 0x06054b50) return offset;
-  }
-  throw new Error("Файл не схожий на коректний .xlsx.");
 }
 
 function textFile(files: Map<string, Uint8Array>, path: string): string {

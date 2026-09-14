@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { spreadsheetCsvCell } from "../utils/spreadsheetSafe.ts";
 import {
   loadAdminAnalytics,
   loadAdminAnalyticsActions,
@@ -143,10 +144,7 @@ function downloadAggregateCsv(
   headers: string[],
   rows: Array<Array<string | number | null>>,
 ): void {
-  const escape = (value: string | number | null) => {
-    const text = value === null ? "" : String(value);
-    return `"${text.replaceAll('"', '""')}"`;
-  };
+  const escape = spreadsheetCsvCell;
   const csv = `\uFEFF${[headers, ...rows].map((row) => row.map(escape).join(";")).join("\r\n")}`;
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const anchor = document.createElement("a");

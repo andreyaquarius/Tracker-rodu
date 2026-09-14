@@ -46,11 +46,7 @@ export async function listProjectActivity(
   limit = 100,
 ): Promise<ActivityLogEntry[]> {
   const { data, error } = await getSupabaseClient()
-    .from("activity_log")
-    .select("id, action, entity_type, entity_id, details, created_at")
-    .eq("project_id", projectId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+    .rpc("list_project_activity_v1", { target_project_id: projectId, max_rows: limit });
   if (error) throw error;
   return (data as ActivityRow[])
     .map(activityFromRow)

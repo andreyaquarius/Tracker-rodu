@@ -32,6 +32,7 @@ const PROJECT_DELETION_PHASE_LABELS: Readonly<Record<string, string>> = {
   custom_section_fields: "Очищаємо поля власних розділів",
   attachments: "Видаляємо вкладення",
   activity_log: "Очищаємо журнал активності",
+  project_change_events: "Очищаємо повідомлення про зміни",
   year_matrix: "Видаляємо матрицю років",
   tasks: "Видаляємо завдання",
   findings: "Видаляємо знахідки",

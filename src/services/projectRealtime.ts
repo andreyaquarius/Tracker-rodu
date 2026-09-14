@@ -72,7 +72,7 @@ export function subscribeProjectRealtime(
     {
       event: "INSERT",
       schema: "public",
-      table: "activity_log",
+      table: "project_change_events",
       filter: `project_id=eq.${projectId}`,
     },
     (payload) => {

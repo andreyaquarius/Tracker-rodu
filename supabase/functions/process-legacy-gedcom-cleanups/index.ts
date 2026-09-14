@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.108.0";
 
 const WORKER_BUDGET_MS = 80_000;
 const INITIAL_BATCH_SIZE = 500;

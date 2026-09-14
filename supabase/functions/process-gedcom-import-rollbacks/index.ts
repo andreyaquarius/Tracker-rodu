@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.108.0";
 
 const WORKER_BUDGET_MS = 80_000;
 const INITIAL_ROLLBACK_BATCH_SIZE = 500;
