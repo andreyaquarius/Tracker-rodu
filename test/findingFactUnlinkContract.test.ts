@@ -8,7 +8,19 @@ test("saving a finding with no linked people still synchronizes former participa
   const block = app.slice(app.indexOf('syncEntityAttachmentMetadata("findings", saved)'),app.indexOf('const deleteFinding ='));
   assert.ok(block.includes('await syncFindingPersonFacts(projectId, saved.id)'));
   assert.ok(!block.includes('if (saved.participants.some('));
-  assert.ok(block.includes('mergePersons(current)'));
+  assert.ok(block.includes('applyFindingFactPersons(projectId, synced.persons)'));
+  assert.ok(app.includes('mergePersons(current)'));
+});
+
+test("deleting a finding refreshes former people without rolling back a successful server deletion", () => {
+  const app = source("../src/App.tsx");
+  const block = app.slice(app.indexOf('const removeFinding ='),app.indexOf('const saveHypothesis ='));
+  assert.match(block, /deleteProjectFinding\(projectId, id\)\)\.then\(async \(personIds\)/);
+  assert.match(block, /loadFindingFactPersons\(projectId, personIds\)/);
+  assert.match(block, /applyFindingFactPersons\(projectId, persons\)/);
+  assert.match(block, /Знахідку видалено, але не вдалося оновити/);
+  const records = source("../src/services/projectWorkRecords.ts");
+  assert.match(records, /client\.rpc\("delete_finding_with_facts_v1"/);
 });
 test("hotfix keeps constraints and source/child data, rather than disabling uniqueness", () => {
   const sql = source("../supabase/migrations/202609060004_finding_fact_unlink_and_relink.sql");

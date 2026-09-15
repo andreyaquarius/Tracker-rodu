@@ -8,6 +8,7 @@ import type {
   ScanAttachment,
 } from "../../types/index.ts";
 import { personEventLabel } from "../../utils/geo.ts";
+import { normalizeFlexibleDateInput } from "../../utils/dateHelpers.ts";
 import {
   isPhotoReferenceAvailable,
   primaryPersonPhoto,
@@ -387,33 +388,50 @@ export function buildPersonTimeline(
     if (!isMeaningfulEvent(event)) continue;
     if (marriages.length && event.type === "marriage" && event.id === "marriage") continue;
 
-    const duplicateIndex = CORE_EVENT_TYPES.has(event.type)
-      ? staged.findIndex((candidate) => (
-          candidate.source === "core"
-          && (!candidate.sourceFindingId || !event.sourceFindingId || candidate.sourceFindingId === event.sourceFindingId)
-          && candidate.type === event.type
-          && (event.id === event.type || eventSignature(candidate) === eventSignature(event))
-        ))
-      : -1;
+    const candidates = staged.flatMap((candidate, index) => {
+      if (candidate.type !== event.type) return [];
+      // Keep independent sources and their potentially conflicting assertions.
+      if (candidate.sourceFindingId && event.sourceFindingId
+        && candidate.sourceFindingId !== event.sourceFindingId) return [];
+      const canonicalCopy = candidate.source === "core" && CORE_EVENT_TYPES.has(event.type)
+        && !event.sourceFindingId && event.id === event.type;
+      const matches = candidate.sourceFindingId || event.sourceFindingId
+        ? sameFindingTimelineFact(candidate, event)
+        : candidate.source === "core" && eventSignature(candidate) === eventSignature(event);
+      return canonicalCopy || matches ? [index] : [];
+    });
+    // An undated/partial record must not be arbitrarily assigned to one of
+    // several spouses or repeated events. Preserve ambiguity in that case.
+    const duplicateIndex = candidates.length === 1 ? candidates[0] : -1;
 
     if (duplicateIndex >= 0) {
       const previous = staged[duplicateIndex];
+      const sourced = previous.sourceFindingId ? previous : event;
       staged[duplicateIndex] = withTimelineSort({
         ...event,
         ...previous,
+        id: previous.source !== "core" && previous.sourceFindingId && !event.sourceFindingId
+          ? event.id : previous.id,
+        date: morePreciseTimelineDate(previous.date, event.date),
+        placeName: previous.placeName || event.placeName,
+        ...(sourced.sourceFindingId ? {
+          sourceFindingId: sourced.sourceFindingId,
+          sourceDocumentId: sourced.sourceDocumentId,
+          sourceSnapshot: sourced.sourceSnapshot,
+        } : {}),
         title: previous.title || event.title,
         value: previous.value || event.value,
         age: previous.age || event.age,
         cause: previous.cause || event.cause,
         address: previous.address || event.address,
         geo: previous.geo || event.geo,
-        notes: previous.notes || event.notes,
+        notes: uniqueText([previous.notes ?? "", event.notes ?? ""]).join("\n\n") || null,
         scans: personTimelineAttachments(person, { ...event, scans: [...(previous.scans ?? []), ...(event.scans ?? [])], source: "event" }).slice(),
         deduplicatedEventIds: uniqueText([
           ...previous.deduplicatedEventIds,
           event.id,
         ]),
-      }, "core", previous.sourceIndex);
+      }, previous.source, previous.sourceIndex);
       continue;
     }
 
@@ -589,6 +607,7 @@ function coreTimelineEvents(
         date: collapseWhitespace(marriage.date) || null,
         placeName: collapseWhitespace(marriage.place) || null,
         address: collapseWhitespace(marriage.address) || null,
+        relatedPersonIds: marriage.partnerId ? [marriage.partnerId] : [],
         geo: null,
         notes: null,
       });
@@ -693,6 +712,45 @@ function eventSignature(event: Pick<PersonEvent, "type" | "date" | "placeName">)
     normalizeSearchText(event.date ?? ""),
     normalizeSearchText(event.placeName ?? ""),
   ].join("|");
+}
+
+function normalizedTimelineFactDate(value?: string | null): string {
+  const text = collapseWhitespace(value ?? "");
+  const normalized = normalizeFlexibleDateInput(text);
+  return normalized.error ? normalizeSearchText(text) : normalized.value;
+}
+
+/** Display-only corroboration: never rewrites manual facts or source evidence. */
+function sameFindingTimelineFact(first: PersonEvent, second: PersonEvent): boolean {
+  const aDate = normalizedTimelineFactDate(first.date);
+  const bDate = normalizedTimelineFactDate(second.date);
+  const aPlace = normalizeSearchText(first.placeName ?? "");
+  const bPlace = normalizeSearchText(second.placeName ?? "");
+  if (first.placeId && second.placeId && first.placeId !== second.placeId) return false;
+  if (aPlace && bPlace && aPlace !== bPlace && !(first.placeId && first.placeId === second.placeId)) return false;
+  const vital = first.type === "birth" || first.type === "death";
+  const dated = Boolean(aDate && bDate);
+  if (dated) {
+    const compatiblePrecision = vital && /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(aDate)
+      && /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(bDate)
+      && (aDate.startsWith(`${bDate}-`) || bDate.startsWith(`${aDate}-`));
+    if (aDate !== bDate && !compatiblePrecision) return false;
+  } else if (!vital || !aPlace || aPlace !== bPlace) return false;
+  const others = (event: PersonEvent) => [...new Set((event.relatedPersonIds ?? [])
+    .filter(id => id !== event.personId))].sort().join("|");
+  const aPeople = others(first);
+  const bPeople = others(second);
+  if (aPeople && bPeople && aPeople !== bPeople) return false;
+  if (!["birth", "death", "marriage", "divorce", "baptism", "christening", "burial", "cremation", "residence"].includes(first.type)
+    && normalizeSearchText(first.title ?? "") !== normalizeSearchText(second.title ?? "")) return false;
+  return true;
+}
+
+function morePreciseTimelineDate(first?: string | null, second?: string | null): string | null {
+  const a = normalizedTimelineFactDate(first);
+  const b = normalizedTimelineFactDate(second);
+  return !a || (b.startsWith(`${a}-`) && /^\d{4}(?:-\d{2})?$/.test(a))
+    ? second ?? null : first ?? null;
 }
 
 function matchesSegment(

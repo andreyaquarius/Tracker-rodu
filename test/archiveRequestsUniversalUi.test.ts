@@ -43,6 +43,7 @@ test("request editor keeps archive suggestions and accepts a free-form instituti
   assert.notEqual(requestConfig, "");
   assert.match(requestConfig, /\{\s*key:\s*"archive",\s*label:\s*"(?:Архів|Архів або установа)",\s*type:\s*"select",\s*options:\s*archiveOptions/u);
   assert.match(entityConfigs, /"ЦДІАК України \(Київ\)"/u);
+  assert.match(entityConfigs, /"Державний архів Харківської області",\s*"Державний архів Херсонської області",\s*"Державний архів Хмельницької області"/u);
   assert.match(entityConfigs, /"Інший архів або установа"/u);
   assert.match(requestConfig, /\{\s*key:\s*"archiveDetails",\s*label:\s*"[^"]*установ[^"]*",\s*wide:\s*true\s*\}/u);
   assert.doesNotMatch(requestConfig, /key:\s*"archiveDetails"[^}\n]*type:\s*"select"/u);

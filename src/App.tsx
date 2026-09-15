@@ -54,7 +54,7 @@ import { HelpChoiceModal } from "./components/HelpChoiceModal";
 import { HelpProvider } from "./help/ContextHelp.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SectionHierarchyHeader } from "./components/SectionHierarchyHeader";
-import { syncFindingPersonFacts } from "./services/findingPersonFacts.ts";
+import { loadFindingFactPersons, syncFindingPersonFacts } from "./services/findingPersonFacts.ts";
 import {
   DocumentWorkspaceViewer,
   type ActiveDocumentScanViewer,
@@ -3778,6 +3778,27 @@ export default function App() {
     });
   };
 
+  const applyFindingFactPersons = (projectId: string, persons: Person[]) => {
+    const byId = new Map(persons.map((person) => [person.id, person]));
+    const mergePersons = (current: Person[]) => {
+      const ids = new Set(current.map((person) => person.id));
+      return [...current.map((person) => {
+        const fresh = byId.get(person.id);
+        return fresh && fresh.updatedAt >= person.updatedAt ? fresh : person;
+      }), ...persons.filter((person) => !ids.has(person.id))];
+    };
+    if (activeWorkspaceIdRef.current === projectId) {
+      setProjectPersons((current) => {
+        const next = mergePersons(current);
+        saveProjectPeopleCache(projectId, next, projectPersonRelations);
+        return next;
+      });
+    } else {
+      const cached = loadProjectPeopleCache(projectId);
+      saveProjectPeopleCache(projectId, mergePersons(cached.persons), cached.relations);
+    }
+  };
+
   const saveFinding = (entity: AppEntity): Promise<Finding | null> => {
     if (!workspace) {
       app.saveEntity("findings", entity);
@@ -3850,24 +3871,7 @@ export default function App() {
           // back in the UI or misreport the source as lost.
           try {
             const synced = await syncFindingPersonFacts(projectId, saved.id);
-            const byId = new Map(synced.persons.map((person) => [person.id, person]));
-            const mergePersons = (current: Person[]) => {
-              const ids = new Set(current.map((person) => person.id));
-              return [...current.map((person) => {
-                const fresh = byId.get(person.id);
-                return fresh && fresh.updatedAt >= person.updatedAt ? fresh : person;
-              }), ...synced.persons.filter((person) => !ids.has(person.id))];
-            };
-            if (activeWorkspaceIdRef.current === projectId) {
-              setProjectPersons((current) => {
-                const next = mergePersons(current);
-                saveProjectPeopleCache(projectId, next, projectPersonRelations);
-                return next;
-              });
-            } else {
-              const cached = loadProjectPeopleCache(projectId);
-              saveProjectPeopleCache(projectId, mergePersons(cached.persons), cached.relations);
-            }
+            applyFindingFactPersons(projectId, synced.persons);
             if (synced.conflictCount && activeWorkspaceIdRef.current === projectId) {
               notify("Зв’язки та події зі знахідки синхронізовано. Є розбіжності з картками або неоднозначні партнери: наявні дані збережено. Перевірте хронологію та записи шлюбів.", true);
             }
@@ -3940,12 +3944,22 @@ export default function App() {
     void (deletedFinding
       ? deleteEntityScanFiles("findings", deletedFinding, activeDb)
       : Promise.resolve()
-    ).then(() => Promise.all([
-      deleteProjectFinding(projectId, id),
-      deleteProjectHypothesisTargetLinks(projectId, "finding", id),
-    ])).then(() => {
+    ).then(() => deleteProjectFinding(projectId, id)).then(async (personIds) => {
       recordEntityDeletion("findings", id);
       deleteEntityAttachmentMetadata("findings", id);
+      // The source and its derived facts have already been deleted atomically.
+      // A refresh failure must not resurrect the deleted finding in local UI.
+      try {
+        const [persons] = await Promise.all([
+          loadFindingFactPersons(projectId, personIds),
+          deleteProjectHypothesisTargetLinks(projectId, "finding", id),
+        ]);
+        applyFindingFactPersons(projectId, persons);
+      } catch (error) {
+        if (activeWorkspaceIdRef.current === projectId) notify(
+          "Знахідку видалено, але не вдалося оновити пов’язані картки. Оновіть сторінку. " +
+          describeError(error, "Перевірте з’єднання."), true);
+      }
     }).catch((error: unknown) => {
       const cached = loadProjectWorkRecordsCache(projectId);
       saveProjectWorkRecordsCache(projectId, cached.tasks, previous);

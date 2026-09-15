@@ -40,3 +40,52 @@ test("inherited scans never transfer attachment metadata ownership to a person",
   assert.deepEqual(projectAttachmentMetadataRows("project-1","persons","person-1",{ [event.id]: [scan] }),[]);
   assert.equal(projectAttachmentMetadataRows("project-1","findings","finding-1",{ scans: [scan] }).length,1);
 });
+
+test("a finding corroborates a manual birth despite date formatting and missing place", () => {
+  const manualScan = { ...scan, id: "manual-scan", storagePath: "manual-file", referenceOwnerType: "persons" as const, referenceOwnerId: person.id };
+  const manual: PersonEvent = { id: "birth", personId: person.id, type: "birth", date: "24.01.1892", notes: "Ручне джерело FamilySearch", scans: [manualScan] };
+  const sourced: PersonEvent = { ...event, type: "birth", notes: "Архівне підтвердження" };
+  const value = { ...person, marriageDate: "", marriagePlace: "", birthDate: manual.date!, events: [manual, sourced] };
+  const before = structuredClone(value);
+  const items = buildPersonTimeline(value);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].sourceFindingId, "finding-1");
+  assert.equal(items[0].placeName, "Вербівка");
+  assert.match(items[0].notes!, /Ручне джерело FamilySearch/);
+  assert.match(items[0].notes!, /Архівне підтвердження/);
+  assert.deepEqual(personTimelineAttachments(value, items[0]).map(value => value.id).sort(), ["manual-scan", "scan-1"]);
+  assert.deepEqual(value, before, "Projection must not overwrite either original assertion");
+});
+
+test("finding-backed custom events merge with manual events without requiring a scalar core field", () => {
+  const manual = { ...event, id: "manual-baptism", type: "baptism" as const, sourceFindingId: undefined, notes: "Ручна нотатка" };
+  const sourced = { ...event, type: "baptism" as const, notes: "Джерело" };
+  const value = { ...person, marriageDate: "", marriagePlace: "" };
+  for (const events of [[manual, sourced], [sourced, manual]]) {
+    const items = buildPersonTimeline({ ...value, events });
+    assert.equal(items.length, 1);
+    assert.equal(items[0].id, manual.id);
+    assert.equal(items[0].sourceFindingId, event.sourceFindingId);
+    assert.match(items[0].notes!, /Ручна нотатка/);
+    assert.match(items[0].notes!, /Джерело/);
+  }
+});
+
+test("ambiguous or conflicting findings stay separate rather than overwriting manual facts", () => {
+  const value = { ...person, marriageDate: "", marriagePlace: "", birthDate: "1892-01-24", birthPlace: "Вербівка" };
+  for (const alternative of [{ date: "1893-01-24" }, { placeName: "Інше село" }]) {
+    assert.equal(buildPersonTimeline({ ...value, events: [{ ...event, type: "birth", ...alternative }] }).length, 2);
+  }
+  const unknown = { ...event, type: "birth" as const, date: null, placeName: null };
+  assert.equal(buildPersonTimeline({ ...value, events: [unknown] }).length, 2);
+  const baptism = { ...event, type: "baptism" as const };
+  assert.equal(buildPersonTimeline({ ...value, events: [baptism] }).length, 2, "Birth and baptism are different facts");
+});
+
+test("separate spouses on the same date must not be merged with the wrong finding", () => {
+  const items = buildPersonTimeline({ ...person, events: [{ ...event, relatedPersonIds: [person.id, "partner-b"] }] }, {
+    marriages: ["partner-a", "partner-b"].map(partnerId => ({ id: partnerId, partnerId, partnerName: partnerId, date: event.date!, place: event.placeName!, address: "" })),
+  });
+  assert.equal(items.length, 2);
+  assert.equal(items.find(item => item.sourceFindingId)?.id, `${person.id}:marriage:partner-b`);
+});
