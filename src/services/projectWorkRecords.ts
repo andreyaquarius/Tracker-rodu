@@ -7,6 +7,7 @@ import type {
   TaskRecord,
 } from "../types";
 import { getSupabaseClient } from "./supabaseAuth";
+import { runAuthenticatedSupabaseRequest } from "../utils/authenticatedSupabaseRequest.ts";
 import { FINDING_GEO_META_KEY, normalizeGeo, stripInternalGeoFields } from "../utils/geo";
 import {
   resolvedContextTargetParticipantId,
@@ -890,13 +891,17 @@ export async function saveProjectFinding(
 export async function deleteProjectFinding(
   projectId: string,
   findingId: string,
-): Promise<void> {
-  const { error } = await getSupabaseClient()
-    .from("findings")
-    .delete()
-    .eq("project_id", projectId)
-    .eq("id", findingId);
+): Promise<string[]> {
+  const client = getSupabaseClient();
+  const { data, error } = await runAuthenticatedSupabaseRequest(client, async () => {
+    const response = await client.rpc("delete_finding_with_facts_v1", {
+      p_project_id: projectId,
+      p_finding_id: findingId,
+    });
+    return { data: response.data, error: response.error };
+  });
   if (error) throw error;
+  return (data as { personIds?: string[] } | null)?.personIds ?? [];
 }
 
 const CACHE_PREFIX = "tracker-rodu-project-work-records:";

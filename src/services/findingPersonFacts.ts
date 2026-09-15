@@ -12,13 +12,19 @@ export async function syncFindingPersonFacts(projectId: string, findingId: strin
   });
   if (error) throw error;
   const result = data as { personIds?: string[]; conflicts?: unknown[] } | null;
+  const persons = await loadFindingFactPersons(projectId, result?.personIds ?? []);
+  return { persons, conflictCount: result?.conflicts?.length ?? 0 };
+}
+
+/** Refresh both current and former participants after a source mutation. */
+export async function loadFindingFactPersons(projectId: string, personIds: readonly string[]): Promise<Person[]> {
   invalidateProjectPersonMarriages(projectId);
   const persons: Person[] = [];
-  const ids = [...new Set(result?.personIds ?? [])];
+  const ids = [...new Set(personIds)];
   // Bounded refresh; no full project reload (which used to interrupt editors).
   for (let offset = 0; offset < ids.length; offset += 8) {
     const loaded = await Promise.all(ids.slice(offset, offset + 8).map((id) => getProjectPerson(projectId, id)));
     persons.push(...loaded.filter((person): person is Person => person !== null));
   }
-  return { persons, conflictCount: result?.conflicts?.length ?? 0 };
+  return persons;
 }

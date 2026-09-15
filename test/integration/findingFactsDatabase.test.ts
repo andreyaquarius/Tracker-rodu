@@ -36,7 +36,7 @@ test("finding facts: real SQL, existing person-save bridge, role-safe events and
       create table findings(id uuid primary key,project_id uuid,document_id uuid,finding_type text,event_date text default '',place text default '',archive text default '',fund text default '',
         description text default '',file_reference text default '',page text default '',source_url text default '',summary text default '',transcription text default '',
         conclusion text default '',notes text default '',custom_fields jsonb default '{}');
-      create table finding_participants(id uuid primary key,project_id uuid,finding_id uuid references findings,person_id uuid,
+      create table finding_participants(id uuid primary key,project_id uuid,finding_id uuid references findings on delete cascade,person_id uuid,
         role text default '',name text default '',notes text default '',context_target_participant_id uuid);
     `);
     const foundation = migration("202606290003_family_tree_graph_foundation");
@@ -254,6 +254,73 @@ test("finding facts: real SQL, existing person-save bridge, role-safe events and
     });
     await isolated("private cleanup cannot be called directly to bypass the public edit guard", async () => {
       await assert.rejects(query("select security_private.detach_obsolete_finding_facts_v1($1,$2,'{}','{}')",[id(10),id(201)]),(e:any)=>e.code==='42501');
+    });
+
+    await t.test("deleting a finding used to leave generated profile facts; forward migration repairs those orphans", async () => {
+      await db.exec("reset role");
+      await query("insert into persons(id,project_id,full_name) values($1,$2,'Старий залишок')", [id(110),id(10)]);
+      await query("insert into findings(id,project_id,finding_type,event_date,place) values($1,$2,'народження','1870-01-02','Тестове село')", [id(205),id(10)]);
+      await query("insert into finding_participants(id,project_id,finding_id,person_id,role) values($1,$2,$3,$4,'Дитина')", [id(315),id(10),id(205),id(110)]);
+      await asUser(1); await sync(205);
+      await query("delete from findings where id=$1", [id(205)]);
+      assert.equal((await readPerson(110)).birth_date, '1870-01-02', "Reproduce the old orphan bug before installing the fix");
+      assert.equal((await events(110)).length, 1);
+      await db.exec("reset role");
+      await db.exec(migration("202609150001_finding_fact_deletion_cleanup"));
+      await asUser(1);
+      assert.equal((await readPerson(110)).birth_date, '');
+      assert.deepEqual(await events(110), []);
+      assert.equal((await query("select * from person_timeline_events where person_id=$1",[id(110)])).length,0);
+    });
+
+    await isolated("atomic finding deletion returns affected people and removes owned facts but keeps the family", async () => {
+      const old = await newPair();
+      const result = (await query("select public.delete_finding_with_facts_v1($1,$2) as result",[id(10),id(203)]))[0].result;
+      assert.deepEqual(result.personIds.sort(), [id(108),id(109)]);
+      assert.equal((await readPerson(108)).birth_date, '1860');
+      assert.equal((await readPerson(108)).marriage_date, '');
+      assert.deepEqual(await events(108), []);
+      assert.equal((await query("select * from partner_relationships where id=$1", [old.id])).length,0);
+      assert.equal((await query("select * from family_groups where id=$1",[old.family_group_id])).length,1);
+      assert.equal((await query("select * from findings where id=$1",[id(203)])).length,0);
+    });
+
+    await isolated("direct table deletion also cleans facts and preserves independently edited values", async () => {
+      const old = await newPair();
+      await db.exec("reset role");
+      await query("update persons set marriage_date='1889',custom_fields=jsonb_set(custom_fields,'{__trackerRoduPersonEvents}',custom_fields->'__trackerRoduPersonEvents'||$2::jsonb) where id=$1",
+        [id(108),JSON.stringify([{id:'manual-birth',type:'birth',date:'1860',notes:'Ручне джерело'}])]);
+      await asUser(1);
+      await query("delete from findings where id=$1",[id(203)]);
+      assert.equal((await readPerson(108)).marriage_date,'1889');
+      assert.equal((await events(108))[0].id,'manual-birth');
+      assert.equal((await events(108))[0].notes,'Ручне джерело');
+      assert.equal((await query("select * from partner_relationships where id=$1",[old.id])).length,0);
+    });
+
+    await isolated("unlinking a corroborating birth keeps the pre-existing manual event, date and notes", async () => {
+      await db.exec("reset role");
+      await query("update persons set birth_date='1870-01-02',birth_place='Тестове село',custom_fields=$2 where id=$1",
+        [id(110), {__trackerRoduPersonEvents:[{id:'birth',type:'birth',date:'1870-01-02',placeName:'Тестове село',notes:'Ручне джерело'}]}]);
+      await query("insert into findings(id,project_id,finding_type,event_date,place) values($1,$2,'народження','1870-01-02','Тестове село')", [id(205),id(10)]);
+      await query("insert into finding_participants(id,project_id,finding_id,person_id,role) values($1,$2,$3,$4,'Дитина')", [id(315),id(10),id(205),id(110)]);
+      await asUser(1); await sync(205);
+      await unlink(205);
+      assert.equal((await readPerson(110)).birth_date,'1870-01-02');
+      assert.deepEqual((await events(110)).map((e:any)=>e.id), ['birth']);
+      assert.equal((await events(110))[0].notes,'Ручне джерело');
+      assert.equal((await query("select * from person_timeline_events where source_finding_id=$1",[id(205)])).length,0);
+    });
+
+    await t.test("viewer, anonymous and other projects cannot use the deletion facade", async () => {
+      for (const user of [2,3]) {
+        await asUser(user);
+        await assert.rejects(query("select public.delete_finding_with_facts_v1($1,$2)",[id(10),id(201)]),(e:any)=>e.code==='42501');
+      }
+      await asUser(1);
+      await assert.rejects(query("select public.delete_finding_with_facts_v1($1,$2)",[id(20),id(201)]),(e:any)=>e.code==='42501');
+      await db.exec("reset role; set role anon");
+      await assert.rejects(query("select public.delete_finding_with_facts_v1($1,$2)",[id(10),id(201)]),(e:any)=>e.code==='42501');
     });
     await t.test("viewer, anonymous and cross-project calls cannot modify people", async () => {
       await asUser(2); await assert.rejects(sync(),(e: any) => e.code==='42501');
