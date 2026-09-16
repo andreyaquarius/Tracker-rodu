@@ -166,7 +166,11 @@ function normalizeOrigin(value: string): string {
 
 function configuredAppOrigins(): Set<string> {
   return new Set(
-    [Deno.env.get("APP_URL"), Deno.env.get("ALLOWED_ORIGIN")]
+    [
+      Deno.env.get("APP_URL"),
+      Deno.env.get("ALLOWED_ORIGIN"),
+      Deno.env.get("ALLOWED_ORIGINS"),
+    ]
       .flatMap((value) => (value ?? "").split(","))
       .map(normalizeOrigin)
       .filter(Boolean),
