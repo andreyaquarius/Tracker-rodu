@@ -39,7 +39,7 @@ test("standalone FAQ page keeps the same public entry points", () => {
   );
 
   assert.match(html, /<h1>Часті запитання про Трекер Роду<\/h1>/);
-  assert.match(html, /href="\/faq" aria-current="page"/);
+  assert.match(html, /href="\/faq\/" aria-current="page"/);
   assert.match(html, /Чому фотографії з GEDCOM можуть не завантажитися\?/);
   assert.match(html, /Як працюють автоматичні резервні копії\?/);
   assert.match(html, /data-analytics-mode="auto-public"/);

@@ -37,6 +37,10 @@ function createHostingFixture() {
       "Disallow: /account",
       "Disallow: /subscription",
       "Disallow: /auth",
+      "Disallow: /notes",
+      "Disallow: /shared-graph",
+      "Disallow: /zahuliaky/my",
+      "Disallow: /zahuliaky/notes",
       "",
       "Sitemap: https://trekerrodu.com.ua/sitemap.xml",
       "Sitemap: https://trekerrodu.com.ua/sitemap-zagulyaky.xml",
@@ -44,17 +48,30 @@ function createHostingFixture() {
     ].join("\n"),
   );
 
-  const sitemapUrls = [
+  const sitemapPageUrls = [
     ...PUBLIC_PAGES.slice(0, 4).map((page) => page.url),
     "https://trekerrodu.com.ua/zahuliaky/",
     "https://trekerrodu.com.ua/zahuliaky/documents/",
     "https://trekerrodu.com.ua/zahuliaky/places/",
-    ...PUBLIC_PAGES.slice(4).map((page) => page.url),
+    ...PUBLIC_PAGES.slice(4, 6).map((page) => page.url),
   ];
+  const sitemapGuideUrls = PUBLIC_PAGES.slice(6).map((page) => page.url);
   writeFixtureFile(
     root,
     "sitemap.xml",
-    `<?xml version="1.0" encoding="UTF-8"?><urlset>${sitemapUrls
+    `<?xml version="1.0" encoding="UTF-8"?><sitemapindex><sitemap><loc>https://trekerrodu.com.ua/sitemap-pages.xml</loc></sitemap><sitemap><loc>https://trekerrodu.com.ua/sitemap-guides.xml</loc></sitemap><sitemap><loc>https://trekerrodu.com.ua/sitemap-zagulyaky.xml</loc></sitemap></sitemapindex>`,
+  );
+  writeFixtureFile(
+    root,
+    "sitemap-pages.xml",
+    `<?xml version="1.0" encoding="UTF-8"?><urlset>${sitemapPageUrls
+      .map((url) => `<url><loc>${url}</loc></url>`)
+      .join("")}</urlset>`,
+  );
+  writeFixtureFile(
+    root,
+    "sitemap-guides.xml",
+    `<?xml version="1.0" encoding="UTF-8"?><urlset>${sitemapGuideUrls
       .map((url) => `<url><loc>${url}</loc></url>`)
       .join("")}</urlset>`,
   );
@@ -71,6 +88,10 @@ function createHostingFixture() {
       : "";
     const indexJsonLd = page.path === "index.html"
       ? '<script type="application/ld+json">{"@type":"WebSite"}</script><script type="application/ld+json">{"@type":"WebApplication"}</script>'
+      : '<script type="application/ld+json">{"@type":"WebPage"}</script>';
+    const publicJsonLd = page.path === "index.html" ? "" : '{"@type":"WebPage"}';
+    const publicJsonLdHash = publicJsonLd
+      ? `'sha256-${createHash("sha256").update(publicJsonLd).digest("base64")}'`
       : "";
     writeFixtureFile(
       root,
@@ -80,13 +101,14 @@ function createHostingFixture() {
         <link rel="canonical" href="${page.url}">
         <meta name="robots" content="index, follow">
         <meta property="og:site_name" content="Трекер Роду">
-        <meta property="og:type" content="website">
+        <meta property="og:type" content="${page.isArticle ? "article" : "website"}">
         <meta property="og:locale" content="uk_UA">
         <meta property="og:url" content="${page.url}">
         <meta property="og:image" content="https://trekerrodu.com.ua/tracker-rodu-logo.png">
         <meta name="twitter:card" content="summary">
         <meta name="twitter:image" content="https://trekerrodu.com.ua/tracker-rodu-logo.png">
-        <meta http-equiv="Content-Security-Policy" content="script-src 'self' https://www.googletagmanager.com https://www.google-analytics.com">
+        <meta name="twitter:image:alt" content="Трекер Роду">
+        <meta http-equiv="Content-Security-Policy" content="script-src 'self' ${publicJsonLdHash} https://www.googletagmanager.com https://www.google-analytics.com">
         <meta name="referrer" content="strict-origin-when-cross-origin">
         <script src="/site-analytics.js" data-analytics-mode="${mode}"></script>
         ${indexJsonLd}

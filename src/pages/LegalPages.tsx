@@ -6,11 +6,11 @@ type LegalPageKind = "privacy" | "terms";
 function LegalPublicNav({ current }: { current: LegalPageKind }) {
   const items = [
     { href: "/", label: "Головна", key: "home" },
-    { href: "/features", label: "Можливості", key: "features" },
-    { href: "/pricing", label: "Тарифи", key: "pricing" },
-    { href: "/faq", label: "FAQ", key: "faq" },
-    { href: "/privacy", label: "Політика конфіденційності", key: "privacy" },
-    { href: "/terms", label: "Умови користування", key: "terms" },
+    { href: "/features/", label: "Можливості", key: "features" },
+    { href: "/pricing/", label: "Тарифи", key: "pricing" },
+    { href: "/faq/", label: "FAQ", key: "faq" },
+    { href: "/privacy/", label: "Політика конфіденційності", key: "privacy" },
+    { href: "/terms/", label: "Умови користування", key: "terms" },
   ];
 
   return (
@@ -56,7 +56,7 @@ function LegalLayout({
   description: string;
   children: ReactNode;
 }) {
-  const currentPath = kind === "privacy" ? "/privacy" : "/terms";
+  const currentPath = kind === "privacy" ? "/privacy/" : "/terms/";
 
   return (
     <main className="legal-page">
@@ -84,11 +84,11 @@ function LegalLayout({
       <article className="legal-card">{children}</article>
       <footer className="legal-footer">
         <a href="/">На головну</a>
-        <a href="/features">Можливості</a>
-        <a href="/pricing">Тарифи</a>
-        <a href="/faq">FAQ</a>
-        <a href="/privacy">Політика конфіденційності</a>
-        <a href="/terms">Умови користування</a>
+        <a href="/features/">Можливості</a>
+        <a href="/pricing/">Тарифи</a>
+        <a href="/faq/">FAQ</a>
+        <a href="/privacy/">Політика конфіденційності</a>
+        <a href="/terms/">Умови користування</a>
       </footer>
     </main>
   );
@@ -276,7 +276,7 @@ export function PrivacyPage() {
       <section>
         <h2>13. Редакції документа</h2>
         <p>
-          Поточна редакція доступна за прямим посиланням <a href="/privacy">/privacy</a>.
+          Поточна редакція доступна за прямим посиланням <a href="/privacy/">/privacy/</a>.
           Старі редакції можуть зберігатися окремо після запровадження архіву
           юридичних документів. Посилання на цю політику використовується під час
           реєстрації на стартовій сторінці.
@@ -338,7 +338,7 @@ export function TermsPage() {
         <p>
           Доступ до окремих можливостей залежить від тарифу, пробного періоду та
           технічних лімітів. Актуальні публічні умови тарифів доступні на
-          сторінці <a href="/pricing">/pricing</a> і в кабінеті користувача.
+          сторінці <a href="/pricing/">/pricing/</a> і в кабінеті користувача.
         </p>
       </section>
 
@@ -452,7 +452,7 @@ export function TermsPage() {
       <section>
         <h2>17. Редакції документа</h2>
         <p>
-          Поточна редакція доступна за прямим посиланням <a href="/terms">/terms</a>.
+          Поточна редакція доступна за прямим посиланням <a href="/terms/">/terms/</a>.
           Старі редакції можуть зберігатися окремо після запровадження архіву
           юридичних документів. Посилання на ці умови використовується під час
           реєстрації на стартовій сторінці.

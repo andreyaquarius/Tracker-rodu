@@ -10,8 +10,8 @@ import {
   requestPublicZagulyakyRpc,
 } from "../scripts/generate-zagulyaky-sitemap.mjs";
 
-test("static sitemap exposes only the two public Zagulyaky catalogue URLs", () => {
-  const sitemap = readFileSync(new URL("../public/sitemap.xml", import.meta.url), "utf8");
+test("static sitemap exposes only the three public Zagulyaky catalogue URLs", () => {
+  const sitemap = readFileSync(new URL("../public/sitemap-zagulyaky.xml", import.meta.url), "utf8");
   const robots = readFileSync(new URL("../public/robots.txt", import.meta.url), "utf8");
   const urls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
 

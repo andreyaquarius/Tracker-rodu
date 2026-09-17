@@ -1,39 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://trekerrodu.com.ua/</loc>
-    <lastmod>2026-06-22</lastmod>
-  </url>
-  <url>
-    <loc>https://trekerrodu.com.ua/features/</loc>
-    <lastmod>2026-06-22</lastmod>
-  </url>
-  <url>
-    <loc>https://trekerrodu.com.ua/pricing/</loc>
-    <lastmod>2026-06-22</lastmod>
-  </url>
-  <url>
-    <loc>https://trekerrodu.com.ua/faq/</loc>
-    <lastmod>2026-08-11</lastmod>
-  </url>
-  <url>
-    <loc>https://trekerrodu.com.ua/zahuliaky/</loc>
-    <lastmod>2026-08-18</lastmod>
-  </url>
-  <url>
-    <loc>https://trekerrodu.com.ua/zahuliaky/documents/</loc>
-    <lastmod>2026-08-18</lastmod>
-  </url>
-  <url>
-    <loc>https://trekerrodu.com.ua/zahuliaky/places/</loc>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://trekerrodu.com.ua/sitemap-pages.xml</loc>
+    <lastmod>2026-09-16</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://trekerrodu.com.ua/sitemap-guides.xml</loc>
+    <lastmod>2026-09-16</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://trekerrodu.com.ua/sitemap-zagulyaky.xml</loc>
     <lastmod>2026-08-25</lastmod>
-  </url>
-  <url>
-    <loc>https://trekerrodu.com.ua/privacy/</loc>
-    <lastmod>2026-06-22</lastmod>
-  </url>
-  <url>
-    <loc>https://trekerrodu.com.ua/terms/</loc>
-    <lastmod>2026-06-22</lastmod>
-  </url>
-</urlset>
+  </sitemap>
+</sitemapindex>

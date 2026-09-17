@@ -120,6 +120,9 @@ test("public Zagulyaky static pages contain only escaped public SEO fields", () 
   assert.match(html, new RegExp(`<link rel="canonical" href="${PUBLIC_ORIGIN}/zahuliaky/people/${encodeURIComponent("Іван & Петро")}/"`));
   assert.match(html, new RegExp(`<meta property="og:url" content="${PUBLIC_ORIGIN}/zahuliaky/people/${encodeURIComponent("Іван & Петро")}/"`));
   assert.match(html, /<meta name="robots" content="index, follow" \/>/);
+  assert.match(html, new RegExp(`<link rel="alternate" hreflang="uk-UA" href="${PUBLIC_ORIGIN}/zahuliaky/people/${encodeURIComponent("Іван & Петро")}/" \/>`));
+  assert.match(html, /<meta property="og:image:alt" content="Трекер Роду — Загуляки" \/>/);
+  assert.match(html, /<meta name="twitter:image:alt" content="Трекер Роду — Загуляки" \/>/);
   assert.match(html, /<meta name="zagulyaky-static-seo" content="https:\/\/trekerrodu\.com\.ua\/zahuliaky\/people\//);
   assert.match(html, /"@type":"ProfilePage"/);
   assert.match(html, /"@type":"Person"/);
@@ -216,7 +219,7 @@ test("static SEO generation uses the enriched public indexing RPC and writes pri
     assert.match(placesCatalogueHtml, new RegExp(`<meta property="og:url" content="${PUBLIC_ORIGIN}/zahuliaky/places/"`));
     assert.match(placesCatalogueHtml, /<h1>Загуляки за населеними пунктами<\/h1>/);
     assert.match(placesCatalogueHtml, /Географічний зв’язок між двома місцями, а не маршрут/);
-    assert.match(placesCatalogueHtml, /href="\/zahuliaky\/places">Місцевості<\/a>/);
+    assert.match(placesCatalogueHtml, /href="\/zahuliaky\/places\/">Місцевості<\/a>/);
     assert.match(documentHtml, /<h1>Метрична книга 1902<\/h1>/);
     assert.match(documentHtml, /"@type":"CreativeWork"/);
     assert.match(sitemap, new RegExp(`<loc>${PUBLIC_ORIGIN}/zahuliaky/people/${encodedPersonSlug}/<\/loc>`));

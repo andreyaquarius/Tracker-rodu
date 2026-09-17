@@ -167,7 +167,7 @@ export function HelpManualDialog({ initialArticle, onClose }: { initialArticle: 
       <footer className="help-manual__footer">
         {preferences ? <><label><input type="checkbox" checked={preferences.disabled} onChange={preferences.toggleTips} /> Не показувати підказки автоматично</label>
           <button type="button" className="context-help__text-button" onClick={() => { preferences.resetTips(); setNotice("Автопідказки відновлено. Вони знову з’являтимуться при відкритті розділів і вкладок."); }}>Показати підказки знову</button></> : null}
-        <a href="/faq" target="_blank" rel="noreferrer">FAQ</a><button type="button" className="button button-primary" onClick={onClose}>Готово</button>
+        <a href="/faq/" target="_blank" rel="noreferrer">FAQ</a><button type="button" className="button button-primary" onClick={onClose}>Готово</button>
         <small className="help-manual__storage-note">Підказки запам’ятовуються для вашого облікового запису в цьому браузері, не змінюють дані проєкту та не надсилаються в аналітику.</small>
         {notice ? <p role="status">{notice}</p> : null}
       </footer>

@@ -496,7 +496,7 @@ export function renderZagulyakyStaticFallback(page) {
   const collectionHref = new URL(page.collectionUrl).pathname;
   const backHref = page.kind === "catalogue" ? "/" : collectionHref;
   const backLabel = page.kind === "catalogue" ? "Перейти на головну" : `До розділу «${page.collectionTitle}»`;
-  return `${styleBlock()}<main class="zagulyaky-static-seo"><div class="zagulyaky-static-seo__inner"><nav aria-label="Публічна навігація"><a href="/">Головна</a><a href="/zahuliaky">Загуляки людей</a><a href="/zahuliaky/documents">Загуляки документів</a><a href="/zahuliaky/places">Місцевості</a><a href="/features">Можливості</a><a href="/faq">FAQ</a></nav><p class="zagulyaky-static-seo__eyebrow">${escapeHtml(page.eyebrow)}</p><h1>${escapeHtml(page.heading)}</h1><p class="zagulyaky-static-seo__description">${escapeHtml(page.description)}</p>${page.summary ? `<p class="zagulyaky-static-seo__summary">${escapeHtml(page.summary)}</p>` : ""}${renderFacts(page.facts)}${renderTranscription(page)}${renderLinks(page.links)}${renderCards(page.cards)}<a class="zagulyaky-static-seo__back" href="${escapeHtml(backHref)}">${escapeHtml(backLabel)}</a></div></main>`;
+  return `${styleBlock()}<main class="zagulyaky-static-seo"><div class="zagulyaky-static-seo__inner"><nav aria-label="Публічна навігація"><a href="/">Головна</a><a href="/zahuliaky/">Загуляки людей</a><a href="/zahuliaky/documents/">Загуляки документів</a><a href="/zahuliaky/places/">Місцевості</a><a href="/features/">Можливості</a><a href="/faq/">FAQ</a></nav><p class="zagulyaky-static-seo__eyebrow">${escapeHtml(page.eyebrow)}</p><h1>${escapeHtml(page.heading)}</h1><p class="zagulyaky-static-seo__description">${escapeHtml(page.description)}</p>${page.summary ? `<p class="zagulyaky-static-seo__summary">${escapeHtml(page.summary)}</p>` : ""}${renderFacts(page.facts)}${renderTranscription(page)}${renderLinks(page.links)}${renderCards(page.cards)}<a class="zagulyaky-static-seo__back" href="${escapeHtml(backHref)}">${escapeHtml(backLabel)}</a></div></main>`;
 }
 
 function replaceRequired(html, pattern, replacement, label) {
@@ -511,6 +511,30 @@ function replaceMeta(html, attribute, name, content) {
     pattern,
     `<meta ${attribute}="${escapeHtml(name)}" content="${escapeHtml(content)}" />`,
     `${attribute}=${name}`,
+  );
+}
+
+function upsertMeta(html, attribute, name, content) {
+  const pattern = new RegExp(`<meta\\b(?=[^>]*\\b${escapeRegExp(attribute)}=["']${escapeRegExp(name)}["'])[^>]*>`, "i");
+  const replacement = `<meta ${attribute}="${escapeHtml(name)}" content="${escapeHtml(content)}" />`;
+  if (pattern.test(html)) return html.replace(pattern, replacement);
+  return replaceRequired(
+    html,
+    /<\/head>/i,
+    `    ${replacement}\n  </head>`,
+    "head closing tag",
+  );
+}
+
+function upsertLanguageLink(html, href) {
+  const pattern = /<link\b(?=[^>]*\brel=["']alternate["'])(?=[^>]*\bhreflang=["']uk-UA["'])[^>]*>/i;
+  const replacement = `<link rel="alternate" hreflang="uk-UA" href="${escapeHtml(href)}" />`;
+  if (pattern.test(html)) return html.replace(pattern, replacement);
+  return replaceRequired(
+    html,
+    /<\/head>/i,
+    `    ${replacement}\n  </head>`,
+    "head closing tag",
   );
 }
 
@@ -564,7 +588,8 @@ function replaceJsonLdCspHash(html, jsonLd, previousJsonLdHashes) {
 
 /** Builds a real HTTP-200 document from Vite's built HTML template. */
 export function renderZagulyakySeoPage(template, page) {
-  // `index.html` has a homepage-oriented <noscript> fallback and JSON-LD.
+  // Remove the visible homepage fallback (and legacy noscript) before
+  // inserting catalogue content. Keep exactly one H1 and one JSON-LD payload.
   // A generated catalogue/card must have one meaningful H1 and one matching
   // structured-data payload instead of carrying those homepage fragments.
   const previousJsonLdHashes = new Set(
@@ -572,6 +597,7 @@ export function renderZagulyakySeoPage(template, page) {
       .map((match) => inlineScriptHash(match[1] ?? "")),
   );
   let html = template
+    .replace(/<!-- public-home:start -->[\s\S]*?<!-- public-home:end -->/i, "")
     .replace(/<noscript>[\s\S]*?<\/noscript>\s*/i, "")
     .replace(new RegExp(`<meta\\b(?=[^>]*\\bname=["']${STATIC_SEO_MARKER_NAME}["'])[^>]*>\\s*`, "gi"), "");
   const jsonLdScriptPattern = /<script\b(?=[^>]*\btype=["']application\/ld\+json["'])[^>]*>[\s\S]*?<\/script>\s*/gi;
@@ -589,6 +615,9 @@ export function renderZagulyakySeoPage(template, page) {
   html = replaceMeta(html, "property", "og:url", page.url);
   html = replaceMeta(html, "name", "twitter:title", page.title);
   html = replaceMeta(html, "name", "twitter:description", page.description);
+  html = upsertMeta(html, "property", "og:image:alt", "Трекер Роду — Загуляки");
+  html = upsertMeta(html, "name", "twitter:image:alt", "Трекер Роду — Загуляки");
+  html = upsertLanguageLink(html, page.url);
   const jsonLd = renderJsonLd(page.structuredData);
   html = replaceRequired(
     html,

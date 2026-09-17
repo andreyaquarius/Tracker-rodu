@@ -417,7 +417,7 @@ export function ZagulyakyPage({
     setActiveTab("people");
     resetPagination(setPage, setCursorHistory, setNextCursor);
     setError("");
-    onNavigate?.("/zahuliaky");
+    onNavigate?.("/zahuliaky/");
   }, [onNavigate]);
 
   const refreshMyRecords = () => {
@@ -502,7 +502,7 @@ export function ZagulyakyPage({
   const openDetail = (kind: ZagulyakaKind, slug: string) => {
     if (!slug) return;
     setSelectedSlug(slug);
-    onNavigate?.(`/zahuliaky/${kind === "person" ? "people" : "documents"}/${encodeURIComponent(slug)}`);
+    onNavigate?.(`/zahuliaky/${kind === "person" ? "people" : "documents"}/${encodeURIComponent(slug)}/`);
   };
 
   const closeDetail = () => {
@@ -522,9 +522,9 @@ export function ZagulyakyPage({
           </a>
           <nav className="zagulyaky-public-nav" aria-label="Публічна навігація">
             <a href="/">Головна</a>
-            <a href="/features">Можливості</a>
-            <a href="/faq">FAQ</a>
-            <a href="/zahuliaky" aria-current="page">Загуляки</a>
+            <a href="/features/">Можливості</a>
+            <a href="/faq/">FAQ</a>
+            <a href="/zahuliaky/" aria-current="page">Загуляки</a>
           </nav>
         </div>
         <div className="zagulyaky-hero-row">
@@ -710,7 +710,7 @@ export function ZagulyakyPage({
 
       <footer className="zagulyaky-footer">
         <span>Випадкова згадка може допомогти іншому досліднику знайти родину.</span>
-        <nav><a href="/privacy">Конфіденційність</a><a href="/terms">Умови</a><a href="/faq">FAQ</a></nav>
+        <nav><a href="/privacy/">Конфіденційність</a><a href="/terms/">Умови</a><a href="/faq/">FAQ</a></nav>
       </footer>
 
       {createKind && account ? (

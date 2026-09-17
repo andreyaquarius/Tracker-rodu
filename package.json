@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite --configLoader runner",
     "dev:historical-places": "vite --mode historical-places --configLoader runner",
-    "build": "tsc --noEmit && vite build --configLoader runner && node scripts/verify-browser-monitoring-build.mjs",
+    "build": "node scripts/generate-public-seo.mjs --check && tsc --noEmit && vite build --configLoader runner && node scripts/verify-browser-monitoring-build.mjs",
+    "generate:seo": "node scripts/generate-public-seo.mjs",
     "build:vercel": "npm run verify:vercel-config && npm run build && node scripts/generate-zagulyaky-public-pages.mjs && npm run verify:hosting",
     "preview": "vite preview --configLoader runner",
     "lint": "tsc --noEmit --pretty false",
