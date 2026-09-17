@@ -37,6 +37,7 @@ import { AdminPanelPage } from "./pages/AdminPanelPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { FaqPage, FeaturesPage, PricingPage } from "./pages/PublicMarketingPages";
+import { HOME_SEO } from "./utils/publicSeoContent.ts";
 import { ZagulyakyPage } from "./pages/ZagulyakyPage";
 import { NotesPage } from "./pages/NotesPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
@@ -383,13 +384,6 @@ const PUBLIC_PAGE_SEO: Record<PublicPageKey, {
   },
 };
 
-const HOME_SEO = {
-  title: "Трекер Роду — Не губи сліди свого роду",
-  description:
-    "Керуйте родовим дослідженням: від першої зачіпки до підтвердженого факту.",
-  canonical: `${SITE_ORIGIN}/`,
-};
-
 function upsertMetaName(name: string, content: string): void {
   let element = document.head.querySelector<HTMLMetaElement>(
     `meta[name="${name}"]`,
@@ -446,6 +440,7 @@ function applyPublicSeo(page: PublicPageKey): void {
   upsertMetaName("twitter:title", seo.title);
   upsertMetaName("twitter:description", seo.description);
   upsertMetaName("twitter:image", SITE_IMAGE_URL);
+  upsertMetaName("twitter:image:alt", "Трекер Роду");
 }
 
 function applyZagulyakySeo(route: Extract<ReturnType<typeof parseAppRoute>, { kind: "zagulyaky" }>): void {
@@ -502,6 +497,7 @@ function applyZagulyakySeo(route: Extract<ReturnType<typeof parseAppRoute>, { ki
   upsertMetaName("twitter:title", title);
   upsertMetaName("twitter:description", description);
   upsertMetaName("twitter:image", SITE_IMAGE_URL);
+  upsertMetaName("twitter:image:alt", "Трекер Роду — Загуляки");
 }
 
 function applyNotesSeo(): void {
@@ -523,6 +519,7 @@ function applyNotesSeo(): void {
   upsertMetaName("twitter:title", title);
   upsertMetaName("twitter:description", description);
   upsertMetaName("twitter:image", SITE_IMAGE_URL);
+  upsertMetaName("twitter:image:alt", "Трекер Роду");
 }
 
 function consumePrivatePostAuthReturn(): string | null {
@@ -562,6 +559,7 @@ function applyHomeSeo(): void {
   upsertMetaName("twitter:title", HOME_SEO.title);
   upsertMetaName("twitter:description", HOME_SEO.description);
   upsertMetaName("twitter:image", SITE_IMAGE_URL);
+  upsertMetaName("twitter:image:alt", "Трекер Роду");
 }
 
 const researchScopedCollections: ReadonlySet<CollectionKey> = new Set([

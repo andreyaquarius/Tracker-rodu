@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { HOME_SEO, researchGuides } from "./src/utils/publicSeoContent.ts";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
 import { sentryIngestOrigin } from "./src/utils/browserMonitoringPrivacy.ts";
 
@@ -25,8 +26,8 @@ const HOMEPAGE_JSON_LD = JSON.stringify({
       applicationCategory: "ReferenceApplication",
       operatingSystem: "Web",
       inLanguage: "uk",
-      description:
-        "Керуйте родовим дослідженням: від першої зачіпки до підтвердженого факту.",
+      description: HOME_SEO.description,
+      featureList: ["Родове дерево онлайн", "Генеалогічне дослідження", "Облік архівних документів", "Імпорт та експорт GEDCOM"],
       image: "https://trekerrodu.com.ua/tracker-rodu-logo.png",
     },
   ],
@@ -149,6 +150,45 @@ function warnLegalConfigGaps() {
   };
 }
 
+const PUBLIC_SEO_DEV_ROUTES = new Set([
+  "/features/",
+  "/pricing/",
+  "/faq/",
+  "/privacy/",
+  "/terms/",
+  ...researchGuides.map((guide) => `/${guide.slug}/`),
+]);
+
+/**
+ * Vite's dev history fallback serves the root SPA for directory URLs. The
+ * public SEO pages are standalone HTML documents, so expose their source
+ * files before that fallback during local SEO checks.
+ */
+function servePublicSeoPages() {
+  return {
+    name: "serve-public-seo-pages",
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const pathname = (request.url ?? "/").split("?", 1)[0] ?? "/";
+        if (!PUBLIC_SEO_DEV_ROUTES.has(pathname)) {
+          next();
+          return;
+        }
+
+        const fileUrl = new URL(`./public${pathname}index.html`, import.meta.url);
+        if (!existsSync(fileUrl)) {
+          next();
+          return;
+        }
+
+        response.statusCode = 200;
+        response.setHeader("Content-Type", "text/html; charset=utf-8");
+        response.end(readFileSync(fileUrl));
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
   const dsn = env.VITE_SENTRY_DSN?.trim() || "";
@@ -165,7 +205,7 @@ export default defineConfig(({ mode, command }) => {
   }
   return {
     plugins: [
-      react(), pdfJsWasmAssets(), injectSecurityMeta(monitoringOrigin), warnLegalConfigGaps(),
+      react(), pdfJsWasmAssets(), servePublicSeoPages(), injectSecurityMeta(monitoringOrigin), warnLegalConfigGaps(),
       ...(uploadMaps ? [sentryVitePlugin({
         authToken, org, project, telemetry: false,
         release: { name: release || undefined, inject: false },

@@ -4,17 +4,18 @@ import {
   publicPricingPlans,
 } from "../utils/publicSiteContent";
 import { publicFaqSections } from "../utils/publicFaqContent";
+import { publicResearchLinks } from "../utils/publicResearchLinks.ts";
 
 type PublicPageKind = "features" | "pricing" | "faq";
 
 function PublicNav({ current }: { current: PublicPageKind }) {
   const items = [
     { href: "/", label: "Головна", key: "home" },
-    { href: "/features", label: "Можливості", key: "features" },
-    { href: "/pricing", label: "Тарифи", key: "pricing" },
-    { href: "/faq", label: "FAQ", key: "faq" },
-    { href: "/privacy", label: "Політика конфіденційності", key: "privacy" },
-    { href: "/terms", label: "Умови користування", key: "terms" },
+    { href: "/features/", label: "Можливості", key: "features" },
+    { href: "/pricing/", label: "Тарифи", key: "pricing" },
+    { href: "/faq/", label: "FAQ", key: "faq" },
+    { href: "/privacy/", label: "Політика конфіденційності", key: "privacy" },
+    { href: "/terms/", label: "Умови користування", key: "terms" },
   ];
 
   return (
@@ -65,11 +66,12 @@ function PublicLayout({
       {children}
       <footer className="public-footer">
         <a href="/">Головна</a>
-        <a href="/features">Можливості</a>
-        <a href="/pricing">Тарифи</a>
-        <a href="/faq">FAQ</a>
-        <a href="/privacy">Політика конфіденційності</a>
-        <a href="/terms">Умови користування</a>
+        <a href="/features/">Можливості</a>
+        <a href="/pricing/">Тарифи</a>
+        <a href="/faq/">FAQ</a>
+        <a href="/privacy/">Політика конфіденційності</a>
+        <a href="/terms/">Умови користування</a>
+        {publicResearchLinks.map((guide) => <a key={guide.slug} href={`/${guide.slug}/`}>{guide.heading}</a>)}
       </footer>
     </main>
   );
@@ -207,7 +209,7 @@ export function FaqPage() {
         </div>
         <div className="faq-cta-actions">
           <a className="public-cta" href="/">Почати роботу</a>
-          <a className="public-cta muted" href="/features">Переглянути можливості</a>
+          <a className="public-cta muted" href="/features/">Переглянути можливості</a>
         </div>
       </section>
     </PublicLayout>

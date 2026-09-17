@@ -18,9 +18,13 @@ test("static public pages use their final trailing-slash URL for canonical and O
 
 test("every public sitemap location is already a final trailing-slash URL", () => {
   const sitemap = readFileSync(resolve(root, "public", "sitemap.xml"), "utf8");
-  const urls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
+  const childMaps = ["sitemap-pages.xml", "sitemap-guides.xml", "sitemap-zagulyaky.xml"]
+    .map((file) => readFileSync(resolve(root, "public", file), "utf8"));
+  const urls = childMaps.flatMap((child) => [...child.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]));
 
   assert.ok(urls.length > 0);
+  assert.match(sitemap, /<sitemapindex\b/);
+  assert.equal((sitemap.match(/<sitemap>/g) ?? []).length, 3);
   for (const value of urls) {
     const url = new URL(value);
     assert.equal(url.origin, origin);

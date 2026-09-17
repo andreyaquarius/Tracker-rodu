@@ -4,7 +4,7 @@ import test from "node:test";
 
 const component = readFileSync(new URL("../src/components/CommunityResources.tsx", import.meta.url), "utf8");
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-const noscript = html.match(/<noscript>([\s\S]*?)<\/noscript>/)?.[1] ?? "";
+const noscript = html.match(/<!-- public-home:start -->([\s\S]*?)<!-- public-home:end -->/)?.[1] ?? "";
 
 for (const [name, markup] of [["shared React resources", component], ["no-JavaScript homepage", noscript]]) {
   test(`${name} has the exact requested external links with safe new-tab access`, () => {

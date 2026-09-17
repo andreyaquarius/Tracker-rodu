@@ -2,13 +2,14 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { HOME_SEO, researchGuides } from "../src/utils/publicSeoContent.ts";
 
 export const PUBLIC_PAGES = [
   {
     path: "index.html",
     url: "https://trekerrodu.com.ua/",
-    title: "Трекер Роду — Не губи сліди свого роду",
-    text: "Не губи сліди свого роду",
+    title: HOME_SEO.title,
+    text: HOME_SEO.heading,
   },
   {
     path: "features/index.html",
@@ -41,6 +42,14 @@ export const PUBLIC_PAGES = [
     text: "Умови користування",
   },
 ];
+
+PUBLIC_PAGES.push(...researchGuides.map((guide) => ({
+  path: `${guide.slug}/index.html`,
+  url: `https://trekerrodu.com.ua/${guide.slug}/`,
+  title: guide.title,
+  text: guide.heading,
+  isArticle: true,
+})));
 
 export const ZAGULYAKY_CATALOGUE_PAGES = [
   {
@@ -155,6 +164,10 @@ export function verifyHostingBuild({
     "/account",
     "/subscription",
     "/auth",
+    "/notes",
+    "/shared-graph",
+    "/zahuliaky/my",
+    "/zahuliaky/notes",
   ]) {
     expectIncludes(robots, `Disallow: ${path}\n`, "robots.txt");
   }
@@ -163,7 +176,27 @@ export function verifyHostingBuild({
   expectNotIncludes(robots, "Disallow: /\n", "robots.txt");
 
   const sitemap = readDistFile("sitemap.xml");
-  const sitemapUrls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
+  expectMatches(sitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>/i, "sitemap.xml");
+  expectMatches(sitemap, /<sitemapindex\b[^>]*>/i, "sitemap.xml");
+  const sitemapIndexUrls = [...sitemap.matchAll(/<sitemap>\s*<loc>(.*?)<\/loc>/g)].map((match) => match[1]);
+  const expectedSitemapIndexUrls = [
+    "https://trekerrodu.com.ua/sitemap-pages.xml",
+    "https://trekerrodu.com.ua/sitemap-guides.xml",
+    "https://trekerrodu.com.ua/sitemap-zagulyaky.xml",
+  ];
+  if (JSON.stringify([...sitemapIndexUrls].sort()) !== JSON.stringify([...expectedSitemapIndexUrls].sort())) {
+    fail(`Unexpected sitemap index URLs: ${JSON.stringify(sitemapIndexUrls)}`);
+  }
+  const sitemapPages = readDistFile("sitemap-pages.xml");
+  const sitemapGuides = readDistFile("sitemap-guides.xml");
+  for (const [name, child] of [["sitemap-pages.xml", sitemapPages], ["sitemap-guides.xml", sitemapGuides]]) {
+    expectMatches(child, /^<\?xml version="1\.0" encoding="UTF-8"\?>/i, name);
+    expectMatches(child, /<urlset\b[^>]*>/i, name);
+  }
+  const sitemapUrls = [
+    ...sitemapPages.matchAll(/<loc>(.*?)<\/loc>/g),
+    ...sitemapGuides.matchAll(/<loc>(.*?)<\/loc>/g),
+  ].map((match) => match[1]);
   const expectedUrls = [
     ...PUBLIC_PAGES.slice(0, 4).map((page) => page.url),
     "https://trekerrodu.com.ua/zahuliaky/",
@@ -171,11 +204,24 @@ export function verifyHostingBuild({
     "https://trekerrodu.com.ua/zahuliaky/places/",
     ...PUBLIC_PAGES.slice(4).map((page) => page.url),
   ];
-  if (JSON.stringify(sitemapUrls) !== JSON.stringify(expectedUrls)) {
+  // Sitemap order has no meaning; compare every URL, preserving duplicates.
+  if (JSON.stringify([...sitemapUrls].sort()) !== JSON.stringify([...expectedUrls].sort())) {
     fail(`Unexpected sitemap URLs: ${JSON.stringify(sitemapUrls)}`);
+  }
+  for (const url of sitemapUrls) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.origin !== "https://trekerrodu.com.ua" || !parsed.pathname.endsWith("/")) {
+        fail(`Public sitemap contains a non-canonical URL: ${url}`);
+      }
+    } catch {
+      fail(`Public sitemap contains an invalid URL: ${url}`);
+    }
   }
   for (const url of privateSitemapUrls) {
     expectNotIncludes(sitemap, `<loc>${url}</loc>`, "sitemap.xml");
+    expectNotIncludes(sitemapPages, `<loc>${url}</loc>`, "sitemap-pages.xml");
+    expectNotIncludes(sitemapGuides, `<loc>${url}</loc>`, "sitemap-guides.xml");
   }
 
   const zagulyakySitemap = readDistFile("sitemap-zagulyaky.xml");
@@ -225,7 +271,11 @@ export function verifyHostingBuild({
     expectIncludes(html, `rel="canonical" href="${page.url}"`, page.path);
     expectIncludes(html, 'name="robots" content="index, follow"', page.path);
     expectIncludes(html, 'property="og:site_name" content="Трекер Роду"', page.path);
-    expectIncludes(html, 'property="og:type" content="website"', page.path);
+    expectIncludes(
+      html,
+      `property="og:type" content="${page.isArticle ? "article" : "website"}"`,
+      page.path,
+    );
     expectIncludes(html, 'property="og:locale" content="uk_UA"', page.path);
     expectIncludes(html, `property="og:url" content="${page.url}"`, page.path);
     expectIncludes(
@@ -239,6 +289,7 @@ export function verifyHostingBuild({
       'name="twitter:image" content="https://trekerrodu.com.ua/tracker-rodu-logo.png"',
       page.path,
     );
+    expectIncludes(html, 'name="twitter:image:alt" content="Трекер Роду"', page.path);
     expectIncludes(html, page.text, page.path);
     expectIncludes(html, 'http-equiv="Content-Security-Policy"', page.path);
     expectIncludes(html, "script-src 'self'", `${page.path} CSP`);
@@ -260,6 +311,8 @@ export function verifyHostingBuild({
       ),
       `${page.path} analytics bootstrap`,
     );
+
+    if (page.path !== "index.html") expectJsonLdAllowedByCsp(html, `${page.path} JSON-LD`);
 
     const h1Count = (html.match(/<h1[\s>]/g) ?? []).length;
     if (h1Count !== 1) fail(`${page.path} must contain exactly one h1, got ${h1Count}`);

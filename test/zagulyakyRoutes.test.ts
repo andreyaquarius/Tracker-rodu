@@ -26,9 +26,9 @@ test("parses public catalogue, private Zaguliaky, and account-level Notes routes
 });
 
 test("routes the private My records tab to the parseable /zahuliaky/my URL", () => {
-  assert.equal(zagulyakyTabPath("people"), "/zahuliaky");
-  assert.equal(zagulyakyTabPath("documents"), "/zahuliaky/documents");
-  assert.equal(zagulyakyTabPath("places"), "/zahuliaky/places");
+  assert.equal(zagulyakyTabPath("people"), "/zahuliaky/");
+  assert.equal(zagulyakyTabPath("documents"), "/zahuliaky/documents/");
+  assert.equal(zagulyakyTabPath("places"), "/zahuliaky/places/");
   assert.equal(zagulyakyTabPath("mine"), "/zahuliaky/my");
   assert.deepEqual(parseAppRoute(zagulyakyTabPath("places")), {
     kind: "zagulyaky",
@@ -134,7 +134,7 @@ test("Login page exposes the public Zaguliaky catalogue before sign-in", () => {
   const source = readFileSync(new URL("../src/pages/LoginPage.tsx", import.meta.url), "utf8");
 
   assert.match(source, /<nav className="login-public-nav" aria-label="Публічна навігація">/);
-  assert.match(source, /<a href="\/zahuliaky">Загуляки<\/a>/);
+  assert.match(source, /<a href="\/zahuliaky\/">Загуляки<\/a>/);
 });
 
 test("authenticated workspace navigation exposes My Zagulyaky records", () => {

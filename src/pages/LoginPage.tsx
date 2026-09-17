@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { CommunityResources } from "../components/CommunityResources.tsx";
+import { HOME_SEO } from "../utils/publicSeoContent.ts";
+import { publicResearchLinks } from "../utils/publicResearchLinks.ts";
 
 type LoginMode = "signIn" | "signUp" | "forgotPassword" | "resetPassword";
 
@@ -144,15 +146,16 @@ export function LoginPage({
           </div>
           <nav className="login-public-nav" aria-label="Публічна навігація">
             <a href="/" aria-current="page">Головна</a>
-            <a href="/zahuliaky">Загуляки</a>
-            <a href="/features">Можливості</a>
-            <a href="/pricing">Тарифи</a>
-            <a href="/faq">FAQ</a>
+            <a href="/zahuliaky/">Загуляки</a>
+            <a href="/features/">Можливості</a>
+            <a href="/pricing/">Тарифи</a>
+            <a href="/faq/">FAQ</a>
+            <a href="/posibnyk-z-henealohii/">Посібник</a>
           </nav>
         </div>
         <span className="eyebrow">Робочий простір для генеалогічного дослідження</span>
-        <h1>Не губи сліди свого роду</h1>
-        <p>Керуйте родовим дослідженням: від першої зачіпки до підтвердженого факту</p>
+        <h1>{HOME_SEO.heading}</h1>
+        <p>{HOME_SEO.intro}</p>
         <CommunityResources variant="home" />
       </section>
       <section className="login-card">
@@ -260,9 +263,23 @@ export function LoginPage({
           </button>
         ) : null}
         <div className="login-legal-links">
-          <a href="/privacy">Політика конфіденційності</a>
-          <a href="/terms">Умови користування</a>
+          <a href="/privacy/">Політика конфіденційності</a>
+          <a href="/terms/">Умови користування</a>
         </div>
+      </section>
+      <section className="home-research" aria-labelledby="home-research-heading">
+        <span className="eyebrow">Практичні матеріали</span>
+        <h2 id="home-research-heading">Із чого почати дослідження родоводу</h2>
+        <p>Практичні кроки для тих, хто хоче дізнатися історію своєї сім’ї та зберегти її для наступних поколінь.</p>
+        <div className="home-research-grid">
+          {publicResearchLinks.map((guide) => (
+            <article key={guide.slug}>
+              <h3><a href={`/${guide.slug}/`}>{guide.heading}</a></h3>
+              <p>{guide.summary}</p>
+            </article>
+          ))}
+        </div>
+        <p>Шукаєте згадки про родичів у чужих дослідженнях? Перегляньте <a href="/zahuliaky/">публічний генеалогічний каталог «Загуляки»</a> та <a href="/zahuliaky/documents/">каталог документів</a>.</p>
       </section>
     </main>
   );

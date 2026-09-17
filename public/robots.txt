@@ -8,6 +8,10 @@ Disallow: /account
 Disallow: /notifications
 Disallow: /subscription
 Disallow: /auth
+Disallow: /notes
+Disallow: /shared-graph
+Disallow: /zahuliaky/my
+Disallow: /zahuliaky/notes
 
 Sitemap: https://trekerrodu.com.ua/sitemap.xml
 Sitemap: https://trekerrodu.com.ua/sitemap-zagulyaky.xml
