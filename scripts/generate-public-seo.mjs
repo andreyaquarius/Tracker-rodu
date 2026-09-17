@@ -133,9 +133,19 @@ function publicPageJsonLd(record) {
   }).replaceAll("<", "\\u003c");
 }
 
-function appendPublicPageJsonLd(html, jsonLd) {
+export function appendPublicPageJsonLd(html, jsonLd) {
   const scriptPattern = /\s*<script\b(?=[^>]*\btype=["']application\/ld\+json["'])[^>]*>[\s\S]*?<\/script>\s*/gi;
-  let next = html.replace(scriptPattern, "");
+  const scriptCount = [...html.matchAll(scriptPattern)].length;
+  if (scriptCount > 1) throw new Error("Public page contains multiple JSON-LD scripts.");
+  if (!/<\/head>/i.test(html)) throw new Error("Public page is missing the head closing tag.");
+  const safeJsonLd = jsonLd.replaceAll("<", "\\u003c");
+  const replacement = `\n    <script type="application/ld+json">${safeJsonLd}</script>\n  `;
+  // Replace the block in place: deleting it can join surrounding fragments
+  // into a new HTML tag. This edits repository templates, not untrusted HTML.
+  // Callbacks also keep JSON values such as $& literal during replacement.
+  const next = scriptCount === 1
+    ? html.replace(scriptPattern, () => replacement)
+    : html.replace(/<\/head>/i, () => `${replacement}</head>`);
   const cspPattern = /<meta\b(?=[^>]*\bhttp-equiv=["']Content-Security-Policy["'])[^>]*>/i;
   const cspMeta = next.match(cspPattern)?.[0];
   if (!cspMeta) throw new Error("Public page is missing the Content-Security-Policy meta tag.");
@@ -145,11 +155,10 @@ function appendPublicPageJsonLd(html, jsonLd) {
   const scriptSrc = contentMatch[2].match(scriptSrcPattern)?.[0];
   if (!scriptSrc) throw new Error("Public page CSP is missing the script-src directive.");
   const tokens = scriptSrc.trim().split(/\s+/).filter((token) => !/^'sha256-[^']+'$/.test(token));
-  tokens.push(`'sha256-${createHash("sha256").update(jsonLd).digest("base64")}'`);
+  tokens.push(`'sha256-${createHash("sha256").update(safeJsonLd).digest("base64")}'`);
   const nextContent = contentMatch[2].replace(scriptSrcPattern, tokens.join(" "));
   const nextCspMeta = cspMeta.replace(contentMatch[0], `content=${contentMatch[1]}${nextContent}${contentMatch[1]}`);
-  next = next.replace(cspPattern, nextCspMeta);
-  return next.replace(/<\/head>/i, `    <script type="application/ld+json">${jsonLd}</script>\n  </head>`);
+  return next.replace(cspPattern, () => nextCspMeta);
 }
 
 const registryByPath = new Map(publicSeoRegistry.map((record) => [record.path, record]));
