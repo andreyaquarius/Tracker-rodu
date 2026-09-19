@@ -476,6 +476,7 @@ export async function createZagulyakaDraft(
   input: ZagulyakaDraftInput,
   expectedUserId?: string,
   rightsConfirmed = false,
+  onRecordPersisted?: (handle: ZagulyakaDraftHandle) => void,
 ): Promise<ZagulyakaDraftHandle> {
   const client = getSupabaseClient();
   const { data, error } = await runAuthenticatedSupabaseRequest(
@@ -490,7 +491,11 @@ export async function createZagulyakaDraft(
     expectedUserId,
   );
   if (error) throw error;
-  return replaceDraftDetails(draftHandle(data), input, expectedUserId);
+  const handle = draftHandle(data);
+  // This RPC has already committed. Keep its ID/version even if saving the
+  // details fails, so retrying cannot create a second record or use an old lock.
+  onRecordPersisted?.(handle);
+  return replaceDraftDetails(handle, input, expectedUserId);
 }
 
 export async function saveZagulyakaDraft(
@@ -498,6 +503,7 @@ export async function saveZagulyakaDraft(
   input: ZagulyakaDraftInput,
   expectedUserId?: string,
   rightsConfirmed = false,
+  onRecordPersisted?: (handle: ZagulyakaDraftHandle) => void,
 ): Promise<ZagulyakaDraftHandle> {
   return runZagulyakaVersionedMutation({
     scope: "author",
@@ -518,7 +524,9 @@ export async function saveZagulyakaDraft(
       expectedUserId,
     );
     if (error) throw error;
-    return replaceDraftDetails(draftHandle(data), input, expectedUserId);
+    const updated = draftHandle(data);
+    onRecordPersisted?.(updated);
+    return replaceDraftDetails(updated, input, expectedUserId);
   });
 }
 

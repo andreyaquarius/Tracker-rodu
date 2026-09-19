@@ -39,6 +39,8 @@ function section(source: string, start: string, end: string): string {
 test("recognises the Zagulyaky optimistic-lock marker and SQLSTATE", () => {
   assert.equal(isZagulyakaVersionConflict({ code: "40001", message: "other" }), true);
   assert.equal(isZagulyakaVersionConflict({ message: "ZAGULYAKA_VERSION_CONFLICT" }), true);
+  assert.equal(isZagulyakaVersionConflict({ code: "PT409", message: "ZAGULYAKA_VERSION_CONFLICT" }), true);
+  assert.equal(isZagulyakaVersionConflict({ code: "PT409", message: "OTHER_CONFLICT" }), false);
   assert.equal(isZagulyakaVersionConflict({ cause: { details: "SQLSTATE 40001" } }), true);
   assert.equal(isZagulyakaVersionConflict({ code: "23505", message: "duplicate key" }), false);
 });

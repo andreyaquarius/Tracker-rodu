@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import type { SupabaseAccount } from "../../services/supabaseAuth";
 import {
   createZagulyakaDraft,
@@ -26,6 +26,7 @@ import {
 } from "../../types/zagulyaky";
 import { sanitizeWebUrl } from "../../utils/safeUrl";
 import { initialZagulyakaDraftForAuthor } from "../../utils/zagulyakyDraftDefaults";
+import { isZagulyakaVersionConflict } from "../../utils/zagulyakyMutationCircuitBreaker";
 import {
   isZagulyakaEventRoleAllowed,
   zagulyakaEventRoleLabel,
@@ -69,9 +70,14 @@ export function ZagulyakaDraftDialog({
   ));
   const [step, setStep] = useState(0);
   const [draftHandle, setDraftHandle] = useState<ZagulyakaDraftHandle | null>(initialHandle);
+  const draftHandleRef = useRef(initialHandle);
   const [recordTypesText, setRecordTypesText] = useState(() => initialDraft?.recordTypes.join(", ") ?? "");
   const [attachments, setAttachments] = useState<ZagulyakaDraftAttachment[]>(initialAttachments);
   const [busy, setBusy] = useState(false);
+  const mutationInFlight = useRef(false);
+  // A background list refresh must not unlock this still-stale editor.
+  const versionConflictRef = useRef(false);
+  const [versionConflict, setVersionConflict] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [savedPlaces, setSavedPlaces] = useState<ZagulyakaSavedPlace[]>([]);
@@ -303,6 +309,35 @@ export function ZagulyakaDraftDialog({
     recordTypes: recordTypesText.split(",").map((item) => item.trim()).filter(Boolean),
   }), [draft, recordTypesText]);
 
+  const rememberPersistedHandle = (handle: ZagulyakaDraftHandle) => {
+    draftHandleRef.current = handle;
+    setDraftHandle(handle);
+  };
+
+  const beginMutation = (): boolean => {
+    // React's disabled state is not synchronous: clicks/Enter/file selection
+    // can otherwise start two writes before the next render.
+    if (mutationInFlight.current || versionConflictRef.current) return false;
+    mutationInFlight.current = true;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    return true;
+  };
+
+  const mutationFailed = (failure: unknown) => {
+    if (isZagulyakaVersionConflict(failure)) {
+      versionConflictRef.current = true;
+      setVersionConflict(true);
+    }
+    setError(errorMessage(failure));
+  };
+
+  const finishMutation = () => {
+    mutationInFlight.current = false;
+    setBusy(false);
+  };
+
   // Legacy drafts may already carry a recorded rights confirmation.  The
   // historical-event form no longer asks the author to make that declaration,
   // but editing one of those drafts must not silently erase the existing fact.
@@ -310,83 +345,77 @@ export function ZagulyakaDraftDialog({
   const persist = async (): Promise<ZagulyakaDraftHandle> => {
     const validationError = validateDraft(normalizedDraft, false);
     if (validationError) throw new Error(validationError);
-    if (!draftHandle) {
-      const created = await createZagulyakaDraft(normalizedDraft, account.id, initialRightsConfirmed);
-      setDraftHandle(created);
+    const currentHandle = draftHandleRef.current;
+    if (!currentHandle) {
+      const created = await createZagulyakaDraft(normalizedDraft, account.id, initialRightsConfirmed, rememberPersistedHandle);
+      rememberPersistedHandle(created);
       return created;
     }
-    const saved = await saveZagulyakaDraft(draftHandle, normalizedDraft, account.id, initialRightsConfirmed);
-    setDraftHandle(saved);
+    const saved = await saveZagulyakaDraft(currentHandle, normalizedDraft, account.id, initialRightsConfirmed, rememberPersistedHandle);
+    rememberPersistedHandle(saved);
     return saved;
   };
 
   const save = async () => {
-    setBusy(true);
-    setError("");
-    setNotice("");
+    if (!beginMutation()) return;
     try {
       await persist();
       setNotice("Чернетку збережено. Її видно лише вам.");
       onSaved?.(false);
     } catch (saveError) {
-      setError(errorMessage(saveError));
+      mutationFailed(saveError);
     } finally {
-      setBusy(false);
+      finishMutation();
     }
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (mutationInFlight.current || versionConflictRef.current) return;
     const validationError = validateDraft(normalizedDraft, true);
     if (validationError) {
       setError(validationError);
       return;
     }
-    setBusy(true);
-    setError("");
-    setNotice("");
+    if (!beginMutation()) return;
     try {
       const handle = await persist();
       await submitZagulyakaDraft(handle, account.id);
       setNotice("Запис передано на модерацію. До схвалення він не публічний.");
       onSaved?.(true);
     } catch (submitError) {
-      setError(errorMessage(submitError));
+      mutationFailed(submitError);
     } finally {
-      setBusy(false);
+      finishMutation();
     }
   };
 
   const uploadAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
+    if (!file || !beginMutation()) return;
     try {
       const handle = await persist();
       const uploaded = await uploadZagulyakaDraftAttachment(handle, file, account.id);
-      setDraftHandle(uploaded.handle);
+      rememberPersistedHandle(uploaded.handle);
       setAttachments((current) => [...current, uploaded.attachment]);
       setNotice("Вкладення збережено приватно. Модератор вирішить, чи можна створити його публічну копію.");
       onSaved?.(false);
     } catch (uploadError) {
-      setError(errorMessage(uploadError));
+      mutationFailed(uploadError);
     } finally {
-      setBusy(false);
+      finishMutation();
     }
   };
 
   const removeAttachment = async (attachment: ZagulyakaDraftAttachment) => {
-    if (!draftHandle || busy) return;
+    const currentHandle = draftHandleRef.current;
+    if (!currentHandle || mutationInFlight.current || versionConflictRef.current) return;
     if (!window.confirm(`Вилучити «${attachment.fileName}» з чернетки?`)) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
+    if (!beginMutation()) return;
     try {
-      const updated = await deleteZagulyakaDraftAttachment(draftHandle, attachment.id, account.id);
-      setDraftHandle(updated);
+      const updated = await deleteZagulyakaDraftAttachment(currentHandle, attachment.id, account.id);
+      rememberPersistedHandle(updated);
       setAttachments((current) => current.filter((item) => item.id !== attachment.id));
       setNotice(
         updated.storageCleanupWakeSucceeded
@@ -395,9 +424,9 @@ export function ZagulyakaDraftDialog({
       );
       onSaved?.(false);
     } catch (removeError) {
-      setError(errorMessage(removeError));
+      mutationFailed(removeError);
     } finally {
-      setBusy(false);
+      finishMutation();
     }
   };
 
@@ -732,7 +761,7 @@ export function ZagulyakaDraftDialog({
                     type="file"
                     accept="image/jpeg,image/png,image/webp,application/pdf"
                     onChange={(event) => void uploadAttachment(event)}
-                    disabled={!draftHandle || busy}
+                    disabled={!draftHandle || busy || versionConflict}
                   />
                 </label>
                 {attachments.length ? (
@@ -740,7 +769,7 @@ export function ZagulyakaDraftDialog({
                     {attachments.map((attachment) => (
                       <li key={attachment.id}>
                         <span><strong>{attachment.fileName}</strong><small>{formatFileSize(attachment.byteSize)} · {attachment.mimeType || "невідомий формат"}</small></span>
-                        <button type="button" className="button button-ghost" onClick={() => void removeAttachment(attachment)} disabled={busy}>Вилучити</button>
+                        <button type="button" className="button button-ghost" onClick={() => void removeAttachment(attachment)} disabled={busy || versionConflict}>Вилучити</button>
                       </li>
                     ))}
                   </ul>
@@ -781,7 +810,7 @@ export function ZagulyakaDraftDialog({
 
         <footer className="zagulyaky-form-footer">
           <div>
-            <button type="button" className="button button-secondary" onClick={() => void save()} disabled={busy}>
+            <button type="button" className="button button-secondary" onClick={() => void save()} disabled={busy || versionConflict}>
               {busy ? "Зберігаємо…" : "Зберегти чернетку"}
             </button>
           </div>
@@ -790,7 +819,7 @@ export function ZagulyakaDraftDialog({
             {step < steps.length - 1 ? (
               <button type="button" className="button button-primary" onClick={() => setStep((current) => current + 1)} disabled={busy}>Далі →</button>
             ) : (
-              <button type="submit" className="button button-primary" disabled={busy}>
+              <button type="submit" className="button button-primary" disabled={busy || versionConflict}>
                 {busy ? "Подаємо…" : "Подати на модерацію"}
               </button>
             )}
@@ -864,9 +893,11 @@ function validateDraft(draft: ZagulyakaDraftInput, forSubmission: boolean): stri
 }
 
 function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (isZagulyakaVersionConflict(error)) return "Версія чернетки на сервері вже змінилася. Повторне збереження зупинено, щоб не перезаписати інші зміни. Введений текст залишився у формі: скопіюйте незбережені зміни, потім закрийте форму й відкрийте запис знову.";
+  const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
+    ? error.message
+    : typeof error === "string" ? error : "";
   if (/not authenticated|jwt|session/i.test(message)) return "Сесія закінчилася. Увійдіть знову, щоб зберегти чернетку.";
-  if (/ZAGULYAKA_VERSION_CONFLICT|40001/i.test(message)) return "Чернетку вже змінено в іншому вікні. Закрийте форму, відкрийте запис знову і повторіть зміни.";
   if (/ZAGULYAKY_DRAFT_RATE_LIMITED/i.test(message)) return "Забагато нових чернеток за короткий час. Спробуйте ще раз пізніше.";
   if (/ZAGULYAKA_NOT_EDITABLE/i.test(message)) return "Цей запис уже передано на модерацію, тому його не можна змінювати.";
   if (/INVALID_EVENT_ROLE_CODE/i.test(message)) return "Оберіть коректну роль людини в події.";

@@ -22,8 +22,8 @@ test("historical Zagulyaky submit to moderation without author-rights or living-
 });
 
 test("editing a legacy draft preserves its already-recorded rights flag without asking again", () => {
-  assert.match(dialog, /createZagulyakaDraft\(normalizedDraft, account\.id, initialRightsConfirmed\)/);
-  assert.match(dialog, /saveZagulyakaDraft\(draftHandle, normalizedDraft, account\.id, initialRightsConfirmed\)/);
+  assert.match(dialog, /createZagulyakaDraft\(normalizedDraft, account\.id, initialRightsConfirmed, rememberPersistedHandle\)/);
+  assert.match(dialog, /saveZagulyakaDraft\(currentHandle, normalizedDraft, account\.id, initialRightsConfirmed, rememberPersistedHandle\)/);
 });
 
 test("moderators retain the separate living-person clearance control but no rights warning", () => {

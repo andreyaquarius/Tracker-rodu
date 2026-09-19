@@ -32,6 +32,10 @@ on:
       - "test/zagulyakyPublicIndexingPerformance.test.ts"
       - "test/zagulyakyPublicStatsSafeupdate.test.ts"
       - "test/zagulyakySecurityDefinerApiIsolation.test.ts"
+      - "test/zagulyakyDraftPersistence.test.ts"
+      - "test/zagulyakyMutationCircuitBreaker.test.ts"
+      - "test/helpers/zagulyakyConflictFixture.ts"
+      - "test/integration/zagulyakyVersionConflictDatabase.test.ts"
       - "test/integration/queryLoadOptimizations.test.ts"
       - "test/personContext*.test.ts"
       - "test/personSocialCircleGraphPresentation.test.ts"
@@ -120,6 +124,13 @@ jobs:
           node --test --test-concurrency=1 \
             "test/zagulyakyPublicStatsSafeupdate.test.ts" \
             "test/integration/queryLoadOptimizations.test.ts"
+
+      - name: Verify Zagulyaky version conflict safety
+        run: |
+          node --test --test-concurrency=1 \
+            "test/zagulyakyDraftPersistence.test.ts" \
+            "test/zagulyakyMutationCircuitBreaker.test.ts" \
+            "test/integration/zagulyakyVersionConflictDatabase.test.ts"
 
       - name: Verify PDF worker container
         run: docker build --tag tracker-rodu-pdf-worker:test services/pdf-export-worker
